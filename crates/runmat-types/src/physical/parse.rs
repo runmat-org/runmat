@@ -76,7 +76,12 @@ fn parse_with(
     source: &str,
     unit: impl Fn(&str) -> Option<UnitDefinition>,
 ) -> Result<UnitDefinition, UnitExpressionError> {
-    let normalized = source.replace(['µ', 'μ'], "u");
+    // The display forms read back as written: `µm`, `mm²`, `cm³` and `45°`.
+    let normalized = source
+        .replace(['µ', 'μ'], "u")
+        .replace('²', "^2")
+        .replace('³', "^3")
+        .replace('°', "deg");
     let compact = normalized
         .chars()
         .filter(|value| !value.is_whitespace())
@@ -370,6 +375,18 @@ mod tests {
         assert!(parse_unit_expecting("mg", PhysicalDimension::LENGTH).is_err());
         // A unit that fits neither reading is the ordinary one, for the mismatch message.
         assert_eq!(parse_unit_expecting("mm", mass).unwrap().dimension, PhysicalDimension::LENGTH);
+    }
+
+    #[test]
+    fn display_forms_read_back() {
+        let area = parse_unit_expression("mm²").unwrap();
+        assert_eq!(area.dimension, PhysicalDimension::LENGTH.power(2).unwrap());
+        assert!((area.scale() - 1e-6).abs() < 1e-18);
+        assert_eq!(parse_unit_expression("m²").unwrap().scale(), 1.0);
+        let volume = parse_unit_expression("cm³").unwrap();
+        assert!((volume.scale() - 1e-6).abs() < 1e-18);
+        let degree = parse_unit_expression("°").unwrap();
+        assert_eq!(degree, parse_unit_expression("deg").unwrap());
     }
 
     #[test]

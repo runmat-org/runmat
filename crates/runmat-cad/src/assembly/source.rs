@@ -715,4 +715,33 @@ mod label_tests {
             .insert(InputName::new("length"), "3.5 in".into());
         assert_eq!(key.label(), "count 3, length 3.5 in, roll 30°");
     }
+
+    /// Every unit a value displays in reads back as the same value: `30 g`, `12 mm²`, `45°`.
+    #[test]
+    fn a_displayed_value_reads_back_as_the_same_value() {
+        use super::{display_quantity, QuantityKindId};
+        use crate::units::Units;
+        use crate::value::{Evaluator, NoDynamicValues, ValueEnv};
+        for (kind, si) in [
+            ("length", 0.088),
+            ("distance", 0.0125),
+            ("area", 12e-6),
+            ("angle", std::f64::consts::FRAC_PI_4),
+            ("angle", -20f64.to_radians()),
+            ("mass", 0.03),
+        ] {
+            let shown = display_quantity(Some(&QuantityKindId::new(kind)), si);
+            let source = format!("part p {{\n    input x : {kind} = {shown}\n}}\n");
+            let parsed = crate::syntax::parse_part("/p.part", &source);
+            assert!(parsed.diagnostics.is_empty(), "{shown}: {:?}", parsed.diagnostics);
+            let document = parsed.document.unwrap_or_else(|| panic!("{shown} doesn't parse"));
+            let evaluator = Evaluator { units: &Units, dynamic: &NoDynamicValues };
+            // An input's default reads against its kind, so a mass's `g` is the gram.
+            let expected = crate::units::Units.kind(&QuantityKindId::new(kind)).unwrap();
+            let value = evaluator
+                .eval_expecting(&document.inputs[0].default, &ValueEnv::default(), expected)
+                .unwrap_or_else(|e| panic!("{shown}: {e}"));
+            assert!((value.si - si).abs() <= si.abs() * 1e-6, "{shown} read as {}", value.si);
+        }
+    }
 }

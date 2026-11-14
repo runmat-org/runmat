@@ -106,6 +106,8 @@ impl FeaLexer {
             '/' => self.single(FeaTokenKind::Slash, start),
             '^' => self.single(FeaTokenKind::Caret, start),
             '±' if self.design => self.single(FeaTokenKind::PlusMinus, start),
+            // The degree sign is a unit on its own (`45°`, `45 °`), as values display.
+            '°' if self.design => self.single(FeaTokenKind::Identifier, start),
             '@' if self.design => self.single(FeaTokenKind::At, start),
             '%' if self.design => self.single(FeaTokenKind::Percent, start),
             '.' if self.peek_second() == Some('.') => {

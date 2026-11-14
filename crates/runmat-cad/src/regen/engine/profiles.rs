@@ -431,3 +431,64 @@ pub(super) fn slot_tie_candidates(
     }
     out
 }
+
+/// Each pair of straight sides in a closed loop that cross through each other's interior, by
+/// curve name, with the crossing point in sketch coordinates. Sides that only meet at a shared
+/// end are not crossings. Empty when the loop is simple.
+pub(super) fn loop_crossings(lp: &[ProfileSegment], tol: f64) -> Vec<(String, String, [f64; 2])> {
+    let lines: Vec<&ProfileSegment> = lp
+        .iter()
+        .filter(|s| matches!(s.kind, SegmentKind::Line))
+        .collect();
+    let orient = |a: [f64; 2], b: [f64; 2], c: [f64; 2]| {
+        (b[0] - a[0]) * (c[1] - a[1]) - (b[1] - a[1]) * (c[0] - a[0])
+    };
+    let strict = |x: f64, y: f64, e: f64| (x > e && y < -e) || (x < -e && y > e);
+    let mut out = Vec::new();
+    for i in 0..lines.len() {
+        for j in i + 1..lines.len() {
+            let (p, q) = (lines[i], lines[j]);
+            let lp_ = (p.end[0] - p.start[0]).hypot(p.end[1] - p.start[1]);
+            let lq = (q.end[0] - q.start[0]).hypot(q.end[1] - q.start[1]);
+            let (d1, d2) = (
+                orient(p.start, p.end, q.start),
+                orient(p.start, p.end, q.end),
+            );
+            let (d3, d4) = (
+                orient(q.start, q.end, p.start),
+                orient(q.start, q.end, p.end),
+            );
+            if strict(d1, d2, tol * lp_.max(1e-9)) && strict(d3, d4, tol * lq.max(1e-9)) {
+                // q.start + t (q.end - q.start), with t from the signed areas on p's line.
+                let t = d1 / (d1 - d2);
+                let at = [
+                    q.start[0] + t * (q.end[0] - q.start[0]),
+                    q.start[1] + t * (q.end[1] - q.start[1]),
+                ];
+                out.push((p.curve.0.clone(), q.curve.0.clone(), at));
+            }
+        }
+    }
+    out
+}
+
+/// The check's sentence for a profile whose sides cross: each crossing pair and its point in
+/// millimetres, so the sketch can be repaired where it crosses.
+pub(super) fn crossing_message(crossings: &[(String, String, [f64; 2])]) -> String {
+    let mm = |v: f64| {
+        let r = (v * 1000.0 * 1000.0).round() / 1000.0;
+        if r == 0.0 {
+            "0".to_string()
+        } else {
+            format!("{r}")
+        }
+    };
+    let pairs: Vec<String> = crossings
+        .iter()
+        .map(|(a, b, p)| format!("`{a}` crosses `{b}` at ({}, {}) mm", mm(p[0]), mm(p[1])))
+        .collect();
+    format!(
+        "the profile crosses itself, so it bounds no single region: {}; move or trim those lines so the outline only meets at its corners",
+        pairs.join(", ")
+    )
+}

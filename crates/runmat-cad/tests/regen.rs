@@ -860,3 +860,117 @@ fn g13b_first_body_feature_with_cut_has_no_body_to_act_on() {
     assert!(!r.status("body").unwrap().ran());
     assert!(diag(&r, DiagCode::RefEmpty).message.contains("has no body to act on"));
 }
+
+/// A profile whose sides cross names each crossing pair and its point, so the sketch can be
+/// repaired; before, the extrude failed with only the kernel's invalid-wire status. The outline
+/// is a recorded agent run's one-piece camera mount: its top side `a` runs through the web's
+/// sides `d` and `j`.
+#[test]
+fn self_intersecting_profile_names_the_crossing_sides_and_point() {
+    let env = Env::new();
+    let mut d = block();
+    let at = |x: f64, y: f64| (mm(x), mm(y));
+    let points = [
+        at(-23.0, 0.0),
+        at(-9.0, 0.0),
+        at(-9.0, 2.5),
+        at(-12.0, 2.5),
+        at(-12.0, -17.0),
+        at(-3.0, -17.0),
+        at(-3.0, -20.0),
+        at(-29.0, -20.0),
+        at(-29.0, -17.0),
+        at(-20.0, -17.0),
+        at(-20.0, 2.5),
+        at(-23.0, 2.5),
+    ];
+    let names = ["a", "b", "c", "d", "e", "f", "g", "h", "i", "j", "k", "l"];
+    d.features.push(sketch(
+        "section",
+        polygon(PlaneRef::origin_xy(), &points, Some(&names[..])),
+    ));
+    d.features
+        .push(extrude("mount", "section", mm(26.0), BodyMode::New));
+    let r = env.regen(&d);
+    let crossing = diag(&r, DiagCode::SketchSelfIntersecting);
+    assert_eq!(crossing.severity, Severity::Error);
+    assert!(
+        crossing.message.contains("`a` crosses `d` at (-12, 0) mm"),
+        "{}",
+        crossing.message
+    );
+    assert!(
+        crossing.message.contains("`a` crosses `j` at (-20, 0) mm"),
+        "{}",
+        crossing.message
+    );
+    assert!(
+        !has(&r, DiagCode::KernelFailed),
+        "the sketch is named before the kernel runs"
+    );
+
+    // The same outline with `a` stopped at the web's sides is a simple loop and extrudes.
+    let mut ok = block();
+    let simple = [
+        at(-12.0, 0.0),
+        at(-12.0, -17.0),
+        at(-3.0, -17.0),
+        at(-3.0, -20.0),
+        at(-29.0, -20.0),
+        at(-29.0, -17.0),
+        at(-20.0, -17.0),
+        at(-20.0, 0.0),
+    ];
+    ok.features.push(sketch(
+        "section",
+        polygon(PlaneRef::origin_xy(), &simple, None),
+    ));
+    ok.features
+        .push(extrude("mount", "section", mm(26.0), BodyMode::New));
+    assert!(!has(&env.regen(&ok), DiagCode::SketchSelfIntersecting));
+}
+
+/// Added material that touches none of the body it joins leaves the part in pieces; the check
+/// says so and names each piece by the features that made it, the way a recorded agent draft's
+/// camera plate floated under its clamp saddle.
+#[test]
+fn detached_add_reports_the_part_in_pieces() {
+    let env = Env::new();
+    let pad = |x0: f64| {
+        let mut d = block();
+        d.features.push(sketch(
+            "s_pad",
+            rect(
+                PlaneRef::origin_xy(),
+                mm(x0),
+                mm(0.0),
+                mm(x0 + 20.0),
+                mm(20.0),
+            ),
+        ));
+        d.features
+            .push(extrude("pad", "s_pad", mm(10.0), BodyMode::add()));
+        d
+    };
+
+    let r = env.regen(&pad(100.0));
+    let split = diag(&r, DiagCode::BodyDisconnected);
+    assert_eq!(split.severity, Severity::Warning);
+    assert!(
+        split
+            .message
+            .contains("`pad` adds material that doesn't touch"),
+        "{}",
+        split.message
+    );
+    assert!(
+        split.message.contains("2 separate solids"),
+        "{}",
+        split.message
+    );
+    assert!(split.message.contains("from `body`"), "{}", split.message);
+    assert!(split.message.contains("from `pad`"), "{}", split.message);
+
+    // Flush against the block's end face, the pad joins it: one solid, no warning.
+    assert!(!has(&env.regen(&pad(80.0)), DiagCode::BodyDisconnected));
+}
