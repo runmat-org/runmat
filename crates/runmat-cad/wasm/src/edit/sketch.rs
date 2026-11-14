@@ -162,6 +162,7 @@ fn draw(
         id: SketchEntityId::new(id),
         geometry,
         construction,
+        projected: None,
     };
     let kind = values.get("type").and_then(Value::as_str).unwrap_or("");
     match command {
@@ -571,6 +572,7 @@ fn polygon(
                 id: SketchEntityId::new(&ids[k]),
                 geometry: G::Line { start, end },
                 construction: false,
+                projected: None,
             }
         })
         .collect();
@@ -766,6 +768,7 @@ pub(crate) fn apply(
     id: &str,
 ) -> Result<String, EditFailure> {
     let id = id.to_owned();
+    let values = &picked_points(values, sketch, &id);
     Ok(match command {
         "sketch.constraint" => {
             let c = relation(values, &id)?;
@@ -814,7 +817,12 @@ pub(crate) fn selected_entities(selection: &[String]) -> Vec<(String, String)> {
         };
         let mut parts = rest.split('.');
         if let (Some(sketch), Some(entity)) = (parts.next(), parts.next()) {
-            let key = (sketch.to_owned(), entity.to_owned());
+            // A point pick names its entity; Delete checks it is a point entity.
+            let entity = match parts.next() {
+                Some(role) => format!("{entity}.{role}"),
+                None => entity.to_owned(),
+            };
+            let key = (sketch.to_owned(), entity);
             if !out.contains(&key) {
                 out.push(key);
             }
@@ -828,7 +836,22 @@ pub(crate) fn selected_entities(selection: &[String]) -> Vec<(String, String)> {
 /// name them go. Parts and assemblies both delete sketch entities through this one function.
 pub(crate) fn delete_entities(sketch: &mut Sketch, ids: &[String]) -> Result<String, EditFailure> {
     for id in ids {
-        let id = SketchEntityId::new(id);
+        // A picked point deletes a point entity (`p1.at`); a curve goes by picking the curve.
+        let id = match id.split_once('.') {
+            Some((entity, _)) => {
+                let point = sketch
+                    .entities
+                    .iter()
+                    .any(|e| e.id.0 == entity && matches!(e.geometry, G::Point { .. }));
+                if !point {
+                    return Err(model(format!(
+                        "Delete takes whole curves: pick `{entity}` itself, not its point"
+                    )));
+                }
+                SketchEntityId::new(entity)
+            }
+            None => SketchEntityId::new(id),
+        };
         if !sketch.entities.iter().any(|e| e.id == id) {
             return Err(model(format!("the sketch has no `{id}`")));
         }
@@ -837,6 +860,50 @@ pub(crate) fn delete_entities(sketch: &mut Sketch, ids: &[String]) -> Result<Str
         sketch.entities.retain(|e| e.id != id);
     }
     Ok(format!("Deleted {}", ids.join(", ")))
+}
+
+/// A tool's values with the editor's selection as `values.selection` when the tool started from
+/// one and its form has no field for it (Construction toggles the selected curves).
+pub(crate) fn with_selection(values: &Map<String, Value>, selection: &[String]) -> Map<String, Value> {
+    let mut out = values.clone();
+    if !selection.is_empty() && !out.contains_key("selection") {
+        out.insert(
+            "selection".into(),
+            Value::Array(selection.iter().cloned().map(Value::String).collect()),
+        );
+    }
+    out
+}
+
+/// The point fields a tool takes (`center`, `at`, `base`, `start`, `end`, `first`, `second`)
+/// given as a pick of a sketch point (`sketch.<sketch>.l1.end`, from the Outline or the view)
+/// rewritten as the point value the canvas sends, `{ x, y, of }`: the tool then sits on that
+/// point, where it is now.
+fn picked_points(values: &Map<String, Value>, sketch: &Sketch, id: &str) -> Map<String, Value> {
+    let mut out = values.clone();
+    for key in ["center", "at", "base", "start", "end", "first", "second"] {
+        let pick = match values.get(key) {
+            Some(Value::String(s)) => s.clone(),
+            Some(Value::Array(a)) if a.len() == 1 => match a[0].as_str() {
+                Some(s) => s.to_owned(),
+                None => continue,
+            },
+            _ => continue,
+        };
+        let Ok(SketchTarget::Point { entity, role }) = target(&pick, id) else {
+            continue;
+        };
+        let at = solved(sketch, &entity.0, role).or_else(|| {
+            modify::position(sketch, &PointExpr::Of { entity: entity.clone(), role }, 0)
+        });
+        if let Some((x, y)) = at {
+            out.insert(
+                key.to_owned(),
+                serde_json::json!({ "x": x, "y": y, "of": format!("{}.{}", entity.0, role.word()) }),
+            );
+        }
+    }
+    out
 }
 
 /// `part.sketch`: an empty sketch on the picked plane or planar face, after the last feature.

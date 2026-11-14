@@ -42,6 +42,7 @@ pub fn polygon(
                     end: PointExpr::Coords { x: x1, y: y1 },
                 },
                 construction: false,
+                projected: None,
             }
         })
         .collect();

@@ -242,3 +242,67 @@ fn an_assembly_sketch_gives_its_closed_profile_to_assembly_features() {
     assert_eq!(loops[0].len(), 4);
     assert!(r.resolved.sketch("nope").is_none());
 }
+
+/// The x and y of entity `id`'s point `role` in the drawn sketch `sketch`, in millimetres.
+fn drawn_point(display: &Value, sketch: &str, id: &str, role: &str) -> [f64; 2] {
+    let s = display["sketches"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|s| s["id"] == sketch)
+        .unwrap_or_else(|| panic!("no sketch {sketch}: {display}"));
+    let e = s["entities"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|e| e["id"] == id)
+        .unwrap_or_else(|| panic!("no {id}: {s}"));
+    let p = &e["points"][role];
+    let p = [p[0].as_f64().unwrap(), p[1].as_f64().unwrap()];
+    // The display may carry metres; read millimetres either way.
+    if p[0].abs() < 1.0 && p[1].abs() < 1.0 {
+        [p[0] * 1000.0, p[1] * 1000.0]
+    } else {
+        p
+    }
+}
+
+#[test]
+fn a_converted_edge_is_fixed_where_the_component_is_and_follows_it() {
+    let text = RIG.replace(
+        "    use part pin as pin2 {",
+        "    sketch layout on origin.xy {\n        c9 = circle(center = [0 mm, 0 mm], radius = 1 mm, from = published(occurrence = pin, name = rim))\n        l1 = line(start = [0 mm, 0 mm], end = [10 mm, 0 mm])\n    }\n    use part pin as pin2 {",
+    );
+    let c = compile(&text);
+    let at = drawn_point(&c.display, "layout", "c9", "center");
+    assert!((at[0] - 60.0).abs() < 1e-3 && (at[1] - 30.0).abs() < 1e-3, "{at:?}");
+    let moved = text.replace("[60 mm, 30 mm, 25 mm]", "[15 mm, 35 mm, 25 mm]");
+    let at = drawn_point(&compile(&moved).display, "layout", "c9", "center");
+    assert!((at[0] - 15.0).abs() < 1e-3 && (at[1] - 35.0).abs() < 1e-3, "{at:?}");
+    // It prints back as written.
+    let scope = crate::runtime::module_scope("/p/rig.assembly", &text, &files());
+    let parsed = runmat_cad::syntax::parse_assembly_in("/p/rig.assembly", &text, &scope);
+    let printed =
+        runmat_cad::syntax::print_assembly(&parsed.document.unwrap(), &parsed.uses).unwrap();
+    assert!(
+        printed.contains("from = published(occurrence = pin, name = rim)"),
+        "{printed}"
+    );
+}
+
+#[test]
+fn delete_on_a_picked_point_entity_removes_it_and_refuses_a_curve_end() {
+    let text = sketch(RIG, "origin.xy");
+    let text = tool(&text, "sketch.point", json!({ "sketch": "sketch1", "at": { "x": 5, "y": 5 } }));
+    let text = tool(&text, "sketch.line", json!({ "sketch": "sketch1", "start": { "x": 0, "y": 0 }, "end": { "x": 9, "y": 0 } }));
+    let deleted = run(&text, json!({ "command": "assembly.delete", "selection": ["sketch.sketch1.p1.at"] }));
+    assert!(!deleted.contains("p1 = point("), "{deleted}");
+    let out: Value = serde_json::from_str(&edit_json(
+        "/p/rig.assembly",
+        &text,
+        &files(),
+        &json!({ "command": "assembly.delete", "selection": ["sketch.sketch1.l1.end"] }).to_string(),
+    ))
+    .unwrap();
+    assert_eq!(out["ok"], false, "{out}");
+}

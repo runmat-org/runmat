@@ -43,7 +43,7 @@ use crate::ids::{ConstraintId, SketchEntityId};
 use crate::model::datum::PlaneRef;
 use crate::model::sketch::{
     EllipseMeasure, PointExpr, TextFont, PointRole, Sketch, SketchConstraint, SketchConstraintKind as K,
-    SketchEntity, SketchGeometry, SketchTarget, SolvedCache, SolvedKey,
+    SketchEntity, SketchGeometry, SketchProjection, SketchTarget, SolvedCache, SolvedKey,
 };
 use crate::value::ValueExpr;
 use runmat_design_syntax::ast::{self, Argument, Expr, Headed, Statement};
@@ -161,6 +161,12 @@ fn print_entity(entity: &SketchEntity) -> Option<String> {
     };
     if entity.construction {
         arguments.push("construction".into());
+    }
+    if let Some(from) = &entity.projected {
+        arguments.push(format!(
+            "from = published(occurrence = {}, name = {})",
+            from.occurrence, from.published
+        ));
     }
     let kind = match entity.geometry {
         SketchGeometry::Point { .. } => "point",
@@ -610,11 +616,37 @@ fn lower_entity(id: &str, value: &Expr) -> Result<SketchEntity, LowerError> {
             other => return Err(error(other.span(), "`construction` is true or false")),
         };
     }
+    let projected = call.take("from").map(|from| lower_projection(&from)).transpose()?;
     call.done(span)?;
     Ok(SketchEntity {
         id: SketchEntityId::new(id),
         geometry,
         construction,
+        projected,
+    })
+}
+
+/// `from = published(occurrence = upper, name = upper_e1)`: a converted entity's source, an
+/// edge set a component publishes.
+fn lower_projection(expr: &Expr) -> Result<SketchProjection, LowerError> {
+    let span = expr.span();
+    let mut call = call_parts(expr)?;
+    if call.word != "published" {
+        return Err(error(
+            span,
+            "`from` is `published(occurrence = <component>, name = <published edges>)`",
+        ));
+    }
+    let word = |e: Expr| match &e {
+        Expr::Reference(r) if !r.segments().is_empty() => Ok(r.segments().join(".")),
+        other => Err(error(other.span(), "expected a name")),
+    };
+    let occurrence = word(call.need("occurrence", span)?)?;
+    let published = word(call.need("name", span)?)?;
+    call.done(span)?;
+    Ok(SketchProjection {
+        occurrence,
+        published,
     })
 }
 

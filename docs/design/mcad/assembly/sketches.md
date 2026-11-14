@@ -100,6 +100,23 @@ The layout drives the mate. When you edit the sketch, for example by moving `p1`
 
 The sketch is solved before the mates that read it, so it can't move with them. It must sit on an origin plane or on a fixed component. A mate that reads a sketch on the component it moves, or on a component that other mates move, is refused: the component would follow its own sketch. In a file, such a connector reports the same error.
 
+## Converted edges
+
+A sketch entity written with `from` takes its shape from edges a component publishes. The assembly reads those edges where the component sits, projects them onto the sketch's plane and holds the entity fixed there. When the component moves, or its part changes, the entity moves with the edges, and the curves related or dimensioned to it follow.
+
+```text
+sketch outline on origin.xy {
+    c1 = circle(center = [60 mm, 30 mm], radius = 5 mm, from = published(occurrence = pin, name = rim))
+    c2 = circle(center = [60 mm, 30 mm], radius = 8 mm)
+    constrain concentric(c1, c2)
+}
+```
+
+- `occurrence` names the component, as a dotted path for one inside a sub-assembly. `name` is an edge set its part publishes (`publish rim = region(region = rim)`).
+- The geometry written in the file is where the edges were at the last edit. Each rebuild replaces it with the projected edges.
+- The edges are read as a line when they run straight, as a circle when they close on one radius, as an arc on one radius, and otherwise as a spline through them.
+- The published name must be one connected chain of edges. An edge set that projects to a single point (an edge along the sketch's normal) is reported on the sketch.
+
 ## Profiles for assembly features
 
 An assembly feature takes a closed region of an assembly sketch as its profile, written `profile = sketch.<name>`. The sketch is solved after placement and mates, so the profile is where the sketch is drawn in the assembly.
@@ -110,7 +127,8 @@ An assembly feature takes a closed region of an assembly sketch as its profile, 
   - A face pick adds a connector on that component, anchored to the face its part publishes. The sketch is written on that connector.
   - The sketch opens in sketch mode with the view normal to it.
 - **Draw:** the sketch ribbon has the same tools, fields and handles as a part sketch: lines, rectangles, circles, arcs, slots, polygons, splines, ellipses, points and text; offset, trim, extend, split, mirror, pattern and transform; fillet and chamfer; relations, dimensions and auto-constrain.
-- **Mate to a sketch:** in a mate, pick a sketch point, line, circle or arc in the view as either side.
+- **Mate to a sketch:** in a mate, pick a sketch point, line, circle or arc as either side, in the view or under the sketch's row in the Outline. Outside sketch mode the sketch's curves and points still pick in the view.
+- **Delete curves:** in sketch mode, pick curves or points and press Delete. Points other curves shared with them stay where they are, and the relations and dimensions on them go.
 - **The Outline:** the **Sketches** folder lists each sketch with its plane and how it solved.
   - Right-click a sketch for **Edit sketch**, **Suppress** and **Delete**.
 

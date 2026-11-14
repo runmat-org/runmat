@@ -534,7 +534,11 @@ pub(super) fn edit(
         }
         "sketch.check" => return Err(super::unhandled("sketch.check")),
         command if command.starts_with("sketch.") => {
-            sketch::tool(&mut document, command, &request.values)?
+            sketch::tool(
+                &mut document,
+                command,
+                &crate::edit::sketch::with_selection(&request.values, &request.selection),
+            )?
         }
         other => return Err(super::unhandled(other)),
     };

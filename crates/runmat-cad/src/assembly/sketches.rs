@@ -177,6 +177,7 @@ impl<'a, 'b> Resolver<'a, 'b> {
             ));
         }
         let frame = self.sketch_frame(owner, &s.plane)?;
+        let s = &self.with_projections(owner, &frame, s)?;
         let ev = self.ev();
         let solved = ConstraintSketchSolver
             .solve(s, &ev, env)
@@ -217,6 +218,19 @@ impl<'a, 'b> Resolver<'a, 'b> {
                         DiagCode::AsmUnknownConnector,
                         Severity::Error,
                         Site::feature(&feature.id, Some("on")),
+                        message,
+                        Vec::new(),
+                    );
+                    continue;
+                }
+            };
+            let sketch = &match self.with_projections(owner, &frame, sketch) {
+                Ok(sketch) => sketch,
+                Err(message) => {
+                    self.diag(
+                        DiagCode::RefKindMismatch,
+                        Severity::Error,
+                        Site::feature(&feature.id, None),
                         message,
                         Vec::new(),
                     );

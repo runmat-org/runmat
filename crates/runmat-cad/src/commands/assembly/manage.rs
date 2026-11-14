@@ -134,8 +134,8 @@ pub(super) fn manage() -> Vec<CommandDescriptor> {
             "delete",
             "Delete components, mates, sketches or sketch curves.",
         )
-        .when(selected(&[K::Occurrence, K::Mate, K::Sketch, K::SketchEntity]))
-        .on(&[K::Occurrence, K::Mate, K::Sketch, K::SketchEntity])
+        .when(selected(&[K::Occurrence, K::Mate, K::Sketch, K::SketchEntity, K::SketchPoint]))
+        .on(&[K::Occurrence, K::Mate, K::Sketch, K::SketchEntity, K::SketchPoint])
         .edit(edit(EditOp::Remove, Section::Occurrences)),
         asm(
             "assembly.edit-mate",

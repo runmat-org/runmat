@@ -1009,6 +1009,7 @@ fn curve_sketch_fill_and_variable_patterns() {
                 },
             },
             construction: false,
+            projected: None,
         })
         .collect();
     d.features.push(sketch("pts", pts));

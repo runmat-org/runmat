@@ -1367,6 +1367,7 @@ fn k1_closed_and_open_hems_name_their_faces_as_the_reference_kernel_does() {
                 end: PointExpr::mm(pts[k + 1].0, pts[k + 1].1),
             },
             construction: false,
+            projected: None,
         });
     }
     let named = |role: Role, key: &str, o: u32| {

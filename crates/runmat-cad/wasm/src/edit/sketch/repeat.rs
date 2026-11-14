@@ -244,6 +244,7 @@ fn copy(
             id: fresh_like(sketch, stem(&e)),
             geometry,
             construction: e.construction,
+            projected: None,
         };
         added.push(new.id.0.clone());
         sketch.entities.push(new);

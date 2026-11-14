@@ -98,6 +98,7 @@ pub(super) fn draw(
                 end,
             },
             construction: false,
+            projected: None,
         }],
         vec![
             constraint(K::MajorRadius {

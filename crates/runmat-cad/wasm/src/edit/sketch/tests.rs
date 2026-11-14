@@ -652,3 +652,36 @@ fn delete_on_a_picked_line_keeps_the_points_other_lines_took_from_it() {
     assert!(!after.contains("l2.end"), "{after}");
     assert!(after.contains("l5 = line(start = [40 mm, 20 mm]") || after.contains("= line(start = [40 mm, 20 mm], end = [60 mm"), "{after}");
 }
+
+/// The polygon and text forms take their centre or anchor as a picked sketch point (the Outline
+/// or the view), as the clicked tools do.
+#[test]
+fn a_polygon_centres_on_a_picked_sketch_point() {
+    let text = applied(
+        PLATE,
+        "sketch.polygon",
+        json!({ "sketch": "s1", "sides": 6, "radius": 5, "center": ["sketch.s1.l2.end"] }),
+    );
+    assert!(added(PLATE, &text).len() >= 6, "{text}");
+    let text = applied(
+        PLATE,
+        "sketch.text",
+        json!({ "sketch": "s1", "text": "AB", "height": 5, "at": ["sketch.s1.l1.start"] }),
+    );
+    assert!(text.contains("text(text = \"AB\", at = l1.start"), "{text}");
+}
+
+/// Construction runs at once on what is selected: the editor's selection reaches the tool.
+#[test]
+fn construction_toggles_the_selected_curve() {
+    let request = json!({ "command": "sketch.construction", "values": { "sketch": "s1" }, "selection": ["sketch.s1.l1"] }).to_string();
+    let out: Value = serde_json::from_str(&crate::edit::edit_json(
+        "/p/plate.part",
+        PLATE,
+        &Default::default(),
+        &request,
+    ))
+    .unwrap();
+    assert_eq!(out["ok"], true, "{out}");
+    assert!(out["files"][0]["text"].as_str().unwrap().contains("end = [40 mm, 0 mm], construction)"), "{out}");
+}

@@ -790,6 +790,7 @@ pub(crate) mod tests {
                     end: PointExpr::mm(p[(k + 1) % 4].0, p[(k + 1) % 4].1),
                 },
                 construction: false,
+                projected: None,
             });
         }
         d.features

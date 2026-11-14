@@ -23,6 +23,20 @@ pub struct SketchEntity {
     pub geometry: SketchGeometry,
     #[serde(default)]
     pub construction: bool,
+    /// Converted geometry (Convert entities, Offset of a component edge): re-read from what it
+    /// was converted from on each regeneration and held fixed by the solver. The written
+    /// geometry is its last position.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub projected: Option<SketchProjection>,
+}
+
+/// Where a converted entity's geometry comes from: an edge set that component `occurrence`
+/// (a dotted occurrence path in the assembly) publishes as `published`, projected onto the
+/// sketch's plane. In the file: `from = published(occurrence = upper, name = upper_e1)`.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SketchProjection {
+    pub occurrence: String,
+    pub published: String,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]

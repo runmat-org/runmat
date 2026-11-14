@@ -200,6 +200,7 @@ pub(super) fn fillet(
                 end,
             },
             construction: false,
+            projected: None,
         });
         for line in [&a.line, &b.line] {
             sketch.constraints.push(constraint(K::Tangent {
@@ -273,6 +274,7 @@ pub(super) fn chamfer(
                 end: end_of(&b),
             },
             construction: false,
+            projected: None,
         });
         added.push(id.0);
     }

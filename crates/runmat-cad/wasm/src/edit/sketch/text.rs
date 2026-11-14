@@ -63,6 +63,7 @@ pub(super) fn draw(
                 stroke,
             },
             construction: false,
+            projected: None,
         }],
         Vec::new(),
     ))

@@ -295,7 +295,8 @@ fn part_edit(
                 .document
                 .ok_or(EditFailure::Invalid(parsed.diagnostics))?;
             let picks = crate::picks::Picks::new(&document, path, text);
-            if let Some(result) = sketch::sketch_edit(path, text, command, &request.values, &picks)
+            let values = sketch::with_selection(&request.values, &request.selection);
+            if let Some(result) = sketch::sketch_edit(path, text, command, &values, &picks)
             {
                 return result;
             }

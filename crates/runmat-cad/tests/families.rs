@@ -174,6 +174,7 @@ fn chain_sketch_on(id: &str, plane: OriginPlane, pts: &[(f64, f64)], names: &[&s
                 end: PointExpr::mm(pts[k + 1].0, pts[k + 1].1),
             },
             construction: false,
+            projected: None,
         });
     }
     sketch(id, s)
@@ -585,6 +586,7 @@ pub fn plate_doc() -> PartDocument {
             end: PointExpr::mm(50.0, 45.0),
         },
         construction: false,
+        projected: None,
     });
     d.features.push(sketch("s_line", line));
     d
@@ -767,6 +769,7 @@ pub fn bent_plate_doc() -> PartDocument {
                 end: PointExpr::mm(20.0, 45.0),
             },
             construction: false,
+            projected: None,
         });
     }
     d.features.push(Feature::new(
@@ -1132,6 +1135,7 @@ fn a_bend_of_plate_material_another_bend_moved_is_refused() {
                 end: PointExpr::mm(65.0, 45.0),
             },
             construction: false,
+            projected: None,
         });
     }
     // The first bend's wall stands clear of the second line; the plate past it is gone.
@@ -1367,6 +1371,7 @@ fn frame_doc(corner: CornerTreatment) -> PartDocument {
                 end: PointExpr::mm(p[(k + 1) % 4].0, p[(k + 1) % 4].1),
             },
             construction: false,
+            projected: None,
         });
     }
     d.features.push(sketch("layout", s));
@@ -2427,6 +2432,7 @@ pub fn nested_bend_doc() -> PartDocument {
             end: PointExpr::mm(45.0, 15.0),
         },
         construction: false,
+        projected: None,
     });
     d.features.push(sketch("s_line3", line));
     d.features.push(Feature::new(

@@ -23,7 +23,7 @@ use std::f64::consts::TAU;
 pub(super) type P = (f64, f64);
 
 /// Where a point sits, in millimetres: written coordinates, followed through shared points.
-pub(super) fn position(sketch: &Sketch, p: &PointExpr, depth: u32) -> Option<P> {
+pub(crate) fn position(sketch: &Sketch, p: &PointExpr, depth: u32) -> Option<P> {
     match p {
         PointExpr::Coords { .. } => coords(p),
         PointExpr::Of { entity, role } if depth < 64 => {

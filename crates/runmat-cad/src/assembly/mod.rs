@@ -27,6 +27,7 @@ pub mod model;
 pub mod options;
 mod place;
 pub mod polyline_frame;
+pub mod projection;
 pub mod representation;
 pub mod resolve;
 pub mod sketches;
