@@ -239,6 +239,9 @@ pub async fn tetrahedron10_jacobian_margin_with_capacity<E>(
                 }
                 Ok::<_, LedgerError>(maximum.max(value))
             })?;
+    // An awaited owner quotes capacity only while no batch is outstanding, so each batch
+    // is released before the next capacity request.
+    drop(sample_batch);
     if !maximum_jacobian.is_finite() || maximum_jacobian <= 0.0 {
         return Ok(None);
     }
@@ -255,6 +258,7 @@ pub async fn tetrahedron10_jacobian_margin_with_capacity<E>(
     if let Some(batch) = &mut target_batch {
         batch.complete(OperationCount::from_operations(1))?;
     }
+    drop(target_batch);
     let reference = [
         [1.0, 0.0, 0.0, 0.0],
         [0.0, 1.0, 0.0, 0.0],
@@ -314,6 +318,7 @@ pub async fn tetrahedron10_stiffness_moments_with_capacity<E>(
             .complete(OperationCount::from_operations(1))
             .map_err(Tet10ElementInvalidity::Accounting)?;
     }
+    drop(validity_batch);
     if !valid {
         return Err((if margin.minimum_jacobian_lower_bound <= 0.0
             && sampled_nonpositive_with_capacity(coordinates, category, owner).await?
@@ -560,6 +565,7 @@ async fn cell_lower_bound_with_capacity<E>(
             batch.complete(OperationCount::from_operations(263))?;
         }
     }
+    drop(vertex_batch);
     ensure_capacity(owner, OperationCount::from_operations(20 * 90)).await?;
     let mut coefficient_batch = usage
         .as_ref()
@@ -595,6 +601,7 @@ async fn cell_lower_bound_with_capacity<E>(
             }
         }
     }
+    drop(coefficient_batch);
     if lowest >= target || depth >= MAXIMUM_BISECTION_DEPTH {
         return Ok(Some(lowest));
     }
@@ -611,6 +618,7 @@ async fn cell_lower_bound_with_capacity<E>(
     if let Some(batch) = &mut bisect_batch {
         batch.complete(OperationCount::from_operations(74))?;
     }
+    drop(bisect_batch);
     let Some(left) = Box::pin(cell_lower_bound_with_capacity(
         coordinates,
         left,
@@ -954,3 +962,7 @@ mod tests {
         );
     }
 }
+
+#[cfg(test)]
+#[path = "tet10_element/awaited_owner_tests.rs"]
+mod awaited_owner_tests;

@@ -672,4 +672,73 @@ mod tests {
     fn midpoint(left: [f64; 3], right: [f64; 3]) -> [f64; 3] {
         std::array::from_fn(|axis| (left[axis] + right[axis]) * 0.5)
     }
+
+    /// The browser worker's owner quotes capacity only with no batch outstanding. A curved
+    /// element's awaited stiffness and mass match the synchronous kernels and leave no
+    /// reservation behind; the first quadratic element no longer fails with OutstandingWork.
+    #[test]
+    fn awaited_tetrahedron10_kernels_request_capacity_with_no_batch_outstanding() {
+        use super::super::tetrahedron10_mass::consistent_mass_matrix_with_capacity;
+        use super::super::tetrahedron10_stiffness::global_stiffness_matrix_with_capacity;
+        use runmat_simulation_usage::{AsyncCapacityOwner, LedgerError};
+        struct ExclusiveOwner<'a>(&'a UsageLedger);
+        impl AsyncCapacityOwner for ExclusiveOwner<'_> {
+            fn ensure_capacity(
+                &self,
+                additional: OperationCount,
+            ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<(), LedgerError>> + '_>>
+            {
+                let quoted = self.0.exclusive_work_requirement(additional).map(|_| ());
+                Box::pin(async move { quoted })
+            }
+        }
+        fn ready<R>(future: impl std::future::Future<Output = R>) -> R {
+            let mut future = std::pin::pin!(future);
+            let mut context = std::task::Context::from_waker(std::task::Waker::noop());
+            match future.as_mut().poll(&mut context) {
+                std::task::Poll::Ready(result) => result,
+                std::task::Poll::Pending => unreachable!("an immediate owner never suspends"),
+            }
+        }
+        let mut curved = straight_unit_tetrahedron();
+        curved.nodes_m[4][1] -= 0.05;
+        for geometry in [straight_unit_tetrahedron(), curved] {
+            let limit = OperationCount::from_operations(1 << 40);
+            let ledger = Arc::new(UsageLedger::new(limit, limit).unwrap());
+            let context = UsageContext::new(Arc::clone(&ledger));
+            let owner = ExclusiveOwner(&ledger);
+            let (stiffness, mass) = context.run_sync(|| {
+                (
+                    ready(global_stiffness_matrix_with_capacity(
+                        steel(),
+                        geometry,
+                        &owner,
+                    )),
+                    ready(consistent_mass_matrix_with_capacity(
+                        steel(),
+                        geometry,
+                        &owner,
+                    )),
+                )
+            });
+            let admitted = |result| match result {
+                Ok(matrix) => matrix,
+                Err(Tetrahedron10CapacityError::Admission(cause)) => {
+                    panic!("capacity refused: {cause:?}")
+                }
+                Err(Tetrahedron10CapacityError::Numerical(error)) => panic!("{error:?}"),
+            };
+            assert_eq!(
+                admitted(stiffness),
+                global_stiffness_matrix(steel(), geometry).unwrap()
+            );
+            assert_eq!(
+                admitted(mass),
+                consistent_mass_matrix(steel(), geometry).unwrap()
+            );
+            let snapshot = ledger.snapshot().unwrap();
+            assert!(snapshot.completed.assembly > OperationCount::ZERO);
+            assert_eq!(snapshot.reserved, OperationCount::ZERO);
+        }
+    }
 }

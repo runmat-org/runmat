@@ -108,23 +108,6 @@ fn preparation_error_from_js(error: JsValue) -> runmat_core::FeaStudyPreparation
     }
     js_value_to_string(error).into()
 }
-/// Serialized length without building the text, so the session worker can admit
-/// the request before it allocates it.
-fn serialized_bytes(value: &impl serde::Serialize) -> Result<u64, JsValue> {
-    struct Count(u64);
-    impl std::io::Write for Count {
-        fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
-            self.0 = self.0.saturating_add(bytes.len() as u64);
-            Ok(bytes.len())
-        }
-        fn flush(&mut self) -> std::io::Result<()> {
-            Ok(())
-        }
-    }
-    let mut count = Count(0);
-    serde_json::to_writer(&mut count, value).map_err(|e| js_error(&e.to_string()))?;
-    Ok(count.0)
-}
 #[wasm_bindgen]
 impl RunMatWasm {
     #[wasm_bindgen(js_name=setFeaRunAdmission)]
@@ -404,12 +387,13 @@ impl RunMatWasm {
             let result = filesystem.run(async {
             // First mesh only after explicit Run. The planner chooses the solve path
             // within the budget of the owned numerical worker (a fresh instance of
-            // this module); the gate below admits exactly the plan it produced.
+            // this module) less the request text it reads; the gate below admits
+            // exactly the plan it produced.
             let budget = instance_budget_bytes();
             let study = fresh.prepare_serial_fea_study(&BrowserGeometryHost { context: &context }, &format!("browser-fea:{plan_id}"), Some(budget))
                 .await.map_err(|error| crate::wire::json_contract_to_js(&error.diagnostic()).unwrap_or_else(|_| js_error(&error.to_string())))?;
             ensure_not_cancelled(&cancellation)?;
-            let request_bytes = serialized_bytes(&study)?;
+            let request_bytes = study.request_bytes().map_err(|e| js_error(&e))?;
             admit(BrowserResourceLimit::check(
                 BrowserResourceTerm::PreparedRequest,
                 request_bytes,
@@ -596,7 +580,11 @@ pub async fn execute_prepared_fea_study(
     let context = std::rc::Rc::try_unwrap(context)
         .map_err(|_| js_error("Owned worker admission remained active after execution."))?;
     let settled = context.settle(outcome).await;
-    super::fea_lease::merge_js_lease_error(result, settled.err())
+    let result = super::fea_lease::merge_js_lease_error(result, settled.err());
+    if let Err(error) = &result {
+        super::fea_lease::log_worker_failure("executePreparedFeaStudy", error);
+    }
+    result
 }
 
 /// A numerical worker accepts its parent's allowance only within its own budget,

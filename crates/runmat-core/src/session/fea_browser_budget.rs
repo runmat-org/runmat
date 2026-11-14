@@ -151,6 +151,22 @@ impl BrowserResourceLimit {
         }
     }
 
+    /// Restates a planner refusal made within the budget less the request text against
+    /// the whole budget, as the Run gate counts it: the solve's resident requirement
+    /// includes the text the worker holds while it reads the study.
+    pub fn with_request(self, request_bytes: u64, budget_bytes: u64) -> Self {
+        match self.term {
+            BrowserResourceTerm::SolveMemory => Self {
+                required_bytes: self
+                    .required_bytes
+                    .map(|required| required.saturating_add(request_bytes)),
+                maximum_bytes: budget_bytes,
+                ..self
+            },
+            _ => self,
+        }
+    }
+
     pub fn message(&self) -> String {
         let subject = self.term.subject();
         let maximum = self.maximum_bytes;

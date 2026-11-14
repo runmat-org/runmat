@@ -113,16 +113,21 @@ pub struct PreparedSerialFeaStudy {
     pub authored_study_digest: Digest,
     pub frozen_project_digest: Option<Digest>,
     pub artifact_access: ArtifactAccess,
-    /// The resident memory the host admits one solve worker (`None`: the authored
-    /// ceiling alone). Preparation and execution choose the solve path within it.
+    /// The resident memory the solve is planned within (`None`: the authored ceiling
+    /// alone). For a browser worker this is its budget less this study's request text,
+    /// which the worker holds while it reads the study. Preparation and execution choose
+    /// the solve path within it.
     pub machine_memory_bytes: Option<u64>,
 }
 impl CheckedFeaSessionSource {
+    /// Prepares one serial study. `worker_budget_bytes` is the resident budget of the
+    /// worker that receives the study as text (`None`: the authored ceiling alone); the
+    /// solve is planned within it less that text.
     pub async fn prepare_serial_fea_study(
         &self,
         host: &impl FeaGeometryExecutionHost,
         authority: &str,
-        machine_memory_bytes: Option<u64>,
+        worker_budget_bytes: Option<u64>,
     ) -> Result<PreparedSerialFeaStudy, FeaStudyPreparationError> {
         let ResolvedFeaRoot::Study(resolved) =
             self.resolve_root(None).map_err(|e| e.to_string())?
@@ -253,47 +258,137 @@ impl CheckedFeaSessionSource {
         let frozen_project_digest = self
             .frozen_project()
             .map(|project| Digest::from_bytes(*project.graph_digest().bytes()));
-        let preparation = sequence_preparation(
-            &workloads,
-            &geometry.mesh,
-            revision.clone(),
-            access.clone(),
-            authored_study_digest,
-            frozen_project_digest,
-            Placement {
-                local_execution: LocalExecutionPlan::serial(),
-                machine_memory_bytes,
+        let resource_plan = plan_admitted_solve(
+            host,
+            SolvePlanInputs {
+                workloads: &workloads,
+                mesh: &geometry.mesh,
+                revision: &revision,
+                access: &access,
+                authored_study_digest,
+                frozen_project_digest,
             },
-        )?;
-        let mut coordinator =
-            runmat_analysis_execution::StructuralSequenceCoordinator::new(preparation)
-                .map_err(|e| e.to_string())?;
-        let work = coordinator
-            .next_solve_wave_work_upper_bound()
-            .map_err(preparation_bridge_error)?;
-        host.ensure_preparation_capacity(work)
-            .await
-            .map_err(FeaStudyPreparationError::Admission)?;
-        let wave = coordinator
-            .prepare_next_solve_wave()
-            .map_err(preparation_bridge_error)?;
-        let [task] = wave.tasks.as_slice() else {
-            return Err("This execution host requires one admitted solve.".into());
-        };
-        Ok(PreparedSerialFeaStudy {
+            worker_budget_bytes,
+        )
+        .await?;
+        let mut study = PreparedSerialFeaStudy {
             compiled,
             mesh: geometry.mesh,
             evidence: geometry.meshing_evidence,
             workloads,
-            resource_plan: task.prepared.resource_plan.clone(),
+            resource_plan,
             revision,
             checked_revision: self.check_result().revision.0,
             authored_study_digest,
             frozen_project_digest,
             artifact_access: access,
-            machine_memory_bytes,
-        })
+            machine_memory_bytes: worker_budget_bytes,
+        };
+        if let Some(budget) = worker_budget_bytes {
+            fit_request_within(host, &mut study, budget).await?;
+        }
+        Ok(study)
     }
+}
+
+/// Rounds of re-planning against the measured request text. The text changes only by the
+/// plan it carries, so the second round normally settles it.
+const REQUEST_FIT_ROUNDS: usize = 3;
+
+/// The owned worker holds the request text while it reads the study, so the solve must fit
+/// the worker budget less that text. A plan chosen against the whole budget is re-derived
+/// within the budget less the measured text: the planner then takes a path that fits (the
+/// elastic multigrid path where the factorization does not), or refuses with its own
+/// numbers. The study keeps the ceiling its final plan used, so execution re-derives it.
+async fn fit_request_within(
+    host: &impl FeaGeometryExecutionHost,
+    study: &mut PreparedSerialFeaStudy,
+    budget: u64,
+) -> Result<(), FeaStudyPreparationError> {
+    for _ in 0..REQUEST_FIT_ROUNDS {
+        let request = study.request_bytes()?;
+        let Some(ceiling) = replanning_ceiling(
+            study.resource_plan.request.memory_bytes,
+            study.machine_memory_bytes,
+            request,
+            budget,
+        ) else {
+            break;
+        };
+        let plan = plan_admitted_solve(host, study.plan_inputs(), Some(ceiling))
+            .await
+            .map_err(|error| match error {
+                FeaStudyPreparationError::ResourceLimit(limit) => {
+                    FeaStudyPreparationError::ResourceLimit(limit.with_request(request, budget))
+                }
+                error => error,
+            })?;
+        study.resource_plan = plan;
+        study.machine_memory_bytes = Some(ceiling);
+    }
+    let request = study.request_bytes()?;
+    super::admit_browser_solve(&study.resource_plan, request, budget)
+        .map_err(FeaStudyPreparationError::ResourceLimit)
+}
+
+/// The ceiling to re-plan within when the plan and its request text overrun the worker
+/// budget, or `None` when the plan fits or was already made within that ceiling (the gate
+/// then refuses with the planner's numbers).
+fn replanning_ceiling(
+    plan_memory_bytes: u64,
+    planned_ceiling_bytes: Option<u64>,
+    request_bytes: u64,
+    budget_bytes: u64,
+) -> Option<u64> {
+    let ceiling = budget_bytes.saturating_sub(request_bytes);
+    (plan_memory_bytes > ceiling && planned_ceiling_bytes.is_none_or(|planned| planned > ceiling))
+        .then_some(ceiling)
+}
+
+struct SolvePlanInputs<'a> {
+    workloads: &'a StructuralStudyWorkloads,
+    mesh: &'a SolverMeshArtifact,
+    revision: &'a ProgramRevision,
+    access: &'a ArtifactAccess,
+    authored_study_digest: Digest,
+    frozen_project_digest: Option<Digest>,
+}
+
+/// Plans the study's one solve within `machine_memory_bytes`, after the host admits the
+/// preparation work.
+async fn plan_admitted_solve(
+    host: &impl FeaGeometryExecutionHost,
+    inputs: SolvePlanInputs<'_>,
+    machine_memory_bytes: Option<u64>,
+) -> Result<FeaResourcePlan, FeaStudyPreparationError> {
+    let preparation = sequence_preparation(
+        inputs.workloads,
+        inputs.mesh,
+        inputs.revision.clone(),
+        inputs.access.clone(),
+        inputs.authored_study_digest,
+        inputs.frozen_project_digest,
+        Placement {
+            local_execution: LocalExecutionPlan::serial(),
+            machine_memory_bytes,
+        },
+    )?;
+    let mut coordinator =
+        runmat_analysis_execution::StructuralSequenceCoordinator::new(preparation)
+            .map_err(|e| e.to_string())?;
+    let work = coordinator
+        .next_solve_wave_work_upper_bound()
+        .map_err(preparation_bridge_error)?;
+    host.ensure_preparation_capacity(work)
+        .await
+        .map_err(FeaStudyPreparationError::Admission)?;
+    let wave = coordinator
+        .prepare_next_solve_wave()
+        .map_err(preparation_bridge_error)?;
+    let [task] = wave.tasks.as_slice() else {
+        return Err("This execution host requires one admitted solve.".into());
+    };
+    Ok(task.prepared.resource_plan.clone())
 }
 fn preparation_bridge_error(
     error: runmat_analysis_execution::AnalysisBridgeError,
@@ -384,6 +479,32 @@ impl From<runmat_analysis_execution::AnalysisBridgeError> for PreparedSerialFeaE
 }
 
 impl PreparedSerialFeaStudy {
+    /// Length of the request text (this study as JSON), counted without building it.
+    pub fn request_bytes(&self) -> Result<u64, String> {
+        struct Count(u64);
+        impl std::io::Write for Count {
+            fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+                self.0 = self.0.saturating_add(bytes.len() as u64);
+                Ok(bytes.len())
+            }
+            fn flush(&mut self) -> std::io::Result<()> {
+                Ok(())
+            }
+        }
+        let mut count = Count(0);
+        serde_json::to_writer(&mut count, self).map_err(|error| error.to_string())?;
+        Ok(count.0)
+    }
+    fn plan_inputs(&self) -> SolvePlanInputs<'_> {
+        SolvePlanInputs {
+            workloads: &self.workloads,
+            mesh: &self.mesh,
+            revision: &self.revision,
+            access: &self.artifact_access,
+            authored_study_digest: self.authored_study_digest,
+            frozen_project_digest: self.frozen_project_digest,
+        }
+    }
     /// Recompute canonical resource admission for a different thread allocation.
     /// This does not infer speedup or change the physical analysis definition.
     pub fn resource_plan_for_threads(
@@ -532,6 +653,37 @@ mod tests {
             4_500_000_000_u64
         );
         assert_eq!(error.to_string(), limit.message());
+    }
+
+    /// AGENTBUILD5: the 1 mm bracket's plan fit the 4.27 GB budget alone and the gate then
+    /// refused it with the request text (4,328,600,066 > 4,267,253,392).
+    #[test]
+    fn a_plan_that_fits_only_without_its_request_is_replanned_within_the_rest() {
+        let budget = 4_267_253_392;
+        let request = 61_346_674 + 1_000;
+        let factorization = 4_267_253_392;
+        assert_eq!(
+            replanning_ceiling(factorization, Some(budget), request, budget),
+            Some(budget - request)
+        );
+        // A plan that fits with its request, or one already made within that ceiling.
+        assert_eq!(
+            replanning_ceiling(1_000_000_000, Some(budget), request, budget),
+            None
+        );
+        assert_eq!(
+            replanning_ceiling(factorization, Some(budget - request), request, budget),
+            None
+        );
+        // The planner's refusal within the reduced ceiling is restated as the gate counts it.
+        let limit = super::super::BrowserResourceLimit {
+            term: super::super::BrowserResourceTerm::SolveMemory,
+            required_bytes: Some(4_300_000_000),
+            maximum_bytes: budget - request,
+        }
+        .with_request(request, budget);
+        assert_eq!(limit.required_bytes, Some(4_300_000_000 + request));
+        assert_eq!(limit.maximum_bytes, budget);
     }
 
     #[test]

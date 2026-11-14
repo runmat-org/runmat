@@ -34,6 +34,21 @@ impl From<JsValue> for StepFailure {
         Self::Js(error)
     }
 }
+fn step_worker_failure(error: JsValue, context: &OperationContext) -> OperationErrorEnvelope {
+    operation_error(
+        "fea.run_study",
+        "fea.run_study/v1",
+        context,
+        OperationErrorSpec {
+            error_code: "RM.FEA.RUN_STUDY.STEP_WORKER_FAILED",
+            error_type: OperationErrorType::Internal,
+            retryable: false,
+            severity: OperationErrorSeverity::Error,
+        },
+        crate::wire::errors::js_value_to_string(error),
+        std::collections::BTreeMap::new(),
+    )
+}
 impl AnalysisStudyStepExecutor for BrowserAnalysisService {
     fn allocated_cpu_millicores(&self) -> u64 {
         1000
@@ -111,8 +126,16 @@ impl AnalysisStudyStepExecutor for BrowserAnalysisService {
                 StepFailure::Limit(limit) => {
                     limit.operation_error("fea.run_study", "fea.run_study/v1", &context)
                 }
-                StepFailure::Js(error) => super::fea_lease::denial_from_js(error)
-                    .into_operation_error("fea.run_study", "fea.run_study/v1", &context),
+                StepFailure::Js(error) if super::fea_lease::is_denial(&error) => {
+                    super::fea_lease::denial_from_js(error).into_operation_error(
+                        "fea.run_study",
+                        "fea.run_study/v1",
+                        &context,
+                    )
+                }
+                // A worker failure that is not an admission refusal keeps its own message;
+                // relabelling it as a denial would hide the step's error behind accounting.
+                StepFailure::Js(error) => step_worker_failure(error, &context),
             })??;
             analysis_validate_study_step_transfer(&result)?;
             Ok(result)

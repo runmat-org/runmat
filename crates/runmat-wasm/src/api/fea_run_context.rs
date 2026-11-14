@@ -192,6 +192,32 @@ impl LocalFeaRunContext {
             .await?,
         )
         .map_err(|_| denied_to_js(FeaRunDenied::LicenseInvalid))?;
+        // The parent now holds this worker as started. A refusal from here on still sends
+        // the final report (no work done), so the parent retires the worker without
+        // reporting OutstandingWork in place of this error.
+        let scope = match Self::bind_worker_scope(&context, &state) {
+            Ok(scope) => scope,
+            Err(error) => {
+                let _ = Self::report_unstarted_finish(&authority, &original_context).await;
+                return Err(error);
+            }
+        };
+        Ok(Self {
+            request: context.request,
+            lease: state.lease,
+            root_started_at_unix_millis: state.root_started_at_unix_millis,
+            scope,
+            host: None,
+            worker_authority: Some((authority, original_context)),
+            worker: Arc::new(Mutex::new(None)),
+            last_retired_worker: Arc::new(Mutex::new(None)),
+        })
+    }
+
+    fn bind_worker_scope(
+        context: &WorkerContext,
+        state: &LeaseState,
+    ) -> Result<FeaRunScope, JsValue> {
         if context.lease.lease_id != state.lease.lease_id
             || context.root_started_at_unix_millis != state.root_started_at_unix_millis
         {
@@ -205,22 +231,25 @@ impl LocalFeaRunContext {
         }
         let elapsed = (now - context.root_started_at_unix_millis as f64).ceil() as u64;
         let budget = state.lease.budget()?;
-        let scope = FeaRunScope::from_parent_supervised_delegation(
-            context.request.clone(),
-            budget,
-            elapsed,
-        )
-        .map_err(denied_to_js)?;
-        Ok(Self {
-            request: context.request,
-            lease: state.lease,
-            root_started_at_unix_millis: state.root_started_at_unix_millis,
-            scope,
-            host: None,
-            worker_authority: Some((authority, original_context)),
-            worker: Arc::new(Mutex::new(None)),
-            last_retired_worker: Arc::new(Mutex::new(None)),
+        FeaRunScope::from_parent_supervised_delegation(context.request.clone(), budget, elapsed)
+            .map_err(denied_to_js)
+    }
+
+    /// Final report of a started worker that executed no numerical work.
+    async fn report_unstarted_finish(
+        authority: &JsValue,
+        original: &JsValue,
+    ) -> Result<(), JsValue> {
+        let report = crate::wire::json_contract_to_js(&WorkerReport {
+            phase: WorkerPhase::Finish,
+            usage: UsageReport {
+                completed_ops: Default::default(),
+            },
         })
+        .map_err(|error| js_error(&error.to_string()))?;
+        call_host(authority, "validateWorker", original, &report)
+            .await
+            .map(|_| ())
     }
 
     fn validate_worker(

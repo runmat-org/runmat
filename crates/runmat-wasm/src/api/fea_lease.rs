@@ -166,6 +166,13 @@ pub(super) fn normalize_denial(error: JsValue) -> JsValue {
 pub(super) fn workers_retired(error: &JsValue) -> bool {
     field(error, "workersRetired").as_bool() == Some(true)
 }
+/// Whether a host or worker error carries an admission refusal (`denied`, or a Server
+/// status), as opposed to a domain or execution failure with its own message.
+pub(super) fn is_denial(error: &JsValue) -> bool {
+    !field(error, "denied").is_undefined()
+        || field(error, "status").as_f64().is_some()
+        || field(error, "statusCode").as_f64().is_some()
+}
 pub(super) fn denial_from_js(error: JsValue) -> FeaRunDenied {
     let denied = field(&error, "denied");
     let reason = field(&denied, "reason").as_string();
@@ -225,6 +232,14 @@ pub(super) fn denial_from_js(error: JsValue) -> FeaRunDenied {
     } else {
         FeaRunDenied::ServerUnreachable
     }
+}
+/// An owned worker's failure in its own console, so the error is visible where it arose
+/// as well as in the response the parent receives.
+pub(super) fn log_worker_failure(operation: &str, error: &JsValue) {
+    web_sys::console::error_2(
+        &JsValue::from_str(&format!("[runmat-fea] {operation} failed:")),
+        error,
+    );
 }
 /// Keep the original domain error and attach the typed lease failure once.
 pub(super) fn merge_js_lease_error<T>(

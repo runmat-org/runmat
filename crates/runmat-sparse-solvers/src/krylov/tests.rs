@@ -293,3 +293,81 @@ fn variable_preconditioners_select_flexible_cg_and_flexible_gmres() {
     assert!(report.converged(), "flexible GMRES {report:?}");
     assert!(residual(&a, &y, &b) <= 1e-9);
 }
+
+/// The browser's numerical worker quotes capacity only while no batch is outstanding. Owned PCG
+/// releases its right-hand-side norm batch before the first iteration requests capacity.
+#[test]
+fn owned_pcg_requests_capacity_with_no_batch_outstanding() {
+    use runmat_simulation_usage::{
+        AsyncCapacityOwner, LedgerError, OperationCount, UsageContext, UsageLedger,
+    };
+    use std::{future::Future, pin::Pin, sync::Arc};
+    struct ExclusiveOwner<'a>(&'a UsageLedger);
+    impl AsyncCapacityOwner for ExclusiveOwner<'_> {
+        fn ensure_capacity(
+            &self,
+            additional: OperationCount,
+        ) -> Pin<Box<dyn Future<Output = Result<(), LedgerError>> + '_>> {
+            let quoted = self.0.exclusive_work_requirement(additional).map(|_| ());
+            Box::pin(async move { quoted })
+        }
+    }
+    let a = poisson3d::<f64>(6, 5, 4);
+    let n = a.nrows();
+    let b = par::seeded_vector::<f64>(n, 7);
+    let options = KrylovOptions {
+        rtol: 1e-10,
+        max_iterations: 400,
+        ..Default::default()
+    };
+    let mut reference = vec![0.0; n];
+    let jacobi = crate::precond::Jacobi::new(a.as_ref()).unwrap();
+    let expected = pcg(
+        &a,
+        Some(&jacobi),
+        &b,
+        &mut reference,
+        &options,
+        SolveControl::NONE,
+    )
+    .unwrap();
+    let limit = OperationCount::from_operations(1 << 40);
+    let ledger = Arc::new(UsageLedger::new(limit, limit).unwrap());
+    let context = UsageContext::new(Arc::clone(&ledger));
+    let owner = ExclusiveOwner(&ledger);
+    let metered = crate::operator::MeteredCsrOperator::new(
+        a.as_ref(),
+        &ledger,
+        runmat_simulation_usage::UsageCategory::Solve,
+    )
+    .unwrap();
+    let mut x = vec![0.0; n];
+    let report = context.run_sync(|| {
+        let mut future = std::pin::pin!(pcg_solve_with_capacity(
+            &metered,
+            Some(&jacobi),
+            &b,
+            &mut x,
+            &options,
+            SolveControl::NONE,
+            &owner,
+        ));
+        let mut waker = std::task::Context::from_waker(std::task::Waker::noop());
+        loop {
+            if let std::task::Poll::Ready(result) = future.as_mut().poll(&mut waker) {
+                break result;
+            }
+        }
+    });
+    let report = match report {
+        Ok(report) => report,
+        Err(PcgCapacityError::Admission(cause)) => panic!("capacity refused: {cause:?}"),
+        Err(PcgCapacityError::Numerical(error)) => panic!("{error:?}"),
+    };
+    assert!(report.converged(), "{report:?}");
+    assert_eq!(report.iterations, expected.iterations);
+    assert!(residual(&a, &x, &b) <= 1e-10);
+    let snapshot = ledger.snapshot().unwrap();
+    assert!(snapshot.completed.solve > OperationCount::ZERO);
+    assert_eq!(snapshot.reserved, OperationCount::ZERO);
+}
