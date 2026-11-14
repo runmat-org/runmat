@@ -24,10 +24,6 @@ This page is generated from `docs/design/ledger.json`; edit the ledger, not this
 
 **Drawing standards.** A sheet format selects an ISO or ASME standard that sets line weights, text, arrowheads and tolerance display in the Desktop sheet and the DXF, DWG and PDF exports.
 
-### design.mcad.evaluate.surface-analysis
-
-**Surface and shape analysis.** Evaluate runs section, thickness, undercut, curvature, zebra and deviation analyses on a part in the Desktop and through design.inspect, coloring the model by result as draft analysis does.
-
 ### design.fea.part-geometry
 
 **Studies that name a design.** A .fea geometry block takes part = &lt;name&gt; or assembly = &lt;name&gt; with inputs, resolved through the folder scope, and the study regenerates the design at those inputs without a STEP export.

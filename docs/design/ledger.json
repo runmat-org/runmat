@@ -93,8 +93,9 @@
       "title": "Surface and shape analysis",
       "kind": "feature",
       "area": "mcad",
-      "status": "pending",
-      "acceptance": "Evaluate runs section, thickness, undercut, curvature, zebra and deviation analyses on a part in the Desktop and through design.inspect, coloring the model by result as draft analysis does."
+      "status": "release",
+      "acceptance": "Evaluate runs section, thickness, undercut, curvature, zebra and deviation analyses on a part in the Desktop and for the agent, coloring the model by the computed values.",
+      "landed_in": "0.7.2"
     },
     {
       "id": "design.fea.part-geometry",

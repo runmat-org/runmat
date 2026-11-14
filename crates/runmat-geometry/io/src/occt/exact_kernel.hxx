@@ -236,6 +236,12 @@ void kernel_release(std::uint64_t id);
 // metres, angular deflection in radians.
 KDisplay kernel_tessellate(std::uint64_t id, double chord, double angle);
 std::uint64_t kernel_live_bodies();
+// Check geometry for one body (kernel_analyze kind 7; exact_check.cc).
+rust::Vec<double> check_body(const Body& b, double short_edge, double gap, bool strict);
+// Area properties of planar faces in one plane (kind 8; exact_check.cc).
+rust::Vec<double> face_area_properties(const Body& b, rust::Slice<const double> faces);
+// Values at points over faces: thickness, curvature or normal (kind 9; exact_field.cc).
+rust::Vec<double> surface_field(const Body& b, rust::Slice<const double> reals);
 rust::Vec<double> kernel_analyze(std::uint32_t kind, rust::Slice<const double> reals,
                                  rust::Slice<const std::uint64_t> bodies);
 rust::Vec<KProjected> kernel_project(rust::Slice<const std::uint64_t> bodies,

@@ -80,6 +80,8 @@ fn build_occt_backend() {
             "src/occt/exact_offset_faces.cc",
             "src/occt/exact_boundary.cc",
             "src/occt/exact_hlr.cc",
+            "src/occt/exact_check.cc",
+            "src/occt/exact_field.cc",
             "src/occt/exact_step_writer.cc",
         ] {
             build.file(f);
@@ -151,6 +153,8 @@ fn build_occt_backend() {
         "src/occt/exact_offset_faces.cc",
         "src/occt/exact_boundary.cc",
         "src/occt/exact_hlr.cc",
+        "src/occt/exact_check.cc",
+        "src/occt/exact_field.cc",
         "src/occt/exact_step_writer.cc",
     ] {
         println!("cargo:rerun-if-changed={k1}");

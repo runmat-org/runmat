@@ -30,8 +30,8 @@ pub(super) fn evaluate() -> Vec<CommandDescriptor> {
             "Section properties",
             "section-properties",
             "section_properties",
-            "Area, centroid and second moments of a planar face or sketch.",
-            vec![pick("section", "Face or sketch", &[K::Face, K::Sketch])],
+            "Area, centroid, second and polar moments and principal moments of planar faces or a sketch.",
+            vec![picks("section", "Faces or sketch", &[K::Face, K::Sketch])],
         ),
         a(
             "evaluate.check-geometry",
@@ -39,7 +39,15 @@ pub(super) fn evaluate() -> Vec<CommandDescriptor> {
             "check",
             "check_geometry",
             "Find invalid faces, short edges, gaps and self-intersections.",
-            vec![flag("strict", "Strict", false)],
+            vec![
+                picks("bodies", "Bodies", &[K::Body]).optional(),
+                flag("strict", "Strict (also self-intersections; slower)", false),
+                flag("short_edges", "Short edges", true),
+                length("short_edge", "Shorter than", 0.01).if_checked("short_edges"),
+                flag("gaps", "Edge and vertex gaps", true),
+                length("gap", "Gaps over", 0.01).if_checked("gaps"),
+                flag("min_radius", "Smallest radius", true),
+            ],
         )
         .kw(&["validate", "repair"]),
         a(
@@ -66,7 +74,7 @@ pub(super) fn evaluate() -> Vec<CommandDescriptor> {
             "Thickness",
             "thickness",
             "thickness",
-            "Color thin and thick regions.",
+            "Color the model by wall thickness and list each face's thinnest and thickest point.",
             vec![
                 length("target", "Target thickness", 2.0),
                 choice(
@@ -92,16 +100,27 @@ pub(super) fn evaluate() -> Vec<CommandDescriptor> {
             "Curvature",
             "curvature",
             "curvature",
-            "Color faces by curvature.",
-            vec![],
+            "Color faces by curvature: convex red, concave blue, flat neutral.",
+            vec![choice(
+                "measure",
+                "Show",
+                &[
+                    ("largest", "Largest curvature"),
+                    ("mean", "Mean curvature"),
+                    ("gaussian", "Gaussian curvature"),
+                ],
+            )],
         ),
         a(
             "evaluate.zebra",
             "Zebra stripes",
             "zebra",
             "zebra",
-            "Show stripes to judge surface continuity.",
-            vec![count("stripes", "Stripes", 20, 2)],
+            "Show stripes to judge surface continuity, and each edge's continuity (G0, G1, G2).",
+            vec![
+                count("stripes", "Stripes", 20, 2),
+                pick("direction", "Light direction", &[K::Plane, K::Face, K::Axis]).optional(),
+            ],
         )
         .kw(&["continuity", "class a"]),
         a(
@@ -110,7 +129,10 @@ pub(super) fn evaluate() -> Vec<CommandDescriptor> {
             "deviation",
             "deviation",
             "Measure the angle between faces along shared edges.",
-            vec![picks("edges", "Edges", &[K::Edge])],
+            vec![
+                picks("edges", "Edges", &[K::Edge]).optional(),
+                angle("tolerance", "Tangent within", 0.5),
+            ],
         ),
         a(
             "evaluate.undercut",
@@ -141,7 +163,10 @@ pub(super) fn evaluate() -> Vec<CommandDescriptor> {
                         ("additive", "Additive"),
                     ],
                 ),
-                text("rules", "Rule pack", Some("company/dfm")).optional(),
+                text("rules", "Company rule pack", Some("company/dfm")).optional(),
+                pick("direction", "Pull or build direction", &[K::Plane, K::Face, K::Axis])
+                    .optional()
+                    .shown("process", &["molding", "additive"]),
             ],
         )
         .kw(&["manufacturability", "design for manufacturing"]),
@@ -150,7 +175,7 @@ pub(super) fn evaluate() -> Vec<CommandDescriptor> {
             "Cost estimate",
             "cost",
             "cost",
-            "Estimate the part's cost for a process and quantity.",
+            "Estimate the part's cost for a process and quantity from your shop's rates.",
             vec![
                 choice(
                     "process",
@@ -163,6 +188,21 @@ pub(super) fn evaluate() -> Vec<CommandDescriptor> {
                     ],
                 ),
                 count("quantity", "Quantity", 100, 1),
+                text("currency", "Currency", Some("USD")).optional(),
+                qty("price", "Material price per kg", "ratio", None),
+                qty("rate", "Machine rate per hour", "ratio", None),
+                qty("setup", "Setup per batch", "ratio", Some(0.0)).optional(),
+                qty("removal_rate", "Removal rate (cm³/min)", "ratio", None)
+                    .shown("process", &["machining"]),
+                length("allowance", "Stock allowance per side", 0.0)
+                    .shown("process", &["machining"]),
+                qty("build_rate", "Build rate (cm³/h)", "ratio", None)
+                    .shown("process", &["additive"]),
+                qty("cycle", "Cycle time per part", "time", None)
+                    .shown("process", &["molding", "sheet_metal"]),
+                qty("tooling", "Tooling (mold or die)", "ratio", Some(0.0))
+                    .optional()
+                    .shown("process", &["molding", "sheet_metal"]),
             ],
         ),
     ]

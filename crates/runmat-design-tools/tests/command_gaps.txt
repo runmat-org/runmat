@@ -52,14 +52,6 @@ circuit.swap-pins circuit.layout
 direct.instant-3d part
 drawing.check drawing
 drawing.edit-view drawing
-evaluate.check-geometry part
-evaluate.cost part
-evaluate.curvature part
-evaluate.deviation part
-evaluate.dfm part
-evaluate.section-properties part
-evaluate.thickness part
-evaluate.zebra part
 explode.auto assembly
 manage.document-settings part
 manage.recognize-features part
@@ -77,8 +69,6 @@ sheet-metal.gauge part
 simulate.defeature part
 simulate.region part
 simulate.representation part
-sketch.check assembly
-sketch.check part
 sketch.use-edges part
 sketch.use-edges part type=intersection
 sketch.use-edges part type=offset_on_surface

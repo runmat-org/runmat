@@ -267,8 +267,22 @@ This file is generated from the command catalog.
 
 ## `evaluate.` commands (`.part`)
 
+- `evaluate.check-geometry`: Find invalid faces, short edges, gaps and self-intersections.
+  - Required: `short_edge` (number in mm, default 0.01) when `short_edges` is true; `gap` (number in mm, default 0.01) when `gaps` is true
+  - Optional: `bodies` (picks: body); `strict` (true or false, default false); `short_edges` (true or false, default true); `gaps` (true or false, default true); `min_radius` (true or false, default true)
 - `evaluate.clearance`: Find places closer than a clearance.
   - Required: `items` (picks: body or face); `minimum` (number in mm, default 1)
+- `evaluate.cost`: Estimate the part's cost for a process and quantity from your shop's rates.
+  - Required: `process` (one of `machining`, `sheet_metal`, `molding`, `additive`, default `machining`); `quantity` (whole number, default 100); `price` (number); `rate` (number); `removal_rate` (number) when `process` is machining; `allowance` (number in mm, default 0) when `process` is machining; `build_rate` (number) when `process` is additive; `cycle` (number in s) when `process` is molding or sheet_metal
+  - Optional: `currency` (text); `setup` (number, default 0); `tooling` (number, default 0) when `process` is molding or sheet_metal
+- `evaluate.curvature`: Color faces by curvature: convex red, concave blue, flat neutral.
+  - Required: `measure` (one of `largest`, `mean`, `gaussian`, default `largest`)
+- `evaluate.deviation`: Measure the angle between faces along shared edges.
+  - Required: `tolerance` (number in deg, default 0.5)
+  - Optional: `edges` (picks: edge)
+- `evaluate.dfm`: Check manufacturability for a process.
+  - Required: `process` (one of `machining`, `sheet_metal`, `molding`, `additive`, default `machining`)
+  - Optional: `rules` (text); `direction` (pick: plane or face or axis) when `process` is molding or additive
 - `evaluate.draft`: Color faces by draft angle.
   - Required: `direction` (pick: plane or face or axis); `angle` (number in deg, default 1)
 - `evaluate.interference`: Find bodies that overlap.
@@ -277,8 +291,15 @@ This file is generated from the command catalog.
   - Required: `mass` (number in kg, default 1) when `override_mass` is true
   - Optional: `bodies` (picks: body or part); `about` (pick: coordinate system); `override_mass` (true or false, default false)
   - Runs on the `selection`: `body`
+- `evaluate.section-properties`: Area, centroid, second and polar moments and principal moments of planar faces or a sketch.
+  - Required: `section` (picks: face or sketch)
+- `evaluate.thickness`: Color the model by wall thickness and list each face's thinnest and thickest point.
+  - Required: `target` (number in mm, default 2); `show` (one of `thin`, `thick`, default `thin`)
 - `evaluate.undercut`: Find undercut faces for a pull direction.
   - Required: `direction` (pick: plane or face or axis)
+- `evaluate.zebra`: Show stripes to judge surface continuity, and each edge's continuity (G0, G1, G2).
+  - Required: `stripes` (whole number, default 20)
+  - Optional: `direction` (pick: plane or face or axis)
 
 ## `explode.` commands (`.assembly`)
 
@@ -600,6 +621,9 @@ This file is generated from the command catalog.
   - Optional: `entities` (picks: sketch entity)
 - `sketch.chamfer`: Bevel sketch corners.
   - Required: `corners` (picks: sketch point or sketch entity); `distance` (number in mm, default 1); `angle` (number in deg, default 45)
+- `sketch.check`: Check the sketch for a feature: open ends, branches, overlaps, crossings, closed loops and Revolve's axis.
+  - Required: `for` (one of `extrude`, `revolve`, `sweep_path`, `loft_profile`, default `extrude`)
+  - Runs on the `selection`: `sketch`
 - `sketch.circle`: Draw a circle by center or through three points.
   - Required: `type` (one of `center`, `three_point`, default `center`); `center` (pick: sketch point or vertex or point) when `type` is center; `radius` (number in mm, default 10) when `type` is center; `points` (picks: sketch point or vertex) when `type` is three_point
 - `sketch.constraint`: Add a geometric relation between sketch entities.

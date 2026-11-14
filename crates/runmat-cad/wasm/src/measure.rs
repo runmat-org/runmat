@@ -441,5 +441,6 @@ pub fn measure(
         settings: named,
         arrow: None,
         dimensions: dims,
+        field: None,
     })
 }

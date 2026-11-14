@@ -15,6 +15,20 @@
 //!   `values.angle`, degrees), banded ([`crate::draft_analysis`]).
 //! - `evaluate.undercut`: faces the part blocks along every way they can release from a
 //!   two-part mould along the pull (`values.direction`), by rays along it ([`crate::undercut`]).
+//! - `evaluate.check-geometry`: invalid faces, edges and vertices, open and short edges, gaps
+//!   and self-intersections, found by the kernel ([`check_geometry`]).
+//! - `evaluate.section-properties`: area, centroid, second and polar moments and principal
+//!   moments of planar faces or a sketch's regions ([`section_properties`]).
+//! - `evaluate.thickness`, `evaluate.curvature`, `evaluate.zebra`: a value at every point of
+//!   each face's mesh, measured on the exact surface, that colors the model while the results
+//!   are open ([`field`]); rows per face (thickness, curvature) or per edge (zebra's
+//!   continuity).
+//! - `evaluate.deviation`: the angle between the two faces along edges ([`deviation`]).
+//! - `evaluate.dfm`: the part checked by a process's rule pack, and a company pack
+//!   ([`dfm`]).
+//! - `evaluate.cost`: the part's cost from the shop's rates you enter ([`cost`]).
+//! - `sketch.check`: a part's or an assembly's sketch checked for the feature it will make
+//!   ([`sketch_check`]).
 //! - `view.measure`: distances, angles, radii, lengths and areas between picks, with dimensions
 //!   to draw on the model ([`crate::measure`]).
 //! - `simulate.check`: the fit and mass checks a study runs before it meshes
@@ -27,6 +41,17 @@
 //!
 //! `values.configuration` names the active configuration. Rows name occurrences by path in
 //! `items`, so selecting a row selects them.
+
+mod check_geometry;
+mod cost;
+mod curvature;
+mod deviation;
+mod dfm;
+mod field;
+mod section_properties;
+mod sketch_check;
+mod thickness;
+mod zebra;
 
 use crate::mass::{assembly_mass, part_mass, MassReport};
 use crate::runtime::Files;
@@ -83,6 +108,10 @@ pub struct Analysis {
     /// result is pinned (Measure's distances, radii and angles).
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub dimensions: Vec<ModelDimension>,
+    /// A value over the model's faces drawn as colors (thickness, curvature, zebra): those
+    /// faces redraw from the field's meshes while the results are open.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub field: Option<field::SurfaceField>,
 }
 
 /// A dimension on the model: a line between two points (model units, metres) with its value.
@@ -291,6 +320,7 @@ fn mass_analysis(report: &MassReport) -> Analysis {
         settings: Vec::new(),
         arrow: None,
         dimensions: Vec::new(),
+        field: None,
     }
 }
 
@@ -411,6 +441,7 @@ pub fn analyze(
                 settings: Vec::new(),
                 arrow: None,
                 dimensions: Vec::new(),
+                field: None,
             })
         }
         "evaluate.interference"
@@ -482,6 +513,7 @@ pub fn analyze(
                 settings: Vec::new(),
                 arrow: None,
                 dimensions: Vec::new(),
+                field: None,
             })
         }
         "evaluate.draft" if !assembly => {
@@ -558,6 +590,7 @@ pub fn analyze(
                 ],
                 arrow,
                 dimensions: Vec::new(),
+                field: None,
             })
         }
         "evaluate.undercut" if !assembly => {
@@ -645,6 +678,7 @@ pub fn analyze(
                 settings: vec![format!("Pull: {}", pull_label(&pick, pull, picked))],
                 arrow: pull_arrow(&part.display, pull),
                 dimensions: Vec::new(),
+                field: None,
             })
         }
         "simulate.check" => {
@@ -706,8 +740,35 @@ pub fn analyze(
                 settings: Vec::new(),
                 arrow: None,
                 dimensions: Vec::new(),
+                field: None,
             })
         }
+        "evaluate.check-geometry" if !assembly => {
+            check_geometry::check_geometry(path, text, configuration, &request.values)
+        }
+        "evaluate.section-properties" if !assembly => {
+            section_properties::section_properties(path, text, configuration, &request.values)
+        }
+        "evaluate.thickness" if !assembly => {
+            thickness::thickness(path, text, configuration, &request.values)
+        }
+        "evaluate.curvature" if !assembly => {
+            curvature::curvature(path, text, configuration, &request.values)
+        }
+        "evaluate.zebra" if !assembly => zebra::zebra(path, text, configuration, &request.values),
+        "evaluate.deviation" if !assembly => {
+            deviation::deviation(path, text, configuration, &request.values)
+        }
+        "evaluate.cost" if !assembly => cost::cost(path, text, configuration, &request.values),
+        "evaluate.dfm" if !assembly => dfm::dfm(path, text, files, configuration, &request.values),
+        "sketch.check" => sketch_check::sketch_check(
+            path,
+            text,
+            files,
+            configuration,
+            &request.values,
+            &request.selection,
+        ),
         "view.measure" => crate::measure::measure(path, text, files, &request.values),
         "part.parents-children" | "part.show-references" if !assembly => {
             crate::parents::parents_children(path, text, &request.selection)
@@ -738,185 +799,4 @@ pub fn analyze_json(path: &str, text: &str, files: &Files, request: &str) -> Str
 }
 
 #[cfg(test)]
-pub(crate) mod tests {
-    use super::*;
-
-    #[test]
-    fn mass_properties_of_a_part_list_its_material_and_mass() {
-        let text = "runmat 0.7\nstd 1\n\npart block {\n    sketch s1 on origin.xy {\n        l1 = line(start = [0 mm, 0 mm], end = [100 mm, 0 mm])\n        l2 = line(start = [100 mm, 0 mm], end = [100 mm, 10 mm])\n        l3 = line(start = [100 mm, 10 mm], end = [0 mm, 10 mm])\n        l4 = line(start = [0 mm, 10 mm], end = [0 mm, 0 mm])\n    }\n    feature body = extrude(profile = sketch.s1, distance = 10 mm)\n    output block = { body = feature.body.body, material = \"material.aluminum\" }\n}\n";
-        let out: Value = serde_json::from_str(&analyze_json(
-            "/p/block.part",
-            text,
-            &Files::new(),
-            &json!({ "command": "evaluate.mass-properties" }).to_string(),
-        ))
-        .unwrap();
-        assert_eq!(out["ok"], true, "{out}");
-        assert!(
-            out["summary"].as_str().unwrap().starts_with("27.0 g"),
-            "{out}"
-        );
-        assert_eq!(out["rows"][0]["cells"][2], "Aluminum");
-        let refused: Value = serde_json::from_str(&analyze_json(
-            "/p/block.part",
-            text,
-            &Files::new(),
-            &json!({ "command": "evaluate.interference" }).to_string(),
-        ))
-        .unwrap();
-        assert_eq!(refused["ok"], false);
-    }
-
-    /// A 200 × 100 mm frame of 20 mm square tube, mitred, written by the printer.
-    pub(crate) fn frame() -> String {
-        use runmat_cad::ids::{FeatureId, SketchEntityId};
-        use runmat_cad::model::weldment::*;
-        use runmat_cad::model::*;
-        use runmat_cad::value::ValueExpr;
-        let mut d = PartDocument::new("/p/frame.part");
-        let mut s = Sketch {
-            plane: PlaneRef::origin_xy(),
-            entities: Vec::new(),
-            constraints: Vec::new(),
-            solved: Default::default(),
-        };
-        let p = [(0.0, 0.0), (200.0, 0.0), (200.0, 100.0), (0.0, 100.0)];
-        let names = ["bottom", "right", "top", "left"];
-        for k in 0..4 {
-            s.entities.push(SketchEntity {
-                id: SketchEntityId::new(names[k]),
-                geometry: SketchGeometry::Line {
-                    start: PointExpr::mm(p[k].0, p[k].1),
-                    end: PointExpr::mm(p[(k + 1) % 4].0, p[(k + 1) % 4].1),
-                },
-                construction: false,
-                projected: None,
-            });
-        }
-        d.features
-            .push(Feature::new("layout", FeatureKind::Sketch(s)));
-        d.features.push(Feature::new(
-            "members",
-            FeatureKind::Weldment(WeldmentFeature::StructuralMember {
-                groups: vec![MemberGroup {
-                    sketch: FeatureId::new("layout"),
-                    segments: names.iter().map(|n| SketchEntityId::new(*n)).collect(),
-                    profile: MemberProfile::RectTube {
-                        width: ValueExpr::mm(20.0),
-                        height: ValueExpr::mm(20.0),
-                        wall: ValueExpr::mm(2.0),
-                    },
-                    material: Some("material.steel".into()),
-                    corner: CornerTreatment::Miter,
-                    rotation: ValueExpr::deg(0.0),
-                }],
-            }),
-        ));
-        runmat_cad::syntax::print_part(&d, &[]).unwrap()
-    }
-
-    #[test]
-    fn draft_analysis_bands_a_blocks_faces_against_the_pull() {
-        // A 100 x 10 x 10 mm block pulled along +Z: the top releases, the bottom from the
-        // other half, the four walls need draft.
-        let text = "runmat 0.7\nstd 1\n\npart block {\n    sketch s1 on origin.xy {\n        l1 = line(start = [0 mm, 0 mm], end = [100 mm, 0 mm])\n        l2 = line(start = [100 mm, 0 mm], end = [100 mm, 10 mm])\n        l3 = line(start = [100 mm, 10 mm], end = [0 mm, 10 mm])\n        l4 = line(start = [0 mm, 10 mm], end = [0 mm, 0 mm])\n    }\n    feature body = extrude(profile = sketch.s1, distance = 10 mm)\n    output block = { body = feature.body.body }\n}\n";
-        let out: Value = serde_json::from_str(&analyze_json(
-            "/p/block.part",
-            text,
-            &Files::new(),
-            &json!({ "command": "evaluate.draft", "values": { "direction": ["origin:top"], "angle": 2 } }).to_string(),
-        ))
-        .unwrap();
-        assert_eq!(out["ok"], true, "{out}");
-        assert_eq!(
-            out["summary"],
-            "6 faces · 1 positive · 1 negative · 4 need draft · 0 straddle the parting line",
-            "{out}"
-        );
-        assert_eq!(
-            out["settings"],
-            json!(["Pull: Top plane (+Z)", "Draft angle: 2°"]),
-            "{out}"
-        );
-        // The pull arrow stands on the block's top, along +Z.
-        assert_eq!(out["arrow"]["direction"], json!([0.0, 0.0, 1.0]), "{out}");
-        assert!(
-            (out["arrow"]["origin"][2].as_f64().unwrap() - 0.01).abs() < 1e-6,
-            "{out}"
-        );
-        // Faces read as labels; the canonical reference rides along for the tooltip and copy.
-        let top = out["rows"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .find(|r| r["reference"] == "feature.body.face.end")
-            .expect("the top face by name");
-        assert_eq!(top["cells"][0], "Body end face");
-        assert_eq!(top["cells"][1], "90.0°");
-        let wall = out["rows"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .find(|r| r["reference"] == "feature.body.face.side(s1.l2)")
-            .unwrap();
-        assert_eq!(wall["cells"][0], "Body side 2");
-        assert_eq!(wall["cells"][3], "Needs draft");
-        assert_eq!(wall["severity"], "warning");
-        // Each row's marker takes its band's legend entry, as the model does.
-        for row in out["rows"].as_array().unwrap() {
-            let entry = row["legend"].as_u64().unwrap() as usize;
-            assert_eq!(
-                out["colors"]["legend"][entry]["label"], row["cells"][3],
-                "{row}"
-            );
-        }
-        // The model takes the band colors: every face, the top green, with a four-entry legend.
-        let colors = &out["colors"];
-        assert_eq!(
-            colors["legend"].as_array().map(Vec::len),
-            Some(4),
-            "{colors}"
-        );
-        assert_eq!(
-            colors["faces"].as_array().map(Vec::len),
-            Some(6),
-            "{colors}"
-        );
-        let entry = colors["faces"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .find(|f| f["item"] == "feature.body.face.end")
-            .unwrap()["entry"]
-            .as_u64()
-            .unwrap();
-        assert_eq!(colors["legend"][entry as usize]["label"], "Positive");
-        // A face picks the pull too: the top's normal is +Z.
-        let by_face: Value = serde_json::from_str(&analyze_json(
-            "/p/block.part",
-            text,
-            &Files::new(),
-            &json!({ "command": "evaluate.draft", "values": { "direction": ["feature.body.face.end"], "angle": 2 } }).to_string(),
-        ))
-        .unwrap();
-        assert_eq!(by_face["summary"], out["summary"], "{by_face}");
-    }
-
-    #[test]
-    fn a_weldment_lists_its_members_by_length_and_end_angle() {
-        let text = frame();
-        let out: Value = serde_json::from_str(&analyze_json(
-            "/p/frame.part",
-            &text,
-            &Files::new(),
-            &json!({ "command": "weldment.cut-list" }).to_string(),
-        ))
-        .unwrap();
-        assert_eq!(out["ok"], true, "{out}\n{text}");
-        assert_eq!(out["rows"].as_array().unwrap().len(), 2, "{out}");
-        assert_eq!(out["summary"], "2 items · 4 members");
-        // The long side: centre line plus half the tube's depth at each mitre.
-        assert_eq!(out["rows"][0]["cells"][4], "220.00 mm");
-        assert_eq!(out["rows"][0]["cells"][5], "45.0°");
-    }
-}
+pub(crate) mod tests;

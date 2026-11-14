@@ -53,50 +53,58 @@ pub(crate) fn profile_loops(
     build_loops(sketch, solved, &[])
 }
 
+/// One sketch curve as a kernel segment, from its solved points: lines, arcs, circles, splines
+/// and ellipses; `None` for points, text and curves the solve didn't place.
+pub(crate) fn curve_segment(
+    sketch: &Sketch,
+    solved: &SolvedSketch,
+    id: &crate::ids::SketchEntityId,
+) -> Option<ProfileSegment> {
+    let e = sketch.entities.iter().find(|e| &e.id == id)?;
+    match &e.geometry {
+        SketchGeometry::Line { .. } => Some(ProfileSegment {
+            curve: id.clone(),
+            kind: SegmentKind::Line,
+            start: solved.point(id, PointRole::Start)?,
+            end: solved.point(id, PointRole::End)?,
+        }),
+        SketchGeometry::Arc { .. } => Some(ProfileSegment {
+            curve: id.clone(),
+            kind: SegmentKind::Arc {
+                center: solved.point(id, PointRole::Center)?,
+                clockwise: false,
+            },
+            start: solved.point(id, PointRole::Start)?,
+            end: solved.point(id, PointRole::End)?,
+        }),
+        SketchGeometry::Circle { .. } => {
+            let c = solved.point(id, PointRole::Center)?;
+            let r = *solved.radii.get(id)?;
+            Some(ProfileSegment {
+                curve: id.clone(),
+                kind: SegmentKind::Circle {
+                    center: c,
+                    radius: r,
+                },
+                start: [c[0] + r, c[1]],
+                end: [c[0] + r, c[1]],
+            })
+        }
+        SketchGeometry::Spline { points, closed } => {
+            spline_segment(id, points.len(), *closed, solved)
+        }
+        SketchGeometry::Ellipse { start, .. } => solved.ellipse_segment(id, start.is_some()),
+        // Text is closed loops of its own (`text_loops`), not one segment.
+        SketchGeometry::Point { .. } | SketchGeometry::Text { .. } => None,
+    }
+}
+
 pub(super) fn build_loops(
     sketch: &Sketch,
     solved: &SolvedSketch,
     explicit: &[Vec<crate::ids::SketchEntityId>],
 ) -> Result<Vec<Vec<ProfileSegment>>, String> {
-    let seg_of = |id: &crate::ids::SketchEntityId| -> Option<ProfileSegment> {
-        let e = sketch.entities.iter().find(|e| &e.id == id)?;
-        match &e.geometry {
-            SketchGeometry::Line { .. } => Some(ProfileSegment {
-                curve: id.clone(),
-                kind: SegmentKind::Line,
-                start: solved.point(id, PointRole::Start)?,
-                end: solved.point(id, PointRole::End)?,
-            }),
-            SketchGeometry::Arc { .. } => Some(ProfileSegment {
-                curve: id.clone(),
-                kind: SegmentKind::Arc {
-                    center: solved.point(id, PointRole::Center)?,
-                    clockwise: false,
-                },
-                start: solved.point(id, PointRole::Start)?,
-                end: solved.point(id, PointRole::End)?,
-            }),
-            SketchGeometry::Circle { .. } => {
-                let c = solved.point(id, PointRole::Center)?;
-                let r = *solved.radii.get(id)?;
-                Some(ProfileSegment {
-                    curve: id.clone(),
-                    kind: SegmentKind::Circle {
-                        center: c,
-                        radius: r,
-                    },
-                    start: [c[0] + r, c[1]],
-                    end: [c[0] + r, c[1]],
-                })
-            }
-            SketchGeometry::Spline { points, closed } => {
-                spline_segment(id, points.len(), *closed, solved)
-            }
-            SketchGeometry::Ellipse { start, .. } => solved.ellipse_segment(id, start.is_some()),
-            // Text is closed loops of its own (`text_loops`), not one segment.
-            SketchGeometry::Point { .. } | SketchGeometry::Text { .. } => None,
-        }
-    };
+    let seg_of = |id: &crate::ids::SketchEntityId| curve_segment(sketch, solved, id);
     let close = |a: [f64; 2], b: [f64; 2]| (a[0] - b[0]).abs() < 1e-9 && (a[1] - b[1]).abs() < 1e-9;
     let mut loops: Vec<Vec<ProfileSegment>> = Vec::new();
     if !explicit.is_empty() {
@@ -252,7 +260,7 @@ pub(super) fn reverse_segment(s: &mut ProfileSegment) {
 }
 
 /// Points along a segment from start to end: the ends for a line, samples for an arc.
-pub(super) fn segment_samples(s: &ProfileSegment) -> Vec<[f64; 2]> {
+pub(crate) fn segment_samples(s: &ProfileSegment) -> Vec<[f64; 2]> {
     match s.kind {
         SegmentKind::Ellipse { .. } | SegmentKind::Spline { .. } => s.polyline(24),
         SegmentKind::Line => vec![s.start, s.end],

@@ -145,6 +145,7 @@ An assembly feature takes a closed region of an assembly sketch as its profile, 
   - Transform's base point is optional: Move and Copy use the deltas, and Rotate and Scale turn about the sketch origin when no base point is picked.
 - **Use edges:** **Use edges > Project edges** brings picked component edges into the sketch (see Converted edges).
 - **Mate to a sketch:** in a mate, pick a sketch point, line, circle or arc as either side, in the view or under the sketch's row in the Outline. Outside sketch mode the sketch's curves and points still pick in the view.
+- **Check a sketch:** **Check sketch for feature** checks it for an extrude, a revolve, a sweep path or a loft profile, as in a part; see [Checking a sketch for a feature](/docs/mcad/part/sketches#checking-a-sketch-for-a-feature).
 - **Delete curves:** in sketch mode, pick curves or points and press Delete. Points other curves shared with them stay where they are, and the relations and dimensions on them go.
 - **The Outline:** the **Sketches** folder lists each sketch with its plane and how it solved.
   - Right-click a sketch for **Edit sketch**, **Suppress** and **Delete**.

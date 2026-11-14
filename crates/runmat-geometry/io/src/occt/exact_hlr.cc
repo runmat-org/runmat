@@ -8,6 +8,9 @@
 //   4 zebra () -> per summary edge (edge, 0|1|2 for G0|G1|G2)
 //   5 deviation () -> (max, rms) distance from samples of body 0 to body 1
 //   6 undercut (pull 3) -> faces whose release path along the pull the body blocks
+//   7 check (short edge, gap, strict) -> findings, four reals each (exact_check.cc)
+//   8 face area (face indices) -> area, centroid(3), inertia about it(9), normal(3) (exact_check.cc)
+//   9 surface field (quantity, then per face: index, n, n points) -> 8 reals per point (exact_field.cc)
 
 #include "runmat-geometry-io/src/occt/kernel_ffi.rs.h"
 #include "exact_kernel.hxx"
@@ -298,6 +301,13 @@ rust::Vec<double> kernel_analyze(std::uint32_t kind, rust::Slice<const double> r
         }
         return out;
       }
+      case 7:
+        if (r.size() < 3) fail("a geometry check needs a short-edge length, a gap and strict");
+        return check_body(*bodies[0], r[0], r[1], r[2] != 0);
+      case 8:
+        return face_area_properties(*bodies[0], r);
+      case 9:
+        return surface_field(*bodies[0], r);
       default:
         unsupported("this analysis");
     }

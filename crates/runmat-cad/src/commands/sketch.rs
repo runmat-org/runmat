@@ -275,10 +275,10 @@ pub(super) fn add(catalog: &mut Catalog) {
             .when(sketching())
             .edit(view_action("sketch_display")),
         cmd("sketch.check", "Check sketch for feature", "check", S)
-            .desc("Check the sketch for a feature: open contours, overlaps, self-intersections.")
+            .desc("Check the sketch for a feature: open ends, branches, overlaps, crossings, closed loops and Revolve's axis.")
             .inputs(vec![choice("for", "Use", &[("extrude", "Extrude"), ("revolve", "Revolve"), ("sweep_path", "Sweep path"), ("loft_profile", "Loft profile")])])
             .when(sketching())
-            .edit(check("sketch")),
+            .edit(analyze("sketch_check")),
         cmd("sketch.repair", "Repair sketch", "repair", S)
             .desc("Close small gaps and remove overlapping entities.")
             .inputs(vec![length("gap", "Close gaps up to", 0.05)])

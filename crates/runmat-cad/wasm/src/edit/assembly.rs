@@ -533,7 +533,6 @@ pub(super) fn edit(
         "assembly.sketch" => {
             sketch::new_sketch(&mut document, &compiled, &mut publisher, &request.values)?
         }
-        "sketch.check" => return Err(super::unhandled("sketch.check")),
         "sketch.use-edges" => use_edges::use_edges(
             &mut document,
             &compiled,

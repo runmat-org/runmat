@@ -125,3 +125,16 @@ sketch s1 on origin.xy {
 ```
 
 The `solved` block is a cache: editing the constraints re-solves the sketch and rewrites it.
+
+## Checking a sketch for a feature
+
+**Check sketch for feature** (`sketch.check`, in the sketch's Sketch tab and on its Outline row) checks a sketch for the feature it will make before you use it. Choose the use; the result lists each problem under the canvas, and selecting a row selects its curves in the sketch.
+
+| Use | What it checks |
+|---|---|
+| Extrude | the curves close into loops: no open end, no branch (three or more ends at one point), no overlapping curves and no crossing |
+| Revolve | the Extrude checks, and a construction line with the whole profile on one side of it, which Revolve can turn the profile about |
+| Sweep path | one chain of curves end to end: one piece, with two free ends (an open path) or none (a closed path), and no branch or crossing |
+| Loft profile | the Extrude checks, and exactly one closed loop |
+
+Each finding states where it is, in millimeters, and an open end names the nearest other curve end and its distance, so a 0.05 mm gap reads as a gap to close. Construction curves and points are left out of the checks: they shape the sketch but are no part of a profile or path. A sketch in an assembly checks the same way; see [Sketches in an assembly](/docs/mcad/assembly/sketches).

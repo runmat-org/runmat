@@ -13,7 +13,7 @@ mod blend_edges;
 mod sketch_status;
 mod pieces;
 mod profiles;
-pub(crate) use profiles::profile_loops;
+pub(crate) use profiles::{curve_segment, profile_loops, segment_samples};
 use profiles::*;
 
 use crate::diagnostics::{
