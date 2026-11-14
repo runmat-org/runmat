@@ -672,6 +672,8 @@ async fn pcg_impl_typed<T: Scalar, E>(
     reservation
         .complete(norm_work)
         .map_err(SolverError::Usage)?;
+    // The owner quotes each iteration's capacity only while no batch is outstanding.
+    drop(reservation);
     if rhs_norm == 0.0 {
         return Ok(zero_rhs_report(x));
     }

@@ -37,6 +37,6 @@ study static {
     assert!(preflight.browser_supported);
     // No imported-preview measurement exists for this constructed source.
     // Unknown demand must not be replaced by a fabricated precise number.
-    assert_eq!(preflight.approximate_memory_bytes, None);
+    assert_eq!(preflight.estimate, None);
     assert!(preflight.desktop_reason.is_none());
 }

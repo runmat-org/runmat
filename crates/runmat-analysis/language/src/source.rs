@@ -273,6 +273,10 @@ pub struct GeometryInspection {
     /// Advisory planning evidence only; not an exact meshing bound.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub preview_extent_m: Option<[f64; 3]>,
+    /// Volume, area and sizing spectrum of the same preview, in canonical metres, for the
+    /// check-time mesh estimate. Advisory evidence like the extent.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub preview_measure: Option<runmat_geometry_core::PreviewMeasure>,
     pub content_digest: SourceDigest,
     pub topology_digest: SourceDigest,
     pub capabilities: Vec<GeometryInspectionCapability>,

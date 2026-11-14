@@ -79,6 +79,7 @@ mod prestressed_frequency;
 mod random_response_portable;
 mod random_response_qualification;
 mod response_spectrum_portable;
+mod solid_static_awaited_capacity;
 mod solid_static_curved_pressure;
 mod solid_static_patch;
 mod solid_static_pressure_patch;

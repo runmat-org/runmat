@@ -23,6 +23,7 @@ impl TestHost {
             path,
             GeometryInspection {
                 preview_extent_m: None,
+                preview_measure: None,
                 unit_evidence: Default::default(),
                 shared_faces: Default::default(),
                 content_digest: SourceDigest([digest; 32]),
@@ -53,6 +54,7 @@ impl TestHost {
             path,
             GeometryInspection {
                 preview_extent_m: None,
+                preview_measure: None,
                 shared_faces: Default::default(),
                 content_digest: SourceDigest([digest; 32]),
                 topology_digest: SourceDigest([digest.wrapping_add(1); 32]),

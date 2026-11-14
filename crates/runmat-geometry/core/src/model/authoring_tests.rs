@@ -19,6 +19,7 @@ fn imported_geometry_requires_exact_identity_and_persistent_topology() {
         parameters: Vec::new(),
         source: GeometryDefinitionSource::Imported(Box::new(ImportedGeometryDefinition {
             preview_extent_m: None,
+            preview_measure: None,
             unit_evidence: Default::default(),
             logical_path: "geometry/bracket.step".into(),
             format: GeometrySourceFormat::Step,
