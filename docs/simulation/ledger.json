@@ -2477,7 +2477,8 @@
         "G36"
       ],
       "witness": [
-        "runmat fea check runmat-examples/aerospace/camera-drone/simulation/arm_landing.fea"
+        "runmat check runmat-examples/aerospace/camera-drone/simulation/arm_landing.fea",
+        "cargo test -p runmat-runtime --features occt-native --lib geometry::design_source"
       ],
       "requirements": [],
       "docs": [
