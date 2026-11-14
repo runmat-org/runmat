@@ -4,9 +4,8 @@ keywords: [feature status, roadmap, not yet released, RunMat MCAD, RunMat ECAD]
 ---
 # Feature status
 
-The design docs describe the design language as it is meant to work. Where the docs describe a feature the current release does not include yet, a “Not yet in” badge marks it and links here. Each entry below says what the feature needs before the mark comes off.
+The design docs describe the design language as it is meant to work. Where the docs describe a feature the current release does not include yet, a “Not yet released” badge marks it, and its Status link leads here. Each entry below says what the feature needs before the mark comes off.
 
-This page is generated from `docs/design/ledger.json`; edit the ledger, not this page.
 
 ## Design language
 
