@@ -31,6 +31,8 @@ pub enum FeaStudyPreparationError {
     Invalid(String),
     Meshing(Box<runmat_meshing_core::MeshingFailure>),
     Admission(runmat_runtime::analysis::fea_run_admission::FeaRunDenied),
+    /// No solve path fits the browser budget the host admitted.
+    ResourceLimit(super::BrowserResourceLimit),
 }
 impl std::fmt::Display for FeaStudyPreparationError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -39,12 +41,16 @@ impl std::fmt::Display for FeaStudyPreparationError {
             Self::Invalid(reason) => f.write_str(reason),
             Self::Meshing(failure) => write!(f, "Mesh preparation failed: {failure}"),
             Self::Admission(denied) => denied.fmt(f),
+            Self::ResourceLimit(limit) => f.write_str(&limit.message()),
         }
     }
 }
 impl std::error::Error for FeaStudyPreparationError {}
 impl FeaStudyPreparationError {
     pub fn diagnostic(&self) -> serde_json::Value {
+        if let Self::ResourceLimit(limit) = self {
+            return limit.diagnostic();
+        }
         let mut value = serde_json::json!({"kind":"runtime","message":self.to_string(),"diagnostic":self.to_string(),"callstack":[]});
         if let Self::Meshing(failure) = self {
             value["identifier"] = "RM.FEA.PREPARATION.MESH_FAILED".into();
@@ -107,12 +113,16 @@ pub struct PreparedSerialFeaStudy {
     pub authored_study_digest: Digest,
     pub frozen_project_digest: Option<Digest>,
     pub artifact_access: ArtifactAccess,
+    /// The resident memory the host admits one solve worker (`None`: the authored
+    /// ceiling alone). Preparation and execution choose the solve path within it.
+    pub machine_memory_bytes: Option<u64>,
 }
 impl CheckedFeaSessionSource {
     pub async fn prepare_serial_fea_study(
         &self,
         host: &impl FeaGeometryExecutionHost,
         authority: &str,
+        machine_memory_bytes: Option<u64>,
     ) -> Result<PreparedSerialFeaStudy, FeaStudyPreparationError> {
         let ResolvedFeaRoot::Study(resolved) =
             self.resolve_root(None).map_err(|e| e.to_string())?
@@ -250,7 +260,10 @@ impl CheckedFeaSessionSource {
             access.clone(),
             authored_study_digest,
             frozen_project_digest,
-            LocalExecutionPlan::serial(),
+            Placement {
+                local_execution: LocalExecutionPlan::serial(),
+                machine_memory_bytes,
+            },
         )?;
         let mut coordinator =
             runmat_analysis_execution::StructuralSequenceCoordinator::new(preparation)
@@ -278,18 +291,30 @@ impl CheckedFeaSessionSource {
             authored_study_digest,
             frozen_project_digest,
             artifact_access: access,
+            machine_memory_bytes,
         })
     }
 }
 fn preparation_bridge_error(
     error: runmat_analysis_execution::AnalysisBridgeError,
 ) -> FeaStudyPreparationError {
-    match error.accounting_cause() {
-        Some(cause) => FeaStudyPreparationError::Admission(
+    if let Some(cause) = error.accounting_cause() {
+        return FeaStudyPreparationError::Admission(
             runmat_runtime::analysis::fea_run_admission::FeaRunDenied::Accounting(*cause),
-        ),
-        None => FeaStudyPreparationError::Invalid(error.to_string()),
+        );
     }
+    if let runmat_analysis_execution::AnalysisBridgeError::Resource(planning) = &error {
+        if let Some(limit) = super::BrowserResourceLimit::from_planning(planning) {
+            return FeaStudyPreparationError::ResourceLimit(limit);
+        }
+    }
+    FeaStudyPreparationError::Invalid(error.to_string())
+}
+/// Where a solve runs: its thread allocation and the resident memory the host
+/// admits one worker (`None`: the authored ceiling alone).
+struct Placement {
+    local_execution: LocalExecutionPlan,
+    machine_memory_bytes: Option<u64>,
 }
 fn sequence_preparation(
     workloads: &StructuralStudyWorkloads,
@@ -298,8 +323,12 @@ fn sequence_preparation(
     access: ArtifactAccess,
     authored_study_digest: Digest,
     frozen_project_digest: Option<Digest>,
-    local_execution: LocalExecutionPlan,
+    placement: Placement,
 ) -> Result<StructuralSequencePreparation, String> {
+    let Placement {
+        local_execution,
+        machine_memory_bytes,
+    } = placement;
     let StructuralStudyWorkloads::LinearSequence { workloads } = workloads else {
         return Err("This procedure requires another execution host.".into());
     };
@@ -317,7 +346,7 @@ fn sequence_preparation(
         local_execution,
         solve_selection:
             runmat_analysis_execution::StructuralSequenceSolveSelection::WithinCeiling {
-                machine_memory_bytes: None,
+                machine_memory_bytes,
             },
     })
 }
@@ -368,7 +397,10 @@ impl PreparedSerialFeaStudy {
             self.artifact_access.clone(),
             self.authored_study_digest,
             self.frozen_project_digest,
-            local_execution,
+            Placement {
+                local_execution,
+                machine_memory_bytes: self.machine_memory_bytes,
+            },
         )?;
         let mut coordinator =
             runmat_analysis_execution::StructuralSequenceCoordinator::new(preparation)
@@ -410,7 +442,10 @@ impl PreparedSerialFeaStudy {
             self.artifact_access,
             self.authored_study_digest,
             self.frozen_project_digest,
-            LocalExecutionPlan::serial(),
+            Placement {
+                local_execution: LocalExecutionPlan::serial(),
+                machine_memory_bytes: self.machine_memory_bytes,
+            },
         )?;
         runmat_analysis_fea::progress::emit_phase(
             "fea.run",
@@ -435,7 +470,7 @@ impl PreparedSerialFeaStudy {
         let numerical = StructuralStudyNumericalResult::LinearSequence(
             StructuralStudySequenceNumericalResult {
                 frozen_project_digest: self.frozen_project_digest,
-                effective_memory_ceiling_bytes: None,
+                effective_memory_ceiling_bytes: self.machine_memory_bytes,
                 steps: completed
                     .steps
                     .into_iter()
@@ -462,5 +497,49 @@ impl PreparedSerialFeaStudy {
             numerical,
         )
         .map_err(PreparedSerialFeaExecutionError::Result)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use runmat_analysis_fea::planning::resource::ResourcePlanningError;
+
+    #[test]
+    fn a_solve_that_fits_no_path_in_the_browser_budget_is_a_coded_preparation_refusal() {
+        let error =
+            preparation_bridge_error(runmat_analysis_execution::AnalysisBridgeError::Resource(
+                ResourcePlanningError::StaticSolveCeiling {
+                    factorization_resident_bytes: Some(6_000_000_000),
+                    multigrid_resident_bytes: 4_500_000_000,
+                    multigrid_scratch_bytes: Some(1_000),
+                    maximum: 4_290_000_000,
+                },
+            ));
+        let FeaStudyPreparationError::ResourceLimit(limit) = &error else {
+            panic!("expected a resource limit, got {error:?}");
+        };
+        assert_eq!(limit.term, super::super::BrowserResourceTerm::SolveMemory);
+        assert_eq!(limit.required_bytes, Some(4_500_000_000));
+        assert_eq!(limit.maximum_bytes, 4_290_000_000);
+        let diagnostic = error.diagnostic();
+        assert_eq!(
+            diagnostic["identifier"],
+            super::super::BROWSER_RESOURCE_LIMIT_CODE
+        );
+        assert_eq!(
+            diagnostic["resourceLimit"]["requiredBytes"],
+            4_500_000_000_u64
+        );
+        assert_eq!(error.to_string(), limit.message());
+    }
+
+    #[test]
+    fn other_planning_failures_keep_their_message() {
+        let error =
+            preparation_bridge_error(runmat_analysis_execution::AnalysisBridgeError::Resource(
+                ResourcePlanningError::Overflow("rows"),
+            ));
+        assert!(matches!(error, FeaStudyPreparationError::Invalid(_)));
     }
 }

@@ -64,6 +64,11 @@ pub use fea_duration::{
 };
 mod fea_preflight;
 pub use fea_preflight::FeaExecutionPreflight;
+mod fea_browser_budget;
+pub use fea_browser_budget::{
+    admit_browser_solve, admit_worker_request, BrowserMemoryPlatform, BrowserResourceLimit,
+    BrowserResourceTerm, BROWSER_RESOURCE_LIMIT_CODE, WASM32_ADDRESS_SPACE_BYTES,
+};
 mod fea_execution;
 pub use fea_execution::{
     FeaGeometryExecutionHost, FeaStudyPreparationError, PreparedSerialFeaExecutionError,
