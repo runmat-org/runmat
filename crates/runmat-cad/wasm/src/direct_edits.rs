@@ -334,6 +334,23 @@ mod tests {
         assert!(!errors.is_empty(), "moving a Fixed face must fail\n{t}");
     }
 
+    /// An upright face moved along the Top plane's normal would slide in its own plane: the
+    /// regeneration says so and names what to pick, rather than failing in the kernel.
+    #[test]
+    fn a_face_moved_along_its_own_plane_says_which_way_to_pick() {
+        let (t, errors) = moved(
+            "direct.move-face",
+            json!({ "faces": ["feature.body.face.side(s1.l2)"], "motion": "translate", "direction": ["origin:top"], "distance": 5 }),
+        );
+        assert!(errors.iter().any(|e| e.contains("own plane")), "{errors:?}\n{t}");
+        // Across the face (the Right plane's normal, +X) it moves.
+        let (t, errors) = moved(
+            "direct.move-face",
+            json!({ "faces": ["feature.body.face.side(s1.l2)"], "motion": "translate", "direction": ["origin:right"], "distance": 5 }),
+        );
+        assert!(errors.is_empty(), "{errors:?}\n{t}");
+    }
+
     /// Offset is Move face's default motion, and Rotate's Reverse turns the other way.
     #[test]
     fn move_face_offsets_by_default_and_reverse_turns_a_rotation_back() {
