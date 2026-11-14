@@ -116,6 +116,34 @@ pub fn material(id: &str) -> Option<&'static Material> {
     MATERIALS.iter().find(|material| material.id == id)
 }
 
+/// The library material a written name means: its id, its label, or a name whose words all
+/// appear in one label (`"Aluminum 6061"` → `aluminum_6061_t6`). `None` when no material or
+/// more than one matches.
+pub fn material_named(name: &str) -> Option<&'static Material> {
+    let words = |text: &str| -> Vec<String> {
+        text.split(|c: char| !c.is_ascii_alphanumeric())
+            .filter(|w| !w.is_empty())
+            .map(str::to_ascii_lowercase)
+            .collect()
+    };
+    if let Some(found) = MATERIALS
+        .iter()
+        .find(|m| m.id == name || m.label.eq_ignore_ascii_case(name))
+    {
+        return Some(found);
+    }
+    let wanted = words(name);
+    if wanted.is_empty() {
+        return None;
+    }
+    let mut matches = MATERIALS.iter().filter(|m| {
+        let label = words(m.label);
+        wanted.iter().all(|w| label.contains(w))
+    });
+    let first = matches.next()?;
+    matches.next().is_none().then_some(first)
+}
+
 /// The library's material ids, in card order.
 pub fn material_ids() -> impl Iterator<Item = &'static str> {
     MATERIALS.iter().map(|material| material.id)
@@ -147,6 +175,14 @@ fn number(value: f64) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn names_find_one_material() {
+        assert_eq!(material_named("Aluminum 6061").map(|m| m.id), Some("aluminum_6061_t6"));
+        assert_eq!(material_named("steel_s355").map(|m| m.id), Some("steel_s355"));
+        assert_eq!(material_named("Structural steel").map(|m| m.id), None);
+        assert_eq!(material_named("unobtainium"), None);
+    }
 
     #[test]
     fn ids_are_unique_fea_names_and_every_row_has_a_source() {
