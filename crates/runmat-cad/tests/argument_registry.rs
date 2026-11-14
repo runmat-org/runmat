@@ -72,15 +72,13 @@ fn corpus_arguments_are_registered() {
 #[test]
 fn docs_tables_are_generated() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../docs/design/mcad/part");
-    for page in ["features.md"] {
-        let path = root.join(page);
-        let text = std::fs::read_to_string(&path).unwrap();
-        let fresh = rewrite_docs(&text);
-        if std::env::var_os("RUNMAT_ARGUMENT_DOCS_WRITE").is_some() {
-            std::fs::write(&path, &fresh).unwrap();
-        } else {
-            assert_eq!(text, fresh, "{page} is stale: rerun with RUNMAT_ARGUMENT_DOCS_WRITE=1");
-        }
+    let path = root.join("features.md");
+    let text = std::fs::read_to_string(&path).unwrap();
+    let fresh = rewrite_docs(&text);
+    if std::env::var_os("RUNMAT_ARGUMENT_DOCS_WRITE").is_some() {
+        std::fs::write(&path, &fresh).unwrap();
+    } else {
+        assert_eq!(text, fresh, "features.md is stale: rerun with RUNMAT_ARGUMENT_DOCS_WRITE=1");
     }
 }
 

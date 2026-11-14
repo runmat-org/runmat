@@ -305,8 +305,7 @@ pub fn rename_region_in_study(
         .collect();
     let text = |i: usize| &source[tokens[i].span.start..tokens[i].span.end];
     let mut edits = Vec::new();
-    for i in 2..tokens.len() {
-        let token = tokens[i];
+    for (i, &token) in tokens.iter().enumerate().skip(2) {
         let inside = spans
             .iter()
             .any(|s| s.start <= token.span.start && token.span.end <= s.end);
