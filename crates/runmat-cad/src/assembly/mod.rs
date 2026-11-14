@@ -11,6 +11,7 @@
 //! - [`representation`]: representations, load levels R0–R3 and working sets.
 //! - [`bom`]: configuration-aware BOM and where-used.
 //! - [`explode`]: named exploded states (ordered and radial steps, explode lines with jogs).
+//! - [`sketches`]: sketches in the assembly, on its origin planes or its connectors.
 //! - [`interference`]: interference and clearance requests through the kernel seam.
 //! - [`index`]: the assembly JSON index and summary cards.
 //! - [`synth`]: synthetic aircraft-scale fixtures for the scale gate.
@@ -28,6 +29,7 @@ mod place;
 pub mod polyline_frame;
 pub mod representation;
 pub mod resolve;
+pub mod sketches;
 pub mod source;
 pub mod synth;
 pub mod validate;

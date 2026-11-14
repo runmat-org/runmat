@@ -24,7 +24,7 @@ mod configuration;
 mod history;
 mod manage;
 mod publish;
-mod sketch;
+pub(crate) mod sketch;
 
 use crate::runtime::Files;
 use runmat_cad::model::{Feature, PartDocument};

@@ -162,7 +162,7 @@ fn handler_of(command: &CommandDescriptor, editor: EditorKind) -> Handler {
     match command.edit.op {
         _ if editor == EditorKind::Fea => Handler::Shell,
         // Sketch on a picked plane or face writes the new sketch feature, then the Desktop opens it.
-        EditOp::EnterMode if id == "part.sketch" => Handler::Edit,
+        EditOp::EnterMode if id == "part.sketch" || id == "assembly.sketch" => Handler::Edit,
         EditOp::View
         | EditOp::EnterMode
         | EditOp::ExitMode
@@ -343,7 +343,8 @@ fn analyze(path: &str, text: &str, files: &Files, request: &RunRequest) -> Value
         .find(|(id, _)| *id == request.command)
         .map(|(_, to)| *to)
         .unwrap_or(&request.command);
-    let body = json!({ "command": command, "values": request.values, "selection": request.selection });
+    let body =
+        json!({ "command": command, "values": request.values, "selection": request.selection });
     let out: Value = serde_json::from_str(&runmat_cad_wasm::analyze::analyze_json(
         path,
         text,

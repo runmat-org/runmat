@@ -100,10 +100,10 @@ pub(super) fn manage() -> Vec<CommandDescriptor> {
             "assembly.suppress",
             "Suppress",
             "suppress",
-            "Leave components out of this configuration.",
+            "Leave components out of this configuration, or turn a sketch off.",
         )
-        .when(selected(&[K::Occurrence, K::Mate]))
-        .on(&[K::Occurrence, K::Mate])
+        .when(selected(&[K::Occurrence, K::Mate, K::Sketch]))
+        .on(&[K::Occurrence, K::Mate, K::Sketch])
         .edit(edit(EditOp::Suppress, Section::Occurrences)),
         asm(
             "assembly.pack-and-share",
@@ -132,10 +132,10 @@ pub(super) fn manage() -> Vec<CommandDescriptor> {
             "assembly.delete",
             "Delete",
             "delete",
-            "Delete components or mates.",
+            "Delete components, mates or sketches.",
         )
-        .when(selected(&[K::Occurrence, K::Mate]))
-        .on(&[K::Occurrence, K::Mate])
+        .when(selected(&[K::Occurrence, K::Mate, K::Sketch]))
+        .on(&[K::Occurrence, K::Mate, K::Sketch])
         .edit(edit(EditOp::Remove, Section::Occurrences)),
         asm(
             "assembly.edit-mate",

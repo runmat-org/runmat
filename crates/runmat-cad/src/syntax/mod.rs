@@ -172,6 +172,16 @@ pub const ASSEMBLY: DocumentGrammar = DocumentGrammar {
         },
         named("connector", "connectors", "connector"),
         named("mate", "mates", "mate"),
+        // `sketch s1 on origin.xy { … }`: the part's feature form, sketches only.
+        Collection {
+            id: Some("id"),
+            tagged: Some(Tagged {
+                field: "kind",
+                tag: "feature",
+                extras: &["suppressed", "frozen"],
+            }),
+            ..named("feature", "features", "feature")
+        },
         // `pattern ribs = linear(seeds = [rib], direction = [1, 0, 0], spacing = 50 mm, count = 4)`
         Collection {
             tagged: Some(Tagged {

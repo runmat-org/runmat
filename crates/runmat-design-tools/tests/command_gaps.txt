@@ -77,65 +77,6 @@ sheet-metal.gauge part
 simulate.defeature part
 simulate.region part
 simulate.representation part
-sketch.arc assembly
-sketch.arc assembly type=center
-sketch.arc assembly type=tangent
-sketch.arc assembly type=three_point
-sketch.auto-constrain assembly
-sketch.chamfer assembly
 sketch.check assembly
 sketch.check part
-sketch.circle assembly
-sketch.circle assembly type=center
-sketch.circle assembly type=three_point
-sketch.constraint assembly
-sketch.construction assembly
-sketch.dimension assembly
-sketch.dimension assembly type=horizontal
-sketch.dimension assembly type=ordinate
-sketch.dimension assembly type=path_length
-sketch.dimension assembly type=smart
-sketch.dimension assembly type=vertical
-sketch.ellipse assembly
-sketch.ellipse assembly type=conic
-sketch.ellipse assembly type=full
-sketch.ellipse assembly type=parabola
-sketch.ellipse assembly type=partial
-sketch.extend assembly
-sketch.fillet assembly
-sketch.line assembly
-sketch.line assembly type=centerline
-sketch.line assembly type=line
-sketch.line assembly type=midpoint
-sketch.mirror assembly
-sketch.offset assembly
-sketch.pattern assembly
-sketch.point assembly
-sketch.polygon assembly
-sketch.rectangle assembly
-sketch.rectangle assembly type=center
-sketch.rectangle assembly type=corner
-sketch.rectangle assembly type=parallelogram
-sketch.rectangle assembly type=three_point
-sketch.slot assembly
-sketch.slot assembly type=arc
-sketch.slot assembly type=center
-sketch.slot assembly type=straight
-sketch.spline assembly
-sketch.spline assembly type=control_points
-sketch.spline assembly type=equation
-sketch.spline assembly type=style
-sketch.spline assembly type=through_points
-sketch.split assembly
-sketch.text assembly
-sketch.transform assembly
-sketch.transform assembly type=copy
-sketch.transform assembly type=move
-sketch.transform assembly type=rotate
-sketch.transform assembly type=scale
-sketch.trim assembly
-sketch.trim assembly type=corner
-sketch.trim assembly type=inside
-sketch.trim assembly type=outside
-sketch.trim assembly type=power
 weldment.profile-library part

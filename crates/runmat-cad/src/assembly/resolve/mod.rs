@@ -253,6 +253,8 @@ pub struct ResolvedAssembly {
     pub mates: Vec<MateOutcome>,
     pub prototypes: Vec<Prototype>,
     pub envelopes: Vec<ResolvedEnvelope>,
+    /// The top assembly's sketches, solved on their planes ([`crate::assembly::sketches`]).
+    pub sketches: Vec<crate::assembly::sketches::ResolvedSketch>,
     /// Display paths of occurrences suppressed in this configuration.
     pub suppressed: Vec<String>,
     pub diagnostics: DiagnosticReport,
@@ -445,6 +447,7 @@ pub(super) struct Resolver<'a, 'b> {
     pub mates: Vec<MateOutcome>,
     pub prototypes: Vec<Prototype>,
     pub envelopes: Vec<ResolvedEnvelope>,
+    pub sketches: Vec<crate::assembly::sketches::ResolvedSketch>,
     pub proto_index: BTreeMap<String, u32>,
     pub suppressed: Vec<String>,
     pub diags: DiagnosticReport,
@@ -485,6 +488,7 @@ pub fn resolve_metered(
         mates: Vec::new(),
         prototypes: Vec::new(),
         envelopes: Vec::new(),
+        sketches: Vec::new(),
         proto_index: BTreeMap::new(),
         suppressed: Vec::new(),
         diags: DiagnosticReport::default(),
@@ -591,7 +595,18 @@ pub fn resolve_metered(
         }
     }
     let env = r.env_for(&doc, &overrides);
-    r.compose_assembly(0, doc, env, Vec::new(), vec![top.clone()], false, &suppress);
+    let features = doc.features.clone();
+    r.compose_assembly(
+        0,
+        doc,
+        env.clone(),
+        Vec::new(),
+        vec![top.clone()],
+        false,
+        &suppress,
+    );
+    // Sketches after placement and mates: a sketch on a connector follows its component.
+    r.solve_sketches(0, &features, &env);
     r.finish(top, variant)
 }
 
@@ -663,6 +678,7 @@ impl<'a, 'b> Resolver<'a, 'b> {
             mates: self.mates,
             prototypes: self.prototypes,
             envelopes: self.envelopes,
+            sketches: self.sketches,
             suppressed: self.suppressed,
             diagnostics: self.diags,
             stats: self.stats,

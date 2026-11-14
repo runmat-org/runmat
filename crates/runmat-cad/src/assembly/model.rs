@@ -856,6 +856,11 @@ pub struct AssemblyDocument {
     pub connectors: Vec<MateConnector>,
     #[serde(default)]
     pub mates: Vec<MateDef>,
+    /// Sketches in the assembly (`sketch s1 on origin.xy { … }`, `sketch s2 on plane.<connector>`),
+    /// in the part's feature form and drawn by the part's sketch engine
+    /// ([`crate::assembly::sketches`]).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub features: Vec<crate::model::Feature>,
     #[serde(default)]
     pub patterns: Vec<OccurrencePattern>,
     #[serde(default)]
@@ -895,6 +900,7 @@ impl AssemblyDocument {
             occurrences: Vec::new(),
             connectors: Vec::new(),
             mates: Vec::new(),
+            features: Vec::new(),
             patterns: Vec::new(),
             mirrors: Vec::new(),
             fasteners: Vec::new(),

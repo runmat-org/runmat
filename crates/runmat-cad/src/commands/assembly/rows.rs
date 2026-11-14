@@ -24,6 +24,7 @@ pub(super) fn add_rows(catalog: &mut Catalog) {
         ],
         view_cluster: cluster_3d(vec![]),
         shortcut_box: [
+            "assembly.sketch",
             "assembly.insert",
             "assembly.mate",
             "assembly.move",
@@ -41,6 +42,7 @@ pub(super) fn add_rows(catalog: &mut Catalog) {
                 "assemble",
                 "Assemble",
                 vec![
+                    group("sketch", "Sketch", vec![c("assembly.sketch")]),
                     group(
                         "components",
                         "Components",

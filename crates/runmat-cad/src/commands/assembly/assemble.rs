@@ -36,6 +36,24 @@ pub(super) fn assemble(conn: &[SelectKind]) -> Vec<CommandDescriptor> {
         .preview()
         .edit(edit(EditOp::Add, Section::Occurrences).item("occurrence")),
         asm(
+            "assembly.sketch",
+            "Sketch",
+            "sketch",
+            "Start a sketch in the assembly on an origin plane or a component's planar face.",
+        )
+        .kw(&["2d", "draw", "layout", "in context"])
+        .inputs(vec![pick("plane", "On", &[K::Plane, K::Face])])
+        .edit(edit(EditOp::EnterMode, Section::Features).item("sketch")),
+        asm(
+            "assembly.edit-sketch",
+            "Edit sketch",
+            "sketch",
+            "Open the assembly's sketch for editing.",
+        )
+        .when(selected_one(&[K::Sketch]))
+        .on(&[K::Sketch])
+        .edit(edit(EditOp::EnterMode, Section::Sketch).item("sketch")),
+        asm(
             "assembly.new-part",
             "New part in context",
             "new-part",

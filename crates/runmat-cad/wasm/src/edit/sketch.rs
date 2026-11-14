@@ -751,44 +751,57 @@ pub fn sketch_edit(
     let mut summary = String::new();
     let result = edit_part(text, path, |document| {
         let sketch = sketch_mut(document, &id)?;
-        match command {
-            "sketch.constraint" => {
-                let c = relation(values, &id)?;
-                summary = format!("Added a relation to {id}");
-                sketch.constraints.push(c);
-            }
-            "sketch.dimension" => {
-                let c = dimension(values, sketch, &id)?;
-                summary = format!("Dimensioned {id}");
-                sketch.constraints.push(c);
-            }
-            "sketch.trim" => summary = modify::trim(values, sketch, &id)?,
-            "sketch.extend" => summary = modify::extend(values, sketch, &id)?,
-            "sketch.construction" => summary = repeat::construction(values, sketch, &id)?,
-            "sketch.mirror" => summary = repeat::mirror(values, sketch, &id)?,
-            "sketch.pattern" => summary = repeat::pattern(values, sketch, &id)?,
-            "sketch.transform" => summary = repeat::transform(values, sketch, &id)?,
-            "sketch.split" => summary = repeat::split(values, sketch, &id)?,
-            "sketch.fillet" => summary = corners::fillet(values, sketch, &id)?,
-            "sketch.chamfer" => summary = corners::chamfer(values, sketch, &id)?,
-            "sketch.auto-constrain" => summary = infer::auto_constrain(values, sketch, &id)?,
-            _ => {
-                let (entities, relations) = draw(command, values, sketch)?;
-                summary = format!(
-                    "Added {} to {id}",
-                    entities
-                        .iter()
-                        .map(|e| e.id.0.as_str())
-                        .collect::<Vec<_>>()
-                        .join(", ")
-                );
-                sketch.entities.extend(entities);
-                sketch.constraints.extend(relations);
-            }
-        }
+        summary = apply(command, values, sketch, &id)?;
         Ok(())
     });
     Some(result.map(|change| (change, summary)))
+}
+
+/// One sketch tool on the open sketch `id`, answering the summary. Parts and assemblies both
+/// run their sketch tools through this one function.
+pub(crate) fn apply(
+    command: &str,
+    values: &Map<String, Value>,
+    sketch: &mut Sketch,
+    id: &str,
+) -> Result<String, EditFailure> {
+    let id = id.to_owned();
+    Ok(match command {
+        "sketch.constraint" => {
+            let c = relation(values, &id)?;
+            sketch.constraints.push(c);
+            format!("Added a relation to {id}")
+        }
+        "sketch.dimension" => {
+            let c = dimension(values, sketch, &id)?;
+            sketch.constraints.push(c);
+            format!("Dimensioned {id}")
+        }
+        "sketch.trim" => modify::trim(values, sketch, &id)?,
+        "sketch.extend" => modify::extend(values, sketch, &id)?,
+        "sketch.construction" => repeat::construction(values, sketch, &id)?,
+        "sketch.mirror" => repeat::mirror(values, sketch, &id)?,
+        "sketch.pattern" => repeat::pattern(values, sketch, &id)?,
+        "sketch.transform" => repeat::transform(values, sketch, &id)?,
+        "sketch.split" => repeat::split(values, sketch, &id)?,
+        "sketch.fillet" => corners::fillet(values, sketch, &id)?,
+        "sketch.chamfer" => corners::chamfer(values, sketch, &id)?,
+        "sketch.auto-constrain" => infer::auto_constrain(values, sketch, &id)?,
+        _ => {
+            let (entities, relations) = draw(command, values, sketch)?;
+            let summary = format!(
+                "Added {} to {id}",
+                entities
+                    .iter()
+                    .map(|e| e.id.0.as_str())
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            );
+            sketch.entities.extend(entities);
+            sketch.constraints.extend(relations);
+            summary
+        }
+    })
 }
 
 /// `part.sketch`: an empty sketch on the picked plane or planar face, after the last feature.

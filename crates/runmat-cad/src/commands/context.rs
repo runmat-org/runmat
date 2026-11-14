@@ -295,6 +295,22 @@ pub(super) fn add(catalog: &mut Catalog) {
     let look = || vec![c("view.zoom-selection"), c("view.measure")];
 
     catalog.context_menus.extend([
+        // An assembly's sketch in its Outline.
+        context_menu(
+            K::Sketch,
+            &[EditorKind::Assembly],
+            &[
+                "assembly.edit-sketch",
+                "assembly.suppress",
+                "assembly.delete",
+                "design.show-source",
+            ],
+            vec![
+                vec![c("assembly.edit-sketch")],
+                vec![c("assembly.suppress"), c("assembly.delete")],
+                vec![c("design.show-source"), c("design.copy-reference")],
+            ],
+        ),
         // Topology picked in a part's view: a face, an edge or a vertex.
         context_menu(
             K::Face,
@@ -344,7 +360,7 @@ pub(super) fn add(catalog: &mut Catalog) {
         ),
         context_menu(
             K::SketchEntity,
-            P,
+            &[EditorKind::Part, EditorKind::Assembly],
             &[
                 "sketch.constraint",
                 "sketch.construction",
@@ -359,7 +375,7 @@ pub(super) fn add(catalog: &mut Catalog) {
         ),
         context_menu(
             K::SketchPoint,
-            P,
+            &[EditorKind::Part, EditorKind::Assembly],
             &[
                 "sketch.constraint",
                 "view.zoom-selection",

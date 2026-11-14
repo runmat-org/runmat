@@ -233,6 +233,56 @@ pub struct AssemblyIndex {
     /// The top assembly's saved model views ([`crate::assembly::views`]).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub views: Vec<crate::assembly::views::ModelView>,
+    /// The top assembly's sketches, in document order, for the Outline.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub sketches: Vec<SketchRow>,
+}
+
+/// One sketch of the assembly: where it sits and how it solved.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct SketchRow {
+    pub id: String,
+    /// The plane as written: `origin.xy`, `plane.<connector>`.
+    pub plane: String,
+    /// `well_defined`, `under_defined`, `over_defined`, `explicit`; `failed` when its plane
+    /// didn't resolve; `suppressed`.
+    pub status: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub dof: Option<u32>,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub suppressed: bool,
+}
+
+fn sketch_rows(
+    tree: &ResolvedAssembly,
+    doc: Option<&crate::assembly::AssemblyDocument>,
+) -> Vec<SketchRow> {
+    use crate::model::FeatureKind;
+    let Some(doc) = doc else { return Vec::new() };
+    doc.features
+        .iter()
+        .filter_map(|f| {
+            let FeatureKind::Sketch(sketch) = &f.kind else {
+                return None;
+            };
+            let solved = tree.sketches.iter().find(|s| s.id == f.id);
+            let status = match (f.suppressed, solved) {
+                (true, _) => "suppressed".to_owned(),
+                (false, None) => "failed".to_owned(),
+                (false, Some(s)) => serde_json::to_value(s.solved.status)
+                    .ok()
+                    .and_then(|v| v.as_str().map(str::to_owned))
+                    .unwrap_or_default(),
+            };
+            Some(SketchRow {
+                id: f.id.0.clone(),
+                plane: crate::syntax::refs::print_plane_or_face(&sketch.plane).unwrap_or_default(),
+                status,
+                dof: solved.and_then(|s| s.solved.dof),
+                suppressed: f.suppressed,
+            })
+        })
+        .collect()
 }
 
 /// The child of `from` reached by walking `path` segment by segment.
@@ -346,9 +396,9 @@ pub fn build_assembly_index(
                         name: k.to_string(),
                         si: *v,
                         kind: kind.map(|q| q.0.clone()),
-                        display: written.cloned().unwrap_or_else(|| {
-                            crate::assembly::source::display_quantity(kind, *v)
-                        }),
+                        display: written
+                            .cloned()
+                            .unwrap_or_else(|| crate::assembly::source::display_quantity(kind, *v)),
                         written: written.is_some(),
                     }
                 })
@@ -398,6 +448,7 @@ pub fn build_assembly_index(
             }
         })
         .collect();
+    let top = source.and_then(|s| s.assembly(&tree.top, None).ok());
     AssemblyIndex {
         format_version: ASSEMBLY_INDEX_FORMAT_VERSION,
         top: tree.top.clone(),
@@ -410,10 +461,11 @@ pub fn build_assembly_index(
         bom: flat_bom(tree, source, &BomOptions::default()),
         diagnostics: tree.diagnostics.diagnostics.clone(),
         stats: tree.stats.clone(),
-        views: source
-            .and_then(|s| s.assembly(&tree.top, None).ok())
+        views: top
+            .as_ref()
             .map(|doc| doc.views.clone())
             .unwrap_or_default(),
+        sketches: sketch_rows(tree, top.as_deref()),
     }
 }
 

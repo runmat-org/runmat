@@ -11,6 +11,7 @@
 //! - `assembly.flip-mate`, `assembly.edit-mate`, `assembly.smart-mate`: mates that exist and
 //!   the smart mate ([`mate_edits`]).
 //! - `assembly.replace`, `assembly.subassembly`, `assembly.new-part`: structure ([`structure`]).
+//! - `assembly.sketch` and the `sketch.*` tools: sketches in the assembly ([`sketch`]).
 //! - `explode.new`, `explode.step`, `explode.radial`, `explode.lines`: exploded views, their
 //!   steps and trail lines ([`explode`]).
 //!
@@ -30,6 +31,7 @@ mod mate_edits;
 mod mirror;
 mod path_picks;
 mod place;
+mod sketch;
 mod structure;
 #[cfg(test)]
 mod anchors_tests;
@@ -37,6 +39,8 @@ mod anchors_tests;
 mod configure_tests;
 #[cfg(test)]
 mod explode_tests;
+#[cfg(test)]
+mod sketch_tests;
 #[cfg(test)]
 mod structure_tests;
 #[cfg(test)]
@@ -404,6 +408,9 @@ pub(super) fn edit(
     let compiled = Compiled::new(path, text, files)?;
     let mut publisher = anchors::Publisher::new(files);
     let summary = match request.command.as_str() {
+        "assembly.delete" | "assembly.suppress" if sketch::selected(request).next().is_some() => {
+            sketch::delete_or_suppress(&mut document, request)?
+        }
         "assembly.delete" => {
             let names = selected_names(&compiled, request)?;
             for name in &names {
@@ -514,6 +521,13 @@ pub(super) fn edit(
             )?
         }
         "explode.lines" => explode::lines(&mut document, &request.values, &request.selection)?,
+        "assembly.sketch" => {
+            sketch::new_sketch(&mut document, &compiled, &mut publisher, &request.values)?
+        }
+        "sketch.check" => return Err(super::unhandled("sketch.check")),
+        command if command.starts_with("sketch.") => {
+            sketch::tool(&mut document, command, &request.values)?
+        }
         other => return Err(super::unhandled(other)),
     };
     publisher.finish(&mut others)?;

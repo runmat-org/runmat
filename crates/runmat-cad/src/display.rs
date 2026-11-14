@@ -629,6 +629,9 @@ pub struct OccurrenceDisplay {
 pub struct AssemblyDisplay {
     pub prototypes: Vec<Prototype>,
     pub occurrences: Vec<OccurrenceDisplay>,
+    /// The assembly's own sketches on their planes, drawn as a part's are.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub sketches: Vec<SketchDisplay>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub bounds: Option<Bounds>,
 }
@@ -662,6 +665,11 @@ pub fn assembly_display_configured(
     configured: &BTreeMap<(String, String), PartDisplay>,
 ) -> AssemblyDisplay {
     let mut out = AssemblyDisplay::default();
+    out.sketches = resolved
+        .sketches
+        .iter()
+        .map(|s| one_sketch_display(&s.id.0, &s.sketch, &s.solved, &s.frame))
+        .collect();
     let mut prototype_of: BTreeMap<(String, String), u32> = BTreeMap::new();
     for (id, node) in resolved.nodes.iter().enumerate() {
         // Parts and circuit boards are leaves that draw; a board draws its 3D model.
@@ -838,7 +846,6 @@ fn text_rings(loops: &[Vec<runmat_geometry_kernel::op::ProfileSegment>]) -> Vec<
 
 /// The solved sketches of a regenerated part, in document order.
 pub fn sketch_display(document: &PartDocument, result: &RegenResult) -> Vec<SketchDisplay> {
-    let f32s = |v: [f64; 3]| v.map(|x| x as f32);
     document
         .features
         .iter()
@@ -851,94 +858,105 @@ pub fn sketch_display(document: &PartDocument, result: &RegenResult) -> Vec<Sket
                 .sketches
                 .get(&feature.id)
                 .or_else(|| result.state.over_defined_sketches.get(&feature.id))?;
-            let entities = sketch
-                .entities
-                .iter()
-                .map(|entity| {
-                    let kind = match entity.geometry {
-                        SketchGeometry::Point { .. } => "point",
-                        SketchGeometry::Line { .. } => "line",
-                        SketchGeometry::Arc { .. } => "arc",
-                        SketchGeometry::Circle { .. } => "circle",
-                        SketchGeometry::Spline { .. } => "spline",
-                        SketchGeometry::Ellipse { .. } => "ellipse",
-                        SketchGeometry::Text { .. } => "text",
-                    };
-                    let points = entity
-                        .geometry
-                        .points()
-                        .into_iter()
-                        .filter_map(|(role, _)| {
-                            solved
-                                .point(&entity.id, role)
-                                .map(|p| (role.word(), p.map(|x| x as f32)))
-                        })
-                        .collect();
-                    let samples = match &entity.geometry {
-                        SketchGeometry::Spline { points, closed } => {
-                            spline_samples(&entity.id, points.len(), *closed, solved)
-                        }
-                        SketchGeometry::Ellipse { start, .. } => solved
-                            .ellipse_segment(&entity.id, start.is_some())
-                            .map(|s| {
-                                s.polyline(96)
-                                    .into_iter()
-                                    .map(|p| p.map(|x| x as f32))
-                                    .collect()
-                            })
-                            .unwrap_or_default(),
-                        _ => Vec::new(),
-                    };
-                    SketchEntityDisplay {
-                        id: entity.id.0.clone(),
-                        kind: kind.into(),
-                        construction: entity.construction,
-                        points,
-                        samples,
-                        radius: solved.radii.get(&entity.id).map(|r| *r as f32),
-                        ellipse: solved
-                            .ellipses
-                            .get(&entity.id)
-                            .map(|e| [e.major as f32, e.minor as f32, e.angle as f32]),
-                        outlines: match &entity.geometry {
-                            SketchGeometry::Text { text, .. } => {
-                                text_rings(&solved.text_loops(&entity.id, text))
-                            }
-                            _ => Vec::new(),
-                        },
-                        text: match &entity.geometry {
-                            SketchGeometry::Text { text, .. } => Some(text.clone()),
-                            _ => None,
-                        },
-                        dof: solved.entity_dof.get(&entity.id).copied(),
-                    }
-                })
-                .collect();
-            Some(SketchDisplay {
-                id: feature.id.0.clone(),
-                frame: FrameDisplay {
-                    origin: f32s(frame.origin),
-                    x: f32s(frame.x),
-                    y: f32s(frame.y),
-                    z: f32s(frame.z),
-                },
-                status: serde_json::to_value(solved.status)
-                    .ok()
-                    .and_then(|v| v.as_str().map(str::to_string))
-                    .unwrap_or_default(),
-                dof: solved.dof,
-                entities,
-                constraints: sketch
-                    .constraints
-                    .iter()
-                    .filter_map(|c| serde_json::to_value(c).ok())
-                    .collect(),
-                redundant: solved.redundant.clone(),
-                conflicting: solved.conflicting.clone(),
-                regions: regions::sketch_regions(sketch, solved),
-            })
+            Some(one_sketch_display(&feature.id.0, sketch, solved, frame))
         })
         .collect()
+}
+
+/// One solved sketch on its plane: what a part's and an assembly's sketches both draw.
+pub fn one_sketch_display(
+    id: &str,
+    sketch: &crate::model::sketch::Sketch,
+    solved: &crate::model::sketch::SolvedSketch,
+    frame: &crate::model::datum::Frame,
+) -> SketchDisplay {
+    let f32s = |v: [f64; 3]| v.map(|x| x as f32);
+    let entities = sketch
+        .entities
+        .iter()
+        .map(|entity| {
+            let kind = match entity.geometry {
+                SketchGeometry::Point { .. } => "point",
+                SketchGeometry::Line { .. } => "line",
+                SketchGeometry::Arc { .. } => "arc",
+                SketchGeometry::Circle { .. } => "circle",
+                SketchGeometry::Spline { .. } => "spline",
+                SketchGeometry::Ellipse { .. } => "ellipse",
+                SketchGeometry::Text { .. } => "text",
+            };
+            let points = entity
+                .geometry
+                .points()
+                .into_iter()
+                .filter_map(|(role, _)| {
+                    solved
+                        .point(&entity.id, role)
+                        .map(|p| (role.word(), p.map(|x| x as f32)))
+                })
+                .collect();
+            let samples = match &entity.geometry {
+                SketchGeometry::Spline { points, closed } => {
+                    spline_samples(&entity.id, points.len(), *closed, solved)
+                }
+                SketchGeometry::Ellipse { start, .. } => solved
+                    .ellipse_segment(&entity.id, start.is_some())
+                    .map(|s| {
+                        s.polyline(96)
+                            .into_iter()
+                            .map(|p| p.map(|x| x as f32))
+                            .collect()
+                    })
+                    .unwrap_or_default(),
+                _ => Vec::new(),
+            };
+            SketchEntityDisplay {
+                id: entity.id.0.clone(),
+                kind: kind.into(),
+                construction: entity.construction,
+                points,
+                samples,
+                radius: solved.radii.get(&entity.id).map(|r| *r as f32),
+                ellipse: solved
+                    .ellipses
+                    .get(&entity.id)
+                    .map(|e| [e.major as f32, e.minor as f32, e.angle as f32]),
+                outlines: match &entity.geometry {
+                    SketchGeometry::Text { text, .. } => {
+                        text_rings(&solved.text_loops(&entity.id, text))
+                    }
+                    _ => Vec::new(),
+                },
+                text: match &entity.geometry {
+                    SketchGeometry::Text { text, .. } => Some(text.clone()),
+                    _ => None,
+                },
+                dof: solved.entity_dof.get(&entity.id).copied(),
+            }
+        })
+        .collect();
+    SketchDisplay {
+        id: id.to_owned(),
+        frame: FrameDisplay {
+            origin: f32s(frame.origin),
+            x: f32s(frame.x),
+            y: f32s(frame.y),
+            z: f32s(frame.z),
+        },
+        status: serde_json::to_value(solved.status)
+            .ok()
+            .and_then(|v| v.as_str().map(str::to_string))
+            .unwrap_or_default(),
+        dof: solved.dof,
+        entities,
+        constraints: sketch
+            .constraints
+            .iter()
+            .filter_map(|c| serde_json::to_value(c).ok())
+            .collect(),
+        redundant: solved.redundant.clone(),
+        conflicting: solved.conflicting.clone(),
+        regions: regions::sketch_regions(sketch, solved),
+    }
 }
 
 /// The part display as JSON, for the Desktop.

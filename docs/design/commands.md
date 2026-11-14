@@ -20,8 +20,8 @@ This file is generated from the command catalog.
 - `assembly.component-configuration`: Use another configuration of the component's file.
   - Required: `configuration` (text)
   - Runs on the `selection`: `occurrence`
-- `assembly.delete`: Delete components or mates.
-  - Runs on the `selection`: `occurrence`, `mate`
+- `assembly.delete`: Delete components, mates or sketches.
+  - Runs on the `selection`: `occurrence`, `mate`, `sketch`
 - `assembly.edit-mate`: Change the mate's type, distance, angle, limits or alignment.
   - Required: `type` (one of `fasten`, `revolute`, `slider`, `cylindrical`, `planar`, `ball`, `parallel`, `distance`, `angle`, `tangent`, `pin_slot`, `gear`, `rack_pinion`, `screw`, `cam`, `width`, `symmetric`, `path`, `linear_coupler`, `hinge`, `universal_joint`, default `fasten`); `offset` (number in mm, default 0) when `type` is distance; `angle` (number in deg, default 0) when `type` is angle; `min` (number in deg, default -30) when `angle_limits` is true; `max` (number in deg, default 45) when `angle_limits` is true; `near` (number in mm, default 0) when `distance_limits` is true; `far` (number in mm, default 10) when `distance_limits` is true; `ratio` (number, default 1) when `type` is gear or linear_coupler; `pitch` (number in mm, default 1) when `type` is screw or rack_pinion; `radius` (number in mm, default 5) when `type` is tangent; `profile` (text) when `type` is cam
   - Optional: `angle_limits` (true or false, default false) when `type` is revolute or cylindrical or hinge; `distance_limits` (true or false, default false) when `type` is slider or cylindrical; `flip` (true or false, default false); `first2` (pick: mate connector or face or edge or vertex or plane or axis or point or component) when `type` is width; `second2` (pick: mate connector or face or edge or vertex or plane or axis or point or component) when `type` is width; `plane` (pick: mate connector or face or edge or vertex or plane or axis or point or component) when `type` is symmetric; `path` (picks: edge) when `type` is path; `joint_point` (true or false, default true) when `type` is universal_joint
@@ -62,13 +62,15 @@ This file is generated from the command catalog.
   - Required: `components` (picks: component); `with` (text)
   - Optional: `remate` (true or false, default true)
   - Runs on the `selection`: `occurrence`
+- `assembly.sketch`: Start a sketch in the assembly on an origin plane or a component's planar face.
+  - Required: `plane` (pick: plane or face)
 - `assembly.smart-mate`: Drag a component onto another and accept the suggested mate.
   - Required: `component` (pick: component); `target` (pick: mate connector or face or edge or vertex or plane or axis or point or component)
 - `assembly.subassembly`: Form a subassembly from components, dissolve one, or make it flexible or rigid.
   - Required: `action` (one of `form`, `dissolve`, `flexible`, `rigid`, default `form`); `components` (picks: component); `name` (text) when `action` is form
   - Runs on the `selection`: `occurrence`
-- `assembly.suppress`: Leave components out of this configuration.
-  - Runs on the `selection`: `occurrence`, `mate`
+- `assembly.suppress`: Leave components out of this configuration, or turn a sketch off.
+  - Runs on the `selection`: `occurrence`, `mate`, `sketch`
 - `assembly.where-used`: List where a component's file is used.
   - Runs on the `selection`: `occurrence`
 
@@ -587,7 +589,7 @@ This file is generated from the command catalog.
   - Required: `stop` (number in s, default 0.001); `step` (number in s, default 0.000001)
   - Optional: `name` (text)
 
-## `sketch.` commands (`.part`)
+## `sketch.` commands (`.part`, `.assembly`)
 
 - `sketch.arc`: Draw an arc by center, tangent to an end or through three points.
   - Required: `type` (one of `center`, `tangent`, `three_point`, default `center`); `start` (pick: sketch point or vertex or point); `end` (pick: sketch point or vertex or point); `center` (pick: sketch point or vertex or point) when `type` is center

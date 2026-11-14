@@ -1,0 +1,74 @@
+---
+description: Reference for sketches in a RunMat assembly. Sketch on an assembly origin plane or on a placed component's face, with the same tools, relations and dimensions as a part sketch, and keep the sketch on the face when the component moves.
+keywords: [assembly sketch, in-context sketch, layout sketch, sketch on a component face, top-down design, sketch in an assembly]
+---
+# Sketches in an assembly
+
+An assembly can hold its own sketches. Use one to lay out where components go, or to draw on a component's face where it sits in the assembly. An assembly sketch has the same entities, relations, dimensions and solver as a part sketch; see [Sketches](/docs/mcad/part/sketches).
+
+This assembly has two sketches. `layout` sits on the assembly's XY plane. `slot` sits on the top face of the `upper` plate, through the connector `top`, and it moves with that plate.
+
+```part file=plate.part
+runmat 0.7
+std 1
+
+part plate {
+    sketch s on origin.xy {
+        l1 = line(start = [0 mm, 0 mm], end = [80 mm, 0 mm])
+        l2 = line(start = l1.end, end = [80 mm, 50 mm])
+        l3 = line(start = l2.end, end = [0 mm, 50 mm])
+        l4 = line(start = l3.end, end = l1.start)
+    }
+    feature body = extrude(profile = sketch.s, distance = 10 mm)
+    output plate = { body = feature.body.body }
+}
+```
+
+```assembly file=stack.assembly
+runmat 0.7
+std 1
+
+assembly stack {
+    use part plate as lower
+    use part plate as upper {
+        placement = { placement = offset, offset = { translation = [0 mm, 0 mm, 20 mm] } }
+    }
+
+    connector top = { occurrence = [{ name = upper }], at = [0 mm, 0 mm, 10 mm] }
+
+    sketch layout on origin.xy {
+        l1 = line(start = [0 mm, 0 mm], end = [80 mm, 0 mm])
+        constrain horizontal(l1)
+    }
+
+    sketch slot on plane.top {
+        c1 = circle(center = [20 mm, 25 mm], radius = 4 mm)
+    }
+}
+```
+
+## Planes
+
+An assembly sketch is written `sketch <name> on <plane> { … }`, as in a part. The plane is one of these:
+
+| Plane | Meaning |
+|---|---|
+| `origin.xy`, `origin.yz`, `origin.zx` | An origin plane of the assembly. |
+| `plane.<connector>` | The XY plane of one of the assembly's connectors, with its normal along the connector's Z axis. |
+
+A connector is fixed in its component (see [Occurrences and mates](/docs/mcad/assembly/mates)). A sketch on a connector therefore follows that component when its placement changes, when mates move it, or when it is dragged. A connector anchored to a face the part publishes also follows that face when the part changes.
+
+A sketch whose connector is missing, or whose component is suppressed, doesn't draw. The rest of the assembly still builds, and the error `cad.asm.unknown_connector` names the sketch.
+
+An assembly's `feature` entries hold sketches only. Any other feature kind is refused with `cad.ref.kind_mismatch`.
+
+## In the Desktop
+
+- **Start a sketch:** click **Sketch** on the Assemble tab and pick an origin plane or a planar face of a component.
+  - A face pick adds a connector on that component, anchored to the face its part publishes. The sketch is written on that connector.
+  - The sketch opens in sketch mode with the view normal to it.
+- **Draw:** the sketch ribbon has the same tools, fields and handles as a part sketch: lines, rectangles, circles, arcs, slots, polygons, splines, ellipses, points and text; offset, trim, extend, split, mirror, pattern and transform; fillet and chamfer; relations, dimensions and auto-constrain.
+- **The Outline:** the **Sketches** folder lists each sketch with its plane and how it solved.
+  - Right-click a sketch for **Edit sketch**, **Suppress** and **Delete**.
+
+The agent and the command line run the same commands: `assembly.sketch` with `values.plane`, then each `sketch.*` tool with `values.sketch` naming the sketch.

@@ -106,9 +106,9 @@ fn round_unit(v: V3) -> [f64; 3] {
 
 /// A pick resolved: the component's name, the frame on it (None for the whole component) and
 /// what its connector anchors to.
-struct Resolved {
+pub(super) struct Resolved {
     occurrence: String,
-    frame: Option<Frame>,
+    pub(super) frame: Option<Frame>,
     /// The frame in assembly coordinates, where the component sits now.
     world: Option<Frame>,
     anchor: Anchor,
@@ -122,7 +122,7 @@ fn entity<'a>(body: Option<&'a Value>, list: &str, index: usize) -> Option<&'a V
         .find(|e| e["index"].as_u64() == Some(index as u64))
 }
 
-fn resolve(
+pub(super) fn resolve(
     document: &AssemblyDocument,
     compiled: &Compiled,
     id: &str,
@@ -234,7 +234,7 @@ fn fresh(taken: impl Fn(&str) -> bool, stem: &str) -> String {
 /// Adds a connector on `pick` and answers its name. A face, edge, vertex or datum is published
 /// from its part ([`Publisher`]) and the connector anchors to that name; a connector the
 /// assembly has is reused (a flipped copy when `flip` asks for the other way).
-fn connector(
+pub(super) fn connector(
     document: &mut AssemblyDocument,
     publisher: &mut Publisher,
     pick: &Resolved,
