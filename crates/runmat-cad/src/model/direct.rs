@@ -85,6 +85,14 @@ pub enum DirectMotion {
         dy: ValueExpr,
         dz: ValueExpr,
     },
+    /// Translated by `distance` along `direction`: an edge or axis along itself, a plane or
+    /// planar face along its normal. `reverse` flips the direction.
+    Along {
+        direction: AxisRef,
+        distance: ValueExpr,
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        reverse: bool,
+    },
     Rotate {
         axis: AxisRef,
         angle: ValueExpr,
@@ -99,6 +107,14 @@ impl DirectMotion {
                 v.value(dx);
                 v.value(dy);
                 v.value(dz);
+            }
+            DirectMotion::Along {
+                direction,
+                distance,
+                ..
+            } => {
+                v.axis("direction", direction);
+                v.value(distance);
             }
             DirectMotion::Rotate { axis, angle } => {
                 v.axis("axis", axis);

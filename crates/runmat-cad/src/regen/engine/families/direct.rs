@@ -20,6 +20,18 @@ impl<'a, 'b> Run<'a, 'b> {
                     self.value(id, "motion.dz", dz, Dimension::LENGTH)?,
                 ],
             },
+            DirectMotion::Along {
+                direction,
+                distance,
+                reverse,
+            } => {
+                let (_, d) = self.axis(i, id, "motion.direction", direction)?;
+                let s = self.value(id, "motion.distance", distance, Dimension::LENGTH)?
+                    * if *reverse { -1.0 } else { 1.0 };
+                FaceMotion::Translate {
+                    vector: [d[0] * s, d[1] * s, d[2] * s],
+                }
+            }
             DirectMotion::Rotate { axis, angle } => {
                 let (p, d) = self.axis(i, id, "motion.axis", axis)?;
                 FaceMotion::Rotate {

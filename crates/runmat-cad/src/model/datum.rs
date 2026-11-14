@@ -102,7 +102,8 @@ impl PlaneRef {
 
 /// An axis-taking parameter: a datum axis; a straight edge (along it) or a circular edge (its
 /// centre and normal); a cylindrical face or a face bounded by a circle, such as a cone (its
-/// axis); or a sketch line, usually a construction centerline.
+/// axis); a planar face (its outward normal through its centre); a sketch line, usually a
+/// construction centerline; or a plane's normal (`Normal`), through the plane's origin.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case", tag = "along")]
 pub enum AxisRef {
@@ -118,6 +119,11 @@ pub enum AxisRef {
     SketchLine {
         sketch: FeatureId,
         entity: crate::ids::SketchEntityId,
+    },
+    /// Normal to a plane (a datum plane or a planar face), through its origin: a direction
+    /// field given a plane reads it as the plane's normal.
+    Normal {
+        plane: PlaneRef,
     },
 }
 

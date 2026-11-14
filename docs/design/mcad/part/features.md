@@ -237,7 +237,21 @@ feature draft_check = mold.parting_line(body = feature.body.body, pull = origin.
 
 ## Direct edits
 
-`direct.move_faces`, `direct.replace_faces`, `direct.delete_faces` and `direct.move_bodies` edit imported or finished geometry as features in the history. `keep` lists relations the edit must keep, such as two faces staying parallel; an edit that would break one is an error (`cad.direct.relation_broken`).
+`direct.move_faces`, `direct.replace_faces`, `direct.delete_faces` and `direct.move_bodies` edit imported or finished geometry as features in the history. `keep` lists relations the edit must keep, such as two faces staying parallel; an edit that would break one is an error (`cad.direct.relation_broken`). In the Desktop, Move face's Keep field writes these relations.
+
+`direct.move_faces` takes one of three motions:
+
+| Motion | What moves | Desktop |
+|---|---|---|
+| `offset(distance)` | Each face moves along its own outward normal by `distance`. A hole's radius changes, and an angled face moves square to itself. | Offset face, Pull, and Move face → Offset |
+| `along(direction, distance, reverse)` | The faces move together as one rigid set, `distance` along `direction`. An edge or axis gives its own direction; a plane or planar face gives its normal, written `{ along = normal, plane = origin.xy }` for the Top plane. `reverse = true` flips the direction. | Move face → Translate along a direction |
+| `rotate(axis, angle)` | The faces turn together about `axis` by `angle`. | Move face → Rotate about an axis |
+
+In every motion the neighboring faces extend or trim to meet the moved faces. Move face → Offset and Offset face write the same feature.
+
+```part fragment
+feature lift = direct.move_faces(faces = [feature.body.face.side(s1.l2)], motion = along(direction = { along = normal, plane = origin.xy }, distance = 16.59 mm))
+```
 
 <!-- design:clip:mcad/direct -->
 
