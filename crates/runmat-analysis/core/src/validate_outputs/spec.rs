@@ -620,7 +620,7 @@ mod tests {
         assert_eq!(published_locations(F::Fluid, Q::FluidVelocity), [L::Node, L::Cell]);
         assert!(published_locations(F::Thermal, Q::Displacement).is_empty());
         let coupled = F::Coupled(C::Thermomechanical);
-        assert_eq!(published_locations(coupled, Q::Temperature), [L::Node, L::Element, L::IntegrationPoint]);
+        assert_eq!(published_locations(coupled, Q::Temperature), [L::Node]);
         assert_eq!(published_locations(coupled, Q::Displacement), [L::Node]);
         assert!(published_locations(F::Structural, Q::HeatRate).is_empty());
     }

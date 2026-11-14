@@ -4,7 +4,9 @@
 //! [`ObservationQuantity::from_source_name`] and the language's field references read this one
 //! table, and so do the checker and Simulation setup's `outputs` choices
 //! ([`crate::published_locations`]). The locations are the native layouts the solvers publish
-//! (runmat-analysis-fea's recovered and native field inventories). A quantity with no locations
+//! (runmat-analysis-fea's recovered and native field inventories, and the layouts its pipelines
+//! build); runmat-analysis-fea's `source_field_locations` test checks the table against them both
+//! ways. A quantity with no locations
 //! has no field form: it is read some other way (a reduction, a port or line parameter).
 use crate::{FieldLocation as L, PhysicsFamily as P};
 
@@ -29,7 +31,7 @@ const fn row(name: &'static str, quantity: Q, fields: &'static [(P, &'static [L]
 pub const SOURCE_QUANTITIES: &[SourceQuantity] = &[
     row("displacement", Q::Displacement, &[(P::Structural, &[L::Node])]),
     row("rotation", Q::Rotation, &[(P::Structural, &[L::Node])]),
-    row("velocity", Q::Velocity, &[(P::Structural, &[L::Node, L::Element])]),
+    row("velocity", Q::Velocity, &[(P::Structural, &[L::Node])]),
     row("acceleration", Q::Acceleration, &[(P::Structural, &[L::Node])]),
     row("strain", Q::Strain, &[(P::Structural, &[L::Element, L::IntegrationPoint])]),
     row("stress", Q::Stress, &[(P::Structural, &[L::Element, L::IntegrationPoint, L::Node])]),
@@ -47,18 +49,18 @@ pub const SOURCE_QUANTITIES: &[SourceQuantity] = &[
     row("shell_bending_moment", Q::ShellBendingMoment, &[(P::Structural, &[L::Element])]),
     row("shell_transverse_shear", Q::ShellTransverseShear, &[(P::Structural, &[L::Element])]),
     row("shell_von_mises", Q::ShellVonMises, &[(P::Structural, &[L::Element])]),
-    row("temperature", Q::Temperature, &[(P::Thermal, &[L::Node, L::Element, L::IntegrationPoint])]),
+    row("temperature", Q::Temperature, &[(P::Thermal, &[L::Node])]),
     row("temperature_gradient", Q::TemperatureGradient, &[(P::Thermal, &[L::Element])]),
     row("heat_flux", Q::HeatFlux, &[(P::Thermal, &[L::Element, L::Interface])]),
     row("heat_rate", Q::HeatRate, &[]),
     row("thermal_energy_storage_rate_density", Q::ThermalEnergyStorageRateDensity, &[(P::Thermal, &[L::Element])]),
-    row("electric_potential", Q::ElectricPotential, &[(P::Electromagnetic, &[L::Node, L::Element])]),
-    row("electric_field", Q::ElectricField, &[(P::Electromagnetic, &[L::Node, L::Edge, L::Element, L::IntegrationPoint])]),
+    row("electric_potential", Q::ElectricPotential, &[(P::Electromagnetic, &[L::Node])]),
+    row("electric_field", Q::ElectricField, &[(P::Electromagnetic, &[L::Edge, L::Element, L::IntegrationPoint])]),
     row("electric_displacement", Q::ElectricDisplacement, &[(P::Electromagnetic, &[L::Element, L::IntegrationPoint])]),
     row("electric_energy_density", Q::ElectricEnergyDensity, &[(P::Electromagnetic, &[L::Element])]),
-    row("joule_power_density", Q::JoulePowerDensity, &[(P::Electromagnetic, &[L::Node, L::Edge, L::Element, L::IntegrationPoint])]),
+    row("joule_power_density", Q::JoulePowerDensity, &[(P::Electromagnetic, &[L::Edge, L::Element, L::IntegrationPoint])]),
     row("electric_current", Q::ElectricCurrent, &[]),
-    row("electric_current_density", Q::ElectricCurrentDensity, &[(P::Electromagnetic, &[L::Node, L::Edge, L::Element, L::IntegrationPoint])]),
+    row("electric_current_density", Q::ElectricCurrentDensity, &[(P::Electromagnetic, &[L::Edge, L::Element, L::IntegrationPoint])]),
     row("electric_charge", Q::ElectricCharge, &[]),
     row("electric_edge_circulation", Q::ElectricEdgeCirculation, &[(P::Electromagnetic, &[L::Edge])]),
     row("magnetic_edge_circulation", Q::MagneticEdgeCirculation, &[(P::Electromagnetic, &[L::Edge])]),
@@ -80,9 +82,9 @@ pub const SOURCE_QUANTITIES: &[SourceQuantity] = &[
     row("modal_frequency", Q::ModalFrequency, &[(P::Structural, &[L::Mode])]),
     row("modal_participation", Q::ModalParticipation, &[(P::Structural, &[L::Mode])]),
     row("eigenvalue", Q::Eigenvalue, &[(P::Structural, &[L::Mode])]),
-    row("residual", Q::Residual, &[(P::Structural, &[L::Global, L::Mode]), (P::Thermal, &[L::Global, L::Mode]), (P::Electromagnetic, &[L::Global, L::Mode]), (P::Acoustic, &[L::Global, L::Mode]), (P::Fluid, &[L::Global, L::Mode])]),
+    row("residual", Q::Residual, &[(P::Structural, &[L::Global, L::Mode]), (P::Thermal, &[L::Global]), (P::Electromagnetic, &[L::Global]), (P::Fluid, &[L::Global])]),
     row("balance", Q::Balance, &[]),
     row("constraint_violation", Q::ConstraintViolation, &[]),
     row("contact_gap", Q::ContactGap, &[(P::Structural, &[L::Interface])]),
-    row("contact_pressure", Q::ContactPressure, &[(P::Structural, &[L::Node, L::Interface])]),
+    row("contact_pressure", Q::ContactPressure, &[(P::Structural, &[L::Interface])]),
 ];

@@ -62,18 +62,20 @@ fn fea_properties_write_the_library_values_in_block_units() {
     assert!(steel.property_citations().iter().any(|(name, citation)| *name == "yield_strength" && citation.id == "en1993-1-1-table-3.1"));
 }
 
-/// Each row names one exact grade. The 304 and C11000 densities are FEA's values; their primary
-/// sources are pending (`citations::PENDING_*`). runmat-cad's part materials still differ on these
-/// two (stainless 7950, copper 8940) and fold in later.
+/// Each row names one exact grade, and the 304 and C11000 densities come from the sources read for
+/// them: the ATI 304 datasheet (7.90 g/cm3) and the International Annealed Copper Standard density
+/// in NBS Circular 31 (8.89 g/cm3 at 20 C). runmat-cad's part materials still differ on these two
+/// (stainless 7950, copper 8940) and fold in later.
 #[test]
-fn rows_name_exact_grades_and_mark_unread_sources_pending() {
+fn rows_name_exact_grades_with_their_density_sources() {
     let stainless = material("stainless_304").unwrap();
     assert!(stainless.label.contains("UNS S30400"));
-    assert_eq!(stainless.mass_density.si(), 8000.0);
-    assert!(stainless.mass_density.citation.source.starts_with("Pending:"));
+    assert_eq!(stainless.mass_density.si(), 7900.0);
+    assert_eq!(stainless.mass_density.citation, &citations::ATI_304_DATASHEET);
     let copper = material("copper_c11000").unwrap();
     assert!(copper.label.contains("C11000"));
     assert_eq!(copper.mass_density.si(), 8890.0);
-    assert!(copper.mass_density.citation.source.starts_with("Pending:"));
+    assert_eq!(copper.mass_density.citation, &citations::NBS_CIRCULAR_31_COPPER_DENSITY);
+    assert!(citations::ALL.iter().all(|citation| !citation.source.starts_with("Pending:")));
     assert!(material("copper_c110").is_none());
 }

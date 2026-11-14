@@ -31,12 +31,11 @@ pub const ASM_HANDBOOK_VOL_1: Citation = cite("asm-vol1", "ASM Handbook Vol. 1, 
 /// Minimum yield strength of annealed 304 plate, sheet and strip.
 pub const ASTM_A240: Citation = cite("astm-a240", "ASTM A240/A240M, Table 2: minimum yield strength of type 304");
 
-/// The density of type 304 (UNS S30400) FEA set (2026-11-14, ASM handbook or a producer
-/// datasheet). No primary source stating 8000 kg/m3 has been read yet; this entry marks the gap.
-pub const PENDING_STAINLESS_304_DENSITY: Citation = cite("pending-s30400-density", "Pending: 8000 kg/m3 for UNS S30400 as FEA set it; the primary source (ASM handbook or a producer datasheet) has not been read yet");
-/// The density of copper C11000 FEA set (2026-11-14: 8.89 g/cm3 at 20 C, as the Copper
-/// Development Association states it). The CDA page could not be read yet; this entry marks the gap.
-pub const PENDING_COPPER_C11000_DENSITY: Citation = cite("pending-c11000-density", "Pending: 8890 kg/m3 (8.89 g/cm3 at 20 C) for C11000 as FEA set it from the Copper Development Association; the CDA source has not been read yet");
+/// Density of type 304 (UNS S30400), from the producer's datasheet (read 2026-11-14).
+pub const ATI_304_DATASHEET: Citation = cite("ati-304", "ATI 304 Austenitic Stainless Steel (UNS S30400) datasheet, ATI, atimaterials.com/Products/ati-304: density 0.285 lb/in3 (7.90 g/cm3)");
+/// Density of annealed copper: the International Annealed Copper Standard's density (read
+/// 2026-11-14 on NIST's site, nvlpubs.nist.gov/nistpubs/Legacy/circ/nbscircular31e4.pdf).
+pub const NBS_CIRCULAR_31_COPPER_DENSITY: Citation = cite("nbs-circ31-1.1", "NBS Circular 31, 4th ed. (1956), Copper Wire Tables, 1.1 Standard Values for Copper, pp. 2-3: the density of the International Annealed Copper Standard, 8.89 g/cm3 at 20 C (IEC)");
 
 /// Every citation the library uses, for the docs and the uniqueness check.
 pub const ALL: &[&Citation] = &[
@@ -48,6 +47,6 @@ pub const ALL: &[&Citation] = &[
     &ASM_HANDBOOK_VOL_2,
     &ASM_HANDBOOK_VOL_1,
     &ASTM_A240,
-    &PENDING_STAINLESS_304_DENSITY,
-    &PENDING_COPPER_C11000_DENSITY,
+    &ATI_304_DATASHEET,
+    &NBS_CIRCULAR_31_COPPER_DENSITY,
 ];
