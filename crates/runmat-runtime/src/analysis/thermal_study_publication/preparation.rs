@@ -15,6 +15,19 @@ pub(super) fn capture(
     storage::AnalysisPublicationError,
 > {
     let maximum = crate::analysis::configuration::publication_staging_budget()?;
+    let (original, copies) = retained_storage(completed, mesh, evidence, options, maximum)?;
+    PublicationPreparation::capture_with_completion_storage(definition, original, copies, maximum)
+}
+
+/// The original inputs publication keeps and the completion copies it introduces, as charged
+/// against the publication budget before the source phase.
+pub(super) fn retained_storage(
+    completed: &ThermalStudyCompletion,
+    mesh: &SolverMeshArtifact,
+    evidence: &MeshingEvidence,
+    options: &AnalysisThermalRunOptions,
+    maximum: u64,
+) -> Result<(u64, u64), storage::AnalysisPublicationError> {
     let mesh_bytes = storage::publication::retained_mesh_storage(mesh, maximum)?;
     let original_metadata = storage::publication::resident(&(evidence, options), maximum)?;
     let limits = runmat_canonical_codec::CanonicalLimits::content_bounded(
@@ -51,5 +64,5 @@ pub(super) fn capture(
         .ok_or_else(|| storage::AnalysisPublicationError::ResourceLimit {
             message: "thermal copy storage overflow".into(),
         })?;
-    PublicationPreparation::capture_with_completion_storage(definition, original, copies, maximum)
+    Ok((original, copies))
 }

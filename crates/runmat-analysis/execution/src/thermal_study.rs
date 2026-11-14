@@ -162,6 +162,14 @@ impl ThermalStudyCoordinator {
         Ok(self.solve_task.as_ref().expect("just prepared"))
     }
 
+    /// The solve task prepared by `prepare_solve`, while it awaits its response.
+    pub fn prepared_solve(&self) -> AnalysisBridgeResult<&PreparedThermalTask> {
+        self.require(ThermalStudyPhase::AwaitingSolve)?;
+        self.solve_task
+            .as_ref()
+            .ok_or_else(|| invalid("thermal solve task is not prepared"))
+    }
+
     /// The caller must preserve the scheduler's response/accounting association.
     pub fn complete_solve(
         &mut self,

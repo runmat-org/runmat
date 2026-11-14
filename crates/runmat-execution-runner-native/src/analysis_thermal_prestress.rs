@@ -157,6 +157,7 @@ pub(crate) async fn execute_with_pool(
         },
         ThermalStudyExecutionPolicy {
             resources: policy.resources.clone(),
+            publication_memory_bytes: crate::study_family::publication_budget()?,
             retry: policy.retry,
             deadline_unix_millis: policy.deadline_unix_millis,
             priority: policy.priority,

@@ -144,9 +144,10 @@ impl<S: CacheImport + Send + Sync> ThermalStudySource for RetainedThermalSource<
         let available = maximum
             .checked_sub(owned)
             .ok_or_else(|| limit("thermal source retained roots exceed allowance"))?;
+        // The replay rebuilds a root wire equal to the retained one (`owned`) for comparison.
         let required = self
             .completed
-            .publication_workspace_bytes(self, &self.catalog, available)
+            .publication_workspace_bytes(self, &self.catalog, owned, available)
             .map_err(bridge)?;
         owned
             .checked_add(required)

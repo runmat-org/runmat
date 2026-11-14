@@ -68,4 +68,13 @@ pub(in crate::analysis) use acoustic::{
     CompletedAcousticFrequencyStep,
 };
 pub use structural::{prepare_structural_study_publication, publish_structural_study_result};
-pub use thermal::{prepare_thermal_study_publication, publish_thermal_study_result};
+/// The memory one study publication may use, as configured by the host (the CLI sets the run's
+/// admitted memory). Planning reads the same value to refuse a study whose publication cannot fit.
+pub fn publication_staging_budget() -> Result<u64, String> {
+    super::configuration::publication_staging_budget()
+}
+
+pub use thermal::{
+    prepare_thermal_study_publication, publish_thermal_study_result,
+    thermal_publication_retained_bytes,
+};
