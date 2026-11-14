@@ -131,6 +131,10 @@ fn compile_part(
         return (problems, None);
     };
     let kernel = runmat_design_tools::kernel::make();
+    // Without OCCT (the browser server has no geometry host of its own) the part regenerates on
+    // the grid test kernel. That kernel's verdicts on an operation are not the product's, so
+    // failures are the test double's limits, not the user's errors, and are left out.
+    let test_kernel = runmat_design_tools::kernel::name() == "reference";
     let scope = module_scope(path, text, files);
     let mut all = files.clone();
     all.insert(path.to_owned(), text.to_owned());
@@ -155,9 +159,14 @@ fn compile_part(
     let mut report = result.diagnostics.clone();
     report.attach_spans(&parsed.spans);
     let waiting = !pending.borrow().is_empty();
+    let unknown = if test_kernel {
+        kernel_verdicts(&report.diagnostics)
+    } else {
+        Default::default()
+    };
     for d in &report.diagnostics {
         let cascade = matches!(d.cause, runmat_cad::diagnostics::Cause::Cascade { .. });
-        if d.message.contains(PENDING) || (waiting && cascade) {
+        if d.message.contains(PENDING) || (waiting && cascade) || unknown.contains(&d.id) {
             continue;
         }
         let span = d
@@ -192,6 +201,27 @@ fn compile_part(
     // The calls still to run, as the CAD host's compile lists them.
     let projection = serde_json::json!({ "document": &document, "index": &index, "pending_values": &*pending.borrow() });
     (problems, Some(projection))
+}
+
+/// The diagnostics that are a kernel's verdict on an operation (not supported, failed, no
+/// history) and those that cascade from one. On the test kernel the editor can't tell whether
+/// the product's kernel would agree, so it reports none of them.
+fn kernel_verdicts(
+    diagnostics: &[runmat_cad::diagnostics::Diagnostic],
+) -> std::collections::BTreeSet<u32> {
+    use runmat_cad::diagnostics::{Cause, DiagCode};
+    let mut ids = std::collections::BTreeSet::new();
+    for d in diagnostics {
+        let verdict = matches!(
+            d.code,
+            DiagCode::KernelNotSupported | DiagCode::KernelFailed | DiagCode::KernelHistoryIncomplete
+        );
+        let follows = matches!(d.cause, Cause::Cascade { root } if ids.contains(&root));
+        if verdict || follows {
+            ids.insert(d.id);
+        }
+    }
+    ids
 }
 
 /// The declaration a diagnostic's site names, when the span map has no entry for it.

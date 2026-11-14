@@ -7,10 +7,10 @@
 //! | Suite | Rules |
 //! |---|---|
 //! | `decoupling` | every IC power-input pin has a capacitor from its rail to ground (capacitors on a rail are shared out in designator order) |
-//! | `i2c` | every SCL/SDA net with a device has a pull-up to a rail, 1 kΩ–10 kΩ |
+//! | `i2c` | every net on a part's I²C pin (SCL/SDA) has a pull-up to a rail, 1 kΩ–10 kΩ |
 //! | `crystal` | each crystal pin has a load capacitor to ground and `C1·C2/(C1+C2) + C_stray` is within 10 % of the crystal's load capacitance |
 //! | `straps` | reset and boot pins are not floating: `NRST`/`RESET` pulled up (or driven), `BOOT0`/`BOOT` pulled down |
-//! | `usb-c` | a USB-C sink has 5.1 kΩ pull-downs (Rd) on CC1 and CC2; D+/D− are connected and paired |
+//! | `usb-c` | a USB-C sink has 5.1 kΩ pull-downs (Rd) on CC1 and CC2; D+/D− are connected and paired, unless both are waived with `no_erc` (a power-only port) |
 //! | `switcher` | a switching regulator has an inductor on SW, input and output capacitors, and a feedback divider setting the output within 3 % of the rail's nominal voltage |
 //!
 //! Fixes are expressed against the sheet that holds the anchor component, using pins of
@@ -140,6 +140,17 @@ struct Ctx<'a> {
 fn is_ground(name: &str) -> bool {
     let n = name.rsplit('/').next().unwrap_or(name).to_ascii_uppercase();
     n.starts_with("GND") || matches!(n.as_str(), "AGND" | "DGND" | "PGND" | "VSS" | "0V")
+}
+
+/// An I²C pin by its name on the part: `SCL`, `SDA`, or one of those as a `/`- or `_`-separated
+/// function with an optional bus number (`I2C1_SCL`, `PB7/SDA1`). `SCLK`, an SPI clock, is not one.
+fn is_i2c_pin(pin: &str) -> bool {
+    pin.split(['/', '_', '-', ' '])
+        .map(|t| t.to_ascii_uppercase())
+        .any(|t| {
+            let base = t.trim_end_matches(|c: char| c.is_ascii_digit());
+            base == "SCL" || base == "SDA"
+        })
 }
 
 fn rail_voltage(name: &str) -> Option<f64> {
@@ -329,23 +340,18 @@ pub fn i2c(nl: &Netlist, pool: &Pool, o: &ReviewOptions) -> Vec<ReviewFinding> {
     let cx = Ctx::new(nl, pool);
     let mut out = Vec::new();
     for (ni, net) in nl.nets.iter().enumerate() {
-        let leaf = net
-            .name
-            .rsplit('/')
-            .next()
-            .unwrap_or(&net.name)
-            .to_ascii_uppercase();
-        let named = leaf.contains("SCL") || leaf.contains("SDA");
         let pins: Vec<(usize, usize)> = net
             .pins
             .iter()
             .copied()
             .filter(|(c, _)| nl.components[*c].fitted())
             .collect();
-        let by_pin = pins
+        // A net is an I²C line when a part's I²C pin is on it; its name says nothing (an SPI
+        // clock named SCLK is not one).
+        let bus = pins
             .iter()
-            .any(|(c, p)| matches!(nl.components[*c].pins[*p].pin.as_str(), "SCL" | "SDA"));
-        if !(named || by_pin) || pins.len() < 2 {
+            .any(|(c, p)| is_i2c_pin(&nl.components[*c].pins[*p].pin));
+        if !bus || pins.len() < 2 {
             continue;
         }
         let pulls = cx.between("R", ni, |m| cx.rail(m));
@@ -559,7 +565,7 @@ pub fn straps(nl: &Netlist, pool: &Pool, o: &ReviewOptions) -> Vec<ReviewFinding
 pub fn usb_c(nl: &Netlist, pool: &Pool, _o: &ReviewOptions) -> Vec<ReviewFinding> {
     let cx = Ctx::new(nl, pool);
     let mut out = Vec::new();
-    for c in nl.components.iter().filter(|c| c.fitted()) {
+    for (ci, c) in nl.components.iter().enumerate().filter(|(_, c)| c.fitted()) {
         let has = |n: &str| c.pins.iter().any(|p| p.pin == n);
         if !(has("CC1") && has("CC2") && has("VBUS")) {
             continue;
@@ -623,8 +629,18 @@ pub fn usb_c(nl: &Netlist, pool: &Pool, _o: &ReviewOptions) -> Vec<ReviewFinding
                 }
             }
         }
-        let dp = c.pins.iter().find(|p| p.pin == "DP").and_then(|p| p.net);
-        let dn = c.pins.iter().find(|p| p.pin == "DN").and_then(|p| p.net);
+        // A D+/D− pin waived with `no_erc` is left open on purpose (a power-only port).
+        let data = |name: &str| {
+            c.pins
+                .iter()
+                .position(|p| p.pin == name)
+                .map(|pi| (c.pins[pi].net, nl.no_erc.contains(&(ci, pi))))
+        };
+        let (dp, dp_waived) = data("DP").unwrap_or((None, false));
+        let (dn, dn_waived) = data("DN").unwrap_or((None, false));
+        if dp.is_none() && dn.is_none() && dp_waived && dn_waived {
+            continue;
+        }
         match (dp, dn) {
             (Some(p), Some(n)) => {
                 let paired = nl
@@ -641,8 +657,8 @@ pub fn usb_c(nl: &Netlist, pool: &Pool, _o: &ReviewOptions) -> Vec<ReviewFinding
                         None,
                     ));
                 }
-                for x in [p, n] {
-                    if nl.nets[x].pins.len() < 2 {
+                for (x, waived) in [(p, dp_waived), (n, dn_waived)] {
+                    if nl.nets[x].pins.len() < 2 && !waived {
                         out.push(add(
                             "usb-c",
                             "data-connected",
