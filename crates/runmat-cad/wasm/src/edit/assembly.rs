@@ -33,6 +33,7 @@ mod path_picks;
 mod place;
 mod sketch;
 mod structure;
+mod use_edges;
 #[cfg(test)]
 mod anchors_tests;
 #[cfg(test)]
@@ -533,6 +534,19 @@ pub(super) fn edit(
             sketch::new_sketch(&mut document, &compiled, &mut publisher, &request.values)?
         }
         "sketch.check" => return Err(super::unhandled("sketch.check")),
+        "sketch.use-edges" => use_edges::use_edges(
+            &mut document,
+            &compiled,
+            &mut publisher,
+            &crate::edit::sketch::with_selection(&request.values, &request.selection),
+        )?,
+        "sketch.offset"
+            if crate::features::picks_of(&request.values, "entities")
+                .iter()
+                .any(|p| use_edges::is_component_pick(p)) =>
+        {
+            use_edges::offset(&mut document, &compiled, &mut publisher, &request.values)?
+        }
         command if command.starts_with("sketch.") => {
             sketch::tool(
                 &mut document,

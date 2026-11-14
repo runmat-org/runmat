@@ -36,7 +36,6 @@ pub fn catalog() -> Catalog {
 pub const UNBUILT: &[&str] = &[
     // Sketch.
     "sketch.fully-define",
-    "sketch.use-edges",
     "sketch.stretch",
     "sketch.block",
     "sketch.image",

@@ -320,6 +320,16 @@ fn extend_runs_a_line_end_to_the_next_curve() {
         down.contains("l5 = line(start = [20 mm, 0 mm], end = [20 mm, 12 mm])"),
         "{down}"
     );
+    // Picked without a click (the panel or the Outline): the end with the nearer curve goes.
+    let nearer = applied(
+        &text,
+        "sketch.extend",
+        json!({ "sketch": "s1", "entities": ["sketch.s1.l5"] }),
+    );
+    assert!(
+        nearer.contains("l5 = line(start = [20 mm, 0 mm], end = [20 mm, 12 mm])"),
+        "{nearer}"
+    );
     let none = run(
         &text.replace(
             "l3 = line(start = [40 mm, 20 mm], end = [0 mm, 20 mm])\n",

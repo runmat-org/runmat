@@ -306,3 +306,65 @@ fn delete_on_a_picked_point_entity_removes_it_and_refuses_a_curve_end() {
     .unwrap();
     assert_eq!(out["ok"], false, "{out}");
 }
+
+#[test]
+fn use_edges_projects_a_component_edge_that_follows_the_component() {
+    let text = sketch(RIG, "origin:top");
+    let c = compile(&text);
+    // The pin's top rim (part z = 30 mm), a circle of 5 mm about its axis.
+    let rim = c.edge("pin", |f| f.radius.is_some_and(|r| (r - 0.005).abs() < 1e-6) && f.origin[2] > 0.02);
+    let text = tool(
+        &text,
+        "sketch.use-edges",
+        json!({ "sketch": "sketch1", "type": "project", "items": [rim] }),
+    );
+    assert!(
+        text.contains("c1 = circle(center = [60 mm, 30 mm], radius = 5 mm, from = published(occurrence = pin, name = mate_edge1))"),
+        "{text}"
+    );
+    // The pin's part publishes the edge it came from.
+    let pin = files()["/p/pin.part"].clone();
+    assert!(
+        pin.contains("publish mate_edge1 = entities(\n        kind = edge,"),
+        "{pin}"
+    );
+    // It follows the pin.
+    let moved = text.replace("[60 mm, 30 mm, 25 mm]", "[20 mm, 45 mm, 25 mm]");
+    let at = drawn_point(&compile(&moved).display, "sketch1", "c1", "center");
+    assert!((at[0] - 20.0).abs() < 1e-3 && (at[1] - 45.0).abs() < 1e-3, "{at:?}");
+    // The other ways to use edges say they aren't built yet, by name.
+    let out: Value = serde_json::from_str(&edit_json(
+        "/p/rig.assembly",
+        &text,
+        &files(),
+        &json!({ "command": "sketch.use-edges", "values": { "sketch": "sketch1", "type": "silhouette", "items": [rim] } }).to_string(),
+    ))
+    .unwrap();
+    assert_eq!(out["ok"], false, "{out}");
+    assert!(out["message"].as_str().unwrap_or_default().contains("silhouette"), "{out}");
+}
+
+#[test]
+fn offset_of_a_component_edge_keeps_its_distance_when_the_component_moves() {
+    let text = sketch(RIG, "origin:top");
+    let c = compile(&text);
+    // The block's top edge along x at its front (block at [30, 10, 40] mm, 20 x 20 x 15 mm).
+    let front = c.edge("block", |f| {
+        f.radius.is_none() && f.z[0].abs() > 0.99 && f.origin[2] > 0.01 && f.origin[1].abs() < 1e-6
+    });
+    let text = tool(
+        &text,
+        "sketch.offset",
+        json!({ "sketch": "sketch1", "entities": [front], "distance": 5 }),
+    );
+    // The edge as construction, and its copy related to it.
+    assert!(text.contains("construction, from = published(occurrence = block, name = mate_edge1)"), "{text}");
+    assert!(text.contains("parallel(l1, l2)"), "{text}");
+    assert!(text.contains("distance(l2.start, l1) = 5 mm"), "{text}");
+    let y = |text: &str| drawn_point(&compile(text).display, "sketch1", "l2", "start")[1];
+    let before = y(&text);
+    assert!((before - 10.0).abs() > 4.99, "{before}");
+    let moved = text.replace("[30 mm, 10 mm, 40 mm]", "[30 mm, 25 mm, 40 mm]");
+    let after = y(&moved);
+    assert!((after - before - 15.0).abs() < 1e-3, "{before} → {after}");
+}

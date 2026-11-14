@@ -1,6 +1,6 @@
 //! Assembly commands from the canvas: each writes the smallest text change, and the edited
 //! assembly compiles, solves and places the components where the command says.
-use super::frames::{face_frame, Frame, FrameKind};
+use super::frames::{edge_frame, face_frame, Frame, FrameKind};
 use crate::edit::edit_json;
 use crate::runtime::{compile_assembly, Files};
 use serde_json::{json, Value};
@@ -97,6 +97,26 @@ impl Compiled {
             self.uuid(path),
             body["index"],
             face["index"]
+        )
+    }
+}
+
+impl Compiled {
+    /// The pick ID of the edge on `path` whose frame `test` accepts.
+    pub(super) fn edge(&self, path: &str, test: impl Fn(&Frame) -> bool) -> String {
+        let prototype = self.occurrence(path)["prototype"].as_u64().unwrap() as usize;
+        let body = &self.display["prototypes"][prototype]["part"]["bodies"][0];
+        let edge = body["edges"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|e| edge_frame(e).is_some_and(|frame| test(&frame)))
+            .unwrap_or_else(|| panic!("no such edge on {path}"));
+        format!(
+            "occurrence:{}/edge:{}:{}",
+            self.uuid(path),
+            body["index"],
+            edge["index"]
         )
     }
 }

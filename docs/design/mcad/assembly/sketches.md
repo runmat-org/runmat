@@ -117,6 +117,19 @@ sketch outline on origin.xy {
 - The edges are read as a line when they run straight, as a circle when they close on one radius, as an arc on one radius, and otherwise as a spline through them.
 - The published name must be one connected chain of edges. An edge set that projects to a single point (an edge along the sketch's normal) is reported on the sketch.
 
+**Use edges** (`sketch.use-edges`, type Project) writes these entities for you. Open a sketch, click **Use edges > Project edges**, and pick one or more component edges in the view. Each edge is published from its part (`publish mate_edge1 = entities(kind = edge, ...)`, the same entry a mate writes) and comes into the sketch as a converted line, circle, arc or spline. Intersection curve, Silhouette edges and Offset on surface aren't built yet; picking one of them reports that by name.
+
+**Offset of a component edge:** in **Offset**, a click on a component's edge (outside the sketch's own curves) picks it. Confirm brings the edge in as construction geometry and adds the offset copy, related to it so it follows the edge:
+
+```text
+l1 = line(start = [30 mm, 10 mm], end = [50 mm, 10 mm], construction, from = published(occurrence = block, name = mate_edge1))
+l2 = line(start = [30 mm, 15 mm], end = [50 mm, 15 mm])
+constrain parallel(l1, l2)
+constrain distance(l2.start, l1) = 5 mm
+```
+
+A circular edge's copy is concentric with it and takes the offset radius as a dimension.
+
 ## Profiles for assembly features
 
 An assembly feature takes a closed region of an assembly sketch as its profile, written `profile = sketch.<name>`. The sketch is solved after placement and mates, so the profile is where the sketch is drawn in the assembly.
@@ -127,6 +140,10 @@ An assembly feature takes a closed region of an assembly sketch as its profile, 
   - A face pick adds a connector on that component, anchored to the face its part publishes. The sketch is written on that connector.
   - The sketch opens in sketch mode with the view normal to it.
 - **Draw:** the sketch ribbon has the same tools, fields and handles as a part sketch: lines, rectangles, circles, arcs, slots, polygons, splines, ellipses, points and text; offset, trim, extend, split, mirror, pattern and transform; fillet and chamfer; relations, dimensions and auto-constrain.
+  - Trim and Extend act on the curve you click, at once: Extend runs the end nearer the click to the next curve it meets. With a curve picked in the Outline instead, Extend's Confirm runs the end that meets a curve sooner.
+  - Offset's first click on a sketch curve fills its Entities field; a second click sets the distance and side, or Confirm uses the distance in the form.
+  - Transform's base point is optional: Move and Copy use the deltas, and Rotate and Scale turn about the sketch origin when no base point is picked.
+- **Use edges:** **Use edges > Project edges** brings picked component edges into the sketch (see Converted edges).
 - **Mate to a sketch:** in a mate, pick a sketch point, line, circle or arc as either side, in the view or under the sketch's row in the Outline. Outside sketch mode the sketch's curves and points still pick in the view.
 - **Delete curves:** in sketch mode, pick curves or points and press Delete. Points other curves shared with them stay where they are, and the relations and dimensions on them go.
 - **The Outline:** the **Sketches** folder lists each sketch with its plane and how it solved.

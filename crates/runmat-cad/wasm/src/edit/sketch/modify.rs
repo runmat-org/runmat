@@ -386,14 +386,14 @@ pub(super) fn set_end(g: &mut G, role: PointRole, p: PointExpr) {
     }
 }
 
-/// `sketch.extend`: the line end nearer the click runs on to the first curve it meets.
+/// `sketch.extend`: the line end nearer the click runs on to the first curve it meets. Without a
+/// click, the end that meets a curve sooner.
 pub(super) fn extend(
     values: &Map<String, Value>,
     sketch: &mut Sketch,
     sketch_id: &str,
 ) -> Result<String, EditFailure> {
     let id = picked(values, sketch_id)?;
-    let p = click(values)?;
     let entity = sketch
         .entities
         .iter()
@@ -406,27 +406,47 @@ pub(super) fn extend(
             id.0
         )));
     };
-    // From the end nearer the click, outward: a long ray as a segment.
-    let (from, toward, role) = if (p.0 - a.0).hypot(p.1 - a.1) <= (p.0 - b.0).hypot(p.1 - b.1) {
-        (a, b, PointRole::Start)
-    } else {
-        (b, a, PointRole::End)
-    };
-    let len = (from.0 - toward.0).hypot(from.1 - toward.1).max(1e-9);
-    let dir = ((from.0 - toward.0) / len, (from.1 - toward.1) / len);
-    let reach = 1.0e6;
-    let ray = Shape::Segment(
-        (from.0 + dir.0 * 1e-6, from.1 + dir.1 * 1e-6),
-        (from.0 + dir.0 * reach, from.1 + dir.1 * reach),
-    );
-    let hit = cuts(sketch, &id, ray)
-        .into_iter()
-        .min_by(|x, y| {
+    // From one end outward, as a long ray: the first curve it meets.
+    let reach_from = |from: P, toward: P| -> Option<P> {
+        let len = (from.0 - toward.0).hypot(from.1 - toward.1).max(1e-9);
+        let dir = ((from.0 - toward.0) / len, (from.1 - toward.1) / len);
+        let reach = 1.0e6;
+        let ray = Shape::Segment(
+            (from.0 + dir.0 * 1e-6, from.1 + dir.1 * 1e-6),
+            (from.0 + dir.0 * reach, from.1 + dir.1 * reach),
+        );
+        cuts(sketch, &id, ray).into_iter().min_by(|x, y| {
             (x.0 - from.0)
                 .hypot(x.1 - from.1)
                 .total_cmp(&(y.0 - from.0).hypot(y.1 - from.1))
         })
-        .ok_or_else(|| model(format!("`{}` meets nothing beyond that end", id.0)))?;
+    };
+    let dist = |p: P, q: P| (p.0 - q.0).hypot(p.1 - q.1);
+    let (role, hit) = match super::xy(values, "at") {
+        // A click: the end nearer it.
+        Some(p) => {
+            let (from, toward, role) = if dist(p, a) <= dist(p, b) {
+                (a, b, PointRole::Start)
+            } else {
+                (b, a, PointRole::End)
+            };
+            let hit = reach_from(from, toward)
+                .ok_or_else(|| model(format!("`{}` meets nothing beyond that end", id.0)))?;
+            (role, hit)
+        }
+        // Picked without a click (the panel, the Outline): the end with the nearer curve.
+        None => {
+            let ends = [
+                (PointRole::Start, a, reach_from(a, b)),
+                (PointRole::End, b, reach_from(b, a)),
+            ];
+            ends.into_iter()
+                .filter_map(|(role, from, hit)| hit.map(|h| (role, dist(from, h), h)))
+                .min_by(|x, y| x.1.total_cmp(&y.1))
+                .map(|(role, _, hit)| (role, hit))
+                .ok_or_else(|| model(format!("`{}` meets nothing beyond either end", id.0)))?
+        }
+    };
     detach(sketch, &id);
     let index = sketch
         .entities

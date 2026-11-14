@@ -200,7 +200,7 @@ pub(super) fn add(catalog: &mut Catalog) {
         tool("sketch.transform", "Transform", "move", "transform", "Move, copy, rotate or scale entities.", vec![
             radio("type", "Type", &[("move", "Move"), ("copy", "Copy"), ("rotate", "Rotate"), ("scale", "Scale")]),
             picks("entities", "Entities", &[K::SketchEntity, K::SketchPoint]),
-            pt("base", "Base point"),
+            pt("base", "Base point").optional().help("Rotate and scale turn about it; the sketch origin when left empty"),
             offset("dx", "Delta X", 0.0).shown("type", &["move", "copy"]),
             offset("dy", "Delta Y", 0.0).shown("type", &["move", "copy"]),
             angle("angle", "Angle", 0.0).shown("type", &["rotate"]),

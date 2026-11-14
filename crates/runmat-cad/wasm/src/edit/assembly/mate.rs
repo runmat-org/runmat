@@ -108,11 +108,11 @@ fn round_unit(v: V3) -> [f64; 3] {
 /// A pick resolved: the component's name, the frame on it (None for the whole component) and
 /// what its connector anchors to.
 pub(super) struct Resolved {
-    occurrence: String,
+    pub(super) occurrence: String,
     pub(super) frame: Option<Frame>,
     /// The frame in assembly coordinates, where the component sits now.
     world: Option<Frame>,
-    anchor: Anchor,
+    pub(super) anchor: Anchor,
 }
 
 /// The entity `list` (`faces`, `edges`, `vertices`) of a body, by index.

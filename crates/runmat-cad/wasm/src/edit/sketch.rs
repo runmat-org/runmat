@@ -423,10 +423,11 @@ fn draw(
                 .ok_or_else(|| model("give the offset a distance"))?;
             let mut out = Vec::new();
             for pick in picks(values, "entities") {
-                let SketchTarget::Entity { entity: id } = target(&pick, "")? else {
+                // A curve pick, bare (`l1`) or full (`sketch.s1.l1`); point picks are skipped.
+                let rest = pick.rsplit('.').next().unwrap_or(&pick).to_owned();
+                if role(&rest).is_some() {
                     continue;
-                };
-                let rest = id.0.rsplit('.').next().unwrap_or(&id.0).to_owned();
+                }
                 let Some(source) = sketch.entities.iter().find(|e| e.id.0 == rest) else {
                     return Err(model(format!("the sketch has no curve `{rest}`")));
                 };
