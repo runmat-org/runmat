@@ -135,9 +135,10 @@ fn every_corpus_feature_renames_cleanly() {
         }
     }
     let mut files = Vec::new();
-    for dir in ["tests/corpus"] {
-        parts(&std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join(dir), &mut files);
-    }
+    parts(
+        &std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/corpus"),
+        &mut files,
+    );
     let mut renamed = 0;
     for path in files {
         let text = std::fs::read_to_string(&path).unwrap();
