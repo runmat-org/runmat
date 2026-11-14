@@ -354,7 +354,9 @@ fn is_distributed(kind: GeometrySceneAnnotationKind, has_direction: bool) -> boo
 }
 
 fn direction_given(direction: Option<[f32; 3]>) -> bool {
-    direction.and_then(normalized_annotation_direction).is_some()
+    direction
+        .and_then(normalized_annotation_direction)
+        .is_some()
 }
 
 fn append_annotation_marker(

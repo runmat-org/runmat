@@ -129,6 +129,7 @@ fn study() -> AuthoredStudy {
             maximum: None,
         }],
         assessments: Vec::new(),
+        displays: Vec::new(),
         outputs: Vec::new(),
         sequence: AnalysisSequence {
             sequence_id: "response".into(),

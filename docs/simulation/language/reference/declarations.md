@@ -208,6 +208,7 @@ study bracket_static {
 | `analysis` | `analysis <name> { <family> <procedure> { … } }`, optionally `after <step>` | at least one | An analysis step. See [studies, analyses and state](../studies-analyses-and-state.md) and the [procedure reference](./procedures.md). |
 | `output` | `output <name> = <expression>` | no | A published field or reduced quantity. See [outputs, fields and observations](../outputs-fields-and-observations.md). |
 | `assessment` | `assessment <name> { value; minimum and/or maximum; evidence }` | no | A pass or fail verdict on an output. See [operations and output queries](./operations-and-output-queries.md). |
+| `display` | `display <output> { unit = <unit>; range = [<min>, <max>]; precision = <digits> }` | no | How result views show a field output: the legend's unit, a fixed colour range and the significant digits of its numbers. Each member is optional; give at least one. See [display a field](../outputs-fields-and-observations.md#display-a-field). |
 
 ## `sweep`
 

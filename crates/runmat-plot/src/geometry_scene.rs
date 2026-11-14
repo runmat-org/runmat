@@ -170,7 +170,8 @@ impl GeometryScene {
     ) -> Vec<SceneNode> {
         // A section caps each body across all its chunks: a CAD import puts each face in its own
         // chunk, and a chunk on its own is an open surface with nothing to fill.
-        let mut cap_sources: BTreeMap<Option<String>, (Material, Vec<[Vertex; 3]>)> = BTreeMap::new();
+        let mut cap_sources: BTreeMap<Option<String>, (Material, Vec<[Vertex; 3]>)> =
+            BTreeMap::new();
         let mut nodes: Vec<SceneNode> = self
             .chunks
             .iter()
@@ -632,9 +633,42 @@ pub struct GeometrySceneScalarLegend {
     /// the range.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub limit: Option<f64>,
-    /// A line under the range, such as how far the result is from that limit.
+    /// A line under the range: the result against the study's acceptance limit, such as
+    /// "Peak 17.7 MPa · limit 184 MPa · factor 10.4"
+    /// ([`crate::legend_text::assessment_line`]).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub note: Option<String>,
+    /// Where `minimum` and `maximum` come from: the field's extremes (`data`, omitted) or a fixed
+    /// range the study sets (`study`). A fixed range colours values outside it with the end
+    /// colours.
+    #[serde(default, skip_serializing_if = "ScalarRangeSource::is_data")]
+    pub range_source: ScalarRangeSource,
+    /// The field's true lowest value, in `unit`, when it lies below a fixed range.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub below: Option<f64>,
+    /// The field's true highest value, in `unit`, when it lies above a fixed range.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub above: Option<f64>,
+    /// Significant digits of the legend's numbers, when the study sets them.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub precision: Option<u8>,
+}
+
+/// Where a scalar legend's range comes from.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ScalarRangeSource {
+    /// The field's extremes.
+    #[default]
+    Data,
+    /// A fixed range set by the study's `display` statement.
+    Study,
+}
+
+impl ScalarRangeSource {
+    pub fn is_data(&self) -> bool {
+        *self == Self::Data
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

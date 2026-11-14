@@ -16,6 +16,11 @@ pub enum FeaContextualWord {
     Maximum,
     Evidence,
     EvidenceValue(AssessmentEvidenceRequirement),
+    /// `display <output> { unit; range; precision }`: how a study shows a field output.
+    Display,
+    Unit,
+    Range,
+    Precision,
 }
 
 impl FeaContextualWord {
@@ -26,6 +31,10 @@ impl FeaContextualWord {
         Self::Evidence,
         Self::EvidenceValue(AssessmentEvidenceRequirement::AuthoredSamples),
         Self::EvidenceValue(AssessmentEvidenceRequirement::CertifiedBound),
+        Self::Display,
+        Self::Unit,
+        Self::Range,
+        Self::Precision,
     ];
 
     pub const fn as_source(self) -> &'static str {
@@ -38,6 +47,10 @@ impl FeaContextualWord {
                 "authored_samples"
             }
             Self::EvidenceValue(AssessmentEvidenceRequirement::CertifiedBound) => "certified_bound",
+            Self::Display => "display",
+            Self::Unit => "unit",
+            Self::Range => "range",
+            Self::Precision => "precision",
         }
     }
 
@@ -50,8 +63,13 @@ impl FeaContextualWord {
 
     pub const fn role(self) -> FeaAuthoringWordRole {
         match self {
-            Self::Assessment => FeaAuthoringWordRole::Block,
-            Self::Minimum | Self::Maximum | Self::Evidence => FeaAuthoringWordRole::Property,
+            Self::Assessment | Self::Display => FeaAuthoringWordRole::Block,
+            Self::Minimum
+            | Self::Maximum
+            | Self::Evidence
+            | Self::Unit
+            | Self::Range
+            | Self::Precision => FeaAuthoringWordRole::Property,
             Self::EvidenceValue(_) => FeaAuthoringWordRole::EnumValue,
         }
     }

@@ -1,5 +1,6 @@
 mod accuracy;
 mod assessment;
+mod display;
 mod header;
 mod initial_conditions;
 mod load_cases;
@@ -33,6 +34,7 @@ pub fn lower_studies(
 ) -> BTreeMap<(LogicalSourcePath, FeaSymbolKey), AuthoredStudy> {
     let context = study::StudyLowering {
         bound,
+        declarations,
         models,
         geometries,
         meshes,

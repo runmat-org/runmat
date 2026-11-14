@@ -6,6 +6,7 @@ mod authored_observation;
 mod authored_output;
 pub mod authoring;
 mod compatibility;
+pub mod display;
 mod formulation;
 mod identity;
 pub mod output;
@@ -34,6 +35,9 @@ pub use authoring::{
 pub use compatibility::{
     analysis_identity_status, family_label, is_exposed_analysis_identity, procedure_label,
     AnalysisIdentity, AnalysisIdentityStatus, ANALYSIS_IDENTITIES,
+};
+pub use display::{
+    AuthoredOutputDisplay, DisplayRange, DisplayUnitSource, DISPLAY_PRECISION_DIGITS,
 };
 pub use formulation::{
     BoundaryTransferImplementation, ConstitutiveImplementation, CouplingImplementation,
