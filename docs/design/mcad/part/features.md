@@ -8,14 +8,16 @@ A part's geometry is its feature history: `feature <name> = <operation>(…)` st
 
 ## Solids from sketches
 
-| Operation | Makes | Main parameters |
+<!-- arguments:operations extrude revolve sweep loft rib emboss -->
+| Operation | Does | Arguments |
 |---|---|---|
-| `extrude` | a prism from a closed profile | `profile`; an extent: `distance`, `through_all`, `up_to_next`, `up_to`, `extent = offset_from_face(face, offset)`; `symmetric`, `reverse`, `second = blind(distance)`; `thin = { thickness }`; `mode` |
-| `revolve` | a solid of revolution | `profile`, `axis`, `angle`, `mode` |
-| `sweep` | a profile along a path | `profile`, `path`, `follow_path`, `mode` |
-| `loft` | a solid through profiles in order | `profiles`, `mode` |
-| `rib` | a rib from an open sketch | `profile`, `thickness`, `depth`, `reverse` |
-| `emboss` | raised or recessed text or shapes on a face | `profile`, `face`, `height` |
+| `extrude` | A prism from a closed sketch profile. | `profile`, `distance`, `through_all`, `up_to_next`, `up_to`, `symmetric`, `extent`, `reverse`, `second`, `from`, `draft`, `thin`, `mode` |
+| `revolve` | A solid of revolution: a profile turned about an axis. | `profile`, `axis`, `angle`, `mode` |
+| `sweep` | A profile moved along a path. | `profile`, `path`, `follow_path`, `mode` |
+| `loft` | A solid through profiles in order. | `profiles`, `guides`, `mode` |
+| `rib` | A rib from an open sketch. | `profile`, `thickness`, `depth`, `reverse` |
+| `emboss` | Raised or recessed text or shapes on a face. | `profile`, `face`, `height`, `wrap` |
+<!-- /arguments -->
 
 `mode` is `new` (the default for the first solid), `add`, `cut` or `intersect`. On the part's first body feature, `add` has no body to join, so it makes the first body as `new` does; `cut` and `intersect` there fail with nothing to act on. A part with a plate and a cut pocket:
 
@@ -70,14 +72,24 @@ A `follow_path` sweep needs a closed profile and the exact geometry engine; the 
 
 `hole` drills one hole at each key of `at`, on a planar face. Each hole's faces are keyed: `feature.mount.face.wall(a)`.
 
-| Parameter | Meaning |
-|---|---|
-| `face` | The face the holes start on. |
-| `at` | Keyed positions: `{ a = point(15 mm, 25 mm, 10 mm), b = sketch.marks.p1.at }`. |
-| `diameter`, `depth` or `through_all` | Size and extent. |
-| `form` | `counterbore(diameter, depth)`, `countersink(diameter, angle)`, `slot(length)`, `pipe_tap`. |
-| `spec` | A standard size: `{ standard = iso, size = M6 }`, `{ standard = npt, size = "1/8" }`. The size sets the diameters. |
-| `series` | The hole's other end in a stack: `{ end = { hole = tapped, modelled = true } }`. |
+<!-- arguments:table hole -->
+| Argument | Kind | Default | Meaning |
+|---|---|---|---|
+| `face` | reference | required | The planar face the holes start on. |
+| `at` | record | required | Keyed positions: `{ a = point(15 mm, 25 mm, 10 mm), … }`. |
+| `diameter` | length (mm) |  | The drilled diameter (default: from `spec`). |
+| `depth` | length (mm) |  | A blind hole's full-diameter depth. |
+| `through_all` | flag |  | Drill through every body in the way. |
+| `up_to_next` | flag |  | Drill to the next face the hole meets. |
+| `end` | `blind` \| `through_all` \| `up_to_next` \| `up_to_face` |  | How deep the hole goes, in full form. |
+| `form` | `simple` \| `counterbore` \| `countersink` \| `tapped` \| `pipe_tap` \| `slot` | `simple` | The hole's form. |
+| `spec` | record |  | A standard size and fit: `{ standard = iso, size = M6 }`; the size sets the diameters. |
+| `form.counterbore.diameter` | length (mm) |  | A slot's counterbore diameter. |
+| `form.counterbore.depth` | length (mm) |  | A slot's counterbore depth. |
+| `drill_point` | angle (deg) |  | A blind hole's drill-point angle (default: a flat bottom). |
+| `series` | record |  | A hole through several bodies: `{ bodies, end, middle_diameter }`. |
+| `series.middle_diameter` | length (mm) |  | The middle bodies' diameter (default: the start clearance). |
+<!-- /arguments -->
 
 ```part fragment
 feature cb = hole(face = feature.body.face.end, at = { c = point(40 mm, 25 mm, 10 mm) }, through_all, form = counterbore, spec = { standard = iso, size = M6 })
@@ -88,14 +100,16 @@ feature m6_thread = thread(face = feature.tap.face.wall(m6), spec = { designatio
 
 ## Edges and faces
 
-| Operation | Does | Main parameters |
+<!-- arguments:operations fillet chamfer face_fillet full_round shell draft -->
+| Operation | Does | Arguments |
 |---|---|---|
-| `fillet` | rounds edges | `edges`, `radius` |
-| `chamfer` | bevels edges or vertices | `edges`; `distance`, `distance` and `angle`, or `distances` for a vertex; `flip` |
-| `face_fillet` | blends between two face sets | `first`, `second`, `radius` |
-| `full_round` | rounds a face away between two side faces | `first`, `center`, `second` |
-| `shell` | hollows a body | `body`, `thickness`, `open_faces`, `outward` |
-| `draft` | tilts faces for molding | `faces`, `neutral`, `angle` |
+| `fillet` | Rounds edges. | `edges`, `radius`, `variable`, `profile`, `setbacks`, `propagate` |
+| `chamfer` | Bevels edges or vertices. | `edges`, `distance`, `distance2`, `angle`, `distances`, `form`, `flip` |
+| `face_fillet` | A blend tangent to two face sets. | `first`, `second`, `radius`, `profile` |
+| `full_round` | Replaces center faces by a blend tangent to two side face sets. | `first`, `center`, `second` |
+| `shell` | Hollows a body. | `body`, `thickness`, `open_faces`, `faces`, `outward` |
+| `draft` | Tilts faces for molding. | `faces`, `neutral`, `angle`, `kind`, `flip` |
+<!-- /arguments -->
 
 In the Desktop, Fillet takes the edges you pick on the model and previews the rounds. Type the radius in the box on the model or in the form, then confirm:
 
@@ -143,15 +157,18 @@ In the Desktop, select the feature to repeat, start Pattern and pick an edge for
 
 <!-- design:clip:mcad/pattern -->
 
-| Layout | Parameters |
-|---|---|
-| `linear(direction, spacing, count)` | `count` copies in all, `spacing` apart |
-| `grid(first, first_spacing, first_count, second, second_spacing, second_count)` | a two-way array |
-| `circular(axis, count, angle)` | `count` copies equally spaced over `angle` |
-| `sketch(sketch)` | one copy at each point of a sketch |
-| `curve(curve, count, spacing)` | copies along an edge or curve |
-| `fill(boundary, spacing, margin, seed)` | copies filling a sketch region |
-| `table(rows)` | one copy per row of offsets `{ key, dx, dy, dz }` |
+<!-- arguments:choices pattern layout -->
+| `layout` | Arguments | Gives |
+|---|---|---|
+| `linear` | `direction`, `spacing`, `count` | `count` copies in all, `spacing` apart along `direction`. |
+| `grid` | `first`, `first_spacing`, `first_count`, `second`, `second_spacing`, `second_count` | A two-way array. |
+| `circular` | `axis`, `count`, `angle`, `equal_spacing` | `count` copies about `axis`, equally spaced over `angle`. |
+| `table` | `rows` | One copy per row of offsets. |
+| `curve` | `curve`, `count`, `spacing`, `orientation` | Copies along an edge or curve from its start. |
+| `sketch` | `sketch`, `points`, `reference` | One copy at each point of a sketch. |
+| `fill` | `boundary`, `spacing`, `margin`, `direction`, `seed`, `lattice` | Copies filling a sketch region on a lattice. |
+| `variable` | `instances` | Copies each with their own offset and input values. |
+<!-- /arguments -->
 
 `skip = [{ instance = linear, step = 2 }]` leaves copies out.
 
@@ -165,13 +182,21 @@ feature mir = mirror(features = [pk2], plane = plane.mp)
 
 ## Bodies
 
-| Operation | Does |
-|---|---|
-| `boolean.union(target, tools)`, `boolean.subtract(…)`, `boolean.intersect(…)` | combines bodies; `keep_tools` keeps the tool bodies |
-| `split(body, tool)` | splits a body with a plane or surface; the pieces are `body(side = positive)` and `body(side = negative)` |
-| `body_op.delete(bodies)`, `body_op.translate(bodies, dx, dy, dz)` | removes or moves bodies |
-| `import(source, digest)` | a body from a STEP file, held by the file's digest; its named faces read as `feature.step.face("Top")` |
-| `library(def, args, mode)` | an instance of a reusable feature definition (`feature_def`) |
+<!-- arguments:operations boolean.union boolean.subtract boolean.intersect split body_op.delete body_op.translate body_op.rotate body_op.copy body_op.indent import library -->
+| Operation | Does | Arguments |
+|---|---|---|
+| `boolean.union` | Joins tool bodies to a target body. | `target`, `tools`, `keep_tools` |
+| `boolean.subtract` | Cuts tool bodies from a target body. | `target`, `tools`, `keep_tools` |
+| `boolean.intersect` | Keeps what a target body shares with the tool bodies. | `target`, `tools`, `keep_tools` |
+| `split` | Splits a body with a plane or surface into `body(side = positive)` and `body(side = negative)`. | `body`, `tool` |
+| `body_op.delete` | Removes bodies. | `bodies` |
+| `body_op.translate` | Moves bodies by an offset. | `bodies`, `dx`, `dy`, `dz` |
+| `body_op.rotate` | Turns bodies about an axis. | `bodies`, `axis`, `angle` |
+| `body_op.copy` | Copies bodies, the originals kept: copy `k` moves `k` times by the offset, then turns `k` times by `angle` about `axis`. | `bodies`, `dx`, `dy`, `dz`, `axis`, `angle`, `count` |
+| `body_op.indent` | Presses a tool body into a target; the tool, grown by `clearance`, is cut from the target and kept. | `target`, `tool`, `clearance` |
+| `import` | A body from a STEP file, held by the file's digest; its named faces read as `feature.<name>.face("Top")`. | `source`, `digest` |
+| `library` | An instance of a reusable feature definition (`feature_def`). | `def`, `args`, `bindings`, `mode` |
+<!-- /arguments -->
 
 ```part fragment
 feature join = boolean.union(target = feature.body.body, tools = [feature.ear.body])
@@ -183,13 +208,36 @@ feature boss1 = library(def = "feature_def.boss", args = { h = 8 mm }, mode = ad
 
 ## Datums and curves
 
-| Operation | Makes |
-|---|---|
-| `plane.offset(base, distance)`, `plane.angle(base, axis, angle)`, `plane.three_point(a, b, c)`, `plane.mid(a, b)`, `plane.normal_to_curve`, `plane.tangent_to_face(face, at)` | a datum plane, read as `plane.<name>` |
-| `axis.through(a, b)`, `axis.of_face`, `axis.of_edge`, `axis.two_planes`, `axis.normal` | a datum axis, read as `axis.<name>` |
-| `point.at`, `point.offset`, `point.center_of`, `point.on_curve`, `point.intersection` | a datum point |
-| `curve.helix(axis, start, pitch, turns)`, `curve.spiral`, `curve.projected`, `curve.composite`, `curve.split_line`, `curve.intersection`, `curve.through_points`, `curve.equation` | a 3D curve |
-| `mate_connector(placement, offset)` | a frame an assembly mates to |
+<!-- arguments:operations plane.offset plane.angle plane.three_point plane.mid plane.normal_to_curve plane.tangent_to_face axis.through axis.of_face axis.of_edge axis.two_planes axis.normal point.at point.coords point.offset point.center_of point.on_curve point.intersection curve.helix curve.spiral curve.projected curve.composite curve.split_line curve.intersection curve.through_points curve.equation mate_connector -->
+| Operation | Does | Arguments |
+|---|---|---|
+| `plane.offset` | A datum plane parallel to a base plane, `distance` along its normal; read as `plane.<name>`. | `base`, `distance` |
+| `plane.angle` | A datum plane turned about an axis lying in a base plane. | `base`, `axis`, `angle` |
+| `plane.three_point` | A datum plane through three points. | `a`, `b`, `c` |
+| `plane.mid` | A datum plane midway between two planes. | `a`, `b` |
+| `plane.normal_to_curve` | A datum plane normal to a curve at a point on it. | `curve`, `parameter` |
+| `plane.tangent_to_face` | A datum plane tangent to a face at a point. | `face`, `at` |
+| `axis.through` | A datum axis through two points; read as `axis.<name>`. | `a`, `b` |
+| `axis.of_face` | The axis of a cylindrical or conical face. | `face` |
+| `axis.of_edge` | The axis along a straight edge, or a circular edge's axis. | `edge` |
+| `axis.two_planes` | The axis where two planes meet. | `a`, `b` |
+| `axis.normal` | The axis normal to a plane through a point. | `plane`, `through` |
+| `point.at` | A datum point at another point. | `at` |
+| `point.coords` | A datum point at coordinates. | `x`, `y`, `z` |
+| `point.offset` | A datum point offset from another. | `base`, `dx`, `dy`, `dz` |
+| `point.center_of` | A datum point at the center of a circular edge or face. | `of` |
+| `point.on_curve` | A datum point at a fraction along a curve. | `curve`, `parameter` |
+| `point.intersection` | A datum point where an axis meets a plane. | `axis`, `plane` |
+| `curve.helix` | A helix about an axis. | `axis`, `start`, `pitch`, `turns` |
+| `curve.spiral` | A flat spiral. |  |
+| `curve.projected` | A sketch curve projected onto faces. |  |
+| `curve.composite` | One curve joined from edges. |  |
+| `curve.split_line` | A curve that splits faces. |  |
+| `curve.intersection` | The curve where a face meets a plane. |  |
+| `curve.through_points` | A curve through points in order. |  |
+| `curve.equation` | A curve from parametric equations. |  |
+| `mate_connector` | A frame an assembly mates to. | `placement`, `offset`, `rotation`, `flip` |
+<!-- /arguments -->
 
 ```part fragment
 feature mid = plane.offset(base = origin.yz, distance = 40 mm)

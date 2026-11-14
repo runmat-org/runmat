@@ -351,7 +351,10 @@ pub fn compile_part_in(
     configuration: Option<&str>,
 ) -> Result<CompiledPart, Vec<Diagnostic>> {
     let part = regenerate_part_in(path, text, configuration, &TessellationOptions::default())?;
-    let projection = json!({ "document": &part.document, "index": &part.index });
+    // What each feature reference resolves to on this kernel, for the Source view's reference
+    // hovers (the editor's language server forwards them; `setDesignEntities`).
+    let facts = runmat_cad::index::reference_facts(&part.document, &part.result);
+    let projection = json!({ "document": &part.document, "index": &part.index, "facts": facts });
     Ok(CompiledPart {
         diagnostics: regen_diagnostics(path, &part),
         document: part.document,

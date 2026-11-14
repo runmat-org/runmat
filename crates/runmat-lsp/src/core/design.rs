@@ -28,14 +28,19 @@ use serde_json::Value;
 use super::fea::highlight::{self, class, TokenClass, FUNCTION, KEYWORD, NAMESPACE, VARIABLE};
 use super::position::{offset_to_position, position_to_offset};
 
+mod calls;
 mod circuit_values;
 mod compile;
+mod help;
 mod modules;
 mod pending;
 pub mod symbols;
+mod words;
 use compile::compile;
 #[cfg(test)]
 mod tests;
+#[cfg(test)]
+mod help_tests;
 
 use symbols::SymbolTable;
 
@@ -498,7 +503,25 @@ impl DesignDocumentAnalysis {
     }
 
     pub fn hover(&self, position: &Position) -> Option<Hover> {
-        let (symbol, span) = self.symbol_at(position)?;
+        let offset = position_to_offset(self.source(), position);
+        let facts = self.reference_facts(offset);
+        let with_facts = |mut text: String| {
+            if let Some(facts) = &facts {
+                text.push_str("\n\n");
+                text.push_str(facts);
+            }
+            text
+        };
+        let Some((symbol, span)) = self.symbol_at(position) else {
+            let (text, (start, end)) = self.word_hover(offset)?;
+            return Some(Hover {
+                contents: HoverContents::Markup(MarkupContent {
+                    kind: MarkupKind::Markdown,
+                    value: with_facts(text),
+                }),
+                range: Some(self.range(Span { start, end })),
+            });
+        };
         let s = &self.symbols.symbols[symbol];
         let statement = self.source().get(s.span.start..s.span.end).unwrap_or("");
         let head = statement
@@ -527,7 +550,7 @@ impl DesignDocumentAnalysis {
         Some(Hover {
             contents: HoverContents::Markup(MarkupContent {
                 kind: MarkupKind::Markdown,
-                value: text,
+                value: with_facts(text),
             }),
             range: Some(self.range(span)),
         })
@@ -815,6 +838,9 @@ impl DesignDocumentAnalysis {
         {
             return items;
         }
+        if let Some(items) = self.call_completions(offset, before) {
+            return items;
+        }
         let scope = self.symbols.scope_at(offset);
         if let Some(path) = dotted_prefix(before) {
             return self.member_completions(&path, scope);
@@ -1013,7 +1039,8 @@ impl DesignDocumentAnalysis {
             kind: Some(kind),
             ..CompletionItem::default()
         };
-        let pool = || runmat_circuit::fixture::standard_pool();
+        // The compile's pool: the standard library, declared parts and `use` libraries.
+        let pool = || self.pool().unwrap_or_else(runmat_circuit::fixture::standard_pool);
         match (self.dialect, field) {
             (Dialect::Circuit, "part") => {
                 let pool = pool();
@@ -1103,14 +1130,16 @@ fn is_identifier(text: &str) -> bool {
         && chars.all(|c| c.is_ascii_alphanumeric() || c == '_')
 }
 
+/// The Monaco language id a hover's code fence names (`design-language.ts`), so it colors.
 fn fence(dialect: Dialect) -> &'static str {
     match dialect {
-        Dialect::Part => "part",
-        Dialect::Assembly => "assembly",
-        Dialect::Drawing => "drawing",
-        Dialect::Circuit => "circuit",
-        Dialect::CircuitLayout => "circuit-layout",
-        Dialect::Fea => "fea",
+        Dialect::Part => "runmat-part",
+        Dialect::Assembly => "runmat-assembly",
+        Dialect::Drawing => "runmat-drawing",
+        Dialect::Circuit => "runmat-circuit",
+        Dialect::CircuitLayout => "runmat-circuit-layout",
+        // `.fea` files open in the `.m` language (`file-language.ts`).
+        Dialect::Fea => "runmat",
     }
 }
 

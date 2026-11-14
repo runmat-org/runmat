@@ -171,7 +171,7 @@ impl<'a, 'b> Run<'a, 'b> {
                 count,
             } => {
                 let (_, d) = self.axis(i, id, "direction", direction)?;
-                let s = self.value(id, "spacing", spacing, Dimension::LENGTH)?;
+                let s = self.arg(id, "pattern", "spacing", spacing)?;
                 let n = self.count(id, "count", count)?;
                 for k in 1..n {
                     instances.push(Instance {
@@ -189,10 +189,10 @@ impl<'a, 'b> Run<'a, 'b> {
                 second_count,
             } => {
                 let (_, d1) = self.axis(i, id, "first", first)?;
-                let s1 = self.value(id, "first_spacing", first_spacing, Dimension::LENGTH)?;
+                let s1 = self.arg(id, "pattern", "first_spacing", first_spacing)?;
                 let n1 = self.count(id, "first_count", first_count)?;
                 let (_, d2) = self.axis(i, id, "second", second)?;
-                let s2 = self.value(id, "second_spacing", second_spacing, Dimension::LENGTH)?;
+                let s2 = self.arg(id, "pattern", "second_spacing", second_spacing)?;
                 let n2 = self.count(id, "second_count", second_count)?;
                 for a in 0..n1 {
                     for b in 0..n2 {
@@ -218,7 +218,7 @@ impl<'a, 'b> Run<'a, 'b> {
             } => {
                 let (pt, dir) = self.axis(i, id, "axis", axis)?;
                 let n = self.count(id, "count", count)?;
-                let total = self.value(id, "angle", angle, Dimension::ANGLE)?;
+                let total = self.arg(id, "pattern", "angle", angle)?;
                 let step = if *equal_spacing {
                     total / n as f64
                 } else {
@@ -236,9 +236,9 @@ impl<'a, 'b> Run<'a, 'b> {
             PatternLayout::Table { rows } => {
                 for r in rows {
                     let t = [
-                        self.value(id, "rows.dx", &r.dx, Dimension::LENGTH)?,
-                        self.value(id, "rows.dy", &r.dy, Dimension::LENGTH)?,
-                        self.value(id, "rows.dz", &r.dz, Dimension::LENGTH)?,
+                        self.arg(id, "pattern", "rows.dx", &r.dx)?,
+                        self.arg(id, "pattern", "rows.dy", &r.dy)?,
+                        self.arg(id, "pattern", "rows.dz", &r.dz)?,
                     ];
                     instances.push(Instance {
                         key: InstanceKey::Row { key: r.key.clone() },
@@ -257,7 +257,7 @@ impl<'a, 'b> Run<'a, 'b> {
                 let n = self.count(id, "count", count)?;
                 let closed = pts.len() > 2 && length(sub(pts[0], pts[pts.len() - 1])) < 1e-9;
                 let step = match spacing {
-                    Some(s) => self.value(id, "spacing", s, Dimension::LENGTH)?,
+                    Some(s) => self.arg(id, "pattern", "spacing", s)?,
                     None if closed => total / n as f64,
                     None => total / (n.max(2) - 1) as f64,
                 };
@@ -357,7 +357,7 @@ impl<'a, 'b> Run<'a, 'b> {
             } => {
                 let prof = self.profile(i, id, "boundary", boundary)?;
                 let frame = prof.frame;
-                let s = self.value(id, "spacing", spacing, Dimension::LENGTH)?;
+                let s = self.arg(id, "pattern", "spacing", spacing)?;
                 if s <= 0.0 {
                     return Err(self.error(
                         id,
@@ -368,7 +368,7 @@ impl<'a, 'b> Run<'a, 'b> {
                     ));
                 }
                 let m = match margin {
-                    Some(x) => self.value(id, "margin", x, Dimension::LENGTH)?,
+                    Some(x) => self.arg(id, "pattern", "margin", x)?,
                     None => 0.0,
                 };
                 let polys: Vec<Vec<[f64; 2]>> = prof
@@ -512,9 +512,9 @@ impl<'a, 'b> Run<'a, 'b> {
                 }
                 for x in vs {
                     let t = [
-                        self.value(id, "instances.dx", &x.dx, Dimension::LENGTH)?,
-                        self.value(id, "instances.dy", &x.dy, Dimension::LENGTH)?,
-                        self.value(id, "instances.dz", &x.dz, Dimension::LENGTH)?,
+                        self.arg(id, "pattern", "instances.dx", &x.dx)?,
+                        self.arg(id, "pattern", "instances.dy", &x.dy)?,
+                        self.arg(id, "pattern", "instances.dz", &x.dz)?,
                     ];
                     instances.push(Instance {
                         key: InstanceKey::Row { key: x.key.clone() },
