@@ -1872,11 +1872,15 @@ impl RunMatWasm {
             runtime_import_geometry_scene(scene)
                 .map_err(|error| JsValue::from_str(&error.to_string()))?
         };
-        serde_wasm_bindgen::to_value(&serde_json::json!({
-            "handle": handle,
-            "deformationScale": deformation_scale,
-            "exact": exact,
-        }))
+        // A plain object, not an ES Map: the Desktop reads `result.handle`.
+        serde::Serialize::serialize(
+            &serde_json::json!({
+                "handle": handle,
+                "deformationScale": deformation_scale,
+                "exact": exact,
+            }),
+            &serde_wasm_bindgen::Serializer::json_compatible(),
+        )
         .map_err(|error| JsValue::from_str(&error.to_string()))
     }
 
