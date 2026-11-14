@@ -102,7 +102,7 @@ pub(super) fn lower(
         _ => None,
     };
     let outputs =
-        super::output::lower_outputs(context.bound, declaration, cross_section, diagnostics);
+        super::output::lower_outputs(context.bound, &sequence.steps, declaration, cross_section, diagnostics);
     reject_formulation_setting(declaration, diagnostics);
     let assessments = super::assessment::lower_assessments(context.bound, declaration, diagnostics);
     match runmat_analysis_core::attach_authored_outputs(&outputs, &mut sequence) {

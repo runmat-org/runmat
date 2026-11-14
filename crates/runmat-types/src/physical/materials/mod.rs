@@ -50,9 +50,10 @@ pub enum MaterialCategory {
     Fluid,
 }
 
-/// One library material. Thermal properties are given at [`Material::property_temperature`];
-/// [`Material::modulus_temperature_coefficient`] is the relative change of Young's modulus per
-/// kelvin from there, `E(T) = E (1 + c (T - T_ref))`, which a thermal preload study reads.
+/// One library material, one exact grade. Thermal properties are given at
+/// [`Material::property_temperature`]; [`Material::modulus_temperature_coefficient`] is the
+/// relative change of Young's modulus per kelvin from there, `E(T) = E (1 + c (T - T_ref))`,
+/// which a thermal preload study reads.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Material {
     /// Stable id, also the `.fea` material declaration name (`material steel_s275 { ... }`).
@@ -70,7 +71,9 @@ pub struct Material {
     /// The temperature the properties are given at: the `.fea` thermal block's
     /// `reference_temperature`.
     pub property_temperature: Cited<kind::Temperature>,
-    pub modulus_temperature_coefficient: Cited<kind::InverseTemperature>,
+    /// Only from a primary source for this exact grade (ASME BPVC Section II Part D's TM tables,
+    /// or MMPDS); `None` until one is read and cited. A study then asks the person for it.
+    pub modulus_temperature_coefficient: Option<Cited<kind::InverseTemperature>>,
     /// Minimum or typical yield strength, when the source gives one for this condition.
     pub yield_strength: Option<Cited<kind::YieldStress>>,
 }
@@ -96,18 +99,25 @@ impl Material {
     /// The properties as a `.fea` material block names them, each with its value and unit:
     /// `("youngs_modulus", "210 GPa")`. The thermal block's `reference_temperature` is
     /// [`Material::property_temperature`]. `yield_strength` is left out: a study reads it from an
-    /// acceptance criterion, not from the material block.
+    /// acceptance criterion, not from the material block. `modulus_temperature_coefficient` is
+    /// written only when the library holds a cited one.
     pub fn fea_properties(&self) -> Vec<(&'static str, String)> {
-        vec![
+        let coefficient = self.modulus_temperature_coefficient
+            .map(|coefficient| ("modulus_temperature_coefficient", format!("{} K^-1", number(coefficient.si()))));
+        [
             ("mass_density", format!("{} kg/m^3", number(self.mass_density.si()))),
             ("youngs_modulus", format!("{} GPa", number(self.youngs_modulus.si() / GPA))),
             ("poisson_ratio", number(self.poisson_ratio.si())),
             ("reference_temperature", format!("{} K", number(self.property_temperature.si()))),
-            ("modulus_temperature_coefficient", format!("{} K^-1", number(self.modulus_temperature_coefficient.si()))),
+        ]
+        .into_iter()
+        .chain(coefficient)
+        .chain([
             ("expansion_coefficient", format!("{} K^-1", number(self.expansion_coefficient.si()))),
             ("conductivity", format!("{} W/m/K", number(self.conductivity.si()))),
             ("specific_heat", format!("{} J/kg/K", number(self.specific_heat.si()))),
-        ]
+        ])
+        .collect()
     }
 
     /// Each property's citation, by `.fea` property name (and `yield_strength`), for the agent
@@ -118,11 +128,13 @@ impl Material {
             ("youngs_modulus", self.youngs_modulus.citation),
             ("poisson_ratio", self.poisson_ratio.citation),
             ("reference_temperature", self.property_temperature.citation),
-            ("modulus_temperature_coefficient", self.modulus_temperature_coefficient.citation),
             ("expansion_coefficient", self.expansion_coefficient.citation),
             ("conductivity", self.conductivity.citation),
             ("specific_heat", self.specific_heat.citation),
         ];
+        if let Some(coefficient) = &self.modulus_temperature_coefficient {
+            cited.push(("modulus_temperature_coefficient", coefficient.citation));
+        }
         if let Some(yield_strength) = &self.yield_strength {
             cited.push(("yield_strength", yield_strength.citation));
         }

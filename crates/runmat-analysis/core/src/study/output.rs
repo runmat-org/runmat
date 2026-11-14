@@ -72,7 +72,7 @@ pub struct ObservationSpec {
 }
 
 mod quantity;
-pub use quantity::{LineParameterScope, ObservationQuantity};
+pub use quantity::{LineParameterScope, ObservationQuantity, SourceQuantity, SOURCE_QUANTITIES};
 
 impl ObservationSpec {
     /// Physical meaning of the projected result, distinct from its recovered source quantity.

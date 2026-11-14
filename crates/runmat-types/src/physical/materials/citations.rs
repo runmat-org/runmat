@@ -31,15 +31,12 @@ pub const ASM_HANDBOOK_VOL_1: Citation = cite("asm-vol1", "ASM Handbook Vol. 1, 
 /// Minimum yield strength of annealed 304 plate, sheet and strip.
 pub const ASTM_A240: Citation = cite("astm-a240", "ASTM A240/A240M, Table 2: minimum yield strength of type 304");
 
-/// Modulus of elasticity against temperature in ASME B31.1 (1995 edition), as tabulated by
-/// The Engineering ToolBox ("Young's Modulus of Elasticity for Metals and Alloys"). The library's
-/// modulus temperature coefficients are the secant of that table from 70 F (21 C) to 400 F
-/// (204 C): `(E_400F / E_70F - 1) / 183.3 K`.
-pub const ASME_B31_1_MODULUS_CARBON_STEEL: Citation = cite("asme-b31.1-e-carbon-steel", "ASME B31.1-1995 modulus of elasticity table, carbon steel C <= 0.3 %: 29.5 and 27.7 x 10^6 psi at 70 F and 400 F (secant 70-400 F)");
-pub const ASME_B31_1_MODULUS_AUSTENITIC: Citation = cite("asme-b31.1-e-austenitic", "ASME B31.1-1995 modulus of elasticity table, austenitic steels (TP304 and others): 28.3 and 26.5 x 10^6 psi at 70 F and 400 F (secant 70-400 F)");
-pub const ASME_B31_1_MODULUS_ALUMINUM: Citation = cite("asme-b31.1-e-aluminum", "ASME B31.1-1995 modulus of elasticity table, aluminum grades (6063 and others; 6061 is not listed): 10.0 and 8.7 x 10^6 psi at 70 F and 400 F (secant 70-400 F)");
-pub const ASME_B31_1_MODULUS_TITANIUM: Citation = cite("asme-b31.1-e-titanium", "ASME B31.1-1995 modulus of elasticity table, unalloyed titanium grades 1, 2, 3 and 7 (Ti-6Al-4V is not listed): 14.0 and 11.9 x 10^6 psi at 70 F and 400 F (secant 70-400 F)");
-pub const ASME_B31_1_MODULUS_COPPER: Citation = cite("asme-b31.1-e-copper", "ASME B31.1-1995 modulus of elasticity table, copper C11000: 16.0 and 15.0 x 10^6 psi at 70 F and 400 F (secant 70-400 F)");
+/// The density of type 304 (UNS S30400) FEA set (2026-11-14, ASM handbook or a producer
+/// datasheet). No primary source stating 8000 kg/m3 has been read yet; this entry marks the gap.
+pub const PENDING_STAINLESS_304_DENSITY: Citation = cite("pending-s30400-density", "Pending: 8000 kg/m3 for UNS S30400 as FEA set it; the primary source (ASM handbook or a producer datasheet) has not been read yet");
+/// The density of copper C11000 FEA set (2026-11-14: 8.89 g/cm3 at 20 C, as the Copper
+/// Development Association states it). The CDA page could not be read yet; this entry marks the gap.
+pub const PENDING_COPPER_C11000_DENSITY: Citation = cite("pending-c11000-density", "Pending: 8890 kg/m3 (8.89 g/cm3 at 20 C) for C11000 as FEA set it from the Copper Development Association; the CDA source has not been read yet");
 
 /// Every citation the library uses, for the docs and the uniqueness check.
 pub const ALL: &[&Citation] = &[
@@ -51,15 +48,6 @@ pub const ALL: &[&Citation] = &[
     &ASM_HANDBOOK_VOL_2,
     &ASM_HANDBOOK_VOL_1,
     &ASTM_A240,
-    &ASME_B31_1_MODULUS_CARBON_STEEL,
-    &ASME_B31_1_MODULUS_AUSTENITIC,
-    &ASME_B31_1_MODULUS_ALUMINUM,
-    &ASME_B31_1_MODULUS_TITANIUM,
-    &ASME_B31_1_MODULUS_COPPER,
+    &PENDING_STAINLESS_304_DENSITY,
+    &PENDING_COPPER_C11000_DENSITY,
 ];
-
-/// The secant coefficient `(e_hot / e_cold - 1) / (t_hot - t_cold)` per kelvin, from two table
-/// values in any one unit and their temperatures in Fahrenheit.
-pub const fn secant_coefficient(e_cold: f64, e_hot: f64, t_cold_f: f64, t_hot_f: f64) -> f64 {
-    (e_hot / e_cold - 1.0) / ((t_hot_f - t_cold_f) * 5.0 / 9.0)
-}

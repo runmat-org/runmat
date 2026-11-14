@@ -45,9 +45,10 @@ pub fn validate_material(material: &Material) -> Result<(), MaterialDefect> {
     }
     // Stiffness falls as metals warm; a coefficient above zero or a loss of more than 0.5 % per
     // kelvin is a units slip.
-    let coefficient = material.modulus_temperature_coefficient.si();
-    if !(coefficient.is_finite() && (-5.0e-3..=0.0).contains(&coefficient)) {
-        return Err(MaterialDefect::Range("modulus_temperature_coefficient"));
+    if let Some(coefficient) = &material.modulus_temperature_coefficient {
+        if !(coefficient.si().is_finite() && (-5.0e-3..=0.0).contains(&coefficient.si())) {
+            return Err(MaterialDefect::Range("modulus_temperature_coefficient"));
+        }
     }
     if let Some(yield_strength) = &material.yield_strength {
         if !(yield_strength.si().is_finite() && yield_strength.si() > 0.0) {
