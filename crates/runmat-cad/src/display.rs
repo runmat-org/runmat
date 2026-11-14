@@ -703,12 +703,14 @@ pub fn assembly_display_configured(
     parts: &BTreeMap<String, PartDisplay>,
     configured: &BTreeMap<(String, String), PartDisplay>,
 ) -> AssemblyDisplay {
-    let mut out = AssemblyDisplay::default();
-    out.sketches = resolved
-        .sketches
-        .iter()
-        .map(|s| one_sketch_display(&s.id.0, &s.sketch, &s.solved, &s.frame))
-        .collect();
+    let mut out = AssemblyDisplay {
+        sketches: resolved
+            .sketches
+            .iter()
+            .map(|s| one_sketch_display(&s.id.0, &s.sketch, &s.solved, &s.frame))
+            .collect(),
+        ..Default::default()
+    };
     let mut prototype_of: BTreeMap<(String, String), u32> = BTreeMap::new();
     for (id, node) in resolved.nodes.iter().enumerate() {
         // Parts and circuit boards are leaves that draw; a board draws its 3D model.
