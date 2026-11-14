@@ -132,3 +132,22 @@ fn a_selected_sketch_suppresses_and_deletes() {
     );
     assert!(!deleted.contains("sketch sketch1"), "{deleted}");
 }
+
+
+#[test]
+fn an_assembly_sketch_reads_and_prints_in_the_part_sketch_form() {
+    let text = sketch(RIG, "origin.zx");
+    let text = tool(
+        &text,
+        "sketch.circle",
+        json!({ "sketch": "sketch1", "type": "center", "center": { "x": 10, "y": 5 }, "radius": 4 }),
+    );
+    let scope = crate::runtime::module_scope("/p/rig.assembly", &text, &files());
+    let parsed = runmat_cad::syntax::parse_assembly_in("/p/rig.assembly", &text, &scope);
+    let document = parsed.document.expect("parses");
+    assert_eq!(document.features.len(), 1);
+    let printed = runmat_cad::syntax::print_assembly(&document, &parsed.uses).unwrap();
+    assert!(printed.contains("sketch sketch1 on origin.zx {"), "{printed}");
+    let again = runmat_cad::syntax::parse_assembly_in("/p/rig.assembly", &printed, &scope);
+    assert_eq!(again.document.unwrap(), document);
+}
