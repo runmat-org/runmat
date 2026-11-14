@@ -198,14 +198,25 @@ fn validate_quantity_family(
 }
 
 pub fn quantity_supported(step: &ProcedureStep, quantity: ObservationQuantity) -> bool {
+    family_supports_quantity(step.family, step.procedure, quantity)
+}
+
+/// Whether a step of `family` running `procedure` produces `quantity`: the same rule
+/// [`quantity_supported`] applies to a lowered step, for a host that knows only the step's
+/// physics and procedure (a study being set up, before its `.fea` exists).
+pub fn family_supports_quantity(
+    family: PhysicsFamily,
+    procedure: AnalysisProcedure,
+    quantity: ObservationQuantity,
+) -> bool {
     // A `line_parameters` step publishes exactly the line parameters of its cross-section.
     let line = quantity.line_parameter_scope().is_some();
-    if step.procedure == AnalysisProcedure::LineParameters || line {
-        return step.procedure == AnalysisProcedure::LineParameters
-            && step.family == PhysicsFamily::Electromagnetic
+    if procedure == AnalysisProcedure::LineParameters || line {
+        return procedure == AnalysisProcedure::LineParameters
+            && family == PhysicsFamily::Electromagnetic
             && line;
     }
-    (match step.family {
+    (match family {
         PhysicsFamily::Structural => is_structural(quantity),
         PhysicsFamily::Thermal => is_thermal(quantity),
         PhysicsFamily::Electromagnetic => is_electromagnetic(quantity),

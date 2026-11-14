@@ -74,6 +74,7 @@ pub use study::{
 pub use validate::physics_family_can_consume_state;
 pub use validate_authored::validate_coordinate_frame;
 pub use validate_outputs::spec::quantity_supported as procedure_produces_observation_quantity;
+pub use validate_outputs::spec::family_supports_quantity as family_produces_observation_quantity;
 pub use validate_outputs::{
     observation_sampling_matches_domain, validate_authored_observation_request,
     validate_observation_sampling,

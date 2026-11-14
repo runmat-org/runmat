@@ -15,9 +15,13 @@ use super::lower;
 
 mod fields;
 mod policy;
+mod published;
 mod series;
 
 pub(crate) use fields::{field_location, field_reference_type};
+pub use published::{
+    step_field_admission, step_published_fields, StepFieldRefusal, CONTINUUM_FIELD_REFERENCES,
+};
 use series::{checked_series_weighting, interpolation_positions, series_domain, series_sampling};
 
 pub(super) fn lower_outputs(

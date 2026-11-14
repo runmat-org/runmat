@@ -20,6 +20,9 @@ use runmat_meshing_core::MeshDefinition;
 use std::collections::BTreeMap;
 
 pub(crate) use output::{field_location, field_reference_type};
+pub use output::{
+    step_field_admission, step_published_fields, StepFieldRefusal, CONTINUUM_FIELD_REFERENCES,
+};
 pub(crate) use study::symbol_key as resolve_symbol_key;
 pub(crate) use values::canonical_scalar;
 
