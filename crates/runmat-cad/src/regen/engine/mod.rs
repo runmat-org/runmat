@@ -11,6 +11,7 @@ mod compile;
 mod apply;
 mod blend_edges;
 mod sketch_status;
+mod pieces;
 mod profiles;
 pub(crate) use profiles::profile_loops;
 use profiles::*;
@@ -589,6 +590,7 @@ fn regenerate_unexpanded(
         failed: count(FeatureWork::Failed),
         duration_nanos: whole.elapsed(meter),
     });
+    pieces::report_split_bodies(&run.st, &mut run.diags);
     let mut result = RegenResult {
         configuration: req.configuration.clone(),
         values: values.clone(),

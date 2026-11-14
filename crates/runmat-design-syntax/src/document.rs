@@ -283,15 +283,13 @@ impl DocumentSyntax {
     }
 
     /// A diagnostic for a model that failed to deserialise at `path`.
+    /// A model error at the text that wrote `path`. The message is what people read; the
+    /// internal JSON path only places the span (it would read as "features[1].kind: ...").
     pub fn model_error(&self, path: &str, message: &str) -> FeaSyntaxDiagnostic {
         FeaSyntaxDiagnostic {
             kind: FeaSyntaxDiagnosticKind::InvalidExpression,
             span: self.span_of_json_path(path),
-            message: if path.is_empty() {
-                message.to_string()
-            } else {
-                format!("{path}: {message}")
-            },
+            message: message.to_string(),
         }
     }
 }

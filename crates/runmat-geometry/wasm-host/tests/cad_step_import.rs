@@ -250,3 +250,87 @@ fn the_export_call_writes_a_part_and_an_assembly_that_import_back() {
         .as_str()
         .is_some_and(|m| !m.is_empty()));
 }
+
+const TILTED: &str = r#"runmat 0.7
+std 1
+
+part tilted {
+    input depth : length = 10 mm
+    input tilt : angle = 0 deg
+    sketch s on origin.xy {
+        l1 = line(start = [0 mm, 0 mm], end = [80 mm, 0 mm])
+        l2 = line(start = l1.end, end = [80 mm, 50 mm])
+        l3 = line(start = l2.end, end = [0 mm, 50 mm])
+        l4 = line(start = l3.end, end = l1.start)
+    }
+    feature body = extrude(profile = sketch.s, distance = input.depth)
+}
+"#;
+
+const TILTED_STUDY: &str = r#"runmat 0.7
+std 1
+
+assembly study {
+    use part tilted as arm {
+        configuration = { select = inputs, values = { depth = 12 mm, tilt = -20 deg } }
+    }
+}
+"#;
+
+/// A part placed in a configuration of its inputs is its own product, named with its input
+/// values (`tilted (depth 12 mm, tilt -20°)`). The degree sign must reach the STEP file as
+/// valid text and read back: an arm study placed this way failed the FEA import with "data for
+/// rust::String is not utf-8".
+#[test]
+fn a_configured_part_with_an_angle_input_exports_and_imports_back() {
+    runmat_geometry_wasm_host::cad::install_occt();
+    let files: std::collections::BTreeMap<String, String> = [
+        ("/p/tilted.part", TILTED),
+        ("/p/study.assembly", TILTED_STUDY),
+    ]
+    .into_iter()
+    .map(|(k, v)| (k.to_string(), v.to_string()))
+    .collect();
+    let step = runmat_cad_wasm::exchange::assembly_step("/p/study.assembly", TILTED_STUDY, &files)
+        .expect("exports")
+        .expect("OCCT writes STEP");
+    if let Ok(dir) = std::env::var("RUNMAT_STEP_DUMP_DIR") {
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(format!("{dir}/study.step"), &step).unwrap();
+    }
+    let high: Vec<String> = step
+        .iter()
+        .enumerate()
+        .filter(|(_, b)| **b >= 0x80)
+        .take(12)
+        .map(|(i, b)| format!("{i}:{b:02X}"))
+        .collect();
+    eprintln!("non-ASCII bytes: {high:?}");
+    for line in String::from_utf8_lossy(&step)
+        .lines()
+        .filter(|l| l.contains("PRODUCT("))
+    {
+        eprintln!("{line}");
+    }
+    let text = String::from_utf8(step).expect("STEP is text");
+
+    let mut files = files;
+    files.insert("/p/study.step".into(), text);
+    let housing = "runmat 0.7\nstd 1\n\npart housing {\n    feature step = import(source = \"study.step\", digest = \"unrecorded\")\n}\n";
+    files.insert("/p/housing.part".into(), housing.into());
+    let v = call(
+        "/p/housing.part",
+        housing,
+        &serde_json::to_value(&files).unwrap(),
+    );
+    let errors: Vec<&Value> = v["diagnostics"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter(|d| d["severity"] == "error")
+        .collect();
+    assert!(errors.is_empty(), "{errors:?}");
+    let b = &v["display"]["data"]["bounds"];
+    let ext = |k: usize| b["max"][k].as_f64().unwrap() - b["min"][k].as_f64().unwrap();
+    assert!((ext(2) - 0.012).abs() < 1e-6, "bounds {b}");
+}

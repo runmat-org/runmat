@@ -39,6 +39,16 @@ impl<'a, 'b> Run<'a, 'b> {
             BodyMode::Intersect { .. } => Combine::Intersect,
         };
         let targets = mode.targets();
+        // An Add with nothing to add to (the part's first body feature) makes the first body,
+        // as New does: sketch a profile, extrude it, and the part has a body.
+        if targets.is_empty()
+            && matches!(combine, Combine::Add)
+            && !self.doc.features[..i]
+                .iter()
+                .any(|x| x.kind.is_body_feature())
+        {
+            return Ok((Combine::New, Vec::new()));
+        }
         if targets.is_empty() {
             return self.implicit_bodies(i, f).map(|b| (combine, b));
         }

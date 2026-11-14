@@ -256,6 +256,9 @@ pub enum PipelineType {
     Lines,
     LinesNoDepth,
     AnnotationStroke,
+    /// Annotation strokes hidden behind the scene's surfaces, as faces are: a section view's
+    /// study symbols on the kept side, so material in front of a symbol hides it.
+    AnnotationStrokeDepth,
     /// Depth-tested screen-space strokes for geometry edges (see `geometry_scene::edge_stroke`).
     EdgeStroke,
     /// Edge strokes drawn over everything, for edge display modes that show hidden lines.
@@ -272,6 +275,7 @@ impl PipelineType {
         matches!(
             self,
             PipelineType::AnnotationStroke
+                | PipelineType::AnnotationStrokeDepth
                 | PipelineType::EdgeStroke
                 | PipelineType::EdgeStrokeNoDepth
         )

@@ -1951,3 +1951,6 @@ mod tests;
 
 #[cfg(all(test, feature = "plot-core"))]
 mod preview_scene_tests;
+
+#[cfg(all(test, feature = "plot-core", feature = "occt-native"))]
+mod section_cap_tests;

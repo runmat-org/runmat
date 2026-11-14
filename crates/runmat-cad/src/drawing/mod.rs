@@ -599,9 +599,9 @@ pub struct DrawingTable {
     pub name: String,
     pub sheet: String,
     pub kind: TableKind,
-    /// Its corner on the sheet when placed by hand; unset, the table takes its standard place.
-    #[serde(default)]
-    pub at: [f64; 2],
+    /// Its corner on the sheet when placed by hand. `None`: the table takes its standard place.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub at: Option<[f64; 2]>,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]

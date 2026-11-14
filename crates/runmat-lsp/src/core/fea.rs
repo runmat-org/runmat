@@ -29,7 +29,7 @@ mod tests;
 
 use presentation::*;
 pub(crate) use project::resolve_project_facts;
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(feature = "native")] // the native backend's rename is the only user
 pub(crate) use rename::{FeaFunctionImportPath, FeaRenameTarget};
 
 #[derive(Clone)]

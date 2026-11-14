@@ -110,15 +110,15 @@ Every design file kind and `.fea` read units from the same registry and check th
 | Kind (as written after `:`) | Units |
 |---|---|
 | `length`, `distance` | `m`, `cm`, `mm`, `um` (also `µm`), `nm`, `km`, `in`, `ft`, `mil` (also `thou`) |
-| `area` | `m^2`, `cm^2`, `mm^2` |
+| `area` | `m^2`, `cm^2`, `mm^2` (also `m²`, `mm²`) |
 | `volume` | `m^3`, `cm^3`, `mm^3` |
-| `angle` | `deg`, `rad` |
-| `mass` | `kg`, `gram` |
+| `angle` | `deg` (also `°`), `rad` |
+| `mass` | `kg`, `g` (also `gram`) |
 | `time` | `s`, `ms`, `us`, `ns` |
 | `force`, `pressure`, `mass_density` and the other physical kinds | their SI units and the prefixed forms listed for `.fea`, composed with `*`, `/` and `^` (`N*m`, `kg/m^3`) |
 | `real`, `dimensionless`, `count`, `integer` | a bare number |
 
-A bare number where a length is expected is an error: write `5 mm`, not `5`. Imperial lengths read as written: `40 ft`, `5.5 in`, and a feet-and-inches length is a sum, `8 ft + 1.125 in`. Board coordinates in a `.circuit.layout` are the exception: a bare number there is millimetres.
+Each unit a value displays in also reads back: `30 g`, `12 mm²`, `45°`. A bare number where a length is expected is an error: write `5 mm`, not `5`. Imperial lengths read as written: `40 ft`, `5.5 in`, and a feet-and-inches length is a sum, `8 ft + 1.125 in`. Board coordinates in a `.circuit.layout` are the exception: a bare number there is millimetres.
 
 A value keeps the unit it was written in. Hover, Properties and the Outline show `0.25 in` for a value written `0.25 in`; the compiler converts to SI only to check and compute. A computed value, such as `input.width / 2`, shows in its kind's display unit: millimetres for a length, degrees for an angle.
 

@@ -80,7 +80,7 @@ fn an_agent_s_long_notes_wrap_and_keep_clear_of_the_title_block_the_border_and_e
         assert!(lines.len() > 1, "{n} wraps onto more lines: {lines:?}");
         // Every word is drawn, in order.
         let drawn: Vec<String> = lines.iter().flat_map(|l| words(&l.0)).collect();
-        assert_eq!(drawn, words(texts[n].as_str().unwrap()), "{n}");
+        assert_eq!(drawn, words(&notes::sheet_case(texts[n].as_str().unwrap())), "{n}");
         // Lines start at one x and step down by the standard's pitch (ISO: 1.7 x 3.5 mm).
         for w in lines.windows(2) {
             assert!((w[0].1 - w[1].1).abs() < 1e-9, "{n}: {w:?}");
@@ -143,11 +143,14 @@ fn the_general_notes_list_numbers_each_note_with_a_hanging_indent_above_the_titl
     for n in &numbers {
         assert!(body.iter().any(|l| (l.2 - n.2).abs() < 1e-9), "{n:?}");
     }
-    // `{material}` is filled from the part; every word of every note is drawn.
+    // `{material}` is filled from the part and set in capitals like the rest of the note; the
+    // unit after a number keeps its case. Every word of every note is drawn.
     let drawn: Vec<String> = body.iter().flat_map(|l| words(&l.0)).collect();
-    assert!(drawn.join(" ").contains("MATERIAL: Aluminum 6061."), "{drawn:?}");
+    let joined = drawn.join(" ");
+    assert!(joined.contains("LEG THICKNESS: 3 mm EACH."), "{drawn:?}");
+    assert!(joined.contains("MATERIAL: ALUMINUM 6061."), "{drawn:?}");
     for row in out["projection"]["data"]["notes"]["notes"].as_array().unwrap() {
-        for w in words(row.as_str().unwrap()) {
+        for w in words(&notes::sheet_case(row.as_str().unwrap())) {
             assert!(drawn.contains(&w), "{w} isn't drawn");
         }
     }
@@ -159,6 +162,20 @@ fn the_general_notes_list_numbers_each_note_with_a_hanging_indent_above_the_titl
     assert!(!b.hits(&title));
     // No ruled grid: the list is text only.
     assert!(p.iter().filter(|q| q.id == "table:notes").all(|q| matches!(q.shape, Shape::Text { .. })));
+}
+
+/// Sheet notes are set in capitals (ASME Y14.2, ISO 3098), fields included; a unit symbol
+/// after a number keeps its case, and a note already in capitals is unchanged.
+#[test]
+fn note_text_is_set_in_capitals_and_units_after_a_number_keep_their_case() {
+    let case = notes::sheet_case;
+    assert_eq!(case("Material: Aluminum 6061."), "MATERIAL: ALUMINUM 6061.");
+    assert_eq!(case("break edges 0.2 mm, mass 25kg; Ra 0.8 µm"), "BREAK EDGES 0.2 mm, MASS 25kg; RA 0.8 µm");
+    assert_eq!(case("6X ⌀5.5 THRU\nM5 clearance"), "6X ⌀5.5 THRU\nM5 CLEARANCE");
+    assert_eq!(case("0.5 MM CHAMFER"), "0.5 MM CHAMFER");
+    assert_eq!(case("position: ⌀0.2 mm to datums"), "POSITION: ⌀0.2 mm TO DATUMS");
+    // A word after a number that isn't a unit is capitalized.
+    assert_eq!(case("4 places"), "4 PLACES");
 }
 
 #[test]

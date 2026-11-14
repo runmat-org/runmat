@@ -17,7 +17,7 @@ A part's geometry is its feature history: `feature <name> = <operation>(…)` st
 | `rib` | a rib from an open sketch | `profile`, `thickness`, `depth`, `reverse` |
 | `emboss` | raised or recessed text or shapes on a face | `profile`, `face`, `height` |
 
-`mode` is `new` (the default for the first solid), `add`, `cut` or `intersect`. A part with a plate and a cut pocket:
+`mode` is `new` (the default for the first solid), `add`, `cut` or `intersect`. On the part's first body feature, `add` has no body to join, so it makes the first body as `new` does; `cut` and `intersect` there fail with nothing to act on. A part with a plate and a cut pocket:
 
 ```part
 runmat 0.7

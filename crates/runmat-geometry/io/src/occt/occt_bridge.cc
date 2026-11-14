@@ -584,9 +584,12 @@ std::string ascii_string(const TCollection_AsciiString& value) {
   return std::string(value.ToCString());
 }
 
+// A name as UTF-8, the encoding a rust::String needs. The replacement-character form kept every
+// character below U+0100 as one raw byte, so a product named "tilt -20°" reached Rust as the
+// lone byte B0 and failed the whole import.
 std::string extended_string(const TCollection_ExtendedString& value) {
-  TCollection_AsciiString ascii(value, '?');
-  return ascii_string(ascii);
+  TCollection_AsciiString utf8(value);
+  return ascii_string(utf8);
 }
 
 std::string label_entry(const TDF_Label& label) {

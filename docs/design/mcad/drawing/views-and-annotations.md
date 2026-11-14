@@ -171,7 +171,7 @@ annotation swing_d1 = door_swing(door = [{ name = envelope }, { name = d1_a_l1_2
 
 ## Tables
 
-`table <name> = <kind>(…, sheet, at)`:
+`table <name> = <kind>(…, sheet, at)`. `at` is the table's corner on the sheet when you place it by hand, `[0, 0]` included; leave it out and the table takes its standard place.
 
 | Kind | Lists |
 |---|---|
@@ -184,7 +184,7 @@ annotation swing_d1 = door_swing(door = [{ name = envelope }, { name = d1_a_l1_2
 | `cut_list(view)` | a weldment's structural members, one row per group of identical members: item, quantity, profile, material, cut length and end angles |
 
 ```drawing fragment
-table bom = bom(view = front, include_fasteners, sheet = "1", at = [0, 0])
+table bom = bom(view = front, include_fasteners, sheet = "1")
 table revs = revision(rows = [{ rev = "A", description = "First release", date = "2026-11-05", by = "NA" }], sheet = "1", at = [300, 280])
 ```
 
@@ -210,6 +210,8 @@ Notes, tables and views never overprint each other, the title block or the borde
 - A note placed with `at` wraps to its `width`. Without a width, it wraps at the room to its right, up to the border, the title block or the next item.
 - A note with no room at its `at` moves to the nearest free spot, and the check warns: "Note n2 at [20, 30] has no room there: …".
 - A note or table that fits nowhere on the sheet stays where it was put, and the check warns with what to change: "Note n2 doesn't fit on the sheet: it needs 200 x 60 mm of free space …".
+
+The sheet sets note text in capitals, as ASME Y14.2 and ISO 3098 lettering expect, with filled `{property}` fields included: `MATERIAL: {material}.` prints `MATERIAL: ALUMINUM 6061.` for a part whose material is `Aluminum 6061`. A unit symbol written after a number keeps the case it was written in, so `3 mm` and `25kg` print as written. The file and the model's properties keep their own case.
 
 The sheet, the PDF and the DXF break notes at the same words. Each line is its own text entity in the DXF and its own line of text in the PDF.
 

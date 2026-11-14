@@ -407,7 +407,7 @@ mod tests {
         assert!(
             note.iter().any(|p| p["shape"]["text"]
                 .as_str()
-                .is_some_and(|t| t.contains("MATERIAL: Aluminum. MARK BR-100."))),
+                .is_some_and(|t| t.contains("MATERIAL: ALUMINUM. MARK BR-100."))),
             "{note:?}"
         );
 

@@ -735,3 +735,28 @@ fn a_material_statement_colors_every_body_it_names() {
         Some(runmat_cad::appearance::material_appearance(Some("material.stucco_finish_coat")).1)
     );
 }
+
+/// A part's display carries its origin planes by the Outline's ids, with the language's frames,
+/// so a viewer draws them for a plane pick (an empty part included).
+#[test]
+fn the_display_publishes_the_origin_planes() {
+    for (path, text) in [
+        ("/empty.part", "runmat 0.7\nstd 1\npart empty {\n}\n"),
+        ("/plate.part", "runmat 0.7\nstd 1\npart plate {\n    sketch s on origin.xy {\n        l1 = line(start = [0 mm, 0 mm], end = [40 mm, 0 mm])\n        l2 = line(start = l1.end, end = [40 mm, 20 mm])\n        l3 = line(start = l2.end, end = [0 mm, 20 mm])\n        l4 = line(start = l3.end, end = l1.start)\n    }\n    feature body = extrude(profile = sketch.s, distance = 5 mm)\n}\n"),
+    ] {
+        let d = compile(path, text);
+        let planes: Vec<_> = d
+            .origin_planes
+            .iter()
+            .map(|p| (p.id.as_str(), p.name.as_str(), p.frame.z))
+            .collect();
+        assert_eq!(
+            planes,
+            [
+                ("origin:top", "Top", [0.0, 0.0, 1.0]),
+                ("origin:front", "Front", [0.0, 1.0, 0.0]),
+                ("origin:right", "Right", [1.0, 0.0, 0.0]),
+            ]
+        );
+    }
+}
