@@ -29,6 +29,13 @@ enum Request {
     MeshImportedSource {
         request: Box<runmat_analysis_execution::ImportedSourceMeshingRequest>,
     },
+    /// Materialize one study's geometry and return its display preview with study regions.
+    MaterializePreview {
+        program: Box<ProgramExecutionRequest>,
+        objects: Vec<LogicalObject>,
+        display_name: String,
+        options: runmat_geometry_io::GeometryImportOptions,
+    },
 }
 struct Cancellation;
 impl runmat_meshing_core::MeshingCancellationSignal for Cancellation {
@@ -64,15 +71,7 @@ pub(super) fn execute(
                 MAX_GEOMETRY_MEMORY_BYTES,
                 &request.settings.limits,
             );
-            let platform = PlatformBuildIdentity {
-                capability_cohort: "browser-serial-occt".into(),
-                target_triple: "wasm32-unknown-emscripten".into(),
-                build_digest: StableDigest::from_bytes(
-                    *Digest::sha256(concat!("runmat-exact-browser:", env!("CARGO_PKG_VERSION")))
-                        .bytes(),
-                ),
-                exact_kernel_abi: Some(profile.kernel_abi),
-            };
+            let platform = browser_platform(profile.kernel_abi);
             let mut store = MemoryObjectStore::new(INVENTORY).map_err(|error| error.to_string())?;
             let context =
                 runmat_geometry_io::GeometryImportContext::with_cancellation_probe(|| {
@@ -89,6 +88,33 @@ pub(super) fn execute(
                 &mut runmat_meshing_execution::NoopMeshingProgress,
             )?;
             serde_json::to_string(&result).map_err(|error| error.to_string().into())
+        }
+        Request::MaterializePreview {
+            program,
+            objects,
+            display_name,
+            options,
+        } => {
+            runmat_execution_artifact::object::validate_inventory(&objects, INVENTORY)
+                .map_err(|e| e.to_string())?;
+            let mut store = MemoryObjectStore::new(INVENTORY).map_err(|e| e.to_string())?;
+            for object in objects {
+                store.write_verified(&object).map_err(|e| e.to_string())?;
+            }
+            let context =
+                runmat_geometry_io::GeometryImportContext::with_cancellation_probe(|| {
+                    runmat_meshing_core::MeshingCancellationSignal::is_cancelled(&Cancellation)
+                });
+            let preview = runmat_analysis_execution::materialize_preview_serial(
+                &program,
+                &mut store,
+                browser_platform(profile.kernel_abi),
+                INVENTORY,
+                &display_name,
+                options,
+                &context,
+            )?;
+            serde_json::to_string(&preview).map_err(|e| e.to_string().into())
         }
         Request::MaterializeAndMesh {
             program,
@@ -109,15 +135,7 @@ pub(super) fn execute(
             for object in objects {
                 store.write_verified(&object).map_err(|e| e.to_string())?;
             }
-            let platform = PlatformBuildIdentity {
-                capability_cohort: "browser-serial-occt".into(),
-                target_triple: "wasm32-unknown-emscripten".into(),
-                build_digest: StableDigest::from_bytes(
-                    *Digest::sha256(concat!("runmat-exact-browser:", env!("CARGO_PKG_VERSION")))
-                        .bytes(),
-                ),
-                exact_kernel_abi: Some(profile.kernel_abi),
-            };
+            let platform = browser_platform(profile.kernel_abi);
             let completed = materialize_and_mesh_serial(
                 &program,
                 &mut store,
@@ -135,5 +153,16 @@ pub(super) fn execute(
             })
             .map_err(|e| e.to_string().into())
         }
+    }
+}
+
+fn browser_platform(kernel_abi: String) -> PlatformBuildIdentity {
+    PlatformBuildIdentity {
+        capability_cohort: "browser-serial-occt".into(),
+        target_triple: "wasm32-unknown-emscripten".into(),
+        build_digest: StableDigest::from_bytes(
+            *Digest::sha256(concat!("runmat-exact-browser:", env!("CARGO_PKG_VERSION"))).bytes(),
+        ),
+        exact_kernel_abi: Some(kernel_abi),
     }
 }

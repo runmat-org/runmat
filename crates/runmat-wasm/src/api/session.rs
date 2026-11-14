@@ -30,7 +30,7 @@ use runmat_runtime::data::{
 use runmat_runtime::execution::RuntimeExecutionServices;
 use runmat_runtime::geometry::{
     GeometryInspectPayload, GeometryPreviewBudgetPayload, GeometryPreviewBudgetPolicyPayload,
-    GeometryPreviewPayload, GeometryStatsPayload,
+    GeometryPreviewPayload,
 };
 use runmat_runtime::{
     runtime_plot_import_figure_scene_async, runtime_plot_import_figure_scene_from_path_async,
@@ -452,38 +452,23 @@ async fn inspect_geometry_path_with_asset(
     };
     ensure_runtime_not_cancelled("geometry inspection")?;
     ensure_geometry_preview_deadline(deadline, "geometry inspection")?;
-    let stats = runmat_runtime::geometry::geometry_compute_stats_op(
+    let mut payload = runmat_runtime::geometry::geometry_inspect_payload_from_asset(
+        &path,
+        &payload.format,
+        payload.byte_count,
         &asset,
-        runmat_runtime::operations::OperationContext::new(None, None),
-    )
-    .map_err(operation_error_message)?
-    .data;
+    )?;
+    let total_vertices = payload
+        .stats
+        .as_ref()
+        .map_or(0, |stats| stats.total_vertices);
     if let Some(max_vertices) = budget.as_ref().and_then(|item| item.max_vertices) {
-        if stats.total_vertices > max_vertices {
+        if total_vertices > max_vertices {
             payload.degraded_reason = Some(format!(
-                "Geometry has {} vertices, above the preview budget of {max_vertices} vertices.",
-                stats.total_vertices
+                "Geometry has {total_vertices} vertices, above the preview budget of {max_vertices} vertices."
             ));
         }
     }
-    payload.stats = Some(GeometryStatsPayload {
-        mesh_count: stats.mesh_count,
-        total_vertices: stats.total_vertices,
-        total_elements: stats.total_elements,
-        region_count: stats.region_count,
-    });
-    payload.geometry_summary =
-        serde_json::to_value(runmat_runtime::geometry::geometry_asset_summary(&asset)).ok();
-    payload.regions = asset
-        .regions
-        .iter()
-        .filter_map(|region| serde_json::to_value(region).ok())
-        .collect();
-    payload.diagnostics = asset
-        .diagnostics
-        .iter()
-        .filter_map(|diagnostic| serde_json::to_value(diagnostic).ok())
-        .collect();
     Ok(GeometryInspectWithAsset {
         inspect: payload,
         asset: Some(asset),
@@ -520,11 +505,6 @@ async fn preview_geometry_path(
     let deadline = geometry_preview_deadline(budget.as_ref());
     ensure_runtime_not_cancelled("geometry preview")?;
     ensure_geometry_preview_deadline(deadline, "geometry preview")?;
-    let figure_options = geometry_preview_figure_options_from_budget(budget.as_ref());
-    let xray = budget
-        .as_ref()
-        .and_then(|budget| budget.xray)
-        .unwrap_or(false);
     let inspected = inspect_geometry_path_with_asset(path, budget.clone()).await?;
     let GeometryInspectWithAsset { inspect, asset } = inspected;
     ensure_runtime_not_cancelled("geometry preview")?;
@@ -540,6 +520,19 @@ async fn preview_geometry_path(
         });
     }
     let asset = asset.ok_or_else(|| "geometry preview asset was not available".to_string())?;
+    preview_payload_from_asset(inspect, asset, budget.as_ref(), deadline)
+}
+
+/// Builds the drawable preview of an imported asset: a chunked geometry scene, or a figure
+/// when the scene cannot be built.
+pub(super) fn preview_payload_from_asset(
+    inspect: GeometryInspectPayload,
+    asset: runmat_geometry_core::GeometryAsset,
+    budget: Option<&GeometryPreviewBudgetPayload>,
+    deadline: Option<GeometryPreviewDeadline>,
+) -> Result<GeometryPreviewPayload, String> {
+    let figure_options = geometry_preview_figure_options_from_budget(budget);
+    let xray = budget.and_then(|budget| budget.xray).unwrap_or(false);
     let truncated = geometry_asset_preview_truncated(&asset);
     ensure_runtime_not_cancelled("geometry preview")?;
     ensure_geometry_preview_deadline(deadline, "geometry preview")?;
@@ -549,7 +542,6 @@ async fn preview_geometry_path(
         presentation: runmat_runtime::geometry::GeometryPreviewPresentation::Cad,
         xray,
         allow_create_fea_study: budget
-            .as_ref()
             .and_then(|budget| budget.allow_create_fea_study)
             .unwrap_or(false),
     };
@@ -564,7 +556,7 @@ async fn preview_geometry_path(
                 } else {
                     runmat_plot::GeometrySceneCompleteness::Complete
                 },
-                geometry_preview_quality_label(budget.as_ref(), truncated),
+                geometry_preview_quality_label(budget, truncated),
                 Some(inspect.format.clone()),
                 Some(inspect.byte_count),
                 scene_options.allow_create_fea_study,
@@ -625,12 +617,12 @@ fn geometry_asset_preview_truncated(asset: &runmat_geometry_core::GeometryAsset)
 }
 
 #[derive(Debug, Clone, Copy)]
-struct GeometryPreviewDeadline {
+pub(super) struct GeometryPreviewDeadline {
     started_ms: f64,
     timeout_ms: u64,
 }
 
-fn geometry_preview_deadline(
+pub(super) fn geometry_preview_deadline(
     budget: Option<&GeometryPreviewBudgetPayload>,
 ) -> Option<GeometryPreviewDeadline> {
     let timeout_ms = budget.and_then(|item| item.timeout_ms)?;
@@ -660,7 +652,7 @@ fn ensure_geometry_preview_deadline(
     Ok(())
 }
 
-fn geometry_import_options_from_budget(
+pub(super) fn geometry_import_options_from_budget(
     budget: Option<&GeometryPreviewBudgetPayload>,
     max_triangles: Option<u64>,
 ) -> runmat_geometry_io::GeometryImportOptions {

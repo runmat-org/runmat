@@ -164,49 +164,19 @@ impl CheckedFeaSessionSource {
         }
         let revision = self.program_revision()?;
         let access = runmat_analysis_execution::checked_fea_artifact_access(authority);
-        let geometry_source = match &resolved.geometry.source {
-            runmat_geometry_core::GeometryDefinitionSource::Constructed(_) => {
-                PreparedGeometrySource::constructed()
-            }
-            runmat_geometry_core::GeometryDefinitionSource::Imported(imported) => {
-                let logical =
-                    runmat_runtime::analysis::LogicalSourcePath::new(imported.logical_path.clone())
-                        .map_err(|e| e.to_string())?;
-                let path =
-                    runmat_runtime::analysis::physical_source_path(&self.source_root, &logical)
-                        .map_err(|e| e.to_string())?;
-                let bytes = self.read_source(&path).await?;
-                if Digest::sha256(&bytes).bytes() != imported.content_digest.bytes() {
-                    return Err("The geometry changed after checking. Refresh the simulation before running.".into());
-                }
-                let name = path
-                    .file_name()
-                    .and_then(|name| name.to_str())
-                    .ok_or_else(|| "Geometry filename is not valid UTF-8.".to_owned())?;
-                PreparedGeometrySource::imported(name, &bytes, 4 << 20, &access)
-                    .map_err(|e| e.to_string())?
-            }
-            _ => {
-                return Err(FeaStudyPreparationError::RequiresDesktop(
-                    "Run this generated geometry in the desktop app.",
-                ))
-            }
-        };
-        let geometry_request = runmat_analysis_execution::prepare_geometry_materialization_request(
-            resolved.geometry.clone(),
-            realized.geometry.bindings.clone(),
-            &geometry_source,
-            host.provider_profile().await?,
-            Default::default(),
-        )
-        .map_err(|e| e.to_string())?;
-        let program = runmat_analysis_execution::prepare_geometry_materialization_program(
-            geometry_request.clone(),
-            revision.clone(),
-            &access,
-            &geometry_source.roots,
-        )
-        .map_err(|e| e.to_string())?;
+        let super::fea_geometry_program::SerialGeometryProgram {
+            request: geometry_request,
+            program,
+            source: geometry_source,
+        } = self
+            .serial_geometry_program(
+                &resolved.geometry,
+                realized.geometry.bindings.clone(),
+                host.provider_profile().await?,
+                &revision,
+                &access,
+            )
+            .await?;
         runmat_analysis_fea::progress::emit_phase(
             "fea.prepare",
             runmat_analysis_fea::FeaProgressPhase::GeometryLoad,

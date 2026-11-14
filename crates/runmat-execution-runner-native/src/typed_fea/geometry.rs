@@ -19,12 +19,7 @@ use runmat_geometry_core::{
 
 const POLL_INTERVAL: Duration = Duration::from_millis(10);
 
-#[derive(Clone, Debug, PartialEq)]
-pub struct MaterializedFeaGeometry {
-    pub output: runmat_analysis_execution::GeometryMaterializationOutput,
-    pub topology: runmat_geometry_core::ExactBRepTopology,
-    pub kernel_representation: Vec<u8>,
-}
+pub use runmat_analysis_execution::MaterializedFeaGeometry;
 
 pub(super) async fn materialize_study_geometry(
     source: &runmat_core::CheckedFeaSessionSource,
@@ -92,42 +87,7 @@ pub(super) async fn materialize_study_geometry(
     output
         .validate_against(&request)
         .map_err(|error| error.to_string())?;
-    let exact = runmat_meshing_execution::import_exact_geometry_input(
-        &store,
-        output.document.clone(),
-        &output.geometry_root,
-        access,
-        limits.inventory,
-    )
-    .map_err(|error| error.to_string())?;
-    let components = exact
-        .into_geometry_objects()
-        .into_components()
-        .map_err(|error| error.to_string())?;
-    let topology = components.topology;
-    let mapped_faces = output
-        .source_face_ids
-        .values()
-        .cloned()
-        .collect::<BTreeSet<_>>();
-    let topology_faces = topology
-        .faces
-        .iter()
-        .map(|face| face.id.clone())
-        .collect::<BTreeSet<_>>();
-    if mapped_faces != topology_faces {
-        return Err(
-            "materialized FEA geometry face ordinals do not match its exact topology".into(),
-        );
-    }
-    let kernel_representation = components.kernel_representation.ok_or_else(|| {
-        "materialized FEA geometry has no exact kernel representation".to_string()
-    })?;
-    Ok(MaterializedFeaGeometry {
-        output,
-        topology,
-        kernel_representation,
-    })
+    runmat_analysis_execution::materialized_fea_geometry(&store, output, access, limits.inventory)
 }
 
 pub(super) async fn prepare_geometry_source(
