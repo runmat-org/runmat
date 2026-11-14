@@ -37,7 +37,7 @@ A quantity is a number followed by a unit: `8 mm`, `1.5 kN`, `2700 kg/m^3`. Thes
 
 | Dimension | Units |
 | --- | --- |
-| Length | `m`, `mm`, `um`, `nm`, `cm`, `km`, `in` (also `inch`), `ft` |
+| Length | `m`, `mm`, `um`, `nm`, `cm`, `km`, `in` (also `inch`), `ft`, `mil` (also `thou`, 0.001 in) |
 | Time | `s`, `ms`, `us`, `ns` |
 | Frequency | `Hz`, `kHz`, `MHz`, `GHz` |
 | Mass | `kg`, `gram` |
@@ -50,8 +50,13 @@ A quantity is a number followed by a unit: `8 mm`, `1.5 kN`, `2700 kg/m^3`. Thes
 | Current | `A`, `mA`, `kA` |
 | Charge | `C` |
 | Potential | `V`, `mV`, `kV`, `MV` |
+| Conductance | `S`, `mS`, `kS` |
+| Resistance | `ohm`, `kohm`, `Mohm` |
+| Capacitance | `F` |
+| Inductance | `H` |
 | Magnetic flux density | `T`, `mT` |
 | Angle | `rad`, `deg` |
+| Rotational speed | `rpm` (revolutions per minute) |
 | Memory (execution resources) | `B`, `KiB`, `MiB`, `GiB` |
 
 Derived units are written as expressions:
@@ -64,7 +69,7 @@ Derived units are written as expressions:
 | Heat transfer coefficient | `W/m^2/K` |
 | Heat flux | `W/m^2` |
 | Dynamic viscosity | `Pa*s` |
-| Electrical conductivity | `A/V/m`; `S/m` [not yet in the current release](pending:language.unit.siemens) |
+| Electrical conductivity | `S/m` or `A/V/m` |
 | Current density | `A/m^2` |
 | Electric field | `V/m`, `kV/mm` |
 | Thermal expansion coefficient | `K^-1` |

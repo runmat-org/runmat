@@ -132,10 +132,32 @@ fn total_power_heat_generation_checks_clean() {
     );
 }
 
+/// The siemens is a unit (G79): conductivity written `S/m` checks exactly as `A/V/m` does, and
+/// both name the same unit.
 #[test]
-fn siemens_unit_reports_its_pending_id() {
-    let body = "include model.base\n    input sigma : real = 5.8e7 S/m";
-    assert_pending(&diagnostics("select result", body), "language.unit.siemens");
+fn siemens_per_metre_checks_and_equals_ampere_per_volt_metre() {
+    let copper = |conductivity: &str| {
+        format!(
+            "material copper {{\n    mass_density = 8960 kg/m^3\n    elastic {{ youngs_modulus = 117 GPa; poisson_ratio = 0.34 }}\n    electrical {{ reference_temperature = 293.15 K; conductivity = {conductivity}; resistive_heating_coefficient = 0.0039 K^-1; relative_permittivity = 1; relative_permeability = 1 }}\n}}"
+        )
+    };
+    let siemens = diagnostics_with("select result", "include model.base", &copper("5.8e7 S/m"));
+    let ampere = diagnostics_with(
+        "select result",
+        "include model.base",
+        &copper("5.8e7 A/V/m"),
+    );
+    assert!(
+        !siemens
+            .iter()
+            .any(|message| message.contains("unit") || message.contains("[pending:")),
+        "{siemens:#?}"
+    );
+    assert_eq!(siemens, ampere);
+    assert_eq!(
+        runmat_types::physical::parse_unit_expression("S/m").unwrap(),
+        runmat_types::physical::parse_unit_expression("A/V/m").unwrap()
+    );
 }
 
 #[test]

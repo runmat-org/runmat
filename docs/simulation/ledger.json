@@ -2830,15 +2830,15 @@
       "title": "The siemens (`S`, `mS`, `kS`) as a unit symbol, so conductivity is written `S/m`",
       "kind": "language",
       "area": "language",
-      "status": "pending",
+      "status": "release",
+      "landed_in": "0.7.2",
       "acceptance": "`runmat-types` accepts `S` as electrical conductance; `conductivity = 5.8e7 S/m` checks and equals `5.8e7 A/V/m`.",
       "owner": "q-check-parity",
       "gaps": [
         "DOC-Q2-1"
       ],
       "witness": [
-        "q-docs-2 claims, runmat-qdocs1-60daf3650d (runmat-build-mac:~/runs/q-docs-2/out/check-probe-siemens.fea.log): error[fea.semantic.invalid_unit]: unknown unit `S`",
-        "runmat check claims/probe-siemens.fea"
+        "runmat-analysis-language test pending_constructs::siemens_per_metre_checks_and_equals_ampere_per_volt_metre: `input sigma : electrical_conductivity = 5.8e7 S/m` checks clean, and `5.8e7 S/m` parses to the same quantity as `5.8e7 A/V/m` (G79, runmat-types accepts `S` since b32ba70b6b)"
       ],
       "requirements": [],
       "docs": [
