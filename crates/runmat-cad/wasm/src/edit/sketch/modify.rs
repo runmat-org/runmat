@@ -183,7 +183,7 @@ fn cuts(sketch: &Sketch, id: &SketchEntityId, own: Shape) -> Vec<P> {
 
 /// Writes out, as coordinates, every point other curves took from `id` (`start = l1.end`), so
 /// they stay put when `id` changes or goes.
-pub(super) fn detach(sketch: &mut Sketch, id: &SketchEntityId) {
+pub(crate) fn detach(sketch: &mut Sketch, id: &SketchEntityId) {
     let snapshot = sketch.clone();
     for e in sketch.entities.iter_mut().filter(|e| e.id != *id) {
         let fix = |p: &mut PointExpr| {
@@ -218,7 +218,7 @@ pub(super) fn detach(sketch: &mut Sketch, id: &SketchEntityId) {
 }
 
 /// Drops relations and dimensions that name `id` (its curve or its points).
-pub(super) fn drop_constraints_on(sketch: &mut Sketch, id: &SketchEntityId) {
+pub(crate) fn drop_constraints_on(sketch: &mut Sketch, id: &SketchEntityId) {
     let needle = format!("\"entity\":\"{}\"", id.0);
     sketch.constraints.retain(|c| {
         !serde_json::to_string(c)

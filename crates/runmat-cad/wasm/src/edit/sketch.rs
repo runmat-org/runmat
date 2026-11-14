@@ -804,6 +804,41 @@ pub(crate) fn apply(
     })
 }
 
+/// The sketch entities among a selection, by sketch: canvas and Outline picks
+/// `sketch.<sketch>.<entity>` (a point pick `sketch.<sketch>.<entity>.<role>` names its entity).
+pub(crate) fn selected_entities(selection: &[String]) -> Vec<(String, String)> {
+    let mut out: Vec<(String, String)> = Vec::new();
+    for pick in selection {
+        let Some(rest) = pick.strip_prefix("sketch.") else {
+            continue;
+        };
+        let mut parts = rest.split('.');
+        if let (Some(sketch), Some(entity)) = (parts.next(), parts.next()) {
+            let key = (sketch.to_owned(), entity.to_owned());
+            if !out.contains(&key) {
+                out.push(key);
+            }
+        }
+    }
+    out
+}
+
+/// Deletes entities `ids` of `sketch`, as Delete does on picked curves and points: points other
+/// curves took from them are written out where they sit, and the relations and dimensions that
+/// name them go. Parts and assemblies both delete sketch entities through this one function.
+pub(crate) fn delete_entities(sketch: &mut Sketch, ids: &[String]) -> Result<String, EditFailure> {
+    for id in ids {
+        let id = SketchEntityId::new(id);
+        if !sketch.entities.iter().any(|e| e.id == id) {
+            return Err(model(format!("the sketch has no `{id}`")));
+        }
+        modify::detach(sketch, &id);
+        modify::drop_constraints_on(sketch, &id);
+        sketch.entities.retain(|e| e.id != id);
+    }
+    Ok(format!("Deleted {}", ids.join(", ")))
+}
+
 /// `part.sketch`: an empty sketch on the picked plane or planar face, after the last feature.
 fn new_sketch(
     path: &str,

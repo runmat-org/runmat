@@ -290,6 +290,7 @@ pub(super) fn tree_actions() -> Vec<CommandDescriptor> {
             .when(selected(&[
                 K::Feature,
                 K::Sketch,
+                K::SketchEntity,
                 K::Region,
                 K::Input,
                 K::Plane,
@@ -299,6 +300,7 @@ pub(super) fn tree_actions() -> Vec<CommandDescriptor> {
             .on(&[
                 K::Feature,
                 K::Sketch,
+                K::SketchEntity,
                 K::Region,
                 K::Input,
                 K::Plane,

@@ -138,6 +138,25 @@ fn a_selected_sketch_suppresses_and_deletes() {
 
 
 #[test]
+fn delete_on_picked_sketch_curves_removes_them_and_their_relations() {
+    let text = sketch(RIG, "origin.xy");
+    let text = tool(
+        &text,
+        "sketch.rectangle",
+        json!({ "sketch": "sketch1", "type": "corner", "first": { "x": 0, "y": 0 }, "second": { "x": 20, "y": 10 } }),
+    );
+    let deleted = run(
+        &text,
+        json!({ "command": "assembly.delete", "selection": ["sketch.sketch1.l1"] }),
+    );
+    assert!(!deleted.contains("l1 = line("), "{deleted}");
+    assert!(!deleted.contains("(l1)") && !deleted.contains("l1."), "{deleted}");
+    assert!(deleted.contains("l2 = line("), "{deleted}");
+    let c = compile(&deleted);
+    assert_eq!(c.index["sketches"][0]["entities"].as_array().unwrap().len(), 3);
+}
+
+#[test]
 fn an_assembly_sketch_reads_and_prints_in_the_part_sketch_form() {
     let text = sketch(RIG, "origin.zx");
     let text = tool(

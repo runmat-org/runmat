@@ -630,3 +630,25 @@ fn a_spline_runs_through_the_picked_points_and_closes_on_request() {
         "{control}"
     );
 }
+
+#[test]
+fn delete_on_a_picked_line_keeps_the_points_other_lines_took_from_it() {
+    let text = applied(
+        PLATE,
+        "sketch.line",
+        json!({ "sketch": "s1", "start": { "x": 40, "y": 20, "of": "l2.end" }, "end": { "x": 60, "y": 20 } }),
+    );
+    let request = json!({ "command": "part.delete", "selection": ["sketch.s1.l2"] }).to_string();
+    let out: Value = serde_json::from_str(&crate::edit::edit_json(
+        "/p/plate.part",
+        &text,
+        &Default::default(),
+        &request,
+    ))
+    .unwrap();
+    assert_eq!(out["ok"], true, "{out}");
+    let after = out["files"][0]["text"].as_str().unwrap();
+    assert!(!after.contains("l2 = line("), "{after}");
+    assert!(!after.contains("l2.end"), "{after}");
+    assert!(after.contains("l5 = line(start = [40 mm, 20 mm]") || after.contains("= line(start = [40 mm, 20 mm], end = [60 mm"), "{after}");
+}

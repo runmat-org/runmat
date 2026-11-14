@@ -413,6 +413,9 @@ pub(super) fn edit(
     let compiled = Compiled::new(path, text, files)?;
     let mut publisher = anchors::Publisher::new(files);
     let summary = match request.command.as_str() {
+        "assembly.delete" if !crate::edit::sketch::selected_entities(&request.selection).is_empty() => {
+            sketch::delete_entities(&mut document, request)?
+        }
         "assembly.delete" | "assembly.suppress" if sketch::selected(request).next().is_some() => {
             sketch::delete_or_suppress(&mut document, request)?
         }

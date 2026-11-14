@@ -150,7 +150,28 @@ fn part_edit(
             Ok(())
         }
     };
+    let entities = sketch::selected_entities(&request.selection);
     match request.command.as_str() {
+        "part.delete" if selected.is_empty() && !entities.is_empty() => {
+            let mut summary = Vec::new();
+            let change = edit_part(text, path, |document| {
+                for (id, entity) in &entities {
+                    let sketch = match document
+                        .features
+                        .iter_mut()
+                        .find(|f| f.id.0 == *id)
+                        .map(|f| &mut f.kind)
+                    {
+                        Some(runmat_cad::model::FeatureKind::Sketch(s)) => s,
+                        _ => return Err(model(format!("the part has no sketch `{id}`"))),
+                    };
+                    sketch::delete_entities(sketch, std::slice::from_ref(entity))?;
+                    summary.push(format!("{id}.{entity}"));
+                }
+                Ok(())
+            })?;
+            Ok((change, format!("Deleted {}", summary.join(", "))))
+        }
         "part.delete" => {
             need_one()?;
             let change = edit_part(text, path, |document| {

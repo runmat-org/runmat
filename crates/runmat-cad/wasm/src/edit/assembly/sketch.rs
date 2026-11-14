@@ -145,6 +145,29 @@ pub(super) fn delete_or_suppress(
     Ok(format!("{verb} {}", ids.join(", ")))
 }
 
+/// `assembly.delete` on picked sketch curves and points (`sketch.<sketch>.<entity>`), through the
+/// part's own entity delete.
+pub(super) fn delete_entities(
+    document: &mut AssemblyDocument,
+    request: &super::EditRequest,
+) -> Result<String, EditFailure> {
+    let mut done = Vec::new();
+    for (id, entity) in crate::edit::sketch::selected_entities(&request.selection) {
+        let sketch = match document
+            .features
+            .iter_mut()
+            .find(|f| f.id.0 == id)
+            .map(|f| &mut f.kind)
+        {
+            Some(FeatureKind::Sketch(s)) => s,
+            _ => return Err(model(format!("the assembly has no sketch `{id}`"))),
+        };
+        crate::edit::sketch::delete_entities(sketch, std::slice::from_ref(&entity))?;
+        done.push(format!("{id}.{entity}"));
+    }
+    Ok(format!("Deleted {}", done.join(", ")))
+}
+
 /// A sketch point or line picked for a mate (`sketch.<sketch>.<entity>[.<role>]`): the sketch,
 /// the entity, the role and the picked frame in assembly coordinates, from the drawn sketch.
 /// A point (or a point entity, or a circle's or arc's center) is a point; a line is an axis

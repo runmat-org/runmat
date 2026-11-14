@@ -358,21 +358,8 @@ pub(super) fn add(catalog: &mut Catalog) {
                 vec![c("design.copy-reference")],
             ],
         ),
-        context_menu(
-            K::SketchEntity,
-            &[EditorKind::Part, EditorKind::Assembly],
-            &[
-                "sketch.constraint",
-                "sketch.construction",
-                "view.zoom-selection",
-                "view.measure",
-            ],
-            vec![
-                vec![c("sketch.constraint"), c("sketch.construction")],
-                look(),
-                vec![c("design.copy-reference")],
-            ],
-        ),
+        sketch_entity_menu(EditorKind::Part, "part.delete"),
+        sketch_entity_menu(EditorKind::Assembly, "assembly.delete"),
         context_menu(
             K::SketchPoint,
             &[EditorKind::Part, EditorKind::Assembly],
@@ -575,4 +562,25 @@ pub(super) fn add(catalog: &mut Catalog) {
             ],
         ),
     ]);
+}
+
+/// A sketch curve's or point entity's menu in `editor` (the Outline row, or a pick in sketch
+/// mode): relations, construction, look, and Delete through the editor's own delete.
+fn sketch_entity_menu(editor: EditorKind, delete: &str) -> ContextMenu {
+    context_menu(
+        K::SketchEntity,
+        &[editor],
+        &[
+            "sketch.constraint",
+            "sketch.construction",
+            "view.zoom-selection",
+            delete,
+        ],
+        vec![
+            vec![c("sketch.constraint"), c("sketch.construction")],
+            vec![c("view.zoom-selection"), c("view.measure")],
+            vec![c("design.copy-reference")],
+            vec![c(delete)],
+        ],
+    )
 }
