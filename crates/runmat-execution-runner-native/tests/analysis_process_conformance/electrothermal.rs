@@ -109,6 +109,7 @@ pub(super) async fn run() {
                 required_capabilities: Default::default(),
             },
             ThermalStudyExecutionPolicy {
+                publication_memory_bytes: u64::MAX,
                 resources,
                 retry: runmat_execution::task::RetryPolicy::IdempotentInfrastructure,
                 deadline_unix_millis: None,

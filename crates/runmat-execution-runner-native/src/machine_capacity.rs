@@ -100,11 +100,13 @@ pub fn meshing_execution_ceilings_for(
     runmat_meshing_core::MeshingExecutionCeilings::for_host(capacity_bytes, limits)
 }
 
-/// Default host budget for staging one study publication: a quarter of the memory this host
-/// admits for work, at least 1 GiB. An explicitly configured budget takes precedence.
-pub fn publication_staging_bytes() -> u64 {
-    const MINIMUM: u64 = 1024 * 1024 * 1024;
-    memory_bytes().map_or(MINIMUM, |bytes| (bytes / 4).max(MINIMUM))
+/// Host budget for publishing one study: the memory this host admits for a run, the same
+/// authority as the run's pool (`NativeExecutionConfig::local_memory_capacity_bytes`).
+/// Publication runs in the coordinating process after the run's workers have finished, so it
+/// may use the run's whole admitted memory. Study planning refuses a study whose planned
+/// publication exceeds it, before any solve.
+pub fn publication_staging_bytes() -> io::Result<u64> {
+    memory_bytes()
 }
 
 #[cfg(target_os = "macos")]

@@ -49,6 +49,22 @@ pub fn publish_thermal_study_result(
     })
 }
 
+/// Bytes publication charges for the thermal completion's original inputs and their copies
+/// before the source phase begins. Planning tests compare this with the planned requirement.
+pub fn thermal_publication_retained_bytes(
+    completed: &ThermalStudyCompletion,
+    mesh: &SolverMeshArtifact,
+    meshing_evidence: &MeshingEvidence,
+    options: &AnalysisThermalRunOptions,
+) -> Result<u64, crate::analysis::storage::AnalysisPublicationError> {
+    let maximum = crate::analysis::configuration::publication_staging_budget()?;
+    let (original, copies) =
+        preparation::retained_storage(completed, mesh, meshing_evidence, options, maximum)?;
+    original
+        .checked_add(copies)
+        .ok_or_else(|| "thermal publication storage overflow".into())
+}
+
 pub fn prepare_thermal_study_publication(
     completed: &ThermalStudyCompletion,
     source: &ThermalStudyObjectSource,

@@ -559,6 +559,7 @@ pub(crate) async fn execute_family_study(
                 *preparation,
                 crate::ThermalStudyExecutionPolicy {
                     resources,
+                    publication_memory_bytes: publication_budget()?,
                     retry,
                     deadline_unix_millis,
                     priority,
@@ -753,4 +754,10 @@ impl CompletedFamilyStudy {
 
 fn protocol(error: impl std::fmt::Display) -> NativeExecutionError {
     NativeExecutionError::Protocol(error.to_string())
+}
+
+/// The host's configured publication budget, which family planning admits publication against.
+pub(crate) fn publication_budget() -> NativeExecutionResult<u64> {
+    runmat_runtime::analysis::publication_staging_budget()
+        .map_err(NativeExecutionError::Configuration)
 }

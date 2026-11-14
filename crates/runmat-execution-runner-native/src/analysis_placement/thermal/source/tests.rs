@@ -7,6 +7,7 @@ use crate::StructuralSequenceExecutionPolicy;
 use runmat_execution::{resource::ResourceRequest, task::RetryPolicy};
 use runmat_meshing_core::ElementOrder;
 mod observation_queries;
+mod publication_admission;
 mod standalone_publication;
 
 #[derive(Clone)]
