@@ -55,6 +55,12 @@ fn static_solve_fallback_is_admitted_against_the_effective_ceiling() {
     elastic_static_path::fallback_is_admitted_against_the_ceiling();
 }
 
+// witness: FEA-SHARED-OPERATORS-001/compatible_solver_and_preconditioner_selection @ shared_infrastructure/canonical_mixed_topology/numerical_kernel; coverage: partial; boundary: The check-time count estimate reproduces the multigrid plan's node count, stiffness pattern and scratch exactly from Euler counts, and its memory within a tenth or the model's fixed reservations (8 MB).
+#[test]
+fn counted_static_estimate_matches_the_mesh_based_multigrid_plan() {
+    elastic_static_path::counted_estimate_matches_the_mesh_plan();
+}
+
 #[test]
 fn solved_tet10_recovery_estimator_decreases_under_uniform_refinement() {
     cantilever_refinement::qualify();

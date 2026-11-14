@@ -346,3 +346,80 @@ pub(super) fn fallback_is_admitted_against_the_ceiling() {
         other => panic!("expected a static solve ceiling error, got {other:?}"),
     }
 }
+
+/// The count-based estimate a check makes before meshing reproduces the mesh-based multigrid
+/// plan: the same node count, stiffness pattern and scratch from Euler counts alone, and the
+/// plan's memory within a tenth, or within the model's fixed reservations the count model
+/// leaves out (constraints, observations, excitation and the state-profile catalog: about
+/// 6 MB on this model, which do not grow with the mesh).
+pub(super) fn counted_estimate_matches_the_mesh_plan() {
+    use crate::planning::resource::{
+        build_static_resource_plan_selecting, estimate_static_solid_from_counts, FeaResourceDemand,
+        LocalExecutionPlan, StaticResourcePreflight, StaticSolvePath, StaticSolveSelection,
+    };
+    let model = fixture_model(FixtureId::CantileverLinearStatic);
+    for order in [ElementOrder::Tet4, ElementOrder::Tet10] {
+        let divisions = 8_u64;
+        let mesh = structured_cantilever(divisions as usize, order);
+        let constraints =
+            crate::constraints::CanonicalStructuralConstraintPlan::compile(&model, &mesh).unwrap();
+        let fields = crate::post::fields::structural_static_observable_field_definitions().unwrap();
+        let observations = crate::results::observation::resolve_structural_observation_plan(
+            &model.sequence.steps[0],
+            &model,
+            Some(&mesh),
+            &constraints,
+            &fields,
+            crate::results::observation::ObservationLimits::default(),
+        )
+        .unwrap();
+        let plan = build_static_resource_plan_selecting(
+            StaticResourcePreflight {
+                compilation: None,
+                prepared_inputs: None,
+                model: &model,
+                step: &model.sequence.steps[0],
+                backend: ComputeBackend::Cpu,
+                preconditioner: SpdPreconditionerKind::Auto,
+                observation_execution:
+                    crate::results::observation::ObservationExecutionPolicy::serial(),
+                mesh: Some(&mesh),
+                constraints: &constraints,
+                observations: &observations,
+                accelerator_requests: &[],
+                local_execution: LocalExecutionPlan::serial(),
+            },
+            StaticSolveSelection::Recorded(StaticSolvePath::ElasticRigidityMultigrid),
+        )
+        .unwrap();
+        let FeaResourceDemand::StructuralLinearPipeline(demand) = &plan.input.demand else {
+            panic!("a static solid plans the structural linear pipeline");
+        };
+        let counts = runmat_meshing_core::SolidMeshCounts {
+            vertices: (divisions + 1).pow(3),
+            tetrahedra: mesh.topology.volume_elements.len() as u64,
+            boundary_facets: mesh.topology.boundary_faces.len() as u64,
+            order,
+        };
+        let counted = estimate_static_solid_from_counts(counts).unwrap();
+        assert_eq!(counted.nodes, mesh.topology.nodes.len() as u64, "{order:?}");
+        assert_eq!(
+            counted.stiffness_nonzeros, demand.operator.sparse.operator_nonzeros[0].0,
+            "{order:?}"
+        );
+        let planned = plan.request.memory_bytes;
+        let modelled = counted.memory_bytes - counted.mesh_bytes;
+        eprintln!(
+            "counted {order:?}: plan memory {planned} B scratch {} B; counted {modelled} B (+ mesh {} B) scratch {} B",
+            plan.request.scratch_bytes, counted.mesh_bytes, counted.scratch_bytes
+        );
+        assert!(
+            modelled.abs_diff(planned) <= (planned / 10).max(8 << 20),
+            "{order:?}: counted {modelled} B vs plan {planned} B"
+        );
+        assert_eq!(
+            counted.scratch_bytes, plan.request.scratch_bytes,
+            "{order:?}"
+        );
+    }
+}

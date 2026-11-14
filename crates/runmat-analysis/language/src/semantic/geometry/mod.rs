@@ -210,6 +210,7 @@ fn imported_source(
     Some(GeometryDefinitionSource::Imported(Box::new(
         ImportedGeometryDefinition {
             preview_extent_m: inspection.facts.preview_extent_m,
+            preview_measure: inspection.facts.preview_measure.clone(),
             // Authored units are authoritative over a different file declaration, which the
             // evidence keeps as provenance.
             unit_evidence: match units {

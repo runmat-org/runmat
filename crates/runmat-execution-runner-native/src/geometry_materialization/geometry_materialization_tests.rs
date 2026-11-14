@@ -681,6 +681,7 @@ fn imported_request(
             parameters: Vec::new(),
             source: GeometryDefinitionSource::Imported(Box::new(ImportedGeometryDefinition {
                 preview_extent_m: None,
+                preview_measure: None,
                 unit_evidence,
                 logical_path: "box.brep".into(),
                 format: GeometrySourceFormat::Brep,

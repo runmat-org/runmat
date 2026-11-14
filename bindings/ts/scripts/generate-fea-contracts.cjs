@@ -96,6 +96,7 @@ const progressEnumTypes = [
 ];
 const analysisStructTypes = [
   ["AnalysisExecutionDuration", "FeaExecutionDuration", { renameAll: "camelCase" }],
+  ["AnalysisResourceLimit", "FeaResourceLimit", { renameAll: "camelCase" }],
   ["AnalysisExecutionCandidate", "FeaExecutionCandidate", { renameAll: "camelCase" }],
   ["AnalysisExecutionChoices", "FeaExecutionChoices", { renameAll: "camelCase" }],
   ["AnalysisRuntimeCapabilities", "FeaCapabilities", { renameAll: "camelCase" }],

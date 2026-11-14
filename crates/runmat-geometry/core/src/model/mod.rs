@@ -26,6 +26,7 @@ mod geometry;
 mod healing;
 mod material_evidence;
 mod mesh;
+mod preview_measure;
 mod occurrence_transforms;
 mod regions;
 mod revision_mapping;
@@ -55,6 +56,7 @@ pub use healing::*;
 pub use material_evidence::{MaterialEvidence, MaterialEvidenceConfidence};
 pub use mesh::{MeshDescriptor, MeshKind, SurfaceMesh};
 pub use occurrence_transforms::PreparedOccurrenceTransforms;
+pub use preview_measure::{PreviewMeasure, PreviewSurfacePatch};
 pub use regions::{
     CadColorEvidence, CadLabelRef, CadPhysicalMaterialEvidence, CadRegionOwnership,
     CadSemanticKind, EntityIdRange, Region, RegionEntityMapping,

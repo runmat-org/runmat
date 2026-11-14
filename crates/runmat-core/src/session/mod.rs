@@ -63,7 +63,7 @@ pub use fea_duration::{
     FeaExecutionTimingKey, FeaExecutionTimingObservation, FeaExecutionTimingProfile, FeaTimingRoute,
 };
 mod fea_preflight;
-pub use fea_preflight::FeaExecutionPreflight;
+pub use fea_preflight::{FeaCheckEstimate, FeaExecutionPreflight, RESOURCE_LIMIT_CODE};
 mod fea_browser_budget;
 pub use fea_browser_budget::{
     admit_browser_solve, admit_worker_request, BrowserMemoryPlatform, BrowserResourceLimit,

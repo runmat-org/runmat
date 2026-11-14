@@ -2617,6 +2617,36 @@ pub struct AnalysisExecutionCandidate {
     pub duration_evidence: Option<AnalysisExecutionDuration>,
     pub readiness: AnalysisExecutionReadiness,
     pub reason: Option<String>,
+    /// Tetrahedra the check estimates the study's mesh settings make of its geometry, before
+    /// meshing. Absent when the geometry has no measured preview.
+    #[serde(default)]
+    #[serde(with = "runmat_types::wire_integer::option")]
+    pub estimated_element_count: Option<u64>,
+    /// Mesh nodes of the same estimate (corner and midside nodes).
+    #[serde(default)]
+    #[serde(with = "runmat_types::wire_integer::option")]
+    pub estimated_node_count: Option<u64>,
+    /// Present when the estimate exceeds this target's admitted memory: the candidate is not
+    /// ready, and the limit says by how much.
+    #[serde(default)]
+    pub resource_limit: Option<AnalysisResourceLimit>,
+}
+/// A check-time refusal: the estimated requirement of one resource term against the maximum
+/// the target admits, with the action that resolves it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct AnalysisResourceLimit {
+    /// The diagnostic code, e.g. `RM.FEA.RUN_STUDY.BROWSER_RESOURCE_LIMIT`.
+    pub code: String,
+    /// The term that does not fit: `estimated_memory` or `estimated_scratch`.
+    pub term: String,
+    /// Absent only when another authored limit bound before the requirement was sized.
+    #[serde(default)]
+    #[serde(with = "runmat_types::wire_integer::option")]
+    pub required_bytes: Option<u64>,
+    #[serde(with = "runmat_types::wire_integer")]
+    pub maximum_bytes: u64,
+    pub next_action: String,
 }
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]

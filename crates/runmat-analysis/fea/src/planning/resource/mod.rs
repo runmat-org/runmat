@@ -260,6 +260,7 @@ pub use preflight::{
     build_structural_resource_plan, build_structural_resource_plan_from_compilation,
     require_executable_static_backend,
 };
+pub use preflight::{estimate_static_solid_from_counts, CountedStaticSolidEstimate};
 pub use random_response::{
     structural_random_response_assembly_payload_bytes_upper_bound,
     structural_random_response_interval_payload_bytes_upper_bound,

@@ -170,6 +170,14 @@ export interface FeaExecutionDuration {
   sampleCount: number;
 }
 
+export interface FeaResourceLimit {
+  code: string;
+  term: string;
+  requiredBytes: number | null;
+  maximumBytes: number;
+  nextAction: string;
+}
+
 export interface FeaExecutionCandidate {
   mode: FeaExecutionMode;
   cores: number | null;
@@ -178,6 +186,9 @@ export interface FeaExecutionCandidate {
   durationEvidence?: FeaExecutionDuration;
   readiness: FeaExecutionReadiness;
   reason: string | null;
+  estimatedElementCount: number | null;
+  estimatedNodeCount: number | null;
+  resourceLimit: FeaResourceLimit | null;
 }
 
 export interface FeaExecutionChoices {

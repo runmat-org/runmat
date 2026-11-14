@@ -150,6 +150,7 @@ geometry bracket {
 "#;
     let inspection = GeometryInspection {
         preview_extent_m: None,
+        preview_measure: None,
         unit_evidence: runmat_geometry_core::physical::LengthUnitEvidence::Declared {
             contexts: vec![runmat_geometry_core::physical::LengthUnitDeclaration {
                 context: "STEP fixture #1".into(),
@@ -204,6 +205,7 @@ model loaded_bracket { assign material.steel to geometry.bracket.region.body }
             vec!["body".to_string()],
         )]),
         preview_extent_m: None,
+        preview_measure: None,
         shared_faces: Default::default(),
         content_digest: SourceDigest([3; 32]),
         topology_digest: SourceDigest([4; 32]),
@@ -267,6 +269,7 @@ fn a_name_carried_by_two_entities_fails_an_exactly_one_region_at_check() {
             ],
         )]),
         preview_extent_m: None,
+        preview_measure: None,
         shared_faces: Default::default(),
         content_digest: SourceDigest([3; 32]),
         topology_digest: SourceDigest([4; 32]),
@@ -324,6 +327,7 @@ geometry channel {
         ],
         exchange: None,
         preview_extent_m: None,
+        preview_measure: None,
         resolved_units: Some(runmat_geometry_core::LengthUnit::Meter),
         unit_evidence: runmat_geometry_core::physical::LengthUnitEvidence::Declared {
             contexts: vec![runmat_geometry_core::physical::LengthUnitDeclaration {

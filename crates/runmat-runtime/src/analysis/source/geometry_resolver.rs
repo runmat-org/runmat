@@ -20,13 +20,14 @@ pub(super) fn inspect_geometry(
 ) -> Result<GeometryInspection, SourceDiagnostic> {
     // A RunMat MCAD part or assembly stands for the exact geometry its regeneration writes.
     if crate::geometry::design_source::is_design_geometry(request.logical_path.as_str()) {
-        let bytes = crate::geometry::design_source::read_design_geometry(path).map_err(|error| {
-            diagnostic(
-                "fea.host.design_geometry_failed",
-                error,
-                SourceAvailability::Available,
-            )
-        })?;
+        let bytes =
+            crate::geometry::design_source::read_design_geometry(path).map_err(|error| {
+                diagnostic(
+                    "fea.host.design_geometry_failed",
+                    error,
+                    SourceAvailability::Available,
+                )
+            })?;
         return inspect_geometry_bytes(&bytes, request);
     }
     let bytes = runmat_filesystem::read(path).map_err(|error| {
@@ -191,6 +192,7 @@ fn inspect_uncached(
     };
     Ok(GeometryInspection {
         preview_extent_m: preview_extent_m(&imported.asset),
+        preview_measure: runmat_geometry_core::PreviewMeasure::measure(&imported.asset),
         content_digest,
         topology_digest,
         capabilities: capabilities(&imported.asset, exchange.as_ref(), exact_topology),

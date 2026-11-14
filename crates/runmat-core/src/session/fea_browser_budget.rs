@@ -52,6 +52,10 @@ pub enum BrowserResourceTerm {
     NumericalResult,
     /// A numerical worker's request against the allowance its parent granted.
     WorkerAllowance,
+    /// The check-time estimate of the solve's resident memory with its prepared mesh.
+    EstimatedMemory,
+    /// The check-time estimate of the solve's scratch workspace.
+    EstimatedScratch,
 }
 
 impl BrowserResourceTerm {
@@ -63,6 +67,8 @@ impl BrowserResourceTerm {
             Self::PreparedRequest => "prepared_request",
             Self::NumericalResult => "numerical_result",
             Self::WorkerAllowance => "worker_allowance",
+            Self::EstimatedMemory => "estimated_memory",
+            Self::EstimatedScratch => "estimated_scratch",
         }
     }
 
@@ -73,6 +79,8 @@ impl BrowserResourceTerm {
             Self::PreparedRequest => "The prepared simulation",
             Self::NumericalResult => "The numerical result",
             Self::WorkerAllowance => "The numerical request",
+            Self::EstimatedMemory => "The estimated solve",
+            Self::EstimatedScratch => "The estimated solve workspace",
         }
     }
 }
@@ -173,6 +181,17 @@ impl BrowserResourceLimit {
                 "nextAction": NEXT_ACTION,
             },
         })
+    }
+
+    /// The same refusal on an execution candidate, for the Run card before Run.
+    pub fn resource_limit(&self) -> runmat_runtime::analysis::AnalysisResourceLimit {
+        runmat_runtime::analysis::AnalysisResourceLimit {
+            code: BROWSER_RESOURCE_LIMIT_CODE.to_owned(),
+            term: self.term.name().to_owned(),
+            required_bytes: self.required_bytes,
+            maximum_bytes: self.maximum_bytes,
+            next_action: NEXT_ACTION.to_owned(),
+        }
     }
 
     /// The same refusal as an RM operation error, for study steps a script runs.

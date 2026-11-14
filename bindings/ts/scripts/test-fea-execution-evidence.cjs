@@ -24,7 +24,15 @@ for (const evidence of [
 ]) assert.throws(()=>admit(plan({...candidate,durationEvidence:evidence})),/duration evidence/);
 assert.throws(()=>admit(plan({...candidate,estimatedMillis:null})),/duration evidence/);
 assert.doesNotThrow(()=>admit(plan({...candidate,estimatedMillis:null,durationEvidence:undefined})));
+const estimated = {...candidate,estimatedElementCount:124318,estimatedNodeCount:182210,resourceLimit:null};
+assert.doesNotThrow(()=>admit(plan(estimated)));
+const limit = {code:"RM.FEA.RUN_STUDY.BROWSER_RESOURCE_LIMIT",term:"estimated_memory",requiredBytes:5000000000,maximumBytes:4000000000,nextAction:"Continue in the desktop app."};
+assert.doesNotThrow(()=>admit(plan({...estimated,readiness:"desktop_required",durationEvidence:undefined,estimatedMillis:null,resourceLimit:limit})));
+assert.throws(()=>admit(plan({...estimated,resourceLimit:limit})),/resource limit/);
+assert.throws(()=>admit(plan({...estimated,readiness:"unavailable",resourceLimit:{...limit,requiredBytes:1}})),/resource limit/);
+assert.throws(()=>admit(plan({...estimated,estimatedElementCount:-1})),/mesh estimate/);
 const generated=fs.readFileSync(path.join(root,"src/generated/fea-analysis-contracts.ts"),"utf8");
 assert.match(generated,/durationEvidence\?: FeaExecutionDuration;/);
 assert.match(generated,/export interface FeaExecutionDuration \{/);
-console.log("Execution duration evidence: valid observed range accepted; sparse, non-finite, fractional and inconsistent evidence rejected; unknown remains absent.");
+assert.match(generated,/resourceLimit: FeaResourceLimit \| null;/);
+console.log("Execution duration evidence: valid observed range accepted; sparse, non-finite, fractional and inconsistent evidence rejected; unknown remains absent. Mesh estimates and resource limits: a limit is never ready and always exceeds its maximum.");

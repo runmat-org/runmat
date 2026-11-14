@@ -33,7 +33,7 @@ use demand_validation::{
     validate_buckling_demand, validate_modal_demand, validate_random_response_interval_demand,
     validate_transient_block_demand,
 };
-use implicit_input::implicit_resource_plan_input_facts;
+pub(in crate::planning::resource) use implicit_input::implicit_resource_plan_input_facts;
 use solve_storage::solve_storage;
 
 use post_process::{
@@ -348,7 +348,7 @@ fn prepared_output_is_valid(output: &PreparedOutputResourceFacts) -> bool {
             >= output.encoded_payload_bytes_upper_bound
 }
 
-fn operator_peak_resident_bytes(
+pub(in crate::planning::resource) fn operator_peak_resident_bytes(
     persistent_numerical: u64,
     decoded_inputs: u64,
     decoded_resource_plan: u64,

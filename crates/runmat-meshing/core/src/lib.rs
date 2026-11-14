@@ -5,6 +5,7 @@ pub const BUILD_CONFIGURATION: &str = env!("RUNMAT_BUILD_CONFIGURATION");
 extern crate self as runmat_meshing_core;
 
 pub mod contracts;
+pub mod estimate;
 pub mod fixtures;
 pub mod interpolation;
 pub mod quality;
@@ -67,6 +68,7 @@ pub use contracts::{
     SurfaceMeshTriangle, Tetrahedron4Element, TetrahedronBoundaryFace, TetrahedronMesh,
     TetrahedronMeshNode, TopologyEntityId, MESHING_CONTRACT_SCHEMA_VERSION,
 };
+pub use estimate::{estimate_solid_mesh_size, MeshSizeEstimate, SolidMeshCounts};
 pub use predicate::{
     closest_point_on_triangle, distance, distance_squared, point_in_closed_triangle_surface,
     point_triangle_distance, ray_triangle_intersection, tetrahedron_centroid,
