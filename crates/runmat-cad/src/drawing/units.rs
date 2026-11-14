@@ -53,7 +53,7 @@ impl DrawingUnits {
         if self == DrawingUnits::FtIn && n > 0 && d > 0 {
             // Inches on the sheet to a foot of the model.
             let sixteenths = (12.0 * 16.0 * n as f64 / d as f64).round() as u64;
-            if sixteenths > 0 && sixteenths % 192 != 0 {
+            if sixteenths > 0 && !sixteenths.is_multiple_of(192) {
                 return format!("{}\" = 1'-0\"", fraction(sixteenths));
             }
             if sixteenths > 0 {

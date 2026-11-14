@@ -546,7 +546,7 @@ impl SolvedSketch {
         let (Some(at), Some(t)) = (self.point(entity, PointRole::At), self.texts.get(entity)) else {
             return Vec::new();
         };
-        if !(t.height > 0.0) {
+        if t.height.is_nan() || t.height <= 0.0 {
             return Vec::new();
         }
         let u = t.height / CAP;

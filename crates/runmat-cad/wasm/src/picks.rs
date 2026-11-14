@@ -207,6 +207,25 @@ impl<'a> Picks<'a> {
         )))
     }
 
+    /// A direction: anything [`Self::axis`] takes (an edge or axis runs along itself), or a plane
+    /// (a datum plane or the Outline's `origin:top`), which gives its normal. A planar face is
+    /// an axis pick whose direction is its outward normal.
+    pub fn direction(&self, pick: &str) -> Result<Value, EditFailure> {
+        match self.axis(pick) {
+            Ok(axis) => Ok(axis),
+            Err(not_an_axis) => match lower_text(&self.text_of(pick)?) {
+                Ok(v) if v.get("on").is_some() => Ok(json!({ "along": "normal", "plane": v })),
+                _ => Err(match not_an_axis {
+                    EditFailure::Model(_) => model(format!(
+                        "`{pick}` gives no direction; pick a straight edge, an axis, a sketch line, \
+                         a plane or a planar face (its normal)"
+                    )),
+                    other => other,
+                }),
+            },
+        }
+    }
+
     /// A point: a datum point, a vertex, or a sketch point (a point entity, an arc's or circle's
     /// centre, a line's start).
     pub fn point(&self, pick: &str) -> Result<Value, EditFailure> {

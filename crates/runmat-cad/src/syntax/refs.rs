@@ -145,6 +145,63 @@ fn every_role_is_listed(role: Role) {
     }
 }
 
+/// What a role word names on a feature's result (`feature.body.face.side(…)`).
+pub fn role_summary(role: Role) -> &'static str {
+    match role {
+        Role::Side => "The face swept from one sketch entity: `face.side(profile.p3)`.",
+        Role::StartCap => "The cap on the start (sketch) plane.",
+        Role::EndCap => "The cap at the far end.",
+        Role::Blend => "A fillet's rounded face.",
+        Role::Chamfer => "A chamfer's bevel face.",
+        Role::ShellInner => "A shell's inner wall.",
+        Role::HoleWall => "A hole's cylindrical wall, by position key: `face.wall(a)`.",
+        Role::HoleBottom => "A blind hole's bottom.",
+        Role::HoleCounterbore => "A counterbore's floor.",
+        Role::HoleCounterboreWall => "A counterbore's wall.",
+        Role::HoleCountersink => "A countersink's cone.",
+        Role::ShellRim => "A shell's rim around an opening.",
+        Role::ShellOuter => "A shell's outer wall.",
+        Role::ThinWall => "A thin feature's wall face.",
+        Role::DraftStep => "A step face a step draft adds.",
+        Role::SplitFace => "A face a split made.",
+        Role::Body => "The body itself.",
+        Role::Replacement => "A face a direct edit replaced.",
+        Role::Boundary => "A surface's boundary edge.",
+        Role::SurfacePatch => "A filled surface patch.",
+        Role::OffsetFace => "An offset surface's face.",
+        Role::Extension => "The face an extended surface gained.",
+        Role::ThickenFace => "A thickened surface's face.",
+        Role::ThickenRim => "A thickened surface's rim.",
+        Role::MidSurface => "A mid-surface's face.",
+        Role::Ruled => "A ruled surface's face.",
+        Role::SheetFace => "A sheet-metal plate's face.",
+        Role::SheetEdge => "A sheet-metal plate's edge face.",
+        Role::BendFace => "A sheet-metal bend's face.",
+        Role::Relief => "A bend relief's face.",
+        Role::FormFace => "A formed feature's face.",
+        Role::MemberSide => "A structural member's side.",
+        Role::MemberEnd => "A structural member's end.",
+        Role::CapPlate => "An end cap plate.",
+        Role::Gusset => "A gusset plate.",
+        Role::WeldBead => "A weld bead.",
+        Role::PartingFace => "A parting surface's face.",
+        Role::ThreadFace => "A modelled thread's face.",
+        Role::EmbossTop => "An emboss's top face.",
+        Role::Rib => "A rib's face.",
+    }
+}
+
+/// What a reference path word names: a topology word (`face`) or a role (`side`).
+pub fn path_word_summary(word: &str) -> Option<&'static str> {
+    Some(match word {
+        "body" => "A body a feature made: `feature.<name>.body`.",
+        "face" => "Faces a feature made, by role: `feature.<name>.face.side(<entity>)`, `.face.end`.",
+        "edge" => "Edges a feature made, by role or between two faces.",
+        "vertex" => "Vertices a feature made.",
+        _ => return role_named(word).map(role_summary),
+    })
+}
+
 fn role_named(word: &str) -> Option<Role> {
     ROLES.iter().copied().find(|role| role.as_str() == word)
 }

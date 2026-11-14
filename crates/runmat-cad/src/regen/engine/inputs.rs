@@ -38,6 +38,21 @@ impl<'a, 'b> Run<'a, 'b> {
         })
     }
 
+    /// A feature argument's value, evaluated as the quantity the argument registry
+    /// ([`crate::syntax::arguments`]) gives `param` in features of kind `kind`.
+    pub(super) fn arg(
+        &mut self,
+        f: &FeatureId,
+        kind: &str,
+        param: &str,
+        v: &ValueExpr,
+    ) -> Result<f64, Halt> {
+        let dim = crate::syntax::arguments::dimension(kind, param).unwrap_or_else(|| {
+            panic!("the argument registry gives `{kind}` no numeric argument `{param}`")
+        });
+        self.value(f, param, v, dim)
+    }
+
     pub(super) fn count(&mut self, f: &FeatureId, param: &str, v: &ValueExpr) -> Result<u32, Halt> {
         let n = self.value(f, param, v, Dimension::DIMENSIONLESS)?;
         if n < 1.0 || n.fract() != 0.0 || n > 10_000.0 {
@@ -253,14 +268,15 @@ impl<'a, 'b> Run<'a, 'b> {
             AxisRef::Face { face } => {
                 let r = self.single(i, f, param, face, Some(TopoKind::Face))?;
                 let h = *r.entities().iter().next().expect("exactly one");
-                self.face_axis(&h).ok_or_else(|| {
+                self.face_axis(&h).or_else(|| self.planar_normal(&h)).ok_or_else(|| {
                     self.error(
                         f,
                         Some(param),
                         DiagCode::RefKindMismatch,
                         format!(
-                            "`{}` is neither cylindrical nor bounded by a circle, so it gives no \
-                             axis; pick a cylindrical or conical face, a circular edge or a datum axis",
+                            "`{}` is neither cylindrical, planar nor bounded by a circle, so it \
+                             gives no axis; pick a cylindrical or conical face, a planar face, a \
+                             circular edge or a datum axis",
                             face
                         ),
                         Vec::new(),
@@ -294,6 +310,20 @@ impl<'a, 'b> Run<'a, 'b> {
                     )
                 })
             }
+            AxisRef::Normal { plane } => {
+                let frame = self.plane(i, f, param, plane)?;
+                Ok((frame.origin, normalize(frame.z)))
+            }
+        }
+    }
+
+    /// A planar face's outward normal through its centroid, the direction a planar face gives a
+    /// direction field. `None` for a curved face.
+    pub(super) fn planar_normal(&self, h: &EntityHandle) -> Option<([f64; 3], [f64; 3])> {
+        let g = &self.st.bodies[h.body as usize].topology.faces[h.index as usize].geom;
+        match g.surface {
+            SurfaceKind::Plane { normal } => Some((g.centroid, normalize(normal))),
+            _ => None,
         }
     }
 

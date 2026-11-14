@@ -467,6 +467,36 @@ fn print_occurrence_pattern(
 /// The surface forms' own words, for the highlighter (`scripts/docs/fea-grammar.mjs` reads
 /// these tables).
 pub mod words {
+    /// What each CAD statement word does, for hovers and the language docs. Words every design
+    /// dialect shares are in [`runmat_design_syntax::dialect::word_summary`].
+    pub const SUMMARIES: &[(&str, &str)] = &[
+        ("sketch", "A 2D sketch on a plane or planar face: entities, constraints and dimensions."),
+        ("feature", "A modeling step: `feature <name> = <operation>(…)`; later steps read its faces as `feature.<name>.face.…`."),
+        ("feature_def", "A reusable feature definition, instanced with `library(…)`."),
+        ("region", "A named set of faces, edges or bodies for studies, drawings and checks: `region.<name>`."),
+        ("output", "A body the part delivers, with its part number, material and properties."),
+        ("datum", "A datum feature for tolerances: `datum A = { on = <face> }`."),
+        ("tolerance", "A geometric tolerance on faces: characteristic, tolerance and datums."),
+        ("annotation", "A note or symbol placed on the model."),
+        ("finish", "A surface finish on faces."),
+        ("material", "The material a part or body is made of."),
+        ("configuration", "A named set of input values the part or assembly can switch to."),
+        ("occurrence", "One placed copy of a part or assembly."),
+        ("mate", "A joint between two occurrences: its type, the frames it joins and its limits."),
+        ("connector", "A frame on an occurrence that mates attach to."),
+        ("pattern", "Copies of occurrences on a layout."),
+        ("mirror", "Mirrored copies of occurrences."),
+        ("exploded", "An exploded view: steps that move occurrences apart."),
+        ("fasteners", "Fasteners placed through matching holes."),
+        ("envelope", "A space a design must stay inside."),
+        ("location", "A named place in an assembly."),
+        ("view", "A drawing view of the model: orientation, scale and placement."),
+        ("format", "The sheet format: size, title block and border."),
+        ("size", "The sheet size."),
+        ("table", "A drawing table: a parts list, hole table or cut list."),
+        ("origin", "The part's origin: planes `origin.xy`, `origin.yz`, `origin.zx` and axes `origin.x`, `origin.y`, `origin.z`."),
+    ];
+
     /// Statement words besides the collections' words.
     pub const STATEMENTS: &[&str] = &["sketch", "use"];
     /// Sketch entities, sketch constraints, reference and datum forms, and short arguments.

@@ -23,8 +23,10 @@ use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 
 mod file_state;
+mod reference_facts;
 
 pub use file_state::{part_file_state, FileState};
+pub use reference_facts::{reference_facts, EntityFacts};
 
 /// Bumped on any change to the projection's shape.
 pub const INDEX_FORMAT_VERSION: u32 = 3;

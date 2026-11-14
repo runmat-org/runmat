@@ -63,8 +63,6 @@ pub const UNBUILT: &[&str] = &[
     // than a plane), so their forms wait for features that take them.
     "mold.shut-off",
     "mold.parting-surface",
-    // Direct: relations kept while a face moves.
-    "direct.live-relations",
     // Manage.
     "manage.find-references",
     "manage.freeze-bar",
@@ -106,6 +104,34 @@ mod tests {
         let c = catalog();
         let problems = c.lint();
         assert!(problems.is_empty(), "{problems:#?}");
+    }
+
+    /// Two fields a panel can show together never share a label (the audit found two Depth
+    /// and two Up to in Extrude, two Second direction and two Instances in Pattern, two Twist
+    /// in Sweep). Fields shown for different choices of the same field may share one.
+    #[test]
+    fn no_panel_shows_two_fields_with_one_label() {
+        let c = catalog();
+        let exclusive = |a: &Field, b: &Field| match (&a.visible_when, &b.visible_when) {
+            (Some(x), Some(y)) => {
+                x.field == y.field
+                    && !x.filled
+                    && !y.filled
+                    && x.any_of.iter().all(|v| !y.any_of.contains(v))
+            }
+            _ => false,
+        };
+        let mut clashes = Vec::new();
+        for command in &c.commands {
+            for (i, a) in command.inputs.iter().enumerate() {
+                for b in &command.inputs[i + 1..] {
+                    if a.label == b.label && !exclusive(a, b) {
+                        clashes.push(format!("{}: {} and {} are both \"{}\"", command.id, a.id, b.id, a.label));
+                    }
+                }
+            }
+        }
+        assert!(clashes.is_empty(), "{clashes:#?}");
     }
 
     #[test]
