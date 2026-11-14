@@ -176,3 +176,22 @@ fn a_split_takes_a_body_as_its_tool() {
         "{text}"
     );
 }
+
+/// A linear pattern's direction can be a plane (its normal) or a planar face (its outward
+/// normal), as well as an edge or axis: the Right plane's normal is +X.
+#[test]
+fn a_linear_pattern_runs_along_a_planes_normal() {
+    for direction in ["origin:right", "feature.body.face.side(s1.l2)"] {
+        let (text, bodies) = added(
+            "part.pattern",
+            json!({ "layout": "linear", "seeds": ["feature:boss"], "direction": [direction], "spacing": 8, "instances": 3 }),
+        );
+        assert!(text.contains("along = "), "{text}");
+        assert_eq!(bodies, 2, "{text}");
+    }
+    let (text, _) = added(
+        "part.pattern",
+        json!({ "layout": "linear", "seeds": ["feature:boss"], "direction": ["origin:right"], "spacing": 8, "instances": 3, "second_direction": true, "direction2": ["origin:front"], "spacing2": 6, "instances2": 2 }),
+    );
+    assert!(text.contains("plane = origin.zx"), "{text}");
+}

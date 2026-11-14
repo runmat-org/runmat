@@ -2,6 +2,14 @@
 
 use super::*;
 
+/// What Move face does, for its tooltip and panel: how it differs from Offset face.
+const MOVE_FACE_HELP: &str = "Move or turn the picked faces as one rigid set; the neighboring faces extend or trim to meet them. Recorded as a feature. Offset moves each face along its own normal, the same edit as Offset face.";
+
+/// What Offset face does, for its tooltip and panel.
+const OFFSET_FACE_HELP: &str = "Move each face along its own normal by the same distance; the neighboring faces extend or trim to follow, so a hole's radius changes and an angled face moves square to itself. Move face moves the faces rigidly instead.";
+
+const MOTION_HELP: &str = "Offset moves each face along its own normal. Translate moves the faces together along one direction, and Rotate turns them about an axis; the neighboring faces extend to meet them.";
+
 pub(super) fn direct() -> Vec<CommandDescriptor> {
     let d = |id: &str, label: &str, icon: &str, variant: &str| {
         cmd(id, label, icon, P)
@@ -11,24 +19,52 @@ pub(super) fn direct() -> Vec<CommandDescriptor> {
     };
     vec![
         d("direct.move-face", "Move face", "move-face", "move_faces")
-            .desc("Move or rotate faces; neighboring faces follow. Recorded as a feature.")
-            .kw(&["push", "translate face"])
+            .desc(MOVE_FACE_HELP)
+            .kw(&["push", "translate face", "rotate face", "offset face"])
             .inputs(vec![
                 picks("faces", "Faces", &[K::Face]),
                 radio(
                     "motion",
                     "Motion",
                     &[
-                        ("translate", "Translate"),
-                        ("rotate", "Rotate"),
-                        ("normal", "Along normal"),
+                        ("normal", "Offset (each face along its own normal)"),
+                        ("translate", "Translate along a direction"),
+                        ("rotate", "Rotate about an axis"),
                     ],
-                ),
-                offset("distance", "Distance", 1.0).drag(Manipulator::Arrow),
-                pick("direction", "Direction", &[K::Edge, K::Axis, K::Plane])
-                    .shown("motion", &["translate"]),
+                )
+                .help(MOTION_HELP),
+                pick(
+                    "direction",
+                    "Direction (edge, axis, or a plane's normal)",
+                    &[K::Edge, K::Axis, K::Plane, K::Face],
+                )
+                .help("A plane or planar face moves the faces along its normal; an edge or axis along itself")
+                .shown("motion", &["translate"]),
                 pick("axis", "Axis", &[K::Axis, K::Edge]).shown("motion", &["rotate"]),
-                angle("angle", "Angle", 0.0).shown("motion", &["rotate"]),
+                offset("distance", "Distance", 1.0)
+                    .drag(Manipulator::Arrow)
+                    .shown("motion", &["normal", "translate"]),
+                angle("angle", "Angle", 0.0)
+                    .drag(Manipulator::Angle)
+                    .shown("motion", &["rotate"]),
+                flag("reverse", "Reverse direction", false).shown("motion", &["translate", "rotate"]),
+                choice(
+                    "keep",
+                    "Keep (live relation)",
+                    &[
+                        ("none", "Nothing"),
+                        ("fixed", "Fixed"),
+                        ("parallel", "Parallel"),
+                        ("perpendicular", "Perpendicular"),
+                        ("coplanar", "Coplanar"),
+                        ("concentric", "Concentric"),
+                        ("tangent", "Tangent"),
+                    ],
+                )
+                .help("The edit fails, naming the relation, rather than break it"),
+                picks("keep_faces", "Faces to keep", &[K::Face])
+                    .help("Fixed: faces that must not move. Otherwise one face kept to the first moved face, or two faces kept to each other")
+                    .shown("keep", &["fixed", "parallel", "perpendicular", "coplanar", "concentric", "tangent"]),
             ]),
         d(
             "direct.offset-face",
@@ -36,10 +72,12 @@ pub(super) fn direct() -> Vec<CommandDescriptor> {
             "offset-face",
             "move_faces",
         )
-        .desc("Offset faces along their normals.")
+        .desc(OFFSET_FACE_HELP)
         .inputs(vec![
             picks("faces", "Faces", &[K::Face]),
-            offset("distance", "Distance", 1.0).drag(Manipulator::Arrow),
+            offset("distance", "Distance", 1.0)
+                .drag(Manipulator::Arrow)
+                .help("Each face moves this far along its own normal; negative moves it inward"),
         ]),
         d(
             "direct.replace-face",
@@ -104,35 +142,12 @@ pub(super) fn direct() -> Vec<CommandDescriptor> {
             offset("value", "Value", 0.0).drag(Manipulator::Arrow),
         ]),
         d("direct.pull", "Pull", "pull", "move_faces")
-            .desc("Push or pull faces; adds or removes material.")
+            .desc("Offset face that adds or removes material: each face moves along its own normal, and the body grows or shrinks to follow.")
             .kw(&["push pull", "press pull"])
             .inputs(vec![
                 picks("faces", "Faces", &[K::Face]),
                 offset("distance", "Distance", 1.0).drag(Manipulator::Arrow),
             ]),
-        cmd("direct.live-relations", "Live relations", "relations", P)
-            .desc("Keep faces parallel, concentric or tangent while editing directly.")
-            .kw(&["keep", "parallel", "concentric", "tangent"])
-            .inputs(vec![
-                choice(
-                    "keep",
-                    "Keep",
-                    &[
-                        ("parallel", "Parallel"),
-                        ("concentric", "Concentric"),
-                        ("tangent", "Tangent"),
-                        ("coplanar", "Coplanar"),
-                        ("symmetric", "Symmetric"),
-                    ],
-                ),
-                picks("faces", "Faces", &[K::Face]),
-            ])
-            .when(bodies_exist())
-            .edit(
-                edit(EditOp::Set, Section::Features)
-                    .item("direct")
-                    .variant("keep", "parallel"),
-            ),
     ]
 }
 

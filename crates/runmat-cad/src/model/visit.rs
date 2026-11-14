@@ -63,6 +63,7 @@ impl<'a> Visit<'a> {
             AxisRef::Face { face } => self.reference(param, face),
             AxisRef::Datum { datum } => self.datum(datum),
             AxisRef::SketchLine { sketch, .. } => self.features.push(sketch.clone()),
+            AxisRef::Normal { plane } => self.plane(param, plane),
         }
     }
     pub fn point(&mut self, param: &str, p: &'a PointRef) {

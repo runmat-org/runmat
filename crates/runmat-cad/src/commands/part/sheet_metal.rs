@@ -33,6 +33,12 @@ pub(super) fn sheet_metal_commands() -> Vec<CommandDescriptor> {
                     ],
                 ),
                 qty("k", "K-factor", "ratio", Some(0.44)).shown("bend_rule", &["k_factor"]),
+                length("allowance", "Allowance per 90° bend", 2.0).shown("bend_rule", &["allowance"]),
+                length("deduction", "Deduction per 90° bend", 2.0).shown("bend_rule", &["deduction"]),
+                text("bend_table", "Bend table", None)
+                    .optional()
+                    .help("A bend table is written in Source: the table's rows by thickness, radius and angle")
+                    .shown("bend_rule", &["table"]),
                 text("gauge", "Gauge", Some("16 ga")).optional(),
             ])
             .when(has(Facet::Sketches))
