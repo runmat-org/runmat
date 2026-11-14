@@ -4,7 +4,7 @@
 
 use crate::import::{file_safe, Report};
 use crate::ir::{Design, PartRef};
-use crate::library::catalog::{PartRecord, PartPin};
+use crate::library::catalog::{PartPin, PartRecord};
 use crate::library::{Package, Pool};
 use std::collections::BTreeMap;
 

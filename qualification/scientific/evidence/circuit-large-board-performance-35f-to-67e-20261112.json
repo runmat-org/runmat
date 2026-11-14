@@ -1,0 +1,187 @@
+{
+  "schema_version": 1,
+  "measured_source": "35f5a6c647203246c4caec0fbbcfe18d4f899a6e",
+  "accepted_source": "67e7985cd2d7b4978b9ed6312713da97b148a6a3",
+  "passed": 1,
+  "failed": 0,
+  "ignored": 0,
+  "log_sha256": "b1c9548012705f306db2894f20d91bcc06590dd2a87cb8c83b975f71303e10c5",
+  "artifact_sha256": "ff391d179082800bbfd6026f9dbb9cb35c4589c9fa2dd7600a093a7e0b22f535",
+  "call_graph": [
+    "runtime_scale::small_edits_on_a_large_board_stay_within_budget",
+    "runmat_circuit::runtime::Session::compile and edit",
+    "circuit projection and fresh-compile equivalence"
+  ],
+  "unchanged_inputs": [
+    {
+      "path": "Cargo.toml",
+      "before": [
+        "100644",
+        "blob",
+        "9e6e369ac33d1cefd157fece68f34c46d790f0d3"
+      ],
+      "after": [
+        "100644",
+        "blob",
+        "9e6e369ac33d1cefd157fece68f34c46d790f0d3"
+      ]
+    },
+    {
+      "path": "Cargo.lock",
+      "before": [
+        "100644",
+        "blob",
+        "6a0348677fb3369c88f3aeacb267208fe1ad68c1"
+      ],
+      "after": [
+        "100644",
+        "blob",
+        "6a0348677fb3369c88f3aeacb267208fe1ad68c1"
+      ]
+    },
+    {
+      "path": "rust-toolchain.toml",
+      "before": [
+        "100644",
+        "blob",
+        "3e93985846a5d81b15c41f2abd384836a8e12d61"
+      ],
+      "after": [
+        "100644",
+        "blob",
+        "3e93985846a5d81b15c41f2abd384836a8e12d61"
+      ]
+    },
+    {
+      "path": ".cargo",
+      "before": [
+        "040000",
+        "tree",
+        "376bd3511faf5bcdc04544f7e09fbb5ad5c34047"
+      ],
+      "after": [
+        "040000",
+        "tree",
+        "376bd3511faf5bcdc04544f7e09fbb5ad5c34047"
+      ]
+    },
+    {
+      "path": "crates/runmat-circuit",
+      "before": [
+        "040000",
+        "tree",
+        "2a6e46310c96f3f1420f4ed84fa8497aa9e145cb"
+      ],
+      "after": [
+        "040000",
+        "tree",
+        "2a6e46310c96f3f1420f4ed84fa8497aa9e145cb"
+      ]
+    },
+    {
+      "path": "crates/runmat-cad",
+      "before": [
+        "040000",
+        "tree",
+        "9dee53c91f7bbb486cfd822cba9393fbd9a5eec1"
+      ],
+      "after": [
+        "040000",
+        "tree",
+        "9dee53c91f7bbb486cfd822cba9393fbd9a5eec1"
+      ]
+    },
+    {
+      "path": "crates/runmat-geometry",
+      "before": [
+        "040000",
+        "tree",
+        "f9398d600cc267edc7d5a746d32ae63f70893437"
+      ],
+      "after": [
+        "040000",
+        "tree",
+        "f9398d600cc267edc7d5a746d32ae63f70893437"
+      ]
+    },
+    {
+      "path": "crates/runmat-design-tools",
+      "before": [
+        "040000",
+        "tree",
+        "90a2ca6eafa966161f5706aebb045ccfcbee0543"
+      ],
+      "after": [
+        "040000",
+        "tree",
+        "90a2ca6eafa966161f5706aebb045ccfcbee0543"
+      ]
+    },
+    {
+      "path": "crates/runmat-design-syntax",
+      "before": [
+        "040000",
+        "tree",
+        "e9fadbffd581e3f655bcb64ee65f530ac4e95131"
+      ],
+      "after": [
+        "040000",
+        "tree",
+        "e9fadbffd581e3f655bcb64ee65f530ac4e95131"
+      ]
+    },
+    {
+      "path": "crates/runmat-design-commands",
+      "before": [
+        "040000",
+        "tree",
+        "7185ce3c3147198d1e5d3e6c1fe05961e38d2e0d"
+      ],
+      "after": [
+        "040000",
+        "tree",
+        "7185ce3c3147198d1e5d3e6c1fe05961e38d2e0d"
+      ]
+    },
+    {
+      "path": "crates/runmat-types",
+      "before": [
+        "040000",
+        "tree",
+        "abf776b14e681127ad1c421f6161ace8c6ddd515"
+      ],
+      "after": [
+        "040000",
+        "tree",
+        "abf776b14e681127ad1c421f6161ace8c6ddd515"
+      ]
+    },
+    {
+      "path": "crates/runmat-rules",
+      "before": [
+        "040000",
+        "tree",
+        "5addce2b6bd71432c1dc0af30956e03d194cb90d"
+      ],
+      "after": [
+        "040000",
+        "tree",
+        "5addce2b6bd71432c1dc0af30956e03d194cb90d"
+      ]
+    },
+    {
+      "path": "scripts/runtime/build-exact-cad-wasm.sh",
+      "before": [
+        "100644",
+        "blob",
+        "80bb67ecbb6c4ab8db06e7453953037a9e41e906"
+      ],
+      "after": [
+        "100644",
+        "blob",
+        "80bb67ecbb6c4ab8db06e7453953037a9e41e906"
+      ]
+    }
+  ],
+  "scope": "Preserves the original native measurement on source 35f5a6c647 and its recorded hardware and allocation scope. This review establishes that all 23 intervening source changes are outside the measured call graph. Consolidated FEA physics, distributed browser products and final CI remain separate qualification obligations."
+}

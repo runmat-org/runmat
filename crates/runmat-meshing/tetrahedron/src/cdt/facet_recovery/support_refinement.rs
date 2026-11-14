@@ -624,12 +624,7 @@ pub(super) fn interior_support_node(
         .collect::<Result<Vec<_>, _>>()?;
     vertices.sort_by_key(|(identity, _)| *identity);
     let construction_vertices = std::array::from_fn(|index| vertices[index].1);
-    let coordinates_m = std::array::from_fn(|axis| {
-        (2.0 * construction_vertices[0][axis]
-            + construction_vertices[1][axis]
-            + construction_vertices[2][axis])
-            * 0.25
-    });
+    let coordinates_m = interior_split_coordinates(construction_vertices);
     let insertion_round = 1;
     let candidate_rank = u64::MAX - refinement_rank;
     let Some(node) = candidate_node(
@@ -737,6 +732,128 @@ pub(super) fn refine_support_triangle_interior_in_place(
         }
         InPlaceCandidate::Declined(_) => Ok(None),
     }
+}
+
+/// The dyadic 2:1:1 point of a support triangle whose corners are sorted by identity.
+fn interior_split_coordinates(sorted_corners: [[f64; 3]; 3]) -> [f64; 3] {
+    std::array::from_fn(|axis| {
+        (2.0 * sorted_corners[0][axis] + sorted_corners[1][axis] + sorted_corners[2][axis]) * 0.25
+    })
+}
+
+/// After the interior split of a support triangle declined: when the split node lies inside the
+/// diametral ball of one of the triangle's recovered segment edges, and inside the circumcircle
+/// of a recovered facet triangle on that edge, the segment edge is split (with its encroachment
+/// cascade) and the triangle is retried on the refined segments.
+///
+/// The node encroaches that edge. When the facet across the edge is nearly coplanar, the node
+/// lies a few micrometres off its plane, inside its circumcircle and beyond its edge, so the node
+/// sees the cells on both sides of that protected face through unprotected faces. Every sphere
+/// through the protected face then holds the node or lies far out on its other side, and no
+/// constrained Delaunay complex holds the face and the node. Splitting the encroached segment
+/// edge first is the segment-before-facet rule of Ruppert and Shewchuk refinement. The split runs
+/// on the working topology first and on the canonical topology when the local split declines;
+/// both admit the result exactly. Returns `None`, with the rejection kept, when no segment edge
+/// is encroached this way or both splits decline.
+pub(super) fn split_segment_encroached_by_interior_node(
+    working: &mut super::working::FacetRecoveryWorking,
+    pending: &PendingSupportTriangle,
+    protected_triangles: &[DelaunayRecoveredFacetTriangle],
+    protected_edges: &[[StableDigest; 2]],
+    constraint_index: u32,
+    work: &mut FacetRecoveryWork<'_>,
+) -> Result<Option<Vec<ProtectedFacetSplit>>, DelaunayFacetRecoveryError> {
+    use crate::cdt::insertion::topology_access::TetrahedralTopology;
+    let triangle = pending.triangle.node_identities;
+    let mut sorted = triangle;
+    sorted.sort_unstable();
+    let corners = sorted.map(|identity| {
+        node_index(working.topology(), identity).map(|index| {
+            working.topology().nodes()[index]
+                .coordinates_m
+                .canonical_value()
+        })
+    });
+    let [Some(first), Some(second), Some(third)] = corners else {
+        return Ok(None);
+    };
+    let node = interior_split_coordinates([first, second, third]);
+    let encroached_faces =
+        super::facet_delaunay::encroached_by_point(working.topology(), protected_triangles, node);
+    let across = protected_edges
+        .iter()
+        .copied()
+        .filter(|edge| {
+            encroached_faces.iter().any(|face| {
+                face.node_identities != triangle
+                    && edge.iter().all(|end| face.node_identities.contains(end))
+            })
+        })
+        .collect::<Vec<_>>();
+    let Some(encroached) =
+        encroachment::segment_edge_encroached_by_point(working.topology(), triangle, node, &across)
+    else {
+        return Ok(None);
+    };
+    let declined = work
+        .last_rejection()
+        .unwrap_or("no reason recorded")
+        .to_owned();
+    work.clear_rejection();
+    let splits = match split_recovered_segment_edge_in_place(
+        working,
+        encroached,
+        protected_triangles,
+        protected_edges,
+        constraint_index,
+        work,
+    )? {
+        Some(splits) => Some(splits),
+        None => {
+            let in_place = work
+                .last_rejection()
+                .unwrap_or("no reason recorded")
+                .to_owned();
+            work.clear_rejection();
+            let canonical = working.canonical_call(constraint_index, work, |source, work| {
+                Ok(try_split_recovered_segment_edge(
+                    source,
+                    encroached,
+                    protected_triangles,
+                    constraint_index,
+                    work,
+                )?
+                .map(|refined| {
+                    *source = refined.recovery;
+                    refined.splits
+                }))
+            })?;
+            if canonical.is_none() {
+                let detail = work
+                    .last_rejection()
+                    .unwrap_or("no reason recorded")
+                    .to_owned();
+                work.reject(format!(
+                    "{declined}; the recovered segment edge {encroached:?} that the interior \
+                     split node encroaches could not be split: {detail}; in-place split: \
+                     {in_place}"
+                ));
+            }
+            canonical
+        }
+    };
+    let Some(splits) = splits else {
+        return Ok(None);
+    };
+    work.cavity_steiner_node(constraint_index)?;
+    tracing::info!(
+        event_code = "meshing.tetrahedron.facet_recovery.interior_encroached_segment_split",
+        constraint_index,
+        protected_facet_split_count = splits.len(),
+        "a facet-interior split node encroached a recovered segment edge beside a nearly \
+         coplanar facet, which was split"
+    );
+    Ok(Some(splits))
 }
 
 fn interior_split(

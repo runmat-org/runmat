@@ -65,7 +65,10 @@ fn stem(path: &str) -> String {
     name.split('.').next().unwrap_or(name).to_string()
 }
 
-fn mm_loops(loops: &[Vec<(f64, f64)>], name: &str) -> Vec<Vec<runmat_cad::regen::kernel::ProfileSegment>> {
+fn mm_loops(
+    loops: &[Vec<(f64, f64)>],
+    name: &str,
+) -> Vec<Vec<runmat_cad::regen::kernel::ProfileSegment>> {
     loops
         .iter()
         .enumerate()
@@ -103,11 +106,17 @@ fn model_bodies(
     let mut bodies: Vec<BodyHandle> = match kernel.execute(&read, &[]) {
         Ok(out) if !out.bodies.is_empty() => out.bodies.into_iter().map(|b| b.handle).collect(),
         Ok(_) => {
-            notes.push(format!("{designator}: {} holds no solid; its body box is written", m.path));
+            notes.push(format!(
+                "{designator}: {} holds no solid; its body box is written",
+                m.path
+            ));
             return None;
         }
         Err(e) => {
-            notes.push(format!("{designator}: {} doesn't read ({e}); its body box is written", m.path));
+            notes.push(format!(
+                "{designator}: {} doesn't read ({e}); its body box is written",
+                m.path
+            ));
             return None;
         }
     };
@@ -117,7 +126,9 @@ fn model_bodies(
             match kernel.execute(&op, &[b]) {
                 Ok(r) => out.extend(r.bodies.into_iter().map(|b| b.handle)),
                 Err(e) => {
-                    notes.push(format!("{designator}: its model doesn't place ({e}); its body box is written"));
+                    notes.push(format!(
+                        "{designator}: its model doesn't place ({e}); its body box is written"
+                    ));
                     return None;
                 }
             }
@@ -158,19 +169,31 @@ pub fn board_step(
     // The substrate, with its cut-outs and drilled holes as inner loops of one profile.
     let mut sheet = solid.outline.clone();
     sheet.extend(solid.holes.iter().cloned());
-    let slab = |z0: f64, z1: f64, name: &str, notes: &mut Vec<String>| {
-        match prism(k, mm_loops(&sheet, name), z0 * 1e-3, z1 * 1e-3, Combine::New, &[]) {
-            Ok(b) => Ok(b),
-            Err(e) if !solid.holes.is_empty() => {
-                notes.push(format!(
-                    "{name}: the {} drilled holes don't cut ({e}); it is written without them",
-                    solid.holes.len()
-                ));
-                prism(k, mm_loops(&solid.outline, name), z0 * 1e-3, z1 * 1e-3, Combine::New, &[])
-                    .map_err(|e| format!("the board outline doesn't extrude: {e}"))
-            }
-            Err(e) => Err(format!("the board outline doesn't extrude: {e}")),
+    let slab = |z0: f64, z1: f64, name: &str, notes: &mut Vec<String>| match prism(
+        k,
+        mm_loops(&sheet, name),
+        z0 * 1e-3,
+        z1 * 1e-3,
+        Combine::New,
+        &[],
+    ) {
+        Ok(b) => Ok(b),
+        Err(e) if !solid.holes.is_empty() => {
+            notes.push(format!(
+                "{name}: the {} drilled holes don't cut ({e}); it is written without them",
+                solid.holes.len()
+            ));
+            prism(
+                k,
+                mm_loops(&solid.outline, name),
+                z0 * 1e-3,
+                z1 * 1e-3,
+                Combine::New,
+                &[],
+            )
+            .map_err(|e| format!("the board outline doesn't extrude: {e}"))
         }
+        Err(e) => Err(format!("the board outline doesn't extrude: {e}")),
     };
     products.push(Product {
         name: "board".into(),
@@ -178,7 +201,10 @@ pub fn board_step(
         color: colors::SUBSTRATE,
     });
     if options.mask {
-        for (name, (z0, z1)) in [("solder mask top", mask[0]), ("solder mask bottom", mask[1])] {
+        for (name, (z0, z1)) in [
+            ("solder mask top", mask[0]),
+            ("solder mask bottom", mask[1]),
+        ] {
             products.push(Product {
                 name: name.into(),
                 bodies: vec![slab(z0, z1, name, &mut notes)?],
@@ -193,7 +219,14 @@ pub fn board_step(
             let mut lost = 0usize;
             for (i, item) in layer.items.iter().enumerate() {
                 let loops = mm_loops(item, &format!("cu{i}_"));
-                match prism(k, loops, layer.z0 * 1e-3, layer.z1 * 1e-3, Combine::New, &[]) {
+                match prism(
+                    k,
+                    loops,
+                    layer.z0 * 1e-3,
+                    layer.z1 * 1e-3,
+                    Combine::New,
+                    &[],
+                ) {
                     Ok(b) => bodies.push(b),
                     Err(_) => lost += 1,
                 }
@@ -237,7 +270,10 @@ pub fn board_step(
                     vec![body]
                 }
                 Err(e) => {
-                    notes.push(format!("{}: its body doesn't extrude ({e}); left out", b.designator));
+                    notes.push(format!(
+                        "{}: its body doesn't extrude ({e}); left out",
+                        b.designator
+                    ));
                     continue;
                 }
             },

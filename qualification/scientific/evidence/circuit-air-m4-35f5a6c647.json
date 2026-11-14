@@ -1,0 +1,26 @@
+{
+  "schema_version": 1,
+  "source_revision": "35f5a6c647203246c4caec0fbbcfe18d4f899a6e",
+  "target": "macos-aarch64",
+  "hardware": "Apple M4, 24 GiB RAM",
+  "passed": 1,
+  "failed": 0,
+  "ignored": 0,
+  "exit_code": 0,
+  "log_sha256": "b1c9548012705f306db2894f20d91bcc06590dd2a87cb8c83b975f71303e10c5",
+  "artifact_sha256": "ff391d179082800bbfd6026f9dbb9cb35c4589c9fa2dd7600a093a7e0b22f535",
+  "source_verification": {
+    "status": "verified",
+    "root": "/Users/runmat-air/src/runtime-circuit-intake-df1e2068ed",
+    "revision": "35f5a6c647203246c4caec0fbbcfe18d4f899a6e",
+    "files": 27265
+  },
+  "test_seconds": 72.55,
+  "primitives": 71727,
+  "move_edit_ms": 23.670666,
+  "move_recompile_ms": 271.934083,
+  "delete_edit_ms": 21.957667,
+  "delete_recompile_ms": 416.636125,
+  "package_recompile_ms": 243.019416,
+  "scope": "One optimized policy run with RUST_TEST_NOCAPTURE=1 retains timing diagnostics. The 500 ms edit budgets and policy argument vector are unchanged."
+}

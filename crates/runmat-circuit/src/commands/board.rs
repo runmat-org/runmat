@@ -405,7 +405,11 @@ pub(super) fn tab() -> DomainTab {
                     c("board.test-points"),
                 ],
             ),
-            group("outputs", "Outputs", vec![c("board.fab-outputs"), c("board.export")]),
+            group(
+                "outputs",
+                "Outputs",
+                vec![c("board.fab-outputs"), c("board.export")],
+            ),
             group("mechanical", "Mechanical", vec![c("board.to-enclosure")]),
             group(
                 "analysis",

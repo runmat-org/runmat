@@ -25,12 +25,35 @@ impl SupervisorFixture {
     pub(super) fn request_stop(&self) -> std::io::Result<()> {
         std::fs::write(self.root.join("test-stop"), b"stop")
     }
+}
 
-    fn released(&self) -> bool {
-        self.root.join("test-stopped").is_file()
-            && runmat_filesystem::ExclusiveFileLock::try_acquire(&self.root.join("supervisor.lock"))
-                .is_ok_and(|owner| owner.is_some())
-    }
+// The kernel lease can be released before run_child writes its acknowledgement.
+// Both are required before collecting the namespace or starting a replacement.
+pub(super) fn supervisor_stopped(root: &Path) -> bool {
+    root.join("test-stopped").is_file()
+        && runmat_filesystem::ExclusiveFileLock::try_acquire(&root.join("supervisor.lock"))
+            .is_ok_and(|owner| owner.is_some())
+}
+
+fn verify_stop_ack_boundary() {
+    let fixture = SupervisorFixture::new("stop-ack-boundary");
+    std::fs::create_dir_all(fixture.root()).unwrap();
+    assert!(
+        !supervisor_stopped(fixture.root()),
+        "a released kernel lease does not acknowledge child teardown"
+    );
+    let authority =
+        runmat_filesystem::ExclusiveFileLock::try_acquire(&fixture.root().join("supervisor.lock"))
+            .unwrap()
+            .unwrap();
+    std::fs::write(fixture.root().join("test-stopped"), b"stopped").unwrap();
+    assert!(
+        !supervisor_stopped(fixture.root()),
+        "the acknowledgement does not release a live kernel authority"
+    );
+    drop(authority);
+    assert!(supervisor_stopped(fixture.root()));
+    println!("supervisor stop requires child acknowledgement and kernel release");
 }
 
 impl Drop for SupervisorFixture {
@@ -39,7 +62,7 @@ impl Drop for SupervisorFixture {
         let started = Instant::now();
         if requested.is_ok() {
             while started.elapsed() < Duration::from_secs(5) {
-                if self.released() {
+                if supervisor_stopped(&self.root) {
                     return;
                 }
                 std::thread::sleep(Duration::from_millis(10));
@@ -58,6 +81,7 @@ impl Drop for SupervisorFixture {
 }
 
 pub(super) async fn verify_unwind() {
+    verify_stop_ack_boundary();
     let fixture = SupervisorFixture::new("unwind-authority");
     let root = fixture.root().to_path_buf();
     let namespace = root.parent().unwrap().to_path_buf();

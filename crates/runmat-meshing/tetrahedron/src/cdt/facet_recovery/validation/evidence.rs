@@ -25,8 +25,8 @@ pub(super) fn validate_recovered_facets(
     let mut work = FacetRecoveryWork::new(options, cancellation);
     let mut globally_recovered = BTreeSet::new();
     for (constraint_index, recovered) in recovery.facets.iter().enumerate() {
-        work.begin_constraint();
         let constraint_index = constraint_index as u32;
+        work.begin_constraint(constraint_index)?;
         if recovered.constraint_index != constraint_index || recovered.triangles.is_empty() {
             return Err(invalid(
                 constraint_index,

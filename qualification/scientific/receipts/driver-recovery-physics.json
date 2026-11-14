@@ -3,11 +3,13 @@
   "cohort": "driver-recovery-physics",
   "policy_sha256": "eeab2d440d501db5062b1302e786dd0680fa4bf1065d061bfe57f6691b7a233b",
   "measured": {
-    "source_revision": "ceae94b5da5d3c95f00cb6ba01a151a536f5fbcb",
+    "source_revision": "67e7985cd2d7b4978b9ed6312713da97b148a6a3",
+    "exit_code": 0,
     "passed": 18,
     "failed": 0,
     "ignored": 0,
     "filtered_out": 464,
+    "test_seconds": 1625.63,
     "case_names": [
       "remote::driver_replacement_tests::active_analysis_attempt_retries_after_actual_driver_replacement",
       "remote::driver_replacement_tests::actual_driver_restarts_from_server_checkpoint_on_a_different_worker",
@@ -28,19 +30,16 @@
       "remote::driver_replacement_tests::restored_analysis_retry_observes_cancellation_before_publication",
       "remote::driver_replacement_tests::thermal::authored_matrix_variants_typecheck_with_explicit_physical_loads"
     ],
-    "log_sha256": "6354aa6ca74dbf7919b36ec71d97ad86126c563a8852466602c7bb96560e8c7b",
-    "log_location": "gh-linux-20260327-125436:/home/nallana/rm1293/logs/intake-ceae94b5da-scientific.driver-recovery-physics.log",
+    "log_sha256": "8b986093598f4f214911dc7834fb0085b59f604f6fa63fde4f89732577788ac8",
+    "log_location": "gh-linux-20260327-125436:/home/nallana/rm1293/logs/consolidated-67e7985cd2-physics.driver-recovery-physics.log",
     "artifacts": [
       {
-        "sha256": "0994faff673f6a545b566e7ccb6fd793eac944c9189d3692bc40e2a9d7cda61c",
-        "bytes": 572298832,
-        "location": "gh-linux-20260327-125436:/home/nallana/rm1293/logs/intake-ceae94b5da-scientific-artifacts/driver-recovery-physics"
+        "sha256": "cf36dc59e30a495ee9345c841f92dc19742530d41437765ad07310a4af5ad11b",
+        "bytes": 572364368,
+        "location": "gh-linux-20260327-125436:/home/nallana/rm1293/logs/consolidated-67e7985cd2-physics-artifacts/driver-recovery-physics",
+        "executed_path": "/home/nallana/rm1293/targets/release/deps/runmat_execution_runner_native-255843cfc32d581f"
       }
     ],
-    "exit_code": 0,
-    "target": "linux-x86_64",
-    "hardware": "GCP N1 highmem-16, Intel Xeon, 16 vCPU and 104 GiB RAM",
-    "toolchain": "rustc 1.90.0 (1159e78c4 2025-09-14)",
     "command": [
       "cargo",
       "test",
@@ -55,6 +54,9 @@
       "--",
       "--test-threads=1"
     ],
+    "target": "linux-x86_64",
+    "hardware": "GCP N1 highmem-16, Intel Xeon, 16 vCPU and 104 GiB RAM",
+    "toolchain": "rustc 1.90.0 (1159e78c4 2025-09-14)",
     "profile": {
       "release": true,
       "debug": 0,
@@ -64,34 +66,34 @@
     },
     "selected_filter": "remote::driver_replacement_tests::",
     "inputs": {
-      "sha256": "44b84374c0acf2daa0b5e9a68409ce7e7b214ed313c76c4dff755a9c119ae118",
-      "files": 26104,
+      "sha256": "ba994ecda5890f03352b0d1d658b4eae17c1363da19add65f5dd359cfbe99ce2",
+      "files": 26117,
       "encoding": "git-mode-type-blob-path-tuples-v1"
     },
     "source_verification": {
-      "at": "2026-11-12T00:56:31.027Z",
-      "root": "/home/nallana/rm1293/candidates/settings-r964-linux",
-      "stage": "/home/nallana/rm1293/incoming/intake-ceae94b5da-source",
       "status": "verified",
-      "files": 27246
+      "root": "/home/nallana/rm1293/candidates/settings-r964-linux",
+      "revision": "67e7985cd2d7b4978b9ed6312713da97b148a6a3",
+      "files": 27272,
+      "before_and_after": true
     },
-    "source_scope": "All 27,246 canonical source files verified against the frozen ceae94b5da snapshot after both cohorts. Credentials and .env namespaces are excluded from transfers."
+    "source_scope": "All 27,272 canonical source files match the frozen consolidated snapshot before and after the required authored, recovery and bounded exact-kernel cohorts. Retained executables have byte-verified copies. Credentials and .env files are excluded from the source transfer."
   },
   "conservation": {
     "measured_inputs": {
-      "sha256": "44b84374c0acf2daa0b5e9a68409ce7e7b214ed313c76c4dff755a9c119ae118",
-      "files": 26104,
+      "sha256": "ba994ecda5890f03352b0d1d658b4eae17c1363da19add65f5dd359cfbe99ce2",
+      "files": 26117,
       "encoding": "git-mode-type-blob-path-tuples-v1"
     },
     "accepted_inputs": {
-      "sha256": "9eb1fb59fa44dd2efb55fa6a409b30adeedc4f3eafc74e3c8a55040acadfc3f0",
-      "files": 26104,
+      "sha256": "190b41b66e4260e756e5a6187443feb05e3d1ae4f8b261e02a9ee57b831ab6da",
+      "files": 26117,
       "encoding": "git-mode-type-blob-path-tuples-v1"
     },
-    "reason": "The complete eight-file delta consists of four formatting-only FEA files, an unchanged modal diagnostic test module moved after production items, the separate CAD fixture comparator and its equivalent rotation constants, and the Desktop part.sketch handler with its integration test. These recovery tests execute FEA requests and driver replacement; they do not dispatch the Desktop part.sketch command. Exact byte comparisons and the rotation-value witness qualify the test-only edits. Solver arithmetic, admission, checkpoint fencing, recovery publication, case inventory and required command remain unchanged.",
+    "reason": "Conserves the recorded scientific measurements across the reviewed process-retirement lifecycle change. Apple group-signal EPERM commits to bounded observation and retains its error; positive leader/group retirement is still required. Linux and Windows retain their previous signal/error decisions. No solver arithmetic, scientific inputs, dependencies, compiler settings or measured thresholds change. The direct in-process circuit Session workload and CAD drawing host workload do not invoke this child-retirement path. The actual Mac meshing and supervisor conformance executables pass with unchanged assertions; they qualify the affected native path separately from these conserved scientific measurements.",
     "review": {
-      "path": "qualification/scientific/reviews/recovery-ceae-to-793f9ae2b3.json",
-      "sha256": "c4aa0efdd78f10b17548fb33e29eb5f1617670d4127f318f1b805cea69200c07"
+      "path": "qualification/scientific/reviews/process-retirement-20261112-driver-recovery-physics.json",
+      "sha256": "861d719259bbcab69b24420f3efa70747ffc1ced9a3e61d5189ae4cf41526d81"
     }
   }
 }

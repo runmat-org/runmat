@@ -267,7 +267,9 @@ jobs:
           # Keep the remaining libraries at a stable, lane-specific path.
           shared-key: ordinary-0.7-v1-${{ matrix.cache_name || matrix.name }}
           cache-workspace-crates: true
-          cache-on-failure: true
+          # A disk-exhausted Windows job can leave incomplete Cargo metadata.
+          # Retain the last successful cache rather than publish that state.
+          cache-on-failure: ${{ runner.os != 'Windows' }}
 
       - name: Install Linux native dependencies
         if: runner.os == 'Linux'

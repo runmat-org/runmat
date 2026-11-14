@@ -17,7 +17,7 @@ use crate::import::shape_json::schematic::{on_segment, Joins};
 use crate::import::xml_project::library::{find_attr, param_key};
 use crate::import::{file_safe, Report};
 use crate::ir::{ComponentDecl, Connection, Design, Endpoint, NetDecl, PartRef};
-use crate::library::catalog::{PartRecord, PartPin};
+use crate::library::catalog::{PartPin, PartRecord};
 use crate::library::Package;
 use std::collections::BTreeMap;
 

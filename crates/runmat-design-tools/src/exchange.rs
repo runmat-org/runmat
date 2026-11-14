@@ -527,12 +527,10 @@ fn export_files(input: &ExportInput, files: &Files) -> Result<ExportOutput, Tool
                         String::from_utf8_lossy(&out.step).into_owned(),
                     )]
                 }
-                None => {
-                    return Err(ToolError::new(
-                        "unsupported",
-                        "a board's STEP needs the exact geometry kernel, which this build doesn't have",
-                    ))
-                }
+                None => return Err(ToolError::new(
+                    "unsupported",
+                    "a board's STEP needs the exact geometry kernel, which this build doesn't have",
+                )),
             }
         }
         ExportFormat::Step

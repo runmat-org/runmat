@@ -221,7 +221,10 @@ fn the_desktop_simulation_scene_reports_the_current_probe() {
         text.contains("\"RO.1\"]") && text.contains("measure i_ro"),
         "the daq section changed; update the scene"
     );
-    let dir = concat!(env!("CARGO_MANIFEST_DIR"), "/../runmat-circuit/tests/projects/daq");
+    let dir = concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../runmat-circuit/tests/projects/daq"
+    );
     let files = gather(dir, "daq.circuit", text);
     let out = call(
         "design.simulate",
@@ -253,7 +256,10 @@ fn the_desktop_simulation_scene_reports_the_current_probe() {
 #[test]
 fn the_desktop_simulation_scene_reads_the_esc_current_sense() {
     const ESC: &str = include_str!("../../runmat-cad/wasm/tests/drone/electrical/esc/esc.circuit");
-    let dir = concat!(env!("CARGO_MANIFEST_DIR"), "/../runmat-cad/wasm/tests/drone/electrical/esc");
+    let dir = concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../runmat-cad/wasm/tests/drone/electrical/esc"
+    );
     let files = gather(dir, "esc.circuit", ESC.to_owned());
     let out = call(
         "design.simulate",
@@ -311,19 +317,23 @@ fn gather(dir: &str, entry: &str, text: String) -> Files {
         let content = files[&path].clone();
         for dep in runmat_circuit::runtime::dependencies(&path, &content) {
             let names: Vec<String> = match dep.strip_suffix('/') {
-                Some(folder) => std::fs::read_dir(format!("{dir}{}", folder.trim_start_matches("/p")))
-                    .into_iter()
-                    .flatten()
-                    .flatten()
-                    .map(|e| format!("{folder}/{}", e.file_name().to_string_lossy()))
-                    .collect(),
+                Some(folder) => {
+                    std::fs::read_dir(format!("{dir}{}", folder.trim_start_matches("/p")))
+                        .into_iter()
+                        .flatten()
+                        .flatten()
+                        .map(|e| format!("{folder}/{}", e.file_name().to_string_lossy()))
+                        .collect()
+                }
                 None => vec![dep],
             };
             for name in names {
                 if files.contains_key(&name) {
                     continue;
                 }
-                let Some(rel) = name.strip_prefix("/p/") else { continue };
+                let Some(rel) = name.strip_prefix("/p/") else {
+                    continue;
+                };
                 if let Ok(body) = std::fs::read_to_string(format!("{dir}/{rel}")) {
                     files.insert(name.clone(), body);
                     todo.push(name);

@@ -1,0 +1,116 @@
+{
+  "schema_version": 1,
+  "source_revision": "b0c69f0c1d3a2fc75044f6fa58106d36716fde30",
+  "previous_revision": "5432202e50ade725b6b489d335fdd80df298e9e4",
+  "checks": [
+    {
+      "target": "macos-aarch64",
+      "command": [
+        "cargo",
+        "test",
+        "--locked",
+        "--offline",
+        "-p",
+        "runmat-process-host",
+        "--all-features"
+      ],
+      "exit_code": 0,
+      "passed": 66,
+      "failed": 0,
+      "ignored": 0,
+      "filtered_out": 0,
+      "log_sha256": "3b8c1ec72a09dc74cbe369f30e4fe067c4419d711378b7f126ad7f3a59a45efb",
+      "log_location": "Main:.runtime-rca-work/private-dev-20261110/mac-process-host-denied-signal-tests.log"
+    },
+    {
+      "target": "linux-x86_64",
+      "command": [
+        "cargo",
+        "test",
+        "--locked",
+        "--offline",
+        "-p",
+        "runmat-process-host",
+        "--all-features"
+      ],
+      "exit_code": 0,
+      "passed": 64,
+      "failed": 0,
+      "ignored": 0,
+      "filtered_out": 0,
+      "log_sha256": "ac9a501b353208cfcae629aa23506de22db66be8277c5435208bb9c67702f30c",
+      "log_location": "Main:.runtime-rca-work/private-dev-20261110/tests.log"
+    },
+    {
+      "target": "macos-aarch64",
+      "command": [
+        "cargo",
+        "clippy",
+        "--locked",
+        "--offline",
+        "-p",
+        "runmat-process-host",
+        "--all-features",
+        "--all-targets",
+        "--",
+        "-D",
+        "warnings"
+      ],
+      "exit_code": 0,
+      "log_sha256": "86d93e0b52f1034520cb7e7f21b564faab11349b11ccc48ce816b80cf001a459",
+      "log_location": "Main:.runtime-rca-work/private-dev-20261110/mac-process-host-denied-signal-clippy.log"
+    },
+    {
+      "target": "linux-x86_64",
+      "command": [
+        "cargo",
+        "clippy",
+        "--locked",
+        "--offline",
+        "-p",
+        "runmat-process-host",
+        "--all-features",
+        "--all-targets",
+        "--",
+        "-D",
+        "warnings"
+      ],
+      "exit_code": 0,
+      "log_sha256": "b1e0061438a4ad7f9ef9bed0adef8ec06a5e4ede563eab5750bb3d2b808c1efa",
+      "log_location": "Main:.runtime-rca-work/private-dev-20261110/clippy.log"
+    },
+    {
+      "target": "macos-aarch64",
+      "command": [
+        "cargo",
+        "test",
+        "--locked",
+        "--offline",
+        "-p",
+        "runmat-execution-runner-native",
+        "--all-features",
+        "--test",
+        "meshing_process_conformance",
+        "--test",
+        "supervisor_process_conformance"
+      ],
+      "exit_code": 0,
+      "scope": "Two harnessless conformance executables complete successfully; original cancellation/retirement assertions retained. This is native process qualification, not a rerun of the scientific workloads.",
+      "log_sha256": "cd34b32ccb50e130fa36163940603d36c4b13af82f092ad28d82f52b07fcb58a",
+      "log_location": "Main:.runtime-rca-work/private-dev-20261110/mac-process-retirement-conformance-r1.log",
+      "artifacts": [
+        {
+          "name": "meshing_process_conformance-bb59eefa94687375",
+          "bytes": 1211375216,
+          "sha256": "618197f0d3e4a9ab196b03b39b729ecd44be31f3935fcc403c224cc8da5c0ab2"
+        },
+        {
+          "name": "supervisor_process_conformance-a01c64918c610ffb",
+          "bytes": 989136112,
+          "sha256": "190a02b608016b5eddbf6f44abb8e95e0438cf9dab9e33f8247f49c5605fd4fe"
+        }
+      ]
+    }
+  ],
+  "review": "Conserves the recorded scientific measurements across the reviewed process-retirement lifecycle change. Apple group-signal EPERM commits to bounded observation and retains its error; positive leader/group retirement is still required. Linux and Windows retain their previous signal/error decisions. No solver arithmetic, scientific inputs, dependencies, compiler settings or measured thresholds change. The direct in-process circuit Session workload and CAD drawing host workload do not invoke this child-retirement path. The actual Mac meshing and supervisor conformance executables pass with unchanged assertions; they qualify the affected native path separately from these conserved scientific measurements."
+}

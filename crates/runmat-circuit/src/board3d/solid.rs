@@ -187,6 +187,9 @@ pub struct CopperSolid {
     pub items: Vec<Vec<Vec<(f64, f64)>>>,
 }
 
+/// Outer copper solids and the solder-mask height interval on each board face (mm).
+pub type BoardSurfaces = (Vec<CopperSolid>, [(f64, f64); 2]);
+
 /// A primitive's outline as items: each outer ring with the holes that follow it.
 fn items_of(prim: &Prim, hole: Option<Vec<(f64, f64)>>) -> Vec<Vec<Vec<(f64, f64)>>> {
     let mut items: Vec<Vec<Vec<(f64, f64)>>> = Vec::new();

@@ -39,7 +39,20 @@ enum RetirementPhase {
     Live,
     ExitObserved,
     Signaled,
+    #[cfg(target_vendor = "apple")]
+    GroupSignalDenied,
     Retired,
+}
+
+#[cfg(target_vendor = "apple")]
+fn initial_retirement_error(phase: RetirementPhase) -> Option<std::io::Error> {
+    (phase == RetirementPhase::GroupSignalDenied)
+        .then(|| std::io::Error::from_raw_os_error(libc::EPERM))
+}
+
+#[cfg(not(target_vendor = "apple"))]
+fn initial_retirement_error(_: RetirementPhase) -> Option<std::io::Error> {
+    None
 }
 
 impl ChildProcess {
@@ -171,11 +184,13 @@ impl ChildProcess {
             return Ok(());
         }
         self.begin_retirement()?;
+        let initial_probe_error = initial_retirement_error(self.retirement);
         super::process_tree::await_retirement(
             &mut self.child,
             self.process_id,
             self._containment.as_ref(),
             self.process_group_placement,
+            initial_probe_error,
         )
         .await?;
         self.retirement = RetirementPhase::Retired;
@@ -190,11 +205,13 @@ impl ChildProcess {
             return Ok(());
         }
         self.begin_retirement()?;
+        let initial_probe_error = initial_retirement_error(self.retirement);
         super::process_tree::await_retirement_blocking(
             &mut self.child,
             self.process_id,
             self._containment.as_ref(),
             self.process_group_placement,
+            initial_probe_error,
         )?;
         self.retirement = RetirementPhase::Retired;
         Ok(())
@@ -205,18 +222,60 @@ impl ChildProcess {
             self.retirement,
             RetirementPhase::Live | RetirementPhase::ExitObserved
         ) {
-            super::process_tree::begin_termination(
+            let start = super::process_tree::begin_termination(
                 &mut self.child,
                 self.process_id,
                 self._containment.as_ref(),
                 self.process_group_placement,
                 self.retirement == RetirementPhase::ExitObserved,
             )?;
-            // Record synchronously, before the first await or possible reap.
-            // Cancellation retries may finish waiting, never signal again.
-            self.retirement = RetirementPhase::Signaled;
+            // Record the attempt before awaiting or reaping. A denied Apple
+            // group signal is uncertainty, and cannot authorize another signal.
+            self.retirement = match start {
+                super::process_tree::TerminationStart::Signaled => RetirementPhase::Signaled,
+                #[cfg(target_vendor = "apple")]
+                super::process_tree::TerminationStart::GroupSignalDenied => {
+                    RetirementPhase::GroupSignalDenied
+                }
+            };
         }
         Ok(())
+    }
+}
+
+#[cfg(all(test, target_vendor = "apple"))]
+mod tests {
+    use super::{initial_retirement_error, RetirementPhase};
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+    #[tokio::test]
+    async fn denied_signal_retry_observes_exit_without_signaling_again() {
+        let mut command = crate::HostCommand::new("/bin/sh");
+        command.arguments = vec!["-c".into(), "printf ready; read finish; exit 7".into()];
+        let mut child = command.spawn().await.unwrap();
+        let mut stdio = child.take_stdio().unwrap();
+        let mut ready = [0_u8; 5];
+        stdio.stdout.read_exact(&mut ready).await.unwrap();
+        assert_eq!(&ready, b"ready");
+        // Inject the typed result of a denied signal while the leader is still
+        // running. Until the pipe releases it, positive retirement is impossible.
+        child.retirement = RetirementPhase::GroupSignalDenied;
+        assert!(
+            tokio::time::timeout(std::time::Duration::from_millis(20), child.terminate_tree(),)
+                .await
+                .is_err()
+        );
+        assert_eq!(
+            initial_retirement_error(child.retirement)
+                .unwrap()
+                .raw_os_error(),
+            Some(libc::EPERM)
+        );
+        stdio.stdin.write_all(b"finish\n").await.unwrap();
+        child.terminate_tree().await.unwrap();
+        let exit = child.wait().await.unwrap();
+        assert_eq!(exit.code, Some(7), "a retry must not send SIGKILL");
+        assert_eq!(exit.signal, None);
     }
 }
 

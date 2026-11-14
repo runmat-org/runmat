@@ -111,6 +111,60 @@ fn encroached_by_apex_at(
     })
 }
 
+/// The edge of `triangle`, among the recovered segment edges `protected_edges`, whose open
+/// diametral ball holds `point` deepest.
+/// `point` is the facet-interior split node of the triangle. Inside that ball the node encroaches
+/// the segment edge: when the facet on the other side of the edge is nearly coplanar, the node
+/// lies a few micrometres off that facet's plane, inside its circumcircle and visible from its far
+/// side, and the cells beside the edge then admit no constrained Delaunay complex. Floating point
+/// with a relative margin: the choice only directs a split that exact validation then admits or
+/// rejects.
+pub(super) fn segment_edge_encroached_by_point(
+    topology: &impl TetrahedralTopology,
+    triangle: [StableDigest; 3],
+    point: [f64; 3],
+    protected_edges: &[[StableDigest; 2]],
+) -> Option<[StableDigest; 2]> {
+    encroached_by_point_at(
+        |identity| {
+            node_index(topology, identity)
+                .map(|index| topology.nodes()[index].coordinates_m.canonical_value())
+        },
+        triangle,
+        point,
+        protected_edges,
+    )
+}
+
+fn encroached_by_point_at(
+    coordinates: impl Fn(StableDigest) -> Option<[f64; 3]>,
+    triangle: [StableDigest; 3],
+    point: [f64; 3],
+    protected_edges: &[[StableDigest; 2]],
+) -> Option<[StableDigest; 2]> {
+    let mut best: Option<(f64, [StableDigest; 2])> = None;
+    for slot in 0..3 {
+        let mut edge = [triangle[slot], triangle[(slot + 1) % 3]];
+        edge.sort_unstable();
+        if !protected_edges.contains(&edge) {
+            continue;
+        }
+        let [Some(a), Some(b)] = edge.map(&coordinates) else {
+            continue;
+        };
+        let radius_squared = 0.25 * distance_squared(a, b);
+        if radius_squared == 0.0 {
+            continue;
+        }
+        let center = [0, 1, 2].map(|axis| 0.5 * (a[axis] + b[axis]));
+        let ratio = distance_squared(point, center) / radius_squared;
+        if ratio < 1.0 - 1e-9 && best.is_none_or(|(current, _)| ratio < current) {
+            best = Some((ratio, edge));
+        }
+    }
+    best.map(|(_, edge)| edge)
+}
+
 fn distance_squared(p: [f64; 3], q: [f64; 3]) -> f64 {
     (0..3).map(|axis| (p[axis] - q[axis]).powi(2)).sum()
 }
@@ -174,6 +228,44 @@ mod tests {
         );
         assert_eq!(
             deepest_encroached_at(point, [id(0), id(1)], &[[id(0), id(2)], [id(4), id(5)]]),
+            None
+        );
+    }
+
+    // witness: FEA-SHARED-RESOURCES-001/bounded_local_search @
+    //   shared_infrastructure/canonical_mixed_topology/numerical_kernel;
+    //   boundary: A facet-interior split node selects, among the candidate segment edges of its
+    //   triangle, the one whose diametral ball holds it deepest; a candidate whose ball the node
+    //   misses, and an edge that is no candidate, are not selected. This local fixture does not
+    //   discharge original-model meshing, physical quality, resource or scientific gates.
+    #[test]
+    fn interior_node_selects_the_segment_edge_whose_diametral_ball_holds_it() {
+        let points = BTreeMap::from([
+            // The thin-wall facet of the motor-pod arm, in millimetres: the 2:1:1 node lies
+            // 0.5 mm from the 1.25 mm edge 1-2, inside its 0.625 mm diametral ball, and deeper
+            // inside the balls of edges 0-1 and 0-2.
+            (id(0), [0.0, 0.0, 0.0]),
+            (id(1), [-0.5, 1.0, -0.625]),
+            (id(2), [-0.5, 1.0, 0.625]),
+        ]);
+        let point = |identity| points.get(&identity).copied();
+        let triangle = [id(0), id(1), id(2)];
+        let node = [-0.25, 0.5, 0.0];
+        // The caller passes only the edges beside a recovered facet that the node encroaches.
+        assert_eq!(
+            encroached_by_point_at(point, triangle, node, &[[id(1), id(2)]]),
+            Some([id(1), id(2)])
+        );
+        assert_eq!(
+            encroached_by_point_at(point, triangle, node, &[[id(0), id(1)], [id(1), id(2)]]),
+            Some([id(0), id(1)])
+        );
+        assert_eq!(
+            encroached_by_point_at(point, triangle, [-0.1, 0.2, 0.0], &[[id(1), id(2)]]),
+            None
+        );
+        assert_eq!(
+            encroached_by_point_at(point, triangle, node, &[[id(0), id(3)]]),
             None
         );
     }

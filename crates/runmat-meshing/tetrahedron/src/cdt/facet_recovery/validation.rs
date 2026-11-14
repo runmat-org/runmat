@@ -14,6 +14,9 @@ use crate::cdt::{
 
 mod evidence;
 
+#[cfg(test)]
+mod cancellation_tests;
+
 pub fn validate_delaunay_facet_recovery(
     recovery: &DelaunayFacetRecovery,
     constraints: &DelaunayConstraints,

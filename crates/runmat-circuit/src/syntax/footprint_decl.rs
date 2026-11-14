@@ -816,7 +816,9 @@ pub(crate) fn read_fields(name: String, fields: Vec<(String, Expr)>) -> Read<Pac
         } else if f.get("size").is_some() || f.get("material").is_some() {
             return Err(diagnostic(
                 v.span,
-                format!("footprint `{name}`: a body with a `size` or `material` needs its `height`"),
+                format!(
+                    "footprint `{name}`: a body with a `size` or `material` needs its `height`"
+                ),
             ));
         }
         if let Some(path) = f.opt("model", text)? {

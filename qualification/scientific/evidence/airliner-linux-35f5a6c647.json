@@ -1,0 +1,25 @@
+{
+  "schema_version": 1,
+  "source_revision": "35f5a6c647203246c4caec0fbbcfe18d4f899a6e",
+  "target": "linux-x86_64",
+  "passed": 1,
+  "failed": 0,
+  "ignored": 0,
+  "exit_code": 0,
+  "test_seconds": 243.84,
+  "rust_heap_peak_mib": {
+    "sheet": 2,
+    "front": 331,
+    "top": 373,
+    "right": 346
+  },
+  "log_sha256": "1e377f693fb92ff957db5b4d995911117e9b1cce3d3fa8d4b8e3fc95b283193b",
+  "artifact_sha256": "27ba3f86ce8b7067787da66c5efc52dde2f5dbb0b2399139dfcbd353f40168d3",
+  "source_verification": {
+    "status": "verified",
+    "root": "/home/nallana/rm1293/candidates/settings-r964-linux",
+    "revision": "35f5a6c647203246c4caec0fbbcfe18d4f899a6e",
+    "files": 27265
+  },
+  "scope": "The complete staged drawing passes the unchanged Rust-heap ceiling through the optimized native browser-host adapter. Measurements exclude the C++ allocator and operating-system RSS. Distributed browser artifact acceptance is separate."
+}

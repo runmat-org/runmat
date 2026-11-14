@@ -54,10 +54,8 @@ impl Stage {
 pub fn compile_parts(path: &str, text: &str, files: &Files) -> String {
     match resolve_assembly(path, text, files) {
         Ok(resolution) => {
-            let _ = crate::configured::configured_displays(
-                &resolution.resolved,
-                &resolution.documents,
-            );
+            let _ =
+                crate::configured::configured_displays(&resolution.resolved, &resolution.documents);
             let components = resolution
                 .resolved
                 .nodes
@@ -177,7 +175,11 @@ mod tests {
         let before = part_cache::stats();
         let (full, report) = compile("", &[]);
         assert!(report.misses.is_empty(), "{:?}", report.misses);
-        assert_eq!(part_cache::stats().misses, before.misses, "nothing regenerates");
+        assert_eq!(
+            part_cache::stats().misses,
+            before.misses,
+            "nothing regenerates"
+        );
         assert_eq!(
             full["display"]["data"]["prototypes"]
                 .as_array()

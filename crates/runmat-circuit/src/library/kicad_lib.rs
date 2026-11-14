@@ -12,7 +12,7 @@
 //! write `Sim.Device`, `Sim.Name`, `Sim.Library` and `Sim.Pins`; KiCad 6 and earlier wrote
 //! `Spice_Primitive`, `Spice_Model`, `Spice_Lib_File` and `Spice_Node_Sequence`.
 
-use super::catalog::{PartRecord, PartPin, PartSpice};
+use super::catalog::{PartPin, PartRecord, PartSpice};
 use crate::kicad::sch::parse_lib_symbol;
 use crate::kicad::sexpr;
 use crate::library::PinType;

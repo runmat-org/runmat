@@ -35,8 +35,9 @@ use support_refinement::{
     ensure_support_triangle_edges, ensure_support_triangle_edges_in_place, interior_support_node,
     recovered_segment_edges, refine_support_triangle_interior,
     refine_support_triangle_interior_in_place, split_segment_encroached_by_apex,
-    split_segment_encroached_by_support_edge, triangle_has_positive_area_on,
-    PendingSupportTriangle, SupportRefinementContext, SupportTriangleEdgeState,
+    split_segment_encroached_by_interior_node, split_segment_encroached_by_support_edge,
+    triangle_has_positive_area_on, PendingSupportTriangle, SupportRefinementContext,
+    SupportTriangleEdgeState,
 };
 pub use validation::validate_delaunay_facet_recovery;
 use validation::{face_exists, validate_inputs};
