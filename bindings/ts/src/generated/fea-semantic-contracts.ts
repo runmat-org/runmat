@@ -3303,6 +3303,7 @@ export interface ScalarObservationEvidence {
   source_identity: string;
   sample: RecoveredFieldSample | null;
   entity: ObservationEntity | null;
+  source_field_id: string | null;
 }
 
 export interface SecondMomentOfArea {

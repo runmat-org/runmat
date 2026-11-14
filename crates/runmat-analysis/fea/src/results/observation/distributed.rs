@@ -287,6 +287,8 @@ pub struct ObservationPartitionContribution {
     pub observation_id: ObservationId,
     pub source_field_definition: RecoveredFieldDefinitionIdentity,
     pub source_field: RecoveredFieldIdentity,
+    /// The run field id of the source field, so the combined result can name the field it read.
+    pub source_field_id: String,
     pub source_partitions: Vec<RecoveredFieldPartitionIdentity>,
     pub source_entity_count: usize,
     pub sample: RecoveredFieldSample,
@@ -306,6 +308,7 @@ struct ObservationPartitionContributionWire {
     observation_id: ObservationId,
     source_field_definition: RecoveredFieldDefinitionIdentity,
     source_field: RecoveredFieldIdentity,
+    source_field_id: String,
     source_partitions: Vec<RecoveredFieldPartitionIdentity>,
     source_entity_count: usize,
     sample: RecoveredFieldSample,
@@ -327,6 +330,7 @@ impl TryFrom<ObservationPartitionContributionWire> for ObservationPartitionContr
             observation_id: wire.observation_id,
             source_field_definition: wire.source_field_definition,
             source_field: wire.source_field,
+            source_field_id: wire.source_field_id,
             source_partitions: wire.source_partitions,
             source_entity_count: wire.source_entity_count,
             sample: wire.sample,
@@ -357,6 +361,7 @@ impl ObservationPartitionContribution {
             observation_id: partition_plan.observation_id.clone(),
             source_field_definition: field.definition.identity(),
             source_field: field.source_field,
+            source_field_id: field.definition.field_id().to_owned(),
             source_partitions: field
                 .partitions
                 .iter()
@@ -451,6 +456,7 @@ impl ObservationPartitionContribution {
         }
         if self.schema_version != 1
             || self.observation_id.0.trim().is_empty()
+            || self.source_field_id.trim().is_empty()
             || self.source_entity_count == 0
             || self.source_partitions.is_empty()
             || self
@@ -485,6 +491,7 @@ impl ObservationPartitionContribution {
                 &self.observation_id,
                 self.source_field_definition,
                 self.source_field,
+                &self.source_field_id,
                 &self.source_partitions,
                 self.source_entity_count,
                 self.sample,

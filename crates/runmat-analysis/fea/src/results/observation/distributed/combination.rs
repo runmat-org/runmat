@@ -36,10 +36,12 @@ pub(crate) fn combine_observation_partitions(
         validate_contribution_payload(partition, contribution, observation)?;
     }
     let first_source = contributions[0].source_field;
+    let source_field_id = contributions[0].source_field_id.clone();
     let first_sample = contributions[0].sample;
     let first_event_attribution = contributions[0].event_attribution;
     if contributions.iter().any(|contribution| {
         contribution.source_field != first_source
+            || contribution.source_field_id != source_field_id
             || contribution.sample != first_sample
             || contribution.event_attribution != first_event_attribution
     }) {
@@ -293,6 +295,7 @@ pub(crate) fn combine_observation_partitions(
         ),
         partial_access: observation.spec.storage.partial_access,
         partition_evidence,
+        source_field_id: Some(source_field_id),
     };
     result.logical_identity = result.derive_identity()?;
     result.validate()?;

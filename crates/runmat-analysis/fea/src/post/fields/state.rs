@@ -35,6 +35,22 @@ pub(super) fn recover_reaction_force(
     reactions
 }
 
+/// Whether the model has any constrained translational row, so a reaction force has entries.
+pub(super) fn has_translational_reaction_rows(summary: &AssemblySummary) -> bool {
+    summary
+        .operator
+        .constrained_dofs()
+        .iter()
+        .enumerate()
+        .any(|(dof, constrained)| {
+            (*constrained || is_affine_constraint_dof(summary, dof))
+                && summary
+                    .structural_dof_layout
+                    .address(dof)
+                    .is_some_and(|address| translational_component(address.kind).is_some())
+        })
+}
+
 pub(super) fn reaction_reference_work(
     summary: &AssemblySummary,
     node_count: usize,

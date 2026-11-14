@@ -368,6 +368,9 @@ pub struct ObservationResult {
     pub field: AnalysisField,
     pub partial_access: PartialAccessPolicy,
     pub partition_evidence: ObservationPartitionEvidence,
+    /// The run field this observation reads, or None when it reads no run field (for example
+    /// port or transmission-line parameters).
+    pub source_field_id: Option<String>,
 }
 
 mod result;
@@ -388,6 +391,7 @@ struct ObservationResultWire {
     field: AnalysisField,
     partial_access: PartialAccessPolicy,
     partition_evidence: ObservationPartitionEvidence,
+    source_field_id: Option<String>,
 }
 
 impl TryFrom<ObservationResultWire> for ObservationResult {
@@ -409,6 +413,7 @@ impl TryFrom<ObservationResultWire> for ObservationResult {
             field: wire.field,
             partial_access: wire.partial_access,
             partition_evidence: wire.partition_evidence,
+            source_field_id: wire.source_field_id,
         };
         result.validate()?;
         Ok(result)
