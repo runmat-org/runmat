@@ -39,29 +39,50 @@ impl RunMatSession {
             |handoff| handoff.project.workspace_root.clone(),
         );
         let mut directories = vec![root.clone()];
+        let mut listed = std::collections::BTreeSet::new();
         let mut files = BTreeMap::new();
         let mut budget = 0usize;
         let mut visited = 0usize;
         while let Some(directory) = directories.pop() {
+            // A directory reached twice means the listing cycles; stop at the first repeat.
+            if !listed.insert(directory.clone()) {
+                return Err(listing_error(format!(
+                    "the folder {} was listed twice",
+                    directory.display()
+                )));
+            }
             for entry in provider
                 .read_dir(&directory)
                 .await
                 .map_err(|error| error.to_string())?
             {
-                visited += 1;
-                if visited > MAX_FILES {
-                    return Err("working-source inventory exceeds 10000 entries".into());
-                }
                 let path = entry.path();
-                let relative = path
-                    .strip_prefix(&root)
-                    .map_err(|_| "provider returned an entry outside the project")?;
+                // Every entry a listing returns must be a direct child of the listed folder.
+                if path.parent() != Some(directory.as_path()) {
+                    return Err(listing_error(format!(
+                        "listing {} returned {} ({:?}), which is not directly inside it",
+                        directory.display(),
+                        path.display(),
+                        entry.file_type()
+                    )));
+                }
                 if matches!(
                     entry.file_name().to_str(),
                     Some(".artifacts" | ".git" | "node_modules" | "target")
                 ) {
                     continue;
                 }
+                visited += 1;
+                if visited > MAX_FILES {
+                    return Err(format!(
+                        "This project has more than {MAX_FILES} files and folders to search for \
+the study's sources. Move unrelated files out of the project, or open the study from a \
+smaller project."
+                    ));
+                }
+                let relative = path
+                    .strip_prefix(&root)
+                    .map_err(|_| "provider returned an entry outside the project")?;
                 if entry.is_dir() {
                     directories.push(path.to_path_buf());
                     continue;
@@ -224,4 +245,13 @@ fn captured(path: LogicalSourcePath, bytes: Vec<u8>) -> FeaWorkspaceFile {
         version: digest.to_string(),
         bytes,
     }
+}
+
+/// A project listing that does not nest is a filesystem defect, not a large project: say so and
+/// name the paths, so the producing provider can be found.
+fn listing_error(detail: String) -> String {
+    format!(
+        "The study's sources couldn't be gathered because the project's file listing is \
+inconsistent: {detail}."
+    )
 }
