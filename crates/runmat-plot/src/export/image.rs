@@ -270,6 +270,30 @@ impl ImageExporter {
         super::geometry_callouts::annotate_png(png, scene, camera, width, height)
     }
 
+    /// As [`Self::render_geometry_scene_png_bytes_with_camera`], drawn with `presentation`
+    /// (a poster takes the live view's edge width).
+    pub async fn render_geometry_scene_png_bytes_with_presentation(
+        &self,
+        scene: &GeometryScene,
+        camera: &Camera,
+        presentation: &crate::geometry_scene::GeometryScenePresentation,
+    ) -> Result<Vec<u8>, String> {
+        let width = self.settings.width.max(1);
+        let height = self.settings.height.max(1);
+        let rgba = crate::export::native_surface::render_geometry_scene_rgba_bytes_with_presentation(
+            scene.clone(),
+            width,
+            height,
+            camera,
+            self.theme.clone().unwrap_or_default(),
+            self.settings.pixels_per_point,
+            presentation,
+        )
+        .await?;
+        let png = self.encode_png_bytes(&rgba)?;
+        super::geometry_callouts::annotate_png(png, scene, camera, width, height)
+    }
+
     /// Render a geometry scene into a PNG buffer using the default scene camera.
     pub async fn render_geometry_scene_png_bytes(
         &self,

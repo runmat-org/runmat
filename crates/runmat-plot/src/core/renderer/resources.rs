@@ -11,6 +11,7 @@ impl WgpuRenderer {
             self.line_pipeline = None;
             self.line_no_depth_pipeline = None;
             self.annotation_stroke_pipeline = None;
+            self.annotation_stroke_depth_pipeline = None;
             self.edge_stroke_pipeline = None;
             self.edge_stroke_no_depth_pipeline = None;
             self.triangle_pipeline = None;
@@ -42,6 +43,7 @@ impl WgpuRenderer {
             self.line_pipeline = None;
             self.line_no_depth_pipeline = None;
             self.annotation_stroke_pipeline = None;
+            self.annotation_stroke_depth_pipeline = None;
             self.edge_stroke_pipeline = None;
             self.edge_stroke_no_depth_pipeline = None;
             self.triangle_pipeline = None;

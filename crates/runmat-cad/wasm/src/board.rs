@@ -519,7 +519,7 @@ mod tests {
         // The assembly's parts list reads them.
         let text = "runmat 0.7\nstd 1\n\nassembly box {\n    use circuit daq as board\n}\n";
         files.insert("/p/box.assembly".into(), text.into());
-        let drawing = "runmat 0.7\nstd 1\n\ndrawing box {\n    format a3 = { size = { size = iso, name = A3 }, title_block = [] }\n    sheet \"1\" = { format = a3, scale = [1, 1], projection = third_angle }\n    view iso = standard(orientation = isometric, sheet = \"1\", model = { assembly = box }, at = [150, 150], display = visible_lines)\n    table parts = bom(view = iso, sheet = \"1\", at = [0, 0])\n}\n";
+        let drawing = "runmat 0.7\nstd 1\n\ndrawing box {\n    format a3 = { size = { size = iso, name = A3 }, title_block = [] }\n    sheet \"1\" = { format = a3, scale = [1, 1], projection = third_angle }\n    view iso = standard(orientation = isometric, sheet = \"1\", model = { assembly = box }, at = [150, 150], display = visible_lines)\n    table parts = bom(view = iso, sheet = \"1\")\n}\n";
         let out: serde_json::Value = serde_json::from_str(&crate::drawing::compile_json(
             "/p/box.drawing",
             drawing,

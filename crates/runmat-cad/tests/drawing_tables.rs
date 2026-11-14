@@ -606,7 +606,7 @@ fn drawing() -> DrawingDocument {
                         ..Default::default()
                     },
                 },
-                at: [0.0, 0.0],
+                at: None,
             },
             DrawingTable {
                 name: "holes".into(),
@@ -616,7 +616,7 @@ fn drawing() -> DrawingDocument {
                     origin: Reference::start_cap("body"),
                     spec: HoleTableSpec::default(),
                 },
-                at: [0.0, 0.0],
+                at: None,
             },
         ],
     }
@@ -700,7 +700,7 @@ fn t06_drawing_merges_field_by_field_by_stable_id() {
         name: "revisions".into(),
         sheet: "1".into(),
         kind: TableKind::Revision { rows: Vec::new() },
-        at: [5.0, 5.0],
+        at: Some([5.0, 5.0]),
     });
     let m = merge_drawings(&base, &ours, &theirs, None);
     assert!(m.conflicts.is_empty(), "{:#?}", m.conflicts);

@@ -9,7 +9,7 @@
 use super::marks::{line, prim, text};
 use super::solver::{nearest_free, BoxR, Class};
 use super::notes::NotesList;
-use super::{placed_at, Ctx, Prim, Shape, Xy};
+use super::{xy, Ctx, Prim, Shape, Xy};
 use serde_json::Value;
 
 /// Table text and row proportions: 2.5 mm text in 7 mm rows.
@@ -428,7 +428,8 @@ pub fn place(ctx: &mut Ctx<'_>) {
             continue;
         }
         let name = t["name"].as_str().unwrap_or("").to_owned();
-        let at = placed_at(t);
+        // A table's `at` is set only when it was placed by hand, so [0, 0] is a real place.
+        let at = xy(&t["at"]);
         let (grid, corner) = match t["kind"]["table"].as_str() {
             Some("notes") => {
                 let notes = notes_list(&ctx.std, &t["kind"], &data["notes"][&name]);

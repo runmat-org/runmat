@@ -472,7 +472,27 @@ fn items_move_align_relabel_and_delete_with_what_is_drawn_from_them() {
     );
     // A table the sheet placed moves from where the layout put it: the revision table's
     // top-right corner at the frame's (A3: 410, 287).
-    assert_eq!(d.tables[0].at, [420.0, 282.0]);
+    assert_eq!(d.tables[0].at, Some([420.0, 282.0]));
+    // A table moved by hand to the sheet's corner stays there.
+    b.run(
+        "drawing.move",
+        json!({ "dx": -420, "dy": -282 }),
+        &["table:revisions"],
+    );
+    assert_eq!(b.document().tables[0].at, Some([0.0, 0.0]));
+    assert!(b.text.contains("at = [0, 0]"), "{}", b.text);
+    let placed = b.compiled()["projection"]["data"]["layouts"]
+        .as_object()
+        .unwrap()
+        .values()
+        .find_map(|l| l["placed"].get("table:revisions").cloned())
+        .unwrap();
+    assert_eq!(placed, json!([0.0, 0.0]));
+    b.run(
+        "drawing.move",
+        json!({ "dx": 420, "dy": 282 }),
+        &["table:revisions"],
+    );
     // An annotation the sheet placed takes the point it is moved to.
     b.run(
         "drawing.move",
