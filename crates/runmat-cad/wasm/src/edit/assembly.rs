@@ -177,6 +177,11 @@ impl Compiled {
             .find(|r| r["id"].as_str() == Some(feature))
     }
 
+    /// The compiled assembly's display (bodies, sketches).
+    fn display(&self) -> &Value {
+        &self.display
+    }
+
     /// A body of prototype `prototype`'s part display.
     fn body(&self, prototype: usize, body: usize) -> Option<&Value> {
         self.display["prototypes"][prototype]["part"]["bodies"]

@@ -28,6 +28,9 @@ impl<'a, 'b> Resolver<'a, 'b> {
         match anchor {
             AnchorRef::Origin => Ok(Transform::IDENTITY),
             AnchorRef::Explicit { offset } => self.offset(offset, env),
+            AnchorRef::Sketch { sketch, .. } => Err(format!(
+                "`{sketch}` is a sketch of the assembly; only the assembly's own connectors sit on its sketches"
+            )),
             AnchorRef::Published { name } => {
                 let n = self.nodes[host as usize].clone();
                 if n.definition.kind == DefinitionKind::Assembly {
@@ -105,6 +108,11 @@ impl<'a, 'b> Resolver<'a, 'b> {
             match &c.anchor {
                 AnchorRef::Origin => Transform::IDENTITY,
                 AnchorRef::Explicit { offset } => self.offset(offset, &env)?,
+                AnchorRef::Sketch {
+                    sketch,
+                    entity,
+                    role,
+                } => self.sketch_anchor(owner, &doc, &env, sketch, entity, *role)?,
                 AnchorRef::Published { name: p } => {
                     // The assembly's own published frame (a sub-assembly connector of itself).
                     let Some(entry) = doc.publishes.iter().find(|e| &e.name == p) else {

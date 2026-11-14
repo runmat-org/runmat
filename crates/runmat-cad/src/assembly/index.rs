@@ -251,6 +251,19 @@ pub struct SketchRow {
     pub dof: Option<u32>,
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub suppressed: bool,
+    /// Its entities, which a mate picks as layout geometry (`sketch.<sketch>.<entity>`).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub entities: Vec<SketchEntityRow>,
+}
+
+/// One entity of an assembly sketch: its name and kind (`point`, `line`, `arc`, `circle`,
+/// `spline`, `ellipse`, `text`).
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct SketchEntityRow {
+    pub id: String,
+    pub kind: String,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub construction: bool,
 }
 
 fn sketch_rows(
@@ -280,6 +293,15 @@ fn sketch_rows(
                 status,
                 dof: solved.and_then(|s| s.solved.dof),
                 suppressed: f.suppressed,
+                entities: sketch
+                    .entities
+                    .iter()
+                    .map(|e| SketchEntityRow {
+                        id: e.id.to_string(),
+                        kind: e.geometry.kind_word().into(),
+                        construction: e.construction,
+                    })
+                    .collect(),
             })
         })
         .collect()

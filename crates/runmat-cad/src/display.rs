@@ -875,15 +875,7 @@ pub fn one_sketch_display(
         .entities
         .iter()
         .map(|entity| {
-            let kind = match entity.geometry {
-                SketchGeometry::Point { .. } => "point",
-                SketchGeometry::Line { .. } => "line",
-                SketchGeometry::Arc { .. } => "arc",
-                SketchGeometry::Circle { .. } => "circle",
-                SketchGeometry::Spline { .. } => "spline",
-                SketchGeometry::Ellipse { .. } => "ellipse",
-                SketchGeometry::Text { .. } => "text",
-            };
+            let kind = entity.geometry.kind_word();
             let points = entity
                 .geometry
                 .points()

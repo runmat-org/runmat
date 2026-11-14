@@ -62,12 +62,55 @@ A sketch whose connector is missing, or whose component is suppressed, doesn't d
 
 An assembly's `feature` entries hold sketches only. Any other feature kind is refused with `cad.ref.kind_mismatch`.
 
+## Layout geometry for mates
+
+A mate can pick a point, line, circle or arc of an assembly sketch as one of its two sides. The mate adds a connector of the assembly itself, anchored to that sketch entity:
+
+| Picked | The connector |
+|---|---|
+| A sketch point, or a named point of an entity (`l1.end`, `c1.center`) | At the point, with Z along the sketch's normal. |
+| A circle or arc | At its center, with Z along the sketch's normal, so a concentric mate puts a shaft on it. |
+| A line | At its start, with Z along the line and X along the sketch's normal. |
+
+In this assembly the point `p1` of the sketch `marks` places the cover: a ball mate puts the cover's origin on the point.
+
+```assembly file=marked.assembly
+runmat 0.7
+std 1
+
+assembly marked {
+    use part plate as base
+    use part plate as cover {
+        fixed = false
+        placement = { placement = offset, offset = { translation = [0 mm, 0 mm, 30 mm] } }
+    }
+
+    sketch marks on origin.xy {
+        p1 = point(at = [100 mm, 0 mm])
+    }
+
+    connector mark = { occurrence = [], anchor = { anchor = sketch, sketch = marks, entity = p1 } }
+    connector corner = { occurrence = [{ name = cover }] }
+
+    mate on_mark = { kind = { mate = ball }, a = mark, b = corner }
+}
+```
+
+The layout drives the mate. When you edit the sketch, for example by moving `p1`, the component mated to it moves too.
+
+The sketch is solved before the mates that read it, so it can't move with them. It must sit on an origin plane or on a fixed component. A mate that reads a sketch on the component it moves, or on a component that other mates move, is refused: the component would follow its own sketch. In a file, such a connector reports the same error.
+
+## Profiles for assembly features
+
+An assembly feature takes a closed region of an assembly sketch as its profile, written `profile = sketch.<name>`. The sketch is solved after placement and mates, so the profile is where the sketch is drawn in the assembly.
+
 ## In the Desktop
 
 - **Start a sketch:** click **Sketch** on the Assemble tab and pick an origin plane or a planar face of a component.
   - A face pick adds a connector on that component, anchored to the face its part publishes. The sketch is written on that connector.
   - The sketch opens in sketch mode with the view normal to it.
 - **Draw:** the sketch ribbon has the same tools, fields and handles as a part sketch: lines, rectangles, circles, arcs, slots, polygons, splines, ellipses, points and text; offset, trim, extend, split, mirror, pattern and transform; fillet and chamfer; relations, dimensions and auto-constrain.
+- **Mate to a sketch:** in a mate, pick a sketch point, line, circle or arc in the view as either side.
 - **The Outline:** the **Sketches** folder lists each sketch with its plane and how it solved.
   - Right-click a sketch for **Edit sketch**, **Suppress** and **Delete**.
 

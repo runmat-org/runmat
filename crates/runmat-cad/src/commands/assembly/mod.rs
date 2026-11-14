@@ -69,7 +69,8 @@ pub(super) const MATE_TYPES: &[(&str, &str)] = &[
 ];
 
 /// What a mate's connector can be picked on: a component's mate connector, face, edge, vertex
-/// or datum plane, axis or point (published from its part), or the whole component.
+/// or datum plane, axis or point (published from its part), the whole component, or a point,
+/// line, circle or arc of one of the assembly's sketches.
 pub(super) const CONNECTOR_PICKS: &[SelectKind] = &[
     K::MateConnector,
     K::Face,
@@ -79,6 +80,9 @@ pub(super) const CONNECTOR_PICKS: &[SelectKind] = &[
     K::Axis,
     K::Point,
     K::Occurrence,
+    // An assembly sketch's points, lines, circles and arcs: layout geometry for mates.
+    K::SketchEntity,
+    K::SketchPoint,
 ];
 
 /// The fields the advanced mates add to Mate and Edit mate: width's two other faces, the

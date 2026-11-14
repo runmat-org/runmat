@@ -11,11 +11,15 @@
 //! ([`super::resolve`]), then each sketch's frame is read from its plane and the sketch is
 //! solved in the assembly's value environment.
 
+use crate::assembly::model::{AnchorRef, AssemblyDocument};
 use crate::assembly::resolve::Resolver;
 use crate::diagnostics::{DiagCode, Severity, Site};
-use crate::ids::FeatureId;
+use crate::ids::{FeatureId, SketchEntityId};
 use crate::model::datum::{DatumRef, Frame, PlaneRef};
-use crate::model::sketch::{Sketch, SketchSolveStatus, SolvedSketch};
+use crate::model::sketch::{
+    PointRole, Sketch, SketchGeometry, SketchSolveStatus, SolvedSketch,
+};
+use crate::regen::kernel::Transform;
 use crate::model::{Feature, FeatureKind};
 use crate::sketch_solver::{last_solved, ConstraintSketchSolver, SketchSolver};
 use crate::value::ValueEnv;
@@ -27,6 +31,82 @@ pub struct ResolvedSketch {
     pub sketch: Sketch,
     pub solved: SolvedSketch,
     pub frame: Frame,
+}
+
+impl ResolvedSketch {
+    /// The sketch's closed profile loops, the largest first, in its plane's coordinates (place
+    /// them with [`ResolvedSketch::frame`], which is in assembly coordinates). This is what an
+    /// assembly feature's `profile = sketch.<name>` cuts, holes or extrudes through the parts.
+    pub fn profile(
+        &self,
+    ) -> Result<Vec<Vec<runmat_geometry_kernel::op::ProfileSegment>>, String> {
+        crate::regen::engine::profile_loops(&self.sketch, &self.solved)
+    }
+}
+
+impl crate::assembly::resolve::ResolvedAssembly {
+    /// The top assembly's solved sketch `name` (`profile = sketch.<name>`), if it solved.
+    pub fn sketch(&self, name: &str) -> Option<&ResolvedSketch> {
+        self.sketches.iter().find(|s| s.id.0 == name)
+    }
+}
+
+/// The frame a connector on sketch point or line `entity.role` has, in the coordinates of the
+/// sketch's `frame`'s space: at a point (Z the sketch's normal), or along a line from its start
+/// (Z along the line, X the sketch's normal). With no role, a point entity's position, a
+/// circle's, arc's or ellipse's center, or a line.
+pub fn sketch_point_frame(
+    frame: &Frame,
+    sketch: &Sketch,
+    solved: &SolvedSketch,
+    entity: &SketchEntityId,
+    role: Option<PointRole>,
+) -> Result<Frame, String> {
+    let geometry = &sketch
+        .entities
+        .iter()
+        .find(|e| &e.id == entity)
+        .ok_or_else(|| format!("the sketch has no `{entity}`"))?
+        .geometry;
+    let at = |p: [f64; 2]| Frame {
+        origin: frame.to_world(p),
+        ..*frame
+    };
+    let point = |role: PointRole| {
+        solved
+            .point(entity, role)
+            .ok_or_else(|| format!("`{entity}` has no solved point `{}`", role.word()))
+    };
+    match (role, geometry) {
+        (Some(role), _) => Ok(at(point(role)?)),
+        (None, SketchGeometry::Point { .. }) => Ok(at(point(PointRole::At)?)),
+        (
+            None,
+            SketchGeometry::Circle { .. } | SketchGeometry::Arc { .. } | SketchGeometry::Ellipse { .. },
+        ) => Ok(at(point(PointRole::Center)?)),
+        (None, SketchGeometry::Line { .. }) => {
+            let (a, b) = (
+                frame.to_world(point(PointRole::Start)?),
+                frame.to_world(point(PointRole::End)?),
+            );
+            let d = [b[0] - a[0], b[1] - a[1], b[2] - a[2]];
+            let l = (d[0] * d[0] + d[1] * d[1] + d[2] * d[2]).sqrt();
+            if l <= 0.0 {
+                return Err(format!("`{entity}` has no length"));
+            }
+            let z = d.map(|c| c / l);
+            let x = frame.z;
+            let y = [
+                z[1] * x[2] - z[2] * x[1],
+                z[2] * x[0] - z[0] * x[2],
+                z[0] * x[1] - z[1] * x[0],
+            ];
+            Ok(Frame { origin: a, x, y, z })
+        }
+        (None, _) => Err(format!(
+            "pick a point of `{entity}`, or a sketch point, line, circle or arc"
+        )),
+    }
 }
 
 /// Why the assembly's `features` can't hold `feature`, if it can't: only sketches today.
@@ -64,6 +144,45 @@ impl<'a, 'b> Resolver<'a, 'b> {
                     .into(),
             ),
         }
+    }
+
+    /// The frame of an assembly connector anchored to sketch `sketch` (layout geometry for
+    /// mates), in the coordinates of node `owner`. The sketch is solved here, before the mates
+    /// that read it, so it must not move with them: it sits on an origin plane or on a fixed
+    /// component. A sketch on a component that mates move would place that component's own
+    /// mates, a cycle, which is refused.
+    pub(in crate::assembly) fn sketch_anchor(
+        &mut self,
+        owner: u32,
+        doc: &AssemblyDocument,
+        env: &ValueEnv,
+        sketch: &FeatureId,
+        entity: &SketchEntityId,
+        role: Option<PointRole>,
+    ) -> Result<Transform, String> {
+        let feature = doc
+            .features
+            .iter()
+            .find(|f| &f.id == sketch)
+            .ok_or_else(|| format!("the assembly has no sketch `{sketch}`"))?;
+        let FeatureKind::Sketch(s) = &feature.kind else {
+            return Err(format!("`{sketch}` isn't a sketch"));
+        };
+        if feature.suppressed {
+            return Err(format!("the sketch `{sketch}` is suppressed"));
+        }
+        if let Some(problem) = moves_with_mates(doc, &s.plane) {
+            return Err(format!(
+                "the sketch `{sketch}` {problem}, so it can't place mates: the component would follow its own sketch"
+            ));
+        }
+        let frame = self.sketch_frame(owner, &s.plane)?;
+        let ev = self.ev();
+        let solved = ConstraintSketchSolver
+            .solve(s, &ev, env)
+            .map_err(|f| format!("the sketch `{sketch}` doesn't solve: {}", f.message))?;
+        let f = sketch_point_frame(&frame, s, &solved, entity, role)?;
+        Ok(Transform::from_frame(&f))
     }
 
     /// Solves the sketches of the assembly at node `owner` (the top assembly), after its
@@ -132,4 +251,25 @@ impl<'a, 'b> Resolver<'a, 'b> {
             });
         }
     }
+}
+
+/// Why a sketch on `plane` moves when the mates solve, if it does: it sits on a connector of a
+/// floating component, or on a connector that is itself on a sketch.
+pub fn moves_with_mates(doc: &AssemblyDocument, plane: &PlaneRef) -> Option<String> {
+    let PlaneRef::Datum {
+        datum: DatumRef::Feature { feature },
+    } = plane
+    else {
+        return None;
+    };
+    let c = doc.connector(&feature.0)?;
+    if matches!(c.anchor, AnchorRef::Sketch { .. }) {
+        return Some(format!("sits on `{}`, a connector on a sketch", c.name));
+    }
+    let top = c.occurrence.0.first()?;
+    let floating = doc
+        .occurrences
+        .iter()
+        .any(|o| o.name == top.name && !o.fixed);
+    floating.then(|| format!("sits on `{}`, which mates move", top.name))
 }

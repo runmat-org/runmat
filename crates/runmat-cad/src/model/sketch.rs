@@ -110,6 +110,20 @@ impl TextFont {
 }
 
 impl SketchGeometry {
+    /// The entity's kind as the display and the Outline name it: `point`, `line`, `arc`,
+    /// `circle`, `spline`, `ellipse` or `text`.
+    pub fn kind_word(&self) -> &'static str {
+        match self {
+            SketchGeometry::Point { .. } => "point",
+            SketchGeometry::Line { .. } => "line",
+            SketchGeometry::Arc { .. } => "arc",
+            SketchGeometry::Circle { .. } => "circle",
+            SketchGeometry::Spline { .. } => "spline",
+            SketchGeometry::Ellipse { .. } => "ellipse",
+            SketchGeometry::Text { .. } => "text",
+        }
+    }
+
     /// The roles of a spline's points, in order.
     pub fn spline_roles(count: usize, closed: bool) -> Vec<PointRole> {
         (0..count)

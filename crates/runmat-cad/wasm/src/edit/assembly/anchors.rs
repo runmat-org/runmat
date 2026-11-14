@@ -47,6 +47,12 @@ pub(super) enum Anchor {
     },
     /// A connector the assembly declares already.
     Connector(String),
+    /// A point or line of one of the assembly's sketches (layout geometry).
+    Sketch {
+        sketch: String,
+        entity: String,
+        role: Option<String>,
+    },
 }
 
 /// The publish entries one command adds, by part file.
@@ -164,7 +170,9 @@ impl<'a> Publisher<'a> {
                 };
                 self.publish(file, target, feature, true)?
             }
-            Anchor::Origin | Anchor::Frozen { .. } | Anchor::Connector(_) => return Ok(None),
+            Anchor::Origin | Anchor::Frozen { .. } | Anchor::Connector(_) | Anchor::Sketch { .. } => {
+                return Ok(None)
+            }
         }))
     }
 

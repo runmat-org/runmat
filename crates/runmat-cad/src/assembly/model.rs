@@ -182,6 +182,16 @@ pub enum AnchorRef {
     Published { name: PublishName },
     /// An explicit frame in definition coordinates.
     Explicit { offset: OffsetExpr },
+    /// A point or line of one of this assembly's sketches, for a connector of the assembly
+    /// itself (layout geometry for mates): at the sketch point `entity.role`, or with no role
+    /// at a point entity or a circle's or arc's center (Z the sketch's normal), or along a line
+    /// from its start (Z along the line, X the sketch's normal).
+    Sketch {
+        sketch: crate::ids::FeatureId,
+        entity: crate::ids::SketchEntityId,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        role: Option<crate::model::sketch::PointRole>,
+    },
 }
 
 /// A frame in this assembly's coordinates.
