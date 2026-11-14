@@ -2933,6 +2933,19 @@ export interface Pressure {
   pascals: number;
 }
 
+export interface PreviewMeasure {
+  volume_m3: number;
+  area_m2: number;
+  patches: PreviewSurfacePatch[];
+}
+
+export interface PreviewSurfacePatch {
+  area_m2: number;
+  radius_m: number | null;
+  thickness_m: number | null;
+  gap_m: number | null;
+}
+
 export type ProcedureSettings = "none"
   | { structural_random_response: StructuralRandomResponseSettings }
   | { structural_nonlinear: StructuralNonlinearSettings }
