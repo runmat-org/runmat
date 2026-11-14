@@ -5,7 +5,8 @@
 //! continuous).
 //!
 //! Values: `stripes` (bands over the half-turn from facing the light to facing away),
-//! `direction` (a plane, axis or face: the light; the Top plane's normal when not picked).
+//! `direction` (a plane, axis or face: the light; the isometric direction (1, 1, 1) when not
+//! picked).
 
 use super::field::{field_face, field_meshes, measure, model_size, SurfaceField, RAMP_STRIPES};
 use super::{Analysis, Row};
@@ -45,11 +46,16 @@ pub(super) fn zebra(
         .and_then(Value::as_u64)
         .unwrap_or(20)
         .clamp(2, 200) as u32;
+    // Unpicked, the light comes along the isometric view direction, which is square to no
+    // origin plane: flat faces of a block take different bands, and a hole's or a boss's wall
+    // round any origin axis shows stripes.
     let pick = crate::features::picks_of(values, "direction")
         .into_iter()
-        .next()
-        .unwrap_or_else(|| "origin.xy".into());
-    let light = crate::draft_analysis::pull_direction(&part.display, &pick)?;
+        .next();
+    let light = match &pick {
+        Some(p) => crate::draft_analysis::pull_direction(&part.display, p)?,
+        None => [1.0 / 3f64.sqrt(); 3],
+    };
     let bodies: Vec<_> = part
         .display
         .bodies
@@ -143,7 +149,10 @@ pub(super) fn zebra(
         colors: None,
         settings: vec![
             format!("Stripes: {stripes}"),
-            format!("Light: {}", super::pull_label(&pick, light, None)),
+            match &pick {
+                Some(p) => format!("Light: {}", super::pull_label(p, light, None)),
+                None => "Light: isometric (1, 1, 1)".into(),
+            },
         ],
         arrow: None,
         dimensions: Vec::new(),

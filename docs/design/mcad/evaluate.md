@@ -184,7 +184,7 @@ Each face is a row with its least and greatest value and its smallest radius, th
 
 ## Zebra stripes
 
-Zebra stripes shows black and white bands, banded by the angle between each point's exact surface normal and a light direction: the Top plane's normal, or a plane, axis or face you pick. Where two faces meet tangentially, the bands run on across the edge; where they meet at a crease, the bands break. Set the number of stripes over the half turn from facing the light to facing away; 20 is the default. The faces are split for the analysis until a triangle's normals turn by no more than a third of a band, so the bands keep their shape on curved faces.
+Zebra stripes shows black and white bands, banded by the angle between each point's exact surface normal and a light direction: a plane, axis or face you pick, or the isometric direction (1, 1, 1), which is square to no origin plane, so a block's flat faces take different bands and a hole's wall shows stripes. Where two faces meet tangentially, the bands run on across the edge; where they meet at a crease, the bands break. Set the number of stripes over the half turn from facing the light to facing away; 20 is the default. The faces are split for the analysis until a triangle's normals turn by no more than a third of a band, so the bands keep their shape on curved faces.
 
 Each edge between two faces is a row with its continuity, measured by the kernel at the edge's midpoint:
 

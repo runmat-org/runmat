@@ -71,7 +71,12 @@ fn a_10_mm_block_is_10_mm_thin_through_its_top_and_100_mm_end_to_end() {
     assert!((range[0].as_f64().unwrap() - 10.0).abs() < 1e-3, "{out}");
     assert!((range[1].as_f64().unwrap() - 100.0).abs() < 1e-3, "{out}");
     let values = field_values(&out);
-    assert!(values.iter().all(|v| (10.0 - 1e-3..=100.0 + 1e-3).contains(v)), "{values:?}");
+    assert!(
+        values
+            .iter()
+            .all(|v| (10.0 - 1e-3..=100.0 + 1e-3).contains(v)),
+        "{values:?}"
+    );
     // The top and bottom are 10 mm through: thinner than the 12 mm target.
     let thin: Vec<&Value> = rows(&out)
         .iter()
@@ -80,10 +85,9 @@ fn a_10_mm_block_is_10_mm_thin_through_its_top_and_100_mm_end_to_end() {
     assert_eq!(thin.len(), 2, "{out}");
     assert!(thin.iter().all(|r| r["cells"][1] == "10.000 mm"), "{out}");
     assert!(
-        out["summary"]
-            .as_str()
-            .unwrap()
-            .contains("6 faces · thinnest 10.000 mm · thickest 100.000 mm · 2 faces thinner than 12.000 mm"),
+        out["summary"].as_str().unwrap().contains(
+            "6 faces · thinnest 10.000 mm · thickest 100.000 mm · 2 faces thinner than 12.000 mm"
+        ),
         "{out}"
     );
     // Against a 50 mm target for thick regions, only the faces 100 mm apart pass it.
@@ -120,7 +124,10 @@ fn a_5_mm_bar_is_convex_at_one_over_5_mm_and_a_5_mm_hole_concave() {
     assert_eq!(side["cells"][2], "0.2000 1/mm", "{out}");
     // Flat caps measure zero.
     assert_eq!(
-        rows(&out).iter().filter(|r| r["cells"][3] == "Flat").count(),
+        rows(&out)
+            .iter()
+            .filter(|r| r["cells"][3] == "Flat")
+            .count(),
         2
     );
     let range = out["field"]["range"].as_array().unwrap();
@@ -154,7 +161,7 @@ fn zebra_bands_a_block_and_finds_its_12_creases() {
         "/p/block.part",
         &block,
         "evaluate.zebra",
-        json!({ "stripes": 10 }),
+        json!({ "stripes": 10, "direction": ["origin.xy"] }),
     );
     assert_field_shape(&out);
     assert_eq!(out["field"]["kind"], "stripes");
@@ -181,7 +188,10 @@ fn zebra_bands_a_block_and_finds_its_12_creases() {
     let bar = extruded("bar", BAR_SKETCH);
     let out = analyze("/p/bar.part", &bar, "evaluate.zebra", json!({}));
     assert!(
-        out["summary"].as_str().unwrap().starts_with("2 edges between faces · 2 G0"),
+        out["summary"]
+            .as_str()
+            .unwrap()
+            .starts_with("2 edges between faces · 2 G0"),
         "{out}"
     );
 }
@@ -195,7 +205,10 @@ fn deviation_measures_90_degrees_along_a_blocks_edges() {
         out["summary"], "12 edges · 0 within 0.5° (tangent) · 12 over",
         "{out}"
     );
-    assert!(rows(&out).iter().all(|r| r["cells"][2] == "90.000°"), "{out}");
+    assert!(
+        rows(&out).iter().all(|r| r["cells"][2] == "90.000°"),
+        "{out}"
+    );
     // One picked edge.
     let edge = rows(&out)[0]["reference"].as_str().unwrap().to_string();
     let one = analyze(

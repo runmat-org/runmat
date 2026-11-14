@@ -120,9 +120,9 @@ pub fn face_section(face: &FaceArea) -> PlaneSection {
     let half_tr = (m[0][0] + m[1][1] + m[2][2]) / 2.0;
     let rr = |a: [f64; 3], b: [f64; 3]| {
         let mut s = half_tr * dot(a, b);
-        for i in 0..3 {
-            for j in 0..3 {
-                s -= a[i] * m[i][j] * b[j];
+        for (ai, row) in a.iter().zip(&m) {
+            for (mij, bj) in row.iter().zip(&b) {
+                s -= ai * mij * bj;
             }
         }
         s

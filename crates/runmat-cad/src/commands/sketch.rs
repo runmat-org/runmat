@@ -277,7 +277,8 @@ pub(super) fn add(catalog: &mut Catalog) {
         cmd("sketch.check", "Check sketch for feature", "check", S)
             .desc("Check the sketch for a feature: open ends, branches, overlaps, crossings, closed loops and Revolve's axis.")
             .inputs(vec![choice("for", "Use", &[("extrude", "Extrude"), ("revolve", "Revolve"), ("sweep_path", "Sweep path"), ("loft_profile", "Loft profile")])])
-            .when(sketching())
+            // In the open sketch, or on a sketch selected in the Outline (its context menu).
+            .when(any(vec![sketching(), selected_one(&[K::Sketch])]))
             .edit(analyze("sketch_check")),
         cmd("sketch.repair", "Repair sketch", "repair", S)
             .desc("Close small gaps and remove overlapping entities.")
