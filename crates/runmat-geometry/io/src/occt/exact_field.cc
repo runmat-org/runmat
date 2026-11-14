@@ -11,12 +11,17 @@
 //   curvature: the two principal curvatures (1/m), smaller first, positive where the face is
 //     convex (bends away from its outward normal);
 //   normal: NaN, NaN.
-// A point whose projection fails gives NaN for all eight.
+// A point off the trimmed face (a mesh chord across a hole's edge) is drawn at the nearest point
+// of the face's boundary and measured just inside it. A point whose projection fails gives NaN
+// for all eight.
 
 #include "runmat-geometry-io/src/occt/kernel_ffi.rs.h"
 #include "exact_kernel.hxx"
 
 #include <BRepAdaptor_Surface.hxx>
+#include <BRepBuilderAPI_MakeVertex.hxx>
+#include <BRepClass_FaceClassifier.hxx>
+#include <BRepExtrema_DistShapeShape.hxx>
 #include <BRepBndLib.hxx>
 #include <BRepLProp_SLProps.hxx>
 #include <BRep_Tool.hxx>
@@ -25,6 +30,8 @@
 #include <Geom_Surface.hxx>
 #include <IntCurvesFace_ShapeIntersector.hxx>
 #include <gp_Lin.hxx>
+#include <gp_Pnt2d.hxx>
+#include <gp_Vec.hxx>
 
 #include <algorithm>
 #include <cmath>
@@ -74,6 +81,31 @@ rust::Vec<double> surface_field(const Body& b, rust::Slice<const double> r) {
         for (int k = 0; k < 8; ++k) out.push_back(nan);
         continue;
       }
+      // A display mesh's chord across a curved boundary (a hole's edge) leaves points off the
+      // trimmed face. Such a point is drawn on the face's boundary, nearest it, and measured a
+      // step further onto the face, where the face's own value is.
+      bool on_boundary = false;
+      gp_Pnt boundary;
+      {
+        BRepClass_FaceClassifier cls(face, gp_Pnt2d(u, v), 1e-7);
+        if (cls.State() == TopAbs_OUT) {
+          BRepExtrema_DistShapeShape near(BRepBuilderAPI_MakeVertex(p).Vertex(), face);
+          if (near.IsDone() && near.NbSolution() > 0) {
+            boundary = near.PointOnShape2(1);
+            gp_Pnt off;
+            surface->D0(u, v, off);
+            gp_Vec d(off, boundary);
+            if (d.Magnitude() > 1e-12) {
+              const gp_Pnt inner = boundary.Translated(d.Normalized() * (size * 1e-4));
+              GeomAPI_ProjectPointOnSurf again(inner, surface);
+              if (again.NbPoints() > 0) {
+                again.LowerDistanceParameters(u, v);
+                on_boundary = true;
+              }
+            }
+          }
+        }
+      }
       BRepLProp_SLProps props(adaptor, u, v, quantity == 1 ? 2 : 1, 1e-9);
       if (!props.IsNormalDefined()) {
         for (int k = 0; k < 8; ++k) out.push_back(nan);
@@ -82,7 +114,8 @@ rust::Vec<double> surface_field(const Body& b, rust::Slice<const double> r) {
       const gp_Pnt q = props.Value();
       gp_Dir normal = props.Normal();
       if (reversed) normal.Reverse();
-      out.push_back(q.X()); out.push_back(q.Y()); out.push_back(q.Z());
+      const gp_Pnt drawn = on_boundary ? boundary : q;
+      out.push_back(drawn.X()); out.push_back(drawn.Y()); out.push_back(drawn.Z());
       out.push_back(normal.X()); out.push_back(normal.Y()); out.push_back(normal.Z());
       double a = nan, c = nan;
       if (quantity == 0) {

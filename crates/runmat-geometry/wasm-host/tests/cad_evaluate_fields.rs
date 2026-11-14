@@ -219,3 +219,43 @@ fn deviation_measures_90_degrees_along_a_blocks_edges() {
     );
     assert_eq!(rows(&one).len(), 1, "{one}");
 }
+
+#[test]
+fn a_plate_with_a_hole_is_measured_right_up_to_the_holes_edge() {
+    // The display mesh's chords across the hole leave points off the top face; each is drawn
+    // on the hole's edge and measured there, so no vertex is left unmeasured.
+    let plate = extruded(
+        "plate",
+        &format!("{BLOCK_SKETCH}        c1 = circle(center = [50 mm, 10 mm], radius = 5 mm)\n"),
+    );
+    let out = analyze(
+        "/p/plate.part",
+        &plate,
+        "evaluate.thickness",
+        json!({ "target": 2.0 }),
+    );
+    for f in out["field"]["faces"].as_array().unwrap() {
+        let values = f["values"].as_array().unwrap();
+        assert!(
+            values.iter().all(|v| v.is_number()),
+            "{}: {values:?}",
+            f["item"]
+        );
+        // Drawn points lie in the plate (no point in the hole's open space on a cap).
+        let p = f["positions"].as_array().unwrap();
+        for c in p.chunks(3) {
+            let (x, y, z) = (
+                c[0].as_f64().unwrap(),
+                c[1].as_f64().unwrap(),
+                c[2].as_f64().unwrap(),
+            );
+            if z.abs() < 1e-9 || (z - 0.01).abs() < 1e-9 {
+                let r = ((x - 0.05).powi(2) + (y - 0.01).powi(2)).sqrt();
+                assert!(
+                    r >= 0.005 - 1e-6,
+                    "a cap point in the hole at ({x}, {y}, {z})"
+                );
+            }
+        }
+    }
+}
