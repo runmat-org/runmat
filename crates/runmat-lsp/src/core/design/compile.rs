@@ -199,7 +199,11 @@ fn compile_part(
         }
     }
     // The calls still to run, as the CAD host's compile lists them.
-    let projection = serde_json::json!({ "document": &document, "index": &index, "pending_values": &*pending.borrow() });
+    // What each feature reference resolves to, for reference hovers. The browser server's test
+    // kernel doesn't match the viewport, so there the Desktop's CAD host forwards them instead
+    // (`DesignDocumentAnalysis::with_entities`).
+    let facts = (!test_kernel).then(|| runmat_cad::index::reference_facts(&document, &result));
+    let projection = serde_json::json!({ "document": &document, "index": &index, "pending_values": &*pending.borrow(), "facts": facts });
     (problems, Some(projection))
 }
 

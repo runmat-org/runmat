@@ -38,6 +38,21 @@ impl<'a, 'b> Run<'a, 'b> {
         })
     }
 
+    /// A feature argument's value, evaluated as the quantity the argument registry
+    /// ([`crate::syntax::arguments`]) gives `param` in features of kind `kind`.
+    pub(super) fn arg(
+        &mut self,
+        f: &FeatureId,
+        kind: &str,
+        param: &str,
+        v: &ValueExpr,
+    ) -> Result<f64, Halt> {
+        let dim = crate::syntax::arguments::dimension(kind, param).unwrap_or_else(|| {
+            panic!("the argument registry gives `{kind}` no numeric argument `{param}`")
+        });
+        self.value(f, param, v, dim)
+    }
+
     pub(super) fn count(&mut self, f: &FeatureId, param: &str, v: &ValueExpr) -> Result<u32, Halt> {
         let n = self.value(f, param, v, Dimension::DIMENSIONLESS)?;
         if n < 1.0 || n.fract() != 0.0 || n > 10_000.0 {

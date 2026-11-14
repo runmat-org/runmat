@@ -829,6 +829,9 @@ impl LanguageServer for RunMatLanguageServer {
     ) -> RpcResult<Option<SignatureHelp>> {
         let uri = params.text_document_position_params.text_document.uri;
         let position = params.text_document_position_params.position;
+        if let Some(design) = self.design_of(&uri).await {
+            return Ok(design.signature_help(&position));
+        }
 
         let (text, analysis, fea_analysis) = {
             let state = self.state.read().await;

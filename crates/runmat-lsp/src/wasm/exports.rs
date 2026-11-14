@@ -72,6 +72,12 @@ runmat_thread_local! {
     static DESIGN_VALUES: RefCell<DesignValues> = RefCell::new(DesignValues::new());
 }
 
+runmat_thread_local! {
+    /// What each part's feature references resolve to, by file path, as the Desktop's CAD host
+    /// regenerated them on the exact kernel and supplied them with `setDesignEntities`.
+    static DESIGN_ENTITIES: RefCell<BTreeMap<String, serde_json::Value>> = RefCell::new(BTreeMap::new());
+}
+
 /// The most call results the server keeps. Keys carry the sources' text, so edits leave old
 /// results behind; past this many, the oldest-keyed go first.
 const DESIGN_VALUES_LIMIT: usize = 4096;
@@ -285,7 +291,12 @@ pub async fn analyze_document(uri: String, version: u64) -> Result<JsValue, JsVa
             &files,
             &values,
         )
-        .with_pending(&DESIGN_PENDING.with(|p| p.borrow().get(&uri).cloned().unwrap_or_default()));
+        .with_pending(&DESIGN_PENDING.with(|p| p.borrow().get(&uri).cloned().unwrap_or_default()))
+        .with_entities(
+            DESIGN_ENTITIES
+                .with(|e| e.borrow().get(parsed_uri.as_ref().expect("a parsed design uri").path()).cloned())
+                .as_ref(),
+        );
         let tokens = analysis.semantic_tokens();
         let committed = DOCS.with(|d| {
             let mut docs = d.borrow_mut();
@@ -388,6 +399,28 @@ pub fn set_design_values(values: JsValue) -> Result<JsValue, JsValue> {
         stored.extend(values);
         while stored.len() > DESIGN_VALUES_LIMIT {
             stored.pop_first();
+        }
+    });
+    WORKSPACE_REVISION.with(|workspace| workspace.set(workspace.get().saturating_add(1)));
+    Ok(JsValue::NULL)
+}
+
+/// Supplies what a part's feature references resolve to, as the Desktop's CAD host regenerated
+/// it: `{ "/p/bracket.part": { "<feature>/<param>": [count, [facts…]] } }` (the shape of
+/// `runmat_cad::index::reference_facts`); a `null` forgets a file. Reference hovers read them,
+/// because this server regenerates on the test kernel, which doesn't match the viewport.
+#[wasm_bindgen(js_name = "setDesignEntities")]
+pub fn set_design_entities(entities: JsValue) -> Result<JsValue, JsValue> {
+    let entities: BTreeMap<String, serde_json::Value> = serde_wasm_bindgen::from_value(entities)
+        .map_err(|error| JsValue::from_str(&error.to_string()))?;
+    DESIGN_ENTITIES.with(|stored| {
+        let mut stored = stored.borrow_mut();
+        for (path, facts) in entities {
+            if facts.is_null() {
+                stored.remove(&path);
+            } else {
+                stored.insert(path, facts);
+            }
         }
     });
     WORKSPACE_REVISION.with(|workspace| workspace.set(workspace.get().saturating_add(1)));
@@ -724,8 +757,10 @@ pub fn signature_help(_uri: String, _line: u32, _character: u32) -> Result<JsVal
         return Ok(JsValue::NULL);
     };
     let position = Position::new(_line, _character);
-    if doc.design_analysis.is_some() {
-        return Ok(JsValue::NULL);
+    if let Some(analysis) = doc.design_analysis.as_ref() {
+        return analysis
+            .signature_help(&position)
+            .map_or(Ok(JsValue::NULL), |help| to_js(&help));
     }
     if let Some(analysis) = doc.fea_analysis.as_ref() {
         return analysis

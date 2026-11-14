@@ -43,6 +43,7 @@ pub mod circuit_edit;
 pub mod layout;
 pub mod footprint_decl;
 pub mod part_decl;
+pub mod summaries;
 pub mod symbol_decl;
 pub mod simulation;
 pub mod simulation_print;
