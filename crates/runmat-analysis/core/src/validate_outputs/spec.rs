@@ -240,7 +240,7 @@ pub fn family_supports_quantity(
 /// The field locations a step of `family` publishes `quantity` at
 /// (`analysis.<step>.field.<location>.<quantity>`), read from the source-name table
 /// ([`crate::SOURCE_QUANTITIES`]). A coupled family publishes what its physics
-/// publish. Empty when the family publishes no field of the quantity. The checker refuses any
+/// publish, plus the rows keyed to the coupled family itself. Empty when the family publishes no field of the quantity. The checker refuses any
 /// other location, and Simulation setup offers only these.
 pub fn published_locations(family: PhysicsFamily, quantity: ObservationQuantity) -> Vec<FieldLocation> {
     use PhysicsFamily as F;
@@ -254,7 +254,7 @@ pub fn published_locations(family: PhysicsFamily, quantity: ObservationQuantity)
     let mut locations = Vec::new();
     for row in crate::SOURCE_QUANTITIES.iter().filter(|row| row.quantity == quantity) {
         for (owner, published) in row.fields {
-            if physics.contains(owner) {
+            if *owner == family || physics.contains(owner) {
                 for location in *published {
                     if !locations.contains(location) {
                         locations.push(*location);
@@ -620,7 +620,9 @@ mod tests {
         assert_eq!(published_locations(F::Fluid, Q::FluidVelocity), [L::Node, L::Cell]);
         assert!(published_locations(F::Thermal, Q::Displacement).is_empty());
         let coupled = F::Coupled(C::Thermomechanical);
-        assert_eq!(published_locations(coupled, Q::Temperature), [L::Node]);
+        assert_eq!(published_locations(coupled, Q::Temperature), [L::Node, L::Element, L::IntegrationPoint]);
+        assert_eq!(published_locations(F::Thermal, Q::Temperature), [L::Node]);
+        assert_eq!(published_locations(F::Coupled(C::Electrothermal), Q::Temperature), [L::Node]);
         assert_eq!(published_locations(coupled, Q::Displacement), [L::Node]);
         assert!(published_locations(F::Structural, Q::HeatRate).is_empty());
     }

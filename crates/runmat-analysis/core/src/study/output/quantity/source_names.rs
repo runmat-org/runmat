@@ -8,7 +8,7 @@
 //! build); runmat-analysis-fea's `source_field_locations` test checks the table against them both
 //! ways. A quantity with no locations
 //! has no field form: it is read some other way (a reduction, a port or line parameter).
-use crate::{FieldLocation as L, PhysicsFamily as P};
+use crate::{CoupledPhysicsFamily as C, FieldLocation as L, PhysicsFamily as P};
 
 use super::ObservationQuantity as Q;
 
@@ -18,8 +18,9 @@ pub struct SourceQuantity {
     /// The `.fea` spelling.
     pub name: &'static str,
     pub quantity: Q,
-    /// Per single physics, the locations a step of that physics publishes the quantity at as a
-    /// field. A coupled family publishes what its physics publish.
+    /// Per physics family, the locations a step of that family publishes the quantity at as a
+    /// field. A coupled family publishes what its single physics publish, plus the locations
+    /// keyed to the coupled family itself (fields only its coupled pipeline produces).
     pub fields: &'static [(P, &'static [L])],
 }
 
@@ -49,7 +50,13 @@ pub const SOURCE_QUANTITIES: &[SourceQuantity] = &[
     row("shell_bending_moment", Q::ShellBendingMoment, &[(P::Structural, &[L::Element])]),
     row("shell_transverse_shear", Q::ShellTransverseShear, &[(P::Structural, &[L::Element])]),
     row("shell_von_mises", Q::ShellVonMises, &[(P::Structural, &[L::Element])]),
-    row("temperature", Q::Temperature, &[(P::Thermal, &[L::Node])]),
+    row(
+        "temperature",
+        Q::Temperature,
+        // The thermo-mechanical prestress snapshots carry the temperature the structural step
+        // reads, per element and per integration point; a thermal step publishes nodes only.
+        &[(P::Thermal, &[L::Node]), (P::Coupled(C::Thermomechanical), &[L::Element, L::IntegrationPoint])],
+    ),
     row("temperature_gradient", Q::TemperatureGradient, &[(P::Thermal, &[L::Element])]),
     row("heat_flux", Q::HeatFlux, &[(P::Thermal, &[L::Element, L::Interface])]),
     row("heat_rate", Q::HeatRate, &[]),

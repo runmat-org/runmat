@@ -12,8 +12,8 @@
 use std::collections::HashSet;
 
 use runmat_analysis_core::{
-    FieldLocation as L, ObservationQuantity as Q, PhysicsFamily as P, StaticElectricalEquation,
-    SOURCE_QUANTITIES,
+    published_locations, CoupledPhysicsFamily as C, FieldLocation as L, ObservationQuantity as Q,
+    PhysicsFamily as P, StaticElectricalEquation, SOURCE_QUANTITIES,
 };
 
 use super::{
@@ -43,6 +43,8 @@ const INLINE: &[(P, Q, L, &str)] = &[
     (P::Structural, Q::ContactPressure, L::Interface, "pipeline/nonlinear/recovery.rs"),
     (P::Thermal, Q::HeatFlux, L::Interface, "physics/cht/recovery.rs"),
     (P::Thermal, Q::Residual, L::Global, "pipeline/thermo_mechanical.rs"),
+    (P::Coupled(C::Thermomechanical), Q::Temperature, L::Element, "pipeline/thermo_mechanical.rs"),
+    (P::Coupled(C::Thermomechanical), Q::Temperature, L::IntegrationPoint, "pipeline/thermo_mechanical/solved.rs"),
     (P::Electromagnetic, Q::ElectricPotential, L::Node, "pipeline/electro_thermal.rs"),
     (P::Electromagnetic, Q::ElectricField, L::Edge, "pipeline/electro_thermal.rs"),
     (P::Electromagnetic, Q::ElectricCurrentDensity, L::Edge, "pipeline/electro_thermal.rs"),
@@ -57,12 +59,14 @@ const INLINE: &[(P, Q, L, &str)] = &[
 ];
 
 /// The single physics the table gives `quantity`, for inventories that mix physics (a conjugate
-/// fluid inventory publishes the solid's temperature).
+/// fluid inventory publishes the solid's temperature). Rows keyed to a coupled family name
+/// fields only its coupled pipeline builds, so they don't count here.
 fn table_physics(quantity: Q, fallback: P) -> P {
     let mut physics = SOURCE_QUANTITIES
         .iter()
         .filter(|row| row.quantity == quantity)
-        .flat_map(|row| row.fields.iter().map(|(physics, _)| *physics));
+        .flat_map(|row| row.fields.iter().map(|(physics, _)| *physics))
+        .filter(|physics| !matches!(physics, P::Coupled(_)));
     match (physics.next(), physics.next()) {
         (Some(only), None) => only,
         _ => fallback,
@@ -149,4 +153,27 @@ fn every_published_field_with_a_source_name_has_a_row() {
         .collect();
     missing.sort();
     assert!(missing.is_empty(), "published fields with no row: {missing:?}");
+}
+
+/// Per family: a thermal step (steady or transient, both published through the thermal history
+/// inventory) publishes temperature at nodes only, and the thermo-mechanical step adds the
+/// element and integration-point temperatures its prestress snapshots carry.
+#[test]
+fn temperature_locations_follow_the_family() {
+    let thermal: HashSet<L> = crate::physics::thermal::history_fields::definitions()
+        .unwrap()
+        .into_iter()
+        .filter(|definition| definition.quantity() == Q::Temperature)
+        .map(|definition| definition.location())
+        .collect();
+    assert_eq!(thermal, HashSet::from([L::Node]));
+    assert_eq!(published_locations(P::Thermal, Q::Temperature), [L::Node]);
+
+    let coupled = published_locations(P::Coupled(C::Thermomechanical), Q::Temperature);
+    assert_eq!(coupled, [L::Node, L::Element, L::IntegrationPoint]);
+    let inline = inline();
+    for location in [L::Element, L::IntegrationPoint] {
+        assert!(inline.contains(&(P::Coupled(C::Thermomechanical), Q::Temperature, location)));
+        assert!(!published_locations(P::Thermal, Q::Temperature).contains(&location));
+    }
 }
