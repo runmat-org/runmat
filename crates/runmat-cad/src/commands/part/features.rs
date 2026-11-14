@@ -20,11 +20,11 @@ pub(super) fn features() -> Vec<CommandDescriptor> {
         pick("from_vertex", "Start vertex", &[K::Vertex, K::Point]).shown("from", &["vertex"]),
         length("from_offset", "Start offset", 5.0).shown("from", &["offset"]),
     ];
-    extrude_inputs.extend(end_fields("", "End"));
+    extrude_inputs.extend(end_fields("", "End", ""));
     extrude_inputs.push(flag("second_direction", "Second direction", false));
     extrude_inputs.extend(
         // The second direction is opposite the first by definition: it has no flip of its own.
-        end_fields("second_", "Second end")
+        end_fields("second_", "Second end", "Second ")
             .into_iter()
             .filter(|f| f.id != "second_flip")
             .map(|f| f.if_checked("second_direction")),
@@ -93,7 +93,8 @@ pub(super) fn features() -> Vec<CommandDescriptor> {
                 op_field(),
                 choice("orientation", "Orientation", &[("follow_path", "Follow path"), ("keep_normal", "Keep normal constant"), ("follow_path_first_guide", "Follow path and first guide")]),
                 choice("twist", "Twist", &[("none", "None"), ("turns", "Turns"), ("angle", "Angle")]),
-                angle("twist_angle", "Twist", 0.0).shown("twist", &["turns", "angle"]),
+                angle("twist_angle", "Twist angle", 0.0).shown("twist", &["angle"]),
+                qty("twist_turns", "Turns", "ratio", Some(0.0)).shown("twist", &["turns"]),
                 choice("start_tangency", "Start tangency", &[("none", "None"), ("normal", "Normal to profile")]),
                 choice("end_tangency", "End tangency", &[("none", "None"), ("normal", "Normal to profile")]),
                 flag("thin", "Thin", false),
@@ -112,7 +113,9 @@ pub(super) fn features() -> Vec<CommandDescriptor> {
                 pick("centerline", "Centerline", &[K::Sketch, K::Curve, K::Edge]).optional(),
                 op_field(),
                 choice("start_tangency", "Start tangency", &[("none", "None"), ("normal", "Normal to profile"), ("direction", "Direction vector"), ("faces", "Tangent to faces")]),
+                pick("start_direction", "Start direction vector", &[K::Edge, K::Axis, K::Plane, K::Face]).shown("start_tangency", &["direction"]),
                 choice("end_tangency", "End tangency", &[("none", "None"), ("normal", "Normal to profile"), ("direction", "Direction vector"), ("faces", "Tangent to faces")]),
+                pick("end_direction", "End direction vector", &[K::Edge, K::Axis, K::Plane, K::Face]).shown("end_tangency", &["direction"]),
                 flag("closed", "Close the loft", false),
                 flag("thin", "Thin", false),
                 length("thin_thickness", "Thickness", 1.0).if_checked("thin"),
@@ -148,6 +151,7 @@ pub(super) fn features() -> Vec<CommandDescriptor> {
                 length("slot_length", "Slot length", 10.0).shown("type", &["slot"]),
                 choice("end", "End", &[("blind", "Blind"), ("through_all", "Through all"), ("up_to_next", "Up to next"), ("up_to_face", "Up to face")]),
                 length("depth", "Depth", 12.0).shown("end", &["blind"]).drag(Manipulator::Arrow),
+                pick("up_to", "Up to face", &[K::Face]).shown("end", &["up_to_face"]),
                 length("thread_depth", "Thread depth", 10.0).shown("type", &["tapped", "pipe_tap"]),
                 flag("cosmetic_thread", "Cosmetic thread", true),
                 pick("face", "Face", &[K::Face]),
@@ -162,7 +166,12 @@ pub(super) fn features() -> Vec<CommandDescriptor> {
             .kw(&["round", "blend", "radius"])
             .inputs(vec![
                 choice("type", "Type", &[("constant", "Constant radius"), ("variable", "Variable radius"), ("face", "Face fillet"), ("full_round", "Full round")]),
-                picks("edges", "Edges and faces", &[K::Edge, K::Face, K::Feature]),
+                picks("edges", "Edges and faces", &[K::Edge, K::Face, K::Feature]).shown("type", &["constant", "variable"]),
+                picks("face_set1", "Face set 1", &[K::Face]).shown("type", &["face"]),
+                picks("face_set2", "Face set 2", &[K::Face]).shown("type", &["face"]),
+                picks("side_set1", "Side face set 1", &[K::Face]).shown("type", &["full_round"]),
+                picks("center_set", "Center face set", &[K::Face]).shown("type", &["full_round"]),
+                picks("side_set2", "Side face set 2", &[K::Face]).shown("type", &["full_round"]),
                 length("radius", "Radius", 2.0).shown("type", &["constant", "face"]).drag(Manipulator::Radius),
                 list("radii", "Radii at vertices", length("radius", "Radius", 2.0)).shown("type", &["variable"]),
                 choice("profile", "Profile", &[("circular", "Circular"), ("conic", "Conic"), ("curvature", "Curvature continuous")]),
@@ -207,6 +216,10 @@ pub(super) fn features() -> Vec<CommandDescriptor> {
                 picks("faces", "Faces to draft", &[K::Face]),
                 pick("neutral", "Neutral plane", &[K::Plane, K::Face]).shown("type", &["neutral_plane"]),
                 picks("parting", "Parting line", &[K::Edge, K::Curve]).shown("type", &["parting_line", "step"]),
+                pick("pull", "Direction of pull (a plane's normal)", &[K::Plane, K::Face])
+                    .optional()
+                    .help("Leave empty to pull along the Top plane's normal (+Z)")
+                    .shown("type", &["parting_line", "step"]),
                 angle("angle", "Angle", 1.0).min(0.0).max(89.0).drag(Manipulator::Angle),
                 flag("flip", "Flip direction", false),
             ])
@@ -231,11 +244,11 @@ pub(super) fn features() -> Vec<CommandDescriptor> {
             .inputs(vec![
                 choice("layout", "Layout", &[("linear", "Linear"), ("circular", "Circular"), ("curve", "Curve-driven"), ("sketch", "Sketch-driven"), ("table", "Table-driven"), ("fill", "Fill"), ("variable", "Variable")]),
                 picks("seeds", "Features, faces or bodies", &[K::Feature, K::Face, K::Body]),
-                pick("direction", "Direction", &[K::Edge, K::Axis, K::Plane, K::Face]).shown("layout", &["linear", "fill"]),
+                pick("direction", "Direction (edge, axis, or a plane's normal)", &[K::Edge, K::Axis, K::Plane, K::Face]).shown("layout", &["linear", "fill"]),
                 length("spacing", "Spacing", 10.0).shown("layout", &["linear", "fill"]).drag(Manipulator::Arrow),
                 count("instances", "Instances", 3, 1).shown("layout", &["linear", "circular", "curve"]),
                 flag("second_direction", "Second direction", false).shown("layout", &["linear"]),
-                pick("direction2", "Second direction", &[K::Edge, K::Axis, K::Plane]).if_checked("second_direction"),
+                pick("direction2", "Second pattern direction", &[K::Edge, K::Axis, K::Plane, K::Face]).if_checked("second_direction"),
                 length("spacing2", "Second spacing", 10.0).if_checked("second_direction"),
                 count("instances2", "Second instances", 2, 1).if_checked("second_direction"),
                 pick("axis", "Axis", &[K::Axis, K::Edge, K::Face]).shown("layout", &["circular"]),
@@ -243,7 +256,7 @@ pub(super) fn features() -> Vec<CommandDescriptor> {
                 flag("equal_spacing", "Equal spacing", true).shown("layout", &["circular"]),
                 pick("curve", "Curve", &[K::Curve, K::Edge, K::Sketch]).shown("layout", &["curve"]),
                 pick("sketch", "Sketch points", &[K::Sketch]).shown("layout", &["sketch"]),
-                text("table", "Instances", Some("b: 20, 0, 0; c: 40, 0, 0")).shown("layout", &["table", "variable"]),
+                text("table", "Instance table", Some("b: 20, 0, 0; c: 40, 0, 0")).shown("layout", &["table", "variable"]),
                 pick("boundary", "Fill boundary", &[K::Face, K::Sketch]).shown("layout", &["fill"]),
                 list("skip", "Instances to skip", count("instance", "Instance", 1, 1)).optional(),
             ])

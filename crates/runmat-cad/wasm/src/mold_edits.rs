@@ -78,7 +78,7 @@ pub fn mold_kind(
                 "feature": "mold",
                 "mold": "parting_line",
                 "body": first_body(picks)?,
-                "pull": picks.axis(&one(values, "direction", "the pull direction")?)?,
+                "pull": picks.direction(&one(values, "direction", "the pull direction")?)?,
                 "min_draft": value(values, "draft", "deg")?,
             }),
         )),
@@ -89,7 +89,7 @@ pub fn mold_kind(
                 "feature": "mold",
                 "mold": "undercuts",
                 "body": first_body(picks)?,
-                "pull": picks.axis(&one(values, "direction", "the pull direction")?)?,
+                "pull": picks.direction(&one(values, "direction", "the pull direction")?)?,
             }),
         )),
         _ => None,
@@ -229,6 +229,15 @@ mod tests {
             json!({ "direction": ["origin:z"], "draft": 1 }),
         );
         assert!(t.contains("feature parting1 = mold.parting_line(body = feature.body.body, pull = origin.z, min_draft = 1 deg)"), "{t}");
+        // A plane gives its normal: the Top plane pulls along +Z.
+        let t = added(
+            "mold.parting-line",
+            json!({ "direction": ["origin:top"], "draft": 1 }),
+        );
+        assert!(
+            t.contains("pull = { along = normal, plane = origin.xy }"),
+            "{t}"
+        );
         let t = added("mold.undercut", json!({ "direction": ["origin:z"] }));
         assert!(
             t.contains(

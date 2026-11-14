@@ -276,7 +276,6 @@ pub(super) fn rows(catalog: &Catalog) -> EditorRows {
                         "Drag",
                         vec![c("direct.instant-3d"), c("direct.pull")],
                     ),
-                    group("relations", "Relations", vec![c("direct.live-relations")]),
                 ],
             ),
             tab(

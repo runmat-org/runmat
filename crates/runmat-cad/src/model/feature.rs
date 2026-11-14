@@ -1156,8 +1156,12 @@ impl FeatureKind {
             }
         }
         fn axis<'a>(out: &mut Vec<(String, &'a Reference)>, name: &str, a: &'a AxisRef) {
-            if let AxisRef::Edge { edge: r } | AxisRef::Face { face: r } = a {
-                out.push((name.to_owned(), r));
+            match a {
+                AxisRef::Edge { edge: r } | AxisRef::Face { face: r } => {
+                    out.push((name.to_owned(), r))
+                }
+                AxisRef::Normal { plane: p } => plane(out, name, p),
+                _ => {}
             }
         }
         fn point<'a>(out: &mut Vec<(String, &'a Reference)>, name: &str, p: &'a PointRef) {
@@ -1285,8 +1289,10 @@ impl FeatureKind {
             }
         }
         fn axis(out: &mut Vec<FeatureId>, a: &AxisRef) {
-            if let AxisRef::Datum { datum: d } = a {
-                datum(out, d);
+            match a {
+                AxisRef::Datum { datum: d } => datum(out, d),
+                AxisRef::Normal { plane: p } => plane(out, p),
+                _ => {}
             }
         }
         fn point(out: &mut Vec<FeatureId>, p: &PointRef) {
