@@ -646,9 +646,12 @@ This file is generated from the command catalog.
   - Required: `text` (text); `at` (pick: sketch point or vertex or point); `height` (number in mm, default 5); `angle` (number in deg, default 0); `font` (one of `single_line`, default `single_line`); `stroke` (number in mm, default 0.75)
   - Optional: `along` (pick: sketch entity)
 - `sketch.transform`: Move, copy, rotate or scale entities.
-  - Required: `type` (one of `move`, `copy`, `rotate`, `scale`, default `move`); `entities` (picks: sketch entity or sketch point); `base` (pick: sketch point or vertex or point); `dx` (number in mm, default 0) when `type` is move or copy; `dy` (number in mm, default 0) when `type` is move or copy; `angle` (number in deg, default 0) when `type` is rotate; `factor` (number, default 1) when `type` is scale
+  - Required: `type` (one of `move`, `copy`, `rotate`, `scale`, default `move`); `entities` (picks: sketch entity or sketch point); `dx` (number in mm, default 0) when `type` is move or copy; `dy` (number in mm, default 0) when `type` is move or copy; `angle` (number in deg, default 0) when `type` is rotate; `factor` (number, default 1) when `type` is scale
+  - Optional: `base` (pick: sketch point or vertex or point)
 - `sketch.trim`: Trim entities by power trim, to a corner, inside or outside.
   - Required: `type` (one of `power`, `corner`, `inside`, `outside`, default `power`); `entities` (picks: sketch entity); `boundaries` (picks: sketch entity) when `type` is inside or outside
+- `sketch.use-edges`: Bring model edges into the sketch by projection, intersection, silhouette or offset.
+  - Required: `type` (one of `project`, `intersection`, `silhouette`, `offset_on_surface`, default `project`); `items` (picks: edge or face or body); `distance` (number in mm, default 1) when `type` is offset_on_surface
 
 ## `study.` commands (`.part`, `.assembly`, `.circuit`, `.circuit.layout`)
 

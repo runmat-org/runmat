@@ -79,4 +79,9 @@ simulate.region part
 simulate.representation part
 sketch.check assembly
 sketch.check part
+sketch.use-edges part
+sketch.use-edges part type=intersection
+sketch.use-edges part type=offset_on_surface
+sketch.use-edges part type=project
+sketch.use-edges part type=silhouette
 weldment.profile-library part
