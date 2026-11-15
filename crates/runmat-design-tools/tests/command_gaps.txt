@@ -1,7 +1,6 @@
 assembly.contacts assembly
 assembly.copy-with-mates assembly
 assembly.document-settings assembly
-assembly.envelope assembly
 assembly.options assembly
 assembly.options-effectivity assembly
 assembly.skeleton assembly

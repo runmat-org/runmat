@@ -129,6 +129,16 @@ use part base as base {
 
 Use an envelope to keep space for a component whose detail doesn't matter here, such as a purchased motor or a neighboring module. Here the stage's base draws as its box. Mass properties still add the parts an envelope stands for at their own mass and center of gravity.
 
+## 7. Reserve space
+
+An envelope is a box of space the assembly keeps for something, such as room to service a part or the path a cable runs along. **Envelope** on the Layout tab fits the box round the components you pick and adds a margin on every side. It writes one line:
+
+```assembly fragment
+envelope service = { owner = base, min = [-5 mm, -5 mm, -5 mm], max = [105 mm, 85 mm, 15 mm], keep_out = true }
+```
+
+The view draws the box's edges, and the Outline lists it under **Envelopes**. With **Keep out** on, Interference lists every component inside the box except its owner, the one component allowed in it. Run Envelope from the row to change it: with no components picked, the box stays and only the other settings change. Delete removes it.
+
 ## Next
 
 - [Make a drawing](/docs/mcad/guides/make-a-drawing) of the assembly with its BOM.

@@ -162,6 +162,8 @@ pub enum SelectKind {
     Configuration,
     /// A display state of the assembly (`display_state:<name>`).
     DisplayState,
+    /// A space the assembly reserves (`envelope:<name>`).
+    Envelope,
     // Drawing.
     Sheet,
     View,
@@ -221,6 +223,7 @@ impl SelectKind {
             Publish => "published item",
             Configuration => "configuration",
             DisplayState => "display state",
+            Envelope => "envelope",
             Sheet => "sheet",
             View => "view",
             Annotation => "annotation",

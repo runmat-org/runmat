@@ -933,6 +933,8 @@ pub fn assembly_display_operated(
         });
     }
     out.references = references::connector_displays(resolved, out.bounds.as_ref());
+    out.references
+        .extend(references::envelope_displays(resolved));
     out
 }
 

@@ -32,12 +32,24 @@ pub(super) fn layout() -> Vec<CommandDescriptor> {
             "assembly.envelope",
             "Envelope",
             "envelope",
-            "Reserve space with an envelope body others must stay out of.",
+            "Reserve a box of space that interference checks keep other components out of.",
         )
         .inputs(vec![
-            text("name", "Name", Some("service_space")),
-            pick("body", "Body", &[K::Occurrence, K::Body]),
+            text("name", "Name", Some("service_space"))
+                .help("An existing envelope's name changes that envelope."),
+            picks("around", "Around", &[K::Occurrence])
+                .optional()
+                .help("The box fits round these components. Leave empty to keep the box an existing envelope has."),
+            length("margin", "Margin", 0.0)
+                .help("Added on every side of the components' box."),
+            flag("keep_out", "Keep out", true)
+                .help("Interference checks list any component inside the box, except its owner."),
+            pick("owner", "Owner", &[K::Occurrence])
+                .optional()
+                .help("The one component allowed inside."),
         ])
+        .when(occurrences())
+        .on(&[K::Envelope])
         .edit(edit(EditOp::Add, Section::Occurrences).item("envelope")),
         asm(
             "assembly.interface-check",

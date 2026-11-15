@@ -13,6 +13,8 @@
 //! - `assembly.replace`, `assembly.subassembly`, `assembly.new-part`: structure ([`structure`]).
 //! - `assembly.sketch` and the `sketch.*` tools: sketches in the assembly ([`sketch`]).
 //! - `assembly.feature`: a cut, holes or a weld bead through components ([`operation`]).
+//! - `assembly.envelope`: a reserved box of space fitted round components, and Delete on its row
+//!   ([`envelopes`]).
 //! - `assembly.representation`: the components' representation (full, or envelope: drawn and
 //!   checked as their box).
 //! - `assembly.mate-connector`: a named connector on a pick, and Delete on its row
@@ -33,6 +35,7 @@ pub(crate) mod anchors;
 mod configurations;
 mod configure;
 mod connector;
+mod envelopes;
 mod explode;
 pub(crate) mod frames;
 mod mate;
@@ -55,6 +58,8 @@ mod configurations_tests;
 mod connector_tests;
 #[cfg(test)]
 mod operation_tests;
+#[cfg(test)]
+mod envelopes_tests;
 #[cfg(test)]
 mod explode_tests;
 #[cfg(test)]
@@ -479,6 +484,10 @@ pub(super) fn edit(
         "assembly.delete" if configurations::selected(request).next().is_some() => {
             configurations::delete(&mut document, request)?
         }
+        "assembly.delete" if envelopes::selected(request).next().is_some() => {
+            envelopes::delete(&mut document, request)?
+        }
+        "assembly.envelope" => envelopes::apply(&mut document, &compiled, &request.values)?,
         "assembly.configurations" => {
             configurations::apply(&mut document, &compiled, &request.values)?
         }

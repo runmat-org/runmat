@@ -251,6 +251,9 @@ pub struct AssemblyIndex {
     /// The top assembly's configurations, then its display states, in document order.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub configurations: Vec<crate::assembly::configuration_rows::ConfigurationRow>,
+    /// The top assembly's envelopes, in document order.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub envelopes: Vec<crate::assembly::envelope_rows::EnvelopeRow>,
 }
 
 /// One assembly feature: its type, sketch and components, whether its tool builds, and its
@@ -641,6 +644,7 @@ pub fn build_assembly_index(
             tree,
             top.as_deref(),
         ),
+        envelopes: crate::assembly::envelope_rows::envelope_rows(tree, top.as_deref()),
     }
 }
 

@@ -89,6 +89,16 @@ struct Placement<'a> {
     bbox: Aabb,
     /// The occurrence is one of the changed ones (always true without a `changed` list).
     changed: bool,
+    /// The occurrence node, or (for a space the assembly reserves) the declared envelope.
+    at: At,
+}
+
+/// What a placement stands for: an occurrence, or a declared envelope (by its index in the
+/// resolved tree's envelopes).
+#[derive(Clone, Copy)]
+enum At {
+    Node(u32),
+    Declared(usize),
 }
 
 fn is_zero(n: &usize) -> bool {
@@ -294,6 +304,7 @@ pub fn assembly_clearance_of(
                 min: [0.0; 3],
                 max: [0.0; 3],
             },
+            at: At::Node(id as u32),
         };
         let local = match (&placement.source, key.and_then(cache::bbox)) {
             (Source::Envelope(b), _) => Some(*b),
@@ -310,6 +321,24 @@ pub fn assembly_clearance_of(
         placement.bbox = local.transformed(&node.world);
         placements.push(placement);
     }
+    // The spaces the top assembly reserves: a component inside one it doesn't admit interferes.
+    for (i, e) in resolved.envelopes.iter().enumerate() {
+        if e.declared_by != 0 {
+            continue;
+        }
+        let path = format!("envelope.{}", e.name);
+        placements.push(Placement {
+            changed: is_changed(&path),
+            item: format!("envelope:{}", e.name),
+            path,
+            file: String::new(),
+            source: Source::Envelope(e.world),
+            key: None,
+            world: Transform::IDENTITY,
+            bbox: e.world,
+            at: At::Declared(i),
+        });
+    }
     if let Some(names) = changed {
         if let Some(missing) = names.iter().find(|n| {
             !placements
@@ -322,14 +351,24 @@ pub fn assembly_clearance_of(
         }
     }
     let mut out = Interference {
-        parts: placements.len(),
+        parts: placements.iter().filter(|p| matches!(p.at, At::Node(_))).count(),
         clearance,
         errors,
         changed: changed.map(<[String]>::to_vec).unwrap_or_default(),
         ..Default::default()
     };
+    let admitted = |a: &Placement, b: &Placement| match (a.at, b.at) {
+        (At::Declared(_), At::Declared(_)) => true,
+        (At::Declared(e), At::Node(n)) | (At::Node(n), At::Declared(e)) => {
+            runmat_cad::assembly::interference::envelope_admits(resolved, &resolved.envelopes[e], n)
+        }
+        (At::Node(_), At::Node(_)) => false,
+    };
     for (i, a) in placements.iter().enumerate() {
         for b in &placements[i + 1..] {
+            if admitted(a, b) {
+                continue;
+            }
             if !(a.changed || b.changed)
                 || grown(&a.bbox, clearance).intersection(&b.bbox).is_empty()
             {
