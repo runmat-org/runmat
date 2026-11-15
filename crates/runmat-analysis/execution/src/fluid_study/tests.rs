@@ -137,6 +137,7 @@ pub(crate) fn preparation() -> FluidStudyPreparation {
     let prior = crate::electrical_study::tests::preparation();
     let (workload, mesh) = authored();
     let compiled = CompiledAnalysisStudy {
+        displays: Vec::new(),
         module_path: "tests/fluid.fea".into(),
         study_id: "fluid".into(),
         study_inputs: Vec::new(),

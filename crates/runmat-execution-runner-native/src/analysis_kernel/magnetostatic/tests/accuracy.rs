@@ -52,6 +52,7 @@ fn native_magnetic_authored_plan_accuracy_preserves_unknown_spatial_evidence() {
         })
         .collect();
         let compiled = CompiledAnalysisStudy {
+            displays: Vec::new(),
             module_path: "qualification/magnetic.fea".into(),
             study_id: "magnetic".into(),
             study_inputs: Vec::new(),

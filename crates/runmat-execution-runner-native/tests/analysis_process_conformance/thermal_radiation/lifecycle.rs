@@ -50,6 +50,7 @@ pub(super) async fn run(
     let ceiling = step.accuracy.resources.resident_byte_budget();
     let wall = step.accuracy.resources.maximum_wall_time_milliseconds;
     let compiled = CompiledAnalysisStudy {
+        displays: Vec::new(),
         module_path: "qualification/thermal-radiation.fea".into(),
         study_id: "thermal-radiation".into(),
         study_inputs: Vec::new(),

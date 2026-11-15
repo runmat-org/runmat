@@ -14,7 +14,10 @@ pub mod event;
 pub mod field_volume;
 pub mod geometry;
 pub mod geometry_scene;
-pub mod legend_text;
+/// The legend's text: range precision, printed units and the assessment line. The formatter
+/// lives with the physical units so publication, which runs without plotting, writes the same
+/// assessment line the legend draws.
+pub use runmat_types::physical::result_text as legend_text;
 pub mod geometry_observation;
 pub mod gpu;
 pub(crate) mod wgpu_compat;

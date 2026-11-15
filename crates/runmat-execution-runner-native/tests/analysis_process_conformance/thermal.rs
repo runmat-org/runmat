@@ -130,6 +130,7 @@ pub(super) async fn run_driver<D: PublicationChainDriver>(
             model.sequence = AnalysisSequence::from_steps("isolated-thermal", vec![step]);
         }
         let compiled = CompiledAnalysisStudy {
+            displays: Vec::new(),
             module_path: "conformance/thermal.fea".into(),
             study_id: "thermal".into(),
             study_inputs: Vec::new(),

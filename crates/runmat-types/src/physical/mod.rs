@@ -46,5 +46,10 @@ pub use unit_names::*;
 mod parameter_coordinate;
 pub use parameter_coordinate::*;
 
+/// How results are printed: legend range precision, printed unit symbols, and the line that
+/// states an assessed result against its limit ("Peak 76.3 MPa (element) · limit 184 MPa ·
+/// factor 2.41"). Legends, published assessments and the Desktop all read it from here.
+pub mod result_text;
+
 /// The shared material library (ids, labels, properties and their sources).
 pub mod materials;

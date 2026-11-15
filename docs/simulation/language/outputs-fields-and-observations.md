@@ -141,6 +141,8 @@ When the study assesses the shown quantity, the legend states the run's result f
 
 The view of an assessed quantity colours the field the assessment reads, at the location the assessment reads it. A peak stress over element von Mises values is drawn element by element, so the top of the bar and the result on the assessment line are the same number when the view draws the assessed region. The line names the location: "Peak 76.3 MPa (element) · limit 184 MPa · factor 2.41". A view of the same quantity at another location names its location on the legend, such as "Von Mises stress, nodal average".
 
+Each published assessment carries the same line in its `summary_line` field, next to the raw result and limit. Publication writes it in the unit and precision of the display of the field output the assessed value reads. Without such a display, it uses the unit the study writes that quantity in, and otherwise SI. Reports and the Desktop print this field, so the legend, a report and the Desktop show the same text for one run. An assessment with a function rule has no `summary_line`.
+
 ## Read results in `.m` code
 
 Fields are published separately from rendering. After a run, `.m` code loads the result, selects a field and plots or post-processes it:

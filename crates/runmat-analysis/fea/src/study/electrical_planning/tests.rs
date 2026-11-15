@@ -19,6 +19,7 @@ fn compiled(equation: StaticElectricalEquation) -> CompiledAnalysisStudy {
     );
     let properties = crate::properties::compile_property_map(&model, None).unwrap();
     CompiledAnalysisStudy {
+        displays: Vec::new(),
         module_path: "tests/electrical.fea".into(),
         study_id: "electrical".into(),
         study_inputs: vec![],

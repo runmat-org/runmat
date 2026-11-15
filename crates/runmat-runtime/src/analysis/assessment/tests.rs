@@ -46,6 +46,7 @@ pub(in crate::analysis) fn fixture() -> (
         },
     };
     let compiled = CompiledAnalysisStudy {
+        displays: Vec::new(),
         module_path: "study.fea".into(),
         study_id: "study".into(),
         study_inputs: Vec::new(),
@@ -148,6 +149,43 @@ fn reassessment_retains_new_criteria_and_original_identity_without_inventing_evi
     let mut replaced = compiled.clone();
     replaced.assessments = vec![criterion];
     assert!(reassess_study_results(&replaced, &published, &replaced.assessments).is_err());
+}
+
+/// The assessment line is presentation: the study's display sets its unit, and neither the
+/// study identity nor the evidence identity a receipt is checked against reads it.
+#[test]
+fn the_assessment_line_reads_the_display_and_enters_no_identity() {
+    let (mut compiled, published, criterion) = fixture();
+    let plain =
+        reassess_study_results(&compiled, &published, std::slice::from_ref(&criterion)).unwrap();
+    assert_eq!(plain[0].summary_line.as_deref(), Some("Limit 0.001 m"));
+    let digest = compiled.definition_digest().unwrap();
+    compiled.displays = vec![AuthoredOutputDisplay {
+        unit: Some("mm".into()),
+        ..AuthoredOutputDisplay::unit_only("displacement", DisplayUnitSource::Study)
+    }];
+    assert_eq!(compiled.definition_digest().unwrap(), digest);
+    let shown = reassess_study_results(&compiled, &published, &[criterion]).unwrap();
+    assert_eq!(shown[0].summary_line.as_deref(), Some("Limit 1 mm"));
+    let mut report = shown[0].clone();
+    report.run_id = Some("immutable-run".into());
+    report.evidence = Some(
+        runmat_analysis_fea::results::assessment::ScalarObservationEvidence {
+            observation_id: ObservationId("peak".into()),
+            value: 0.0004,
+            source_identity: Digest::sha256("peak"),
+            sample: None,
+            entity: None,
+            source_field_id: None,
+        },
+    );
+    let identity =
+        crate::analysis::prepared_study_publication::assessment_evidence_identity(&report).unwrap();
+    report.summary_line = Some("Peak 0.4 mm · limit 1 mm · factor 2.50".into());
+    assert_eq!(
+        crate::analysis::prepared_study_publication::assessment_evidence_identity(&report).unwrap(),
+        identity
+    );
 }
 
 #[test]

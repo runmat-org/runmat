@@ -145,6 +145,13 @@ fn static_peak_stress_evidence_names_the_element_von_mises_field_and_leads_the_f
         Some(FEA_FIELD_STRUCTURAL_VON_MISES)
     );
     assert!(evidence.entity.is_some());
+    // Publication states the element peak against its limit; the study has no display, so the
+    // line reads in Pa.
+    let line = assessed[0].summary_line.as_deref().unwrap();
+    assert!(
+        line.starts_with("Peak ") && line.contains(" Pa (element) · limit 1e12 Pa · factor "),
+        "{line}"
+    );
 
     // The run lists declared outputs' fields first, in output order.
     let results = analysis_results_by_run_id_op(

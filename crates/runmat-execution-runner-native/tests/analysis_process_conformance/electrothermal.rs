@@ -45,6 +45,7 @@ pub(super) async fn run() {
         energy.evidence = RequiredAccuracyEvidence::ConservationBalance;
         step.accuracy.criteria.push(energy);
         let compiled = CompiledAnalysisStudy {
+            displays: Vec::new(),
             module_path: "conformance/electrothermal.fea".into(),
             study_id: "one_way_heat".into(),
             study_inputs: vec![],

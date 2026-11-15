@@ -48,6 +48,9 @@ pub struct RealizedStudy {
     pub outputs: Vec<crate::AuthoredOutput>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub assessments: Vec<crate::AuthoredAssessment>,
+    /// The study's displays of its field outputs, carried to publication. Presentation only.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub displays: Vec<crate::AuthoredOutputDisplay>,
     pub sequence: AnalysisSequence,
 }
 
@@ -112,6 +115,7 @@ impl AuthoredStudy {
                 .collect(),
             outputs,
             assessments: self.assessments.clone(),
+            displays: self.displays.clone(),
             sequence: self.sequence.clone(),
         })
     }

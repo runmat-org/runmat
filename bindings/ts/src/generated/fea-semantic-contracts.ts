@@ -3012,6 +3012,7 @@ export interface PublishedStudyAssessment {
   evidence: ScalarObservationEvidence | null;
   function_execution_identity?: string;
   function_execution_diagnostic?: string;
+  summary_line?: string;
 }
 
 export interface PublishedStudyReassessment {

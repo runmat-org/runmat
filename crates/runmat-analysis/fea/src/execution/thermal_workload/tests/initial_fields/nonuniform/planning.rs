@@ -11,6 +11,7 @@ pub(super) fn through_authored_product(
         }
     }
     let compiled = crate::study::CompiledAnalysisStudy {
+        displays: Vec::new(),
         module_path: "tests/original-temperature.fea".into(),
         study_id: "original-temperature".into(),
         study_inputs: Vec::new(),

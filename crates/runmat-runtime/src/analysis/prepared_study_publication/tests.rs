@@ -64,6 +64,7 @@ fn fixture() -> (
         evidence: None,
         function_execution_identity: None,
         function_execution_diagnostic: None,
+        summary_line: None,
     }];
     let store = Arc::new(super::super::storage::InMemoryAnalysisArtifactStore::new());
     let mut run = super::super::analysis_run_linear_static_with_options(

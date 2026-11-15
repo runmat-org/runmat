@@ -105,6 +105,7 @@ fn preparation(order: ElementOrder, transient: bool) -> ThermalStudyPreparation 
     step.accuracy.criteria.push(energy);
     model.sequence = AnalysisSequence::from_steps("native-thermal-study", vec![step]);
     let compiled = CompiledAnalysisStudy {
+        displays: Vec::new(),
         module_path: "tests/thermal.fea".into(),
         study_id: "thermal".into(),
         study_inputs: Vec::new(),

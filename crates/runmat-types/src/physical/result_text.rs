@@ -1,5 +1,6 @@
-//! Text of a field legend: the range ends at the precision the range needs, and units as they
-//! are printed (`degC` as °C, `m^2` as m²).
+//! Text of a result as legends and reports print it: the range ends of a field legend at the
+//! precision the range needs, units as they are printed (`degC` as °C, `m^2` as m²), and the
+//! line that states an assessed result against its limit.
 
 /// How the numbers of one legend are written, chosen from its range so the two ends differ
 /// and carry no digits beyond that.

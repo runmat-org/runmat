@@ -2,13 +2,12 @@
 //! display of the field output (`display <output> { … }`, or the unit the study writes that
 //! quantity in), and the line that states the run's result against the study's limit on it.
 //! The snapshot posters and the live result view both write their legend here.
-use runmat_analysis_core::{AssessmentRule, AssessmentStatus, AuthoredOutputDisplay};
+use runmat_analysis_core::AuthoredOutputDisplay;
 use runmat_plot::geometry_scene::{GeometrySceneScalarLegend, ScalarRangeSource};
-use runmat_plot::legend_text::{assessment_line, AssessedResult};
-use runmat_types::physical::{parse_unit_expression, UnitDefinition};
-use runmat_types::PhysicalDimension;
+use runmat_types::physical::parse_unit_expression;
 use serde::{Deserialize, Serialize};
 
+use crate::analysis::assessment::summary_line::{bound_line, bounds_of, location_names, tightest};
 use crate::analysis::assessment::PublishedStudyAssessment;
 use crate::analysis::AnalysisFieldLocation;
 
@@ -33,15 +32,6 @@ impl FieldLegendTerms {
     }
 }
 
-/// One assessment bound of the shown quantity and the run's result against it.
-struct Bound<'a> {
-    canonical: f64,
-    maximum: bool,
-    measured: Option<f64>,
-    /// The run field the assessed result reads (G77 evidence), when it reads one.
-    source_field_id: Option<&'a str>,
-}
-
 /// The field a legend colours: its run field id and where its values sit.
 #[derive(Debug, Clone, Copy)]
 pub struct ShownField<'a> {
@@ -49,64 +39,10 @@ pub struct ShownField<'a> {
     pub location: AnalysisFieldLocation,
 }
 
-/// How a location is named on a legend: after the assessed result ("Peak 76.3 MPa (element)")
-/// and after the label of a view of another location ("Von Mises stress, nodal average").
-fn location_names(location: AnalysisFieldLocation) -> Option<(&'static str, &'static str)> {
-    match location {
-        AnalysisFieldLocation::Element => Some(("element", "element")),
-        AnalysisFieldLocation::Node => Some(("node", "nodal average")),
-        _ => None,
-    }
-}
-
-impl Bound<'_> {
-    /// Signed distance inside the bound, canonical: negative when the result breaks it.
-    fn margin(&self) -> Option<f64> {
-        self.measured.map(|measured| {
-            if self.maximum {
-                self.canonical - measured
-            } else {
-                measured - self.canonical
-            }
-        })
-    }
-}
-
-fn bounds_of<'a>(
-    assessment: &'a PublishedStudyAssessment,
-    field: &UnitDefinition,
-) -> Vec<Bound<'a>> {
-    let source_field_id = assessment
-        .evidence
-        .as_ref()
-        .and_then(|evidence| evidence.source_field_id.as_deref());
-    let measured = assessment
-        .result
-        .measured
-        .filter(|_| assessment.result.status != AssessmentStatus::Indeterminate)
-        .map(|value| *value.canonical_values());
-    let (minimum, maximum) = match &assessment.definition.rule {
-        AssessmentRule::Function { .. } => return Vec::new(),
-        rule => rule.bounds(),
-    };
-    [(minimum, false), (maximum, true)]
-        .into_iter()
-        .filter_map(|(bound, maximum)| {
-            let bound = bound?;
-            (bound.descriptor().dimension() == field.dimension()).then(|| Bound {
-                canonical: *bound.canonical_values(),
-                maximum,
-                measured,
-                source_field_id,
-            })
-        })
-        .collect()
-}
-
 /// Write `legend` (built in `field_unit`) in the display unit and precision of `terms`, convert
 /// its range, overflow values and limit to that unit, and state the result against the tightest
-/// assessment bound of the shown quantity ([`assessment_line`]). Returns the display unit when
-/// it differs from `field_unit`.
+/// assessment bound of the shown quantity, in the line publication also writes on each
+/// assessment. Returns the display unit when it differs from `field_unit`.
 ///
 /// `drawn` is the coloured field and `locate` gives a run field's location. The assessment line
 /// names where its result is evaluated (the location of the field the assessment reads); when
@@ -140,18 +76,13 @@ pub fn present(
     legend.unit = symbol.clone();
     legend.precision = display.and_then(|display| display.precision);
     // The bound the run comes closest to (or breaks furthest); without a result, the first.
-    let tightest = terms
-        .assessments
-        .iter()
-        .flat_map(|assessment| bounds_of(assessment, &field))
-        .min_by(|a, b| {
-            let key = |bound: &Bound| bound.margin().unwrap_or(f64::INFINITY);
-            key(a).total_cmp(&key(b))
-        });
+    let tightest = tightest(
+        terms
+            .assessments
+            .iter()
+            .flat_map(|assessment| bounds_of(assessment, field.dimension())),
+    );
     if let Some(bound) = tightest {
-        let in_unit = |canonical: f64| unit.from_canonical(canonical).map_err(|e| e.to_string());
-        let limit = in_unit(bound.canonical)?;
-        legend.limit = Some(limit);
         let assessed = bound.source_field_id.and_then(|id| Some((id, locate(id)?)));
         if let (Some(drawn), Some((assessed_id, assessed_location))) = (drawn, assessed) {
             if drawn.field_id != assessed_id && drawn.location != assessed_location {
@@ -160,18 +91,18 @@ pub fn present(
                 }
             }
         }
-        legend.note = Some(assessment_line(&AssessedResult {
-            maximum: bound.maximum,
-            measured: bound.measured.map(in_unit).transpose()?,
-            limit,
-            unit: &symbol,
-            // A ratio of temperatures depends on the scale's zero; state the margin instead.
-            ratio: field.dimension() != PhysicalDimension::TEMPERATURE,
-            digits: legend.precision.unwrap_or(3),
-            location: assessed
-                .and_then(|(_, location)| location_names(location))
-                .map(|(name, _)| name),
-        }));
+        let location = assessed
+            .and_then(|(_, location)| location_names(location))
+            .map(|(name, _)| name);
+        let (limit, line) = bound_line(
+            &bound,
+            &symbol,
+            &unit,
+            legend.precision.unwrap_or(3),
+            location,
+        )?;
+        legend.limit = Some(limit);
+        legend.note = Some(line);
     }
     Ok((symbol != field_unit).then_some(symbol))
 }

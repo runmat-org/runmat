@@ -149,6 +149,7 @@ fn base(order: ElementOrder, scope: &str, revision: ProgramRevision) -> ThermalS
     heat.state_outputs.push(second);
     model.sequence = AnalysisSequence::from_steps("process-thermal", vec![heat]);
     let compiled = CompiledAnalysisStudy {
+        displays: Vec::new(),
         module_path: "tests/thermal-prestress.fea".into(),
         study_id: "thermal-prestress".into(),
         study_inputs: Vec::new(),

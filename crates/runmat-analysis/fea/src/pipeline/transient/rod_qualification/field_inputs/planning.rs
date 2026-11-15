@@ -15,6 +15,7 @@ pub(super) fn verify_original_sources(
         numerics: StructuralNumericalPlanningPolicy::production(),
     };
     let mut compiled = CompiledAnalysisStudy {
+        displays: Vec::new(),
         module_path: "tests/original-rod.fea".into(),
         study_id: "original-rod".into(),
         study_inputs: Vec::new(),

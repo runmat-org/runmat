@@ -38,6 +38,11 @@ pub struct CompiledAnalysisStudy {
     pub outputs: Vec<AuthoredOutput>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub assessments: Vec<runmat_analysis_core::AuthoredAssessment>,
+    /// How the study shows its field outputs (`display <output> { … }`). Publication writes each
+    /// assessment's line in the unit and precision of the display of the field it reads.
+    /// Presentation only: it never enters [`Self::definition_digest`].
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub displays: Vec<runmat_analysis_core::AuthoredOutputDisplay>,
     pub model: AnalysisModel,
     pub properties: CompiledPropertyMap,
     pub solver_mesh_digest: StableDigest,
@@ -204,6 +209,7 @@ pub fn compile_analysis_study(
         study_id: study.study_id.clone(),
         study_inputs: study.study_inputs.clone(),
         assessments: study.assessments.clone(),
+        displays: study.displays.clone(),
         outputs: study.outputs.clone(),
         model,
         properties,
@@ -267,6 +273,7 @@ pub fn compile_cross_section_study(
         study_id: study.study_id.clone(),
         study_inputs: study.study_inputs.clone(),
         assessments: study.assessments.clone(),
+        displays: study.displays.clone(),
         outputs: study.outputs.clone(),
         model,
         properties,

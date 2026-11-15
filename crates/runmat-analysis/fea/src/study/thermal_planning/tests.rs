@@ -27,6 +27,7 @@ fn compiled(step: ProcedureStep) -> CompiledAnalysisStudy {
     model.sequence = AnalysisSequence::from_steps("heat-study", vec![step]);
     let properties = crate::properties::compile_property_map(&model, None).unwrap();
     CompiledAnalysisStudy {
+        displays: Vec::new(),
         module_path: "tests/thermal.fea".into(),
         study_id: "thermal".into(),
         study_inputs: Vec::new(),
