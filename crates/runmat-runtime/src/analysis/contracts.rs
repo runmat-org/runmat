@@ -36,6 +36,8 @@ pub use execution_choices::{
 };
 mod field_units;
 use field_units::infer_field_unit;
+mod study_step_run;
+pub use study_step_run::{AnalysisStudyStepRunData, RenderTopologyPresence};
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct AnalysisValidateResult {
@@ -944,6 +946,9 @@ pub struct AnalysisFieldBinding {
     pub step_id: ProcedureStepId,
     pub run_id: String,
     pub descriptor: AnalysisFieldDescriptor,
+    /// The `render_topology` of the run's step record; absent for a record published before it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub render_topology: Option<RenderTopologyPresence>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
@@ -1876,26 +1881,6 @@ pub struct AnalysisStudyPlanStepData {
     pub execution: AnalysisExecutionStep,
     pub run_operation: String,
     pub run_op_version: String,
-}
-
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct AnalysisStudyStepRunData {
-    pub ordinal: usize,
-    pub procedure_step: ProcedureStep,
-    pub execution: AnalysisExecutionStep,
-    pub identity: AnalysisRunIdentity,
-    pub run_operation: String,
-    pub run_op_version: String,
-    pub run_id: String,
-    pub run_status: RunStatus,
-    pub numerically_acceptable: bool,
-    pub solver_convergence: QualityGate,
-    pub result_quality: QualityGate,
-    #[serde(default)]
-    pub quality_reasons: Vec<QualityReason>,
-    pub provenance: RunProvenance,
-    pub numerical_result: AnalysisStudyStepNumericalResultData,
-    pub evidence_artifact_path: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

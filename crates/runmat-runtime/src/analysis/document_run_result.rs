@@ -59,6 +59,7 @@ pub fn project_study_field_bindings(
                     step_id: step.procedure_step.step_id.clone(),
                     run_id: step.run_id.clone(),
                     descriptor: descriptor.clone(),
+                    render_topology: step.render_topology,
                 })
         })
         .collect()

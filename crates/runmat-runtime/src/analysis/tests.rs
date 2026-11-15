@@ -73,6 +73,7 @@ mod admission_roots;
 mod admission_validation;
 mod nonlinear_physical;
 mod persisted_record_shape;
+mod render_topology_presence;
 mod static_admission;
 mod structural_study_intent;
 mod structural_study_storage;

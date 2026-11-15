@@ -123,6 +123,7 @@ fn transient_assessment_preserves_sampled_peak_and_store_parity() {
         provenance: run.provenance.clone(),
         numerical_result: AnalysisStudyStepNumericalResultData::Standard,
         evidence_artifact_path: String::new(),
+        render_topology: None,
     }];
     let directory = tempfile::tempdir().unwrap();
     let stores: Vec<Arc<dyn storage::AnalysisArtifactStore>> = vec![

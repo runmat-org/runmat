@@ -21,6 +21,8 @@ export type FeaExecutionReadiness = "ready" | "desktop_required" | "unavailable"
 
 export type FeaDocumentKind = "study" | "sweep";
 
+export type FeaRenderTopologyPresence = "persisted" | "absent";
+
 export type FeaFieldKind = "scalar" | "vector" | "tensor" | "unknown";
 
 export type FeaFieldStorage = "host_f64" | "device_ref";
@@ -233,6 +235,7 @@ export interface FeaFieldBinding {
   stepId: string;
   runId: string;
   descriptor: FeaFieldDescriptor;
+  renderTopology?: FeaRenderTopologyPresence;
 }
 
 export interface FeaFieldRequestOptions {

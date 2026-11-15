@@ -54,8 +54,8 @@ use crate::runtime::gpu::{capture_memory_usage, GpuStatus};
 use crate::runtime::logging::init_logging_once;
 use crate::runtime::state::clear_figure_event_callback as clear_figure_event_callback_state;
 use crate::wire::errors::{
-    js_error, js_value_to_string, run_error_payload, run_error_to_js, runtime_error_to_js,
-    RunMatErrorKind,
+    field_scene_error_to_js, js_error, js_value_to_string, run_error_payload, run_error_to_js,
+    runtime_error_to_js, RunMatErrorKind,
 };
 use crate::wire::payloads::{
     compute_data_preview_slice, estimate_data_array_bytes, infer_dataset_class_name,
@@ -1861,7 +1861,7 @@ impl RunMatWasm {
             })
             .await
             .map_err(|error| js_error(&error.to_string()))?
-            .map_err(|error| JsValue::from_str(&error))?;
+            .map_err(|error| field_scene_error_to_js(&error))?;
         self.ensure_not_disposed()?;
         let handle = if let Some(handle) = replace_handle {
             let previous = runmat_runtime::builtins::plotting::clone_geometry_scene(handle)

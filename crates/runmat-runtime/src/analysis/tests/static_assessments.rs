@@ -131,6 +131,7 @@ fn static_peak_stress_evidence_names_the_element_von_mises_field_and_leads_the_f
         provenance: run.provenance.clone(),
         numerical_result: AnalysisStudyStepNumericalResultData::Standard,
         evidence_artifact_path: String::new(),
+        render_topology: None,
     }];
     let store: Arc<dyn storage::AnalysisArtifactStore> =
         Arc::new(storage::InMemoryAnalysisArtifactStore::new());

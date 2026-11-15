@@ -85,6 +85,17 @@ pub(crate) fn runtime_error_to_js(err: &RuntimeError) -> JsValue {
     }
 }
 
+/// A field scene refusal. A coded one (a run without persisted render topology) is its runtime
+/// diagnostic object, as the other coded FEA refusals are; any other stays a message string.
+pub(crate) fn field_scene_error_to_js(
+    error: &runmat_runtime::analysis::field_scene::FieldSceneError,
+) -> JsValue {
+    error
+        .diagnostic()
+        .and_then(|diagnostic| crate::wire::json_contract_to_js(&diagnostic).ok())
+        .unwrap_or_else(|| js_error(&error.to_string()))
+}
+
 pub(crate) fn run_error_to_js(
     err: &RunError,
     source_name: Option<&str>,

@@ -237,6 +237,7 @@ export type {
   FeaFieldPagingDescriptor,
   FeaFieldRequestOptions,
   FeaFieldResult,
+  FeaRenderTopologyPresence,
   FeaFieldStorage,
   FeaFieldStorageRef,
   FeaObjectArtifactMetadata,

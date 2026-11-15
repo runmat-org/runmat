@@ -99,6 +99,7 @@ fn fixture() -> (
         provenance: run.provenance.clone(),
         numerical_result: super::super::AnalysisStudyStepNumericalResultData::Standard,
         evidence_artifact_path: String::new(),
+        render_topology: None,
     }];
     let definition = compiled.definition_digest().unwrap();
     let staging =
