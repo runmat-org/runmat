@@ -191,7 +191,7 @@ fn direct_factor_envelope_and_forged_exact_facts_are_rejected() {
             0 => d.complex_dimension.0 += 1,
             1 => d.factorization.resident_bytes.0 -= 1,
             2 => d.nonzeros.0 = d.element_count.0 * 36 + 1,
-            _ => d.edge_count_upper_bound.0 -= 1,
+            _ => d.edge_count_upper_bound.0 = d.element_count.0 * 6 + 1,
         }
         assert!(build_resource_plan(input).is_err());
     }
@@ -200,4 +200,52 @@ fn direct_factor_envelope_and_forged_exact_facts_are_rejected() {
         MaxwellDirectFactorEnvelope::default()
     );
     assert!(estimate::maxwell_harmonic::factor_envelope(u64::MAX, 0).is_err());
+}
+
+/// The reservation charges the distinct corner edges (not six per element) and still covers
+/// the measured peak heap of the admitted solve. The allocation counter is per thread and the
+/// plan runs serially.
+#[test]
+fn reservation_covers_the_measured_solve_within_its_band() {
+    use crate::topology::measure_test_allocations as measured;
+    for (order, cells) in [(ElementOrder::Tet4, 6), (ElementOrder::Tet10, 4)] {
+        let m = match order {
+            ElementOrder::Tet4 => fixtures::slab_mesh(cells),
+            _ => fixtures::quadratic_slab_mesh(cells),
+        };
+        let w = workload();
+        let plan = build_maxwell_harmonic_resource_plan(&w, &m, facts(&w, &m)).unwrap();
+        let FeaResourceDemand::MaxwellHarmonic(d) = &plan.input.demand else {
+            panic!("Maxwell demand");
+        };
+        // Count the distinct corner edges independently of the planner.
+        let mut pairs = std::collections::BTreeSet::new();
+        for element in &m.topology.volume_elements {
+            let c = &element.node_ids[..4];
+            for a in 0..4 {
+                for b in a + 1..4 {
+                    pairs.insert((c[a].min(c[b]), c[a].max(c[b])));
+                }
+            }
+        }
+        assert_eq!(d.edge_count_upper_bound.0, pairs.len() as u64);
+        assert!(d.edge_count_upper_bound.0 < 2 * d.element_count.0);
+        let (result, _, peak) = measured(|| w.execute_with_resource_plan(&m, &plan));
+        result.unwrap();
+        let reserved = d.numerical_reservation_bytes.0;
+        eprintln!(
+            "Maxwell {order:?} {cells}: elements {} edges {} measured peak {peak} B, reserved {reserved} B, ratio {:.2}",
+            d.element_count.0,
+            d.edge_count_upper_bound.0,
+            reserved as f64 / peak as f64
+        );
+        assert!(
+            peak as u64 <= reserved,
+            "{order:?}: peak {peak} above {reserved}"
+        );
+        // Measured 2026-11-15: the reservation is still 36x (Tet4) and 40x (Tet10) the peak.
+        // On these meshes the per-element material and assignment metadata charge
+        // (2 x elements x profile bytes) is most of the topology term; it is the next store
+        // to audit against what compilation holds.
+    }
 }

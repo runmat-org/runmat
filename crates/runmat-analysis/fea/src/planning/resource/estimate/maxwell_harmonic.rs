@@ -32,8 +32,9 @@ pub(super) fn build_maxwell_harmonic_plan(
     let dimension = demand.complex_dimension.0;
     if demand.node_count.0 == 0
         || demand.element_count.0 == 0
+        || demand.edge_count_upper_bound.0 == 0
         || demand.edge_count_upper_bound.0
-            != mul(demand.element_count.0, 6, "Maxwell edge upper bound")?
+            > mul(demand.element_count.0, 6, "Maxwell edge upper bound")?
         || demand.quadrature_sample_count.0
             != mul(demand.element_count.0, 15, "Maxwell sample count")?
         || demand.free_edge_count > demand.edge_count_upper_bound

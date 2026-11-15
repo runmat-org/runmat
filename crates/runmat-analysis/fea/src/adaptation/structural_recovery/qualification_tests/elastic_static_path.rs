@@ -423,3 +423,67 @@ pub(super) fn counted_estimate_matches_the_mesh_plan() {
         );
     }
 }
+
+/// The multigrid plan's resident memory covers the measured peak heap of the elastic rigidity
+/// solve. The allocation counter is per thread; the default static options solve serially.
+pub(super) fn multigrid_plan_covers_the_measured_solve() {
+    use crate::planning::resource::{
+        build_static_resource_plan_selecting, LocalExecutionPlan, StaticResourcePreflight,
+        StaticSolvePath, StaticSolveSelection,
+    };
+    use crate::topology::measure_test_allocations as measured;
+    let model = fixture_model(FixtureId::CantileverLinearStatic);
+    for (order, divisions) in [(ElementOrder::Tet4, 12), (ElementOrder::Tet10, 8)] {
+        let mesh = structured_cantilever(divisions, order);
+        let constraints =
+            crate::constraints::CanonicalStructuralConstraintPlan::compile(&model, &mesh).unwrap();
+        let fields = crate::post::fields::structural_static_observable_field_definitions().unwrap();
+        let observations = crate::results::observation::resolve_structural_observation_plan(
+            &model.sequence.steps[0],
+            &model,
+            Some(&mesh),
+            &constraints,
+            &fields,
+            crate::results::observation::ObservationLimits::default(),
+        )
+        .unwrap();
+        let plan = build_static_resource_plan_selecting(
+            StaticResourcePreflight {
+                compilation: None,
+                prepared_inputs: None,
+                model: &model,
+                step: &model.sequence.steps[0],
+                backend: ComputeBackend::Cpu,
+                preconditioner: SpdPreconditionerKind::Amg,
+                observation_execution:
+                    crate::results::observation::ObservationExecutionPolicy::serial(),
+                mesh: Some(&mesh),
+                constraints: &constraints,
+                observations: &observations,
+                accelerator_requests: &[],
+                local_execution: LocalExecutionPlan::serial(),
+            },
+            StaticSolveSelection::Recorded(StaticSolvePath::ElasticRigidityMultigrid),
+        )
+        .unwrap();
+        let (_, _, peak) = measured(|| solve(&model, &mesh, SpdPreconditionerKind::Amg));
+        let planned = plan.request.memory_bytes;
+        eprintln!(
+            "multigrid static {order:?} {divisions}: nodes {} measured peak {peak} B, planned {planned} B, ratio {:.2}; breakdown {:?}",
+            mesh.topology.nodes.len(),
+            planned as f64 / peak as f64,
+            plan.breakdown
+        );
+        assert!(
+            peak as u64 <= planned,
+            "{order:?}: peak {peak} above {planned}"
+        );
+        // Measured 2026-11-15: 1.41x (Tet4) and 1.13x (Tet10). Every charged store (stiffness,
+        // consistent mass and damping patterns, contribution stream, hierarchy, proof
+        // inventory, recovery) is held; the plan has no slack to remove at this size.
+        assert!(
+            planned <= 2 * peak as u64,
+            "{order:?}: plan {planned} exceeds twice the measured peak {peak}"
+        );
+    }
+}

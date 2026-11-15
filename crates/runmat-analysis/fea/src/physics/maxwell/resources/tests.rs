@@ -51,24 +51,23 @@ fn exact_local_ceiling_and_raw_metadata_are_counted_before_expansion() {
 #[test]
 fn checked_counts_and_actual_shared_krylov_counter_fail_closed() {
     for values in [
-        (1, u64::MAX, 1, 0, 0, 0, 0),
-        (u64::MAX, 1, 1, 0, 0, 0, 0),
-        (1, 1, 1, u64::MAX, 0, 0, 0),
-        (1, 1, 1, 0, u64::MAX, 0, 0),
-        (1, 1, 1, 0, 0, u64::MAX, 0),
-        (1, 1, 1, 0, 0, 0, u64::MAX),
+        (1, u64::MAX, 1, 1, 0, 0, 0, 0),
+        (u64::MAX, 1, 1, 1, 0, 0, 0, 0),
+        (1, 1, u64::MAX, 1, 0, 0, 0, 0),
+        (1, 1, 1, 1, u64::MAX, 0, 0, 0),
+        (1, 1, 1, 1, 0, u64::MAX, 0, 0),
+        (1, 1, 1, 1, 0, 0, u64::MAX, 0),
+        (1, 1, 1, 1, 0, 0, 0, u64::MAX),
     ] {
-        assert!(
-            from_counts(values.0, values.1, values.2, values.3, values.4, values.5, values.6)
-                .is_err()
-        );
+        assert!(counted(values).is_err());
     }
     // The sparse LU reservation scales with the element count, with no iteration-counter cap.
-    let huge = from_counts(1, u64::from(u32::MAX) / 480 + 1, 1, 0, 0, 0, 0).unwrap();
+    let elements = u64::from(u32::MAX) / 480 + 1;
+    let huge = counted((1, elements, 6 * elements, 1, 0, 0, 0, 0)).unwrap();
     assert!(huge.assembly_and_solver_bytes > 16 * (1u64 << 30));
-    let small = from_counts(10, 1, 4, 100, 100, 100, 0).unwrap();
-    let large = from_counts(27, 8, 24, 101, 101, 101, 0).unwrap();
-    let current_drive = from_counts(10, 1, 4, 100, 100, 100, 1).unwrap();
+    let small = counted((10, 1, 6, 4, 100, 100, 100, 0)).unwrap();
+    let large = counted((27, 8, 19, 24, 101, 101, 101, 0)).unwrap();
+    let current_drive = counted((10, 1, 6, 4, 100, 100, 100, 1)).unwrap();
     assert_eq!(current_drive.real_block_dimension_upper_bound, 14);
     assert_eq!(current_drive.support_entries_upper_bound, 49);
     assert!(current_drive.assembly_and_solver_bytes > small.assembly_and_solver_bytes);
@@ -114,4 +113,23 @@ fn replicated_property_metadata_and_selected_policy_are_not_ignored() {
     assert!(require_selected_ceiling(&big, &mesh, "foreign-step").is_err());
     big.sequence.steps.push(big.sequence.steps[0].clone());
     assert!(require_selected_ceiling(&big, &mesh, id.as_str()).is_err());
+}
+
+type Counts = (u64, u64, u64, u64, u64, u64, u64, u64);
+
+/// (nodes, elements, distinct edges, boundary faces, projection, metadata, selected, drives).
+fn counted(values: Counts) -> Result<MaxwellNumericalReservation, MaxwellError> {
+    let (nodes, elements, edges, faces, projection, metadata, selected, drives) = values;
+    from_counts(
+        MeshCounts {
+            nodes,
+            elements,
+            edges,
+            faces,
+        },
+        projection,
+        metadata,
+        selected,
+        drives,
+    )
 }

@@ -62,6 +62,11 @@ fn counted_static_estimate_matches_the_mesh_based_multigrid_plan() {
 }
 
 #[test]
+fn multigrid_static_plan_covers_the_measured_solve() {
+    elastic_static_path::multigrid_plan_covers_the_measured_solve();
+}
+
+#[test]
 fn solved_tet10_recovery_estimator_decreases_under_uniform_refinement() {
     cantilever_refinement::qualify();
 }

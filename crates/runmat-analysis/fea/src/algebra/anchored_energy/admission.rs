@@ -3,7 +3,7 @@
 use super::{
     check_cancelled,
     source::{block_storage_bytes, SOURCE_HEADER_BYTES},
-    CoercivityWorkEnvelope, EnergyError,
+    CoercivityWorkEnvelope, EnergyError, MISSING_PAIR_RESIDENT_BYTES,
 };
 pub(super) const LOCAL_PROOF_CACHE_CAPACITY: usize = 32;
 
@@ -62,8 +62,9 @@ impl SourceEnergyDemand {
             source = add(source, block_bytes)?;
             graph = add(graph, 64 * q)?;
             // Every original pair may be absent from the numeric CSR, even when its
-            // reconstructed coefficient is zero. Duplicate pairs only over-reserve.
-            missing = add(missing, 512 * w * w)?;
+            // reconstructed coefficient is zero; the check charges each distinct absent pair
+            // MISSING_PAIR_RESIDENT_BYTES. Duplicate pairs only over-reserve.
+            missing = add(missing, MISSING_PAIR_RESIDENT_BYTES * w * w)?;
             scratch = scratch.max(64 * w * w + 128 * w);
             cache_entry = cache_entry.max(8 * w * w + 256);
             blocks = add(blocks, 1)?;
@@ -97,10 +98,15 @@ impl SourceEnergyDemand {
         .into_iter()
         .try_fold(0, add)?;
         Ok(Self {
+            // The check holds one interval per operator entry beside this block-derived
+            // inventory (vertex arrays are in `retained`).
             admission: EnergyAdmission {
                 dimension: matrix.dimension(),
                 operations,
-                resident: add(matrix.energy_resident_limit(), additional_resident_bytes)?,
+                resident: add(
+                    matrix.energy_entry_resident_bytes(),
+                    additional_resident_bytes,
+                )?,
             },
             additional_resident_bytes,
         })
