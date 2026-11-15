@@ -124,6 +124,7 @@ mod tests {
 
     #[test]
     fn project_host_resolves_only_exact_frozen_facts() {
+        let _filesystem = runmat_filesystem::provider_override_lock();
         let temporary = tempfile::tempdir().unwrap();
         let module_path = LogicalSourcePath::new("design_curve.m").unwrap();
         let symbol = SourceSymbol::new("designCurve").unwrap();

@@ -140,6 +140,7 @@ mod tests {
 
     #[test]
     fn rejects_json_instead_of_guessing_an_obsolete_mesh_contract() {
+        let _filesystem = runmat_filesystem::provider_override_lock();
         let root = tempfile::tempdir().unwrap();
         let path = root.path().join("mesh.json");
         runmat_filesystem::write(path.clone(), br#"{"mesh":{"nodes":[]}}"#).unwrap();

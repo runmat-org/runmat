@@ -4,7 +4,6 @@ use super::*;
 #[test]
 fn evidence_capacity_rejects_before_creation_and_captures_original_root_and_provider() {
     let _guard = tests::analysis_test_guard();
-    let _provider_lock = runmat_filesystem::provider_override_lock();
     let root = tempfile::tempdir().unwrap();
     let first = root.path().join("first");
     let second = root.path().join("second");

@@ -2,7 +2,6 @@ use super::*;
 #[test]
 fn immutable_mesh_collision_uses_the_installed_virtual_provider() {
     let _guard = crate::analysis::tests::analysis_test_guard();
-    let _provider_lock = runmat_filesystem::provider_override_lock();
     let provider = std::sync::Arc::new(runmat_filesystem::MemoryFsProvider::new());
     let _provider = runmat_filesystem::replace_provider(provider.clone());
     let path = Path::new("/immutable-mesh.cbor");

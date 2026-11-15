@@ -102,7 +102,6 @@ fn owned_study_sweep_commits_mesh_results_and_evidence_on_async_only_storage() {
     }
 
     let _host = analysis_test_guard();
-    let _provider_lock = runmat_filesystem::provider_override_lock();
     let provider = std::sync::Arc::new(runmat_filesystem::MemoryFsProvider::new());
     let _provider = runmat_filesystem::replace_provider(provider.clone());
     let root = PathBuf::from("/owned-async-study");
