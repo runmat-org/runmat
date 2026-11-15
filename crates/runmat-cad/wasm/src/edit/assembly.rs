@@ -10,7 +10,8 @@
 //!   each pick becoming a mate connector on its component ([`mate`], [`frames`]).
 //! - `assembly.flip-mate`, `assembly.edit-mate`, `assembly.smart-mate`: mates that exist and
 //!   the smart mate ([`mate_edits`]).
-//! - `assembly.replace`, `assembly.subassembly`, `assembly.new-part`: structure ([`structure`]).
+//! - `assembly.replace`, `assembly.subassembly`, `assembly.new-part`, `assembly.skeleton`:
+//!   structure ([`structure`]).
 //! - `assembly.sketch` and the `sketch.*` tools: sketches in the assembly ([`sketch`]).
 //! - `assembly.feature`: a cut, holes or a weld bead through components ([`operation`]).
 //! - `assembly.envelope`: a reserved box of space fitted round components, and Delete on its row
@@ -62,6 +63,8 @@ mod operation_tests;
 mod envelopes_tests;
 #[cfg(test)]
 mod explode_tests;
+#[cfg(test)]
+mod skeleton_tests;
 #[cfg(test)]
 mod sketch_tests;
 #[cfg(test)]
@@ -580,6 +583,11 @@ pub(super) fn edit(
             let names = selected_names(&compiled, request)?;
             let (summary, created) =
                 structure::subassembly(&mut document, &compiled, files, &names, &request.values)?;
+            others.extend(created);
+            summary
+        }
+        "assembly.skeleton" => {
+            let (summary, created) = structure::skeleton(&mut document, files, &request.values)?;
             others.extend(created);
             summary
         }

@@ -88,6 +88,9 @@ pub struct OccurrenceRow {
     pub origin: NodeOrigin,
     pub world: Transform,
     pub representation: Representation,
+    /// A reference component (a skeleton): left out of the parts list, mass and interference.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub reference: bool,
     pub pose: PoseStatus,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub dof: Option<u32>,
@@ -577,6 +580,7 @@ pub fn build_assembly_index(
             origin: n.origin.clone(),
             world: n.world,
             representation: n.representation,
+            reference: n.reference,
             pose: n.pose,
             dof: n.dof,
             material: n.material.clone(),

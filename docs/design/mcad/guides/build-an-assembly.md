@@ -139,6 +139,26 @@ envelope service = { owner = base, min = [-5 mm, -5 mm, -5 mm], max = [105 mm, 8
 
 The view draws the box's edges, and the Outline lists it under **Envelopes**. With **Keep out** on, Interference lists every component inside the box except its owner, the one component allowed in it. Run Envelope from the row to change it: with no components picked, the box stays and only the other settings change. Delete removes it.
 
+## 8. Drive the layout from a skeleton
+
+A skeleton is a part that holds the assembly's layout: sketches, planes and frames that the other parts are placed against. **Skeleton part** on the Layout tab creates the part beside the assembly and places it at the origin as a reference component. Name a part already beside the assembly to use that one instead.
+
+```part file=layout.part
+runmat 0.7
+std 1
+
+part layout {
+}
+```
+
+```assembly fragment
+use part layout as layout {
+    reference = true
+}
+```
+
+Open the skeleton to draw the layout and publish the frames other parts attach to. A reference component is drawn, picked and mated to like any other, and is left out of the parts list, mass properties and interference checks. Set `reference = true` on any component to treat it the same way.
+
 ## Next
 
 - [Make a drawing](/docs/mcad/guides/make-a-drawing) of the assembly with its BOM.

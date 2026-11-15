@@ -10,9 +10,11 @@ pub(super) fn layout() -> Vec<CommandDescriptor> {
             "assembly.skeleton",
             "Skeleton part",
             "skeleton",
-            "Add a skeleton part that drives the layout.",
+            "Add a skeleton part that drives the layout: a reference component left out of the parts list, mass and interference.",
         )
-        .inputs(vec![text("name", "Name", Some("skeleton.part"))])
+        .inputs(vec![text("name", "Name", Some("skeleton.part")).help(
+            "A new file is created beside the assembly; the name of a part already there places that part as the skeleton.",
+        )])
         .edit(edit(EditOp::CreateFile, Section::Occurrences).item("skeleton")),
         asm(
             "assembly.publish",

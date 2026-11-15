@@ -270,7 +270,9 @@ pub fn assembly_clearance_of(
         // An occurrence at the envelope representation checks as its box (a sub-assembly's
         // box stands in for everything under it).
         let envelope = runmat_cad::assembly::representation::is_envelope(resolved, id as u32);
-        if !envelope && (node.parent.is_none() || node.failed || node.represented_by_ancestor) {
+        if node.reference
+            || !envelope && (node.parent.is_none() || node.failed || node.represented_by_ancestor)
+        {
             continue;
         }
         let file = node.definition.file.0.clone();

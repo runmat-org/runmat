@@ -120,6 +120,8 @@ This file is generated from the command catalog.
 - `assembly.representation`: Draw and check components as their full model or as their envelope box.
   - Required: `components` (picks: component); `representation` (one of `full`, `envelope`, default `full`)
   - Runs on the `selection`: `occurrence`
+- `assembly.skeleton`: Add a skeleton part that drives the layout: a reference component left out of the parts list, mass and interference.
+  - Required: `name` (text)
 - `assembly.sketch`: Start a sketch in the assembly on an origin plane or a component's planar face.
   - Required: `plane` (pick: plane or face)
 - `assembly.smart-mate`: Drag a component onto another and accept the suggested mate.

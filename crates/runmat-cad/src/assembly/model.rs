@@ -472,6 +472,10 @@ pub struct Occurrence {
     pub flexible: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub representation: Option<Representation>,
+    /// A reference component (a skeleton or layout part): drawn, picked and mated to, but left
+    /// out of the parts list, mass properties and interference checks.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub reference: bool,
     #[serde(default)]
     pub suppressed: bool,
     /// Some alternative of this name must be active in every legal configuration.
@@ -501,6 +505,7 @@ impl Occurrence {
             fixed: true,
             flexible: false,
             representation: None,
+            reference: false,
             suppressed: false,
             required: false,
             overrides: Vec::new(),

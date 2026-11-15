@@ -336,7 +336,8 @@ pub fn assembly_mass(
     for (id, node) in resolved.nodes.iter().enumerate() {
         // A component drawn as its envelope still weighs what its parts weigh: the envelope
         // stands in for its geometry in the view and in interference, not for its mass.
-        if node.parent.is_none() || node.failed {
+        // A reference component (a skeleton) weighs nothing in the product.
+        if node.parent.is_none() || node.failed || node.reference {
             continue;
         }
         if node.definition.kind == DefinitionKind::Circuit {

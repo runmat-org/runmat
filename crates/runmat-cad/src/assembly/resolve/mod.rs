@@ -104,6 +104,9 @@ pub struct OccNode {
     pub representation: Representation,
     /// An ancestor's lightweight representation stands in for this occurrence.
     pub represented_by_ancestor: bool,
+    /// A reference component, or under one: left out of the parts list, mass and interference.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub reference: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub material: Option<MaterialRef>,
     #[serde(default)]
@@ -576,6 +579,7 @@ pub fn resolve_metered(
         dof: None,
         representation: Representation::Full,
         represented_by_ancestor: false,
+        reference: false,
         material: None,
         properties: doc.properties.clone(),
         part_number: doc.part_number.clone(),
