@@ -140,9 +140,13 @@ pub struct AssessedResult<'a> {
     pub ratio: bool,
     /// Significant digits of the result.
     pub digits: u8,
+    /// Where the result is evaluated (`element`, `node`), named after it: "Peak 76.3 MPa
+    /// (element)". `None` names no location.
+    pub location: Option<&'a str>,
 }
 
 /// The legend's assessment line, result first: "Peak 17.7 MPa · limit 184 MPa · factor 10.4",
+/// or with its location "Peak 76.3 MPa (element) · limit 184 MPa · factor 2.41",
 /// "Lowest 2.10 mm · limit 1 mm · factor 2.10", or with a temperature "Peak 63.4 °C · limit
 /// 85 °C · margin 21.6 K" ("… · 5.00 K over" when the result breaks the limit). Without a
 /// result, "Limit 184 MPa".
@@ -152,7 +156,10 @@ pub fn assessment_line(result: &AssessedResult<'_>) -> String {
         return format!("Limit {limit}");
     };
     let lead = if result.maximum { "Peak" } else { "Lowest" };
-    let shown = with_unit(format_significant(measured, result.digits), result.unit);
+    let mut shown = with_unit(format_significant(measured, result.digits), result.unit);
+    if let Some(location) = result.location {
+        shown = format!("{shown} ({location})");
+    }
     let (numerator, denominator) = if result.maximum {
         (result.limit, measured)
     } else {
@@ -272,10 +279,21 @@ mod tests {
             unit: "MPa",
             ratio: true,
             digits: 3,
+            location: None,
         };
         assert_eq!(
             assessment_line(&stress),
             "Peak 17.7 MPa · limit 184 MPa · factor 10.4"
+        );
+        // The yaw arm: the element von Mises peak, named with its location.
+        let element = AssessedResult {
+            measured: Some(76.32),
+            location: Some("element"),
+            ..stress
+        };
+        assert_eq!(
+            assessment_line(&element),
+            "Peak 76.3 MPa (element) · limit 184 MPa · factor 2.41"
         );
         let broken = AssessedResult {
             measured: Some(200.0),
@@ -303,6 +321,7 @@ mod tests {
             unit: "degC",
             ratio: false,
             digits: 3,
+            location: None,
         };
         assert_eq!(
             assessment_line(&busbar),

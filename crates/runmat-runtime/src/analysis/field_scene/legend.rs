@@ -10,6 +10,7 @@ use runmat_types::PhysicalDimension;
 use serde::{Deserialize, Serialize};
 
 use crate::analysis::assessment::PublishedStudyAssessment;
+use crate::analysis::AnalysisFieldLocation;
 
 /// What a field legend is written in terms of: the study's display of the shown output (from
 /// the compiled study's `displays`) and the run's published assessments.
@@ -33,13 +34,32 @@ impl FieldLegendTerms {
 }
 
 /// One assessment bound of the shown quantity and the run's result against it.
-struct Bound {
+struct Bound<'a> {
     canonical: f64,
     maximum: bool,
     measured: Option<f64>,
+    /// The run field the assessed result reads (G77 evidence), when it reads one.
+    source_field_id: Option<&'a str>,
 }
 
-impl Bound {
+/// The field a legend colours: its run field id and where its values sit.
+#[derive(Debug, Clone, Copy)]
+pub struct ShownField<'a> {
+    pub field_id: &'a str,
+    pub location: AnalysisFieldLocation,
+}
+
+/// How a location is named on a legend: after the assessed result ("Peak 76.3 MPa (element)")
+/// and after the label of a view of another location ("Von Mises stress, nodal average").
+fn location_names(location: AnalysisFieldLocation) -> Option<(&'static str, &'static str)> {
+    match location {
+        AnalysisFieldLocation::Element => Some(("element", "element")),
+        AnalysisFieldLocation::Node => Some(("node", "nodal average")),
+        _ => None,
+    }
+}
+
+impl Bound<'_> {
     /// Signed distance inside the bound, canonical: negative when the result breaks it.
     fn margin(&self) -> Option<f64> {
         self.measured.map(|measured| {
@@ -52,7 +72,14 @@ impl Bound {
     }
 }
 
-fn bounds_of(assessment: &PublishedStudyAssessment, field: &UnitDefinition) -> Vec<Bound> {
+fn bounds_of<'a>(
+    assessment: &'a PublishedStudyAssessment,
+    field: &UnitDefinition,
+) -> Vec<Bound<'a>> {
+    let source_field_id = assessment
+        .evidence
+        .as_ref()
+        .and_then(|evidence| evidence.source_field_id.as_deref());
     let measured = assessment
         .result
         .measured
@@ -70,6 +97,7 @@ fn bounds_of(assessment: &PublishedStudyAssessment, field: &UnitDefinition) -> V
                 canonical: *bound.canonical_values(),
                 maximum,
                 measured,
+                source_field_id,
             })
         })
         .collect()
@@ -79,10 +107,16 @@ fn bounds_of(assessment: &PublishedStudyAssessment, field: &UnitDefinition) -> V
 /// its range, overflow values and limit to that unit, and state the result against the tightest
 /// assessment bound of the shown quantity ([`assessment_line`]). Returns the display unit when
 /// it differs from `field_unit`.
+///
+/// `drawn` is the coloured field and `locate` gives a run field's location. The assessment line
+/// names where its result is evaluated (the location of the field the assessment reads); when
+/// the legend colours another location of the quantity, its label names that location too.
 pub fn present(
     legend: &mut GeometrySceneScalarLegend,
     field_unit: &str,
     terms: &FieldLegendTerms,
+    drawn: Option<ShownField<'_>>,
+    locate: &dyn Fn(&str) -> Option<AnalysisFieldLocation>,
 ) -> Result<Option<String>, String> {
     let Ok(field) = parse_unit_expression(field_unit) else {
         return Ok(None);
@@ -118,6 +152,14 @@ pub fn present(
         let in_unit = |canonical: f64| unit.from_canonical(canonical).map_err(|e| e.to_string());
         let limit = in_unit(bound.canonical)?;
         legend.limit = Some(limit);
+        let assessed = bound.source_field_id.and_then(|id| Some((id, locate(id)?)));
+        if let (Some(drawn), Some((assessed_id, assessed_location))) = (drawn, assessed) {
+            if drawn.field_id != assessed_id && drawn.location != assessed_location {
+                if let Some((_, label)) = location_names(drawn.location) {
+                    legend.label = format!("{}, {label}", legend.label);
+                }
+            }
+        }
         legend.note = Some(assessment_line(&AssessedResult {
             maximum: bound.maximum,
             measured: bound.measured.map(in_unit).transpose()?,
@@ -126,6 +168,9 @@ pub fn present(
             // A ratio of temperatures depends on the scale's zero; state the margin instead.
             ratio: field.dimension() != PhysicalDimension::TEMPERATURE,
             digits: legend.precision.unwrap_or(3),
+            location: assessed
+                .and_then(|(_, location)| location_names(location))
+                .map(|(name, _)| name),
         }));
     }
     Ok((symbol != field_unit).then_some(symbol))
@@ -165,6 +210,10 @@ impl super::SceneStats {
     /// These stats with the study's fixed range from `terms`.
     pub(super) fn with_terms(mut self, terms: &FieldLegendTerms) -> Self {
         self.scale.fixed = terms.fixed_range();
+        self.fixed_deformation = terms
+            .display
+            .as_ref()
+            .and_then(|display| display.deformation);
         self
     }
 }
@@ -174,9 +223,11 @@ pub fn present_overlay(
     overlay: &mut runmat_plot::geometry_scene::GeometrySceneOverlay,
     field_unit: Option<&str>,
     terms: &FieldLegendTerms,
+    shown: Option<ShownField<'_>>,
+    locate: &dyn Fn(&str) -> Option<AnalysisFieldLocation>,
 ) -> Result<(), String> {
     if let (Some(legend), Some(unit)) = (overlay.scalar_legend.as_mut(), field_unit) {
-        present(legend, unit, terms)?;
+        present(legend, unit, terms, shown, locate)?;
     }
     Ok(())
 }

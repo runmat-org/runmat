@@ -19,6 +19,26 @@ pub(super) struct LegendTerms {
         String,
         Vec<runmat_runtime::analysis::assessment::PublishedStudyAssessment>,
     >,
+    /// Each run's solved bodies (the study regions its model assigns materials to).
+    pub regions: std::collections::BTreeMap<
+        String,
+        Vec<runmat_runtime::analysis::field_scene::regions::AnalysisStudyRegion>,
+    >,
+    /// Each run's published field locations, by field id.
+    pub locations: std::collections::BTreeMap<
+        String,
+        std::collections::BTreeMap<String, runmat_runtime::analysis::AnalysisFieldLocation>,
+    >,
+}
+
+/// Where a view's deformation scale comes from.
+#[derive(Serialize, Clone, Copy, PartialEq, Eq, Debug)]
+#[serde(rename_all = "snake_case")]
+pub(super) enum DeformationSource {
+    /// Chosen from the run's own displacement.
+    Data,
+    /// The study's `display <output> { deformation = … }`, the same for every run.
+    Study,
 }
 pub(super) use profiles::CaptureProfile;
 
@@ -57,10 +77,19 @@ pub(super) struct View {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub poster_light: Option<String>,
     pub deformation_scale: f64,
+    /// Where `deformation_scale` comes from.
+    pub deformation_source: DeformationSource,
+    /// Solid regions the view leaves out and draws as grey context (the study's display); the
+    /// legend's extremes are taken over the other bodies.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub hidden_regions: Vec<String>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub context_regions: Vec<String>,
     pub minimum: Option<f64>,
     pub maximum: Option<f64>,
-    /// The field's true extrema over every stored value of the solution, with where they
-    /// occur; the legend range above is the same range unless the study fixes it.
+    /// The field's true extrema over every stored value of the bodies the view draws in field
+    /// colour, with where they occur; the legend range above is the same range unless the
+    /// study fixes it.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub extrema: Option<runmat_runtime::analysis::field_scene::extrema::FieldExtrema>,
     /// The largest distance between a saved surface position and the solver's, from the
@@ -176,6 +205,12 @@ struct Written {
 /// Mesh coordinates and element corners of one run, kept only while its views are captured.
 type MeshEntities = (Vec<[f64; 3]>, Vec<Vec<usize>>);
 
+/// One run's solver mesh entities and solved bodies, kept while its views are captured.
+type RunMesh = (
+    Option<MeshEntities>,
+    Option<std::sync::Arc<runmat_runtime::analysis::field_scene::regions::BodyRegions>>,
+);
+
 /// `solver_mesh` gives each captured run's canonical solver mesh artifact; it places each
 /// field's extrema.
 ///
@@ -192,8 +227,9 @@ pub(super) async fn capture(
     outputs: &OutputNames,
 ) -> Result<Vec<View>> {
     use runmat_runtime::analysis::field_scene::extrema;
+    use runmat_runtime::analysis::field_scene::regions::{BodyRegions, ViewRegions};
     use runmat_runtime::builtins::plotting;
-    let mut mesh: Option<(String, Option<MeshEntities>)> = None;
+    let mut mesh: Option<(String, RunMesh)> = None;
     let mut written = Vec::new();
     let view_count = profile.views.len();
     for (position, spec) in profile.views.into_iter().enumerate() {
@@ -209,33 +245,55 @@ pub(super) async fn capture(
                 .map(extrema::solver_mesh_entities)
                 .transpose()
                 .map_err(anyhow::Error::msg)?;
-            mesh = Some((run_id.to_string(), entities));
+            let study_regions = terms
+                .regions
+                .get(run_id)
+                .filter(|regions| !regions.is_empty());
+            let bodies = mesh_path
+                .as_deref()
+                .zip(study_regions)
+                .map(|(path, regions)| BodyRegions::load(path, regions))
+                .transpose()
+                .map_err(anyhow::Error::msg)?
+                .map(std::sync::Arc::new);
+            mesh = Some((run_id.to_string(), (entities, bodies)));
         }
-        let entities = mesh.as_ref().and_then(|(_, entities)| entities.as_ref());
+        let (entities, bodies) = mesh
+            .as_ref()
+            .map(|(_, (entities, bodies))| (entities.as_ref(), bodies.clone()))
+            .unwrap_or_default();
         let output_name = outputs.name(&spec);
+        let display = output_name.as_deref().and_then(|output| {
+            runmat_analysis_core::AuthoredOutputDisplay::of(&terms.displays, output)
+        });
+        // The study's display of the output leaves bodies out of the view or greys them; a mode
+        // shape has no display. Extremes are taken over the bodies drawn in field colour.
+        let regions = ViewRegions::of_display(bodies, display.filter(|_| !spec.relative));
+        let counted = entities.and_then(|(_, elements)| regions.counted_entities(elements));
         let extrema = spec
             .field
             .as_ref()
             .map(|field| {
-                extrema::field_extrema(
+                extrema::field_extrema_counted(
                     run_id,
                     field,
                     entities.map(|(nodes, _)| nodes.as_slice()),
                     entities.map(|(_, elements)| elements.as_slice()),
+                    counted.as_ref(),
                 )
             })
             .transpose()
             .map_err(anyhow::Error::msg)?;
+        let fixed_deformation = display
+            .filter(|_| !spec.relative)
+            .and_then(|display| display.deformation);
         // The study's display of this view's output, and its run's assessments. A mode shape's
         // relative amplitude has no unit, range or limit.
         let legend_terms = if spec.relative {
             Default::default()
         } else {
             runmat_runtime::analysis::field_scene::legend::FieldLegendTerms {
-                display: output_name.as_deref().and_then(|output| {
-                    runmat_analysis_core::AuthoredOutputDisplay::of(&terms.displays, output)
-                        .cloned()
-                }),
+                display: display.cloned(),
                 assessments: terms.assessments.get(run_id).cloned().unwrap_or_default(),
             }
         };
@@ -299,11 +357,13 @@ pub(super) async fn capture(
                             runmat_runtime::analysis::field_scene::SceneShape {
                                 mode: spec.shape,
                                 exaggeration: 1.0,
+                                deformation: fixed_deformation,
                                 // Posters show the deformed body alone; an undeformed overlay
                                 // drawn over a shape a few micrometres away only fights it for
                                 // depth.
                                 show_undeformed_outline: false,
                             },
+                            &regions,
                             detail.surface,
                         )
                         .map_err(anyhow::Error::msg)?;
@@ -338,10 +398,20 @@ pub(super) async fn capture(
                 range = Some((legend.minimum, legend.maximum));
                 range_source = legend.range_source;
                 if !spec.relative {
+                    let locations = terms.locations.get(run_id);
+                    let locate = |field_id: &str| locations?.get(field_id).copied();
+                    let shown = spec.field.as_ref().and_then(|field| {
+                        Some(runmat_runtime::analysis::field_scene::legend::ShownField {
+                            field_id: &field.field_id,
+                            location: locate(&field.field_id)?,
+                        })
+                    });
                     display_unit = runmat_runtime::analysis::field_scene::legend::present(
                         legend,
                         &spec.unit,
                         &legend_terms,
+                        shown,
+                        &locate,
                     )
                     .map_err(anyhow::Error::msg)?;
                 }
@@ -481,6 +551,12 @@ pub(super) async fn capture(
                 range_source,
                 scene: scene_path,
                 deformation_scale,
+                deformation_source: match fixed_deformation {
+                    Some(_) if deformation_scale != 0.0 => DeformationSource::Study,
+                    _ => DeformationSource::Data,
+                },
+                hidden_regions: regions.hide.clone(),
+                context_regions: regions.context.clone(),
                 minimum,
                 maximum,
                 extrema: extrema.filter(|_| {

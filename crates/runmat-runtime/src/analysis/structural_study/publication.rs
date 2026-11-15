@@ -456,6 +456,7 @@ pub(in crate::analysis) fn complete_study_run_prepared(
             states: state_results,
             solver_mesh_artifact_path,
             meshing_evidence_artifact_path,
+            regions: crate::analysis::contracts::AnalysisStudyRegion::of_model(&model),
             study_fingerprint,
             operation_sequence,
             run_status,

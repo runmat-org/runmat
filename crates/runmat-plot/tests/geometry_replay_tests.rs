@@ -93,6 +93,7 @@ fn malformed_saved_edges_are_rejected() {
             segment_regions: Vec::new(),
             instances: Vec::new(),
             lod_pixels: None,
+            owner_node_ids: Vec::new(),
         });
     assert!(saved.into_geometry_scene("invalid", 1).is_err());
 }

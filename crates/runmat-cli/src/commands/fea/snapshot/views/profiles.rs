@@ -669,15 +669,20 @@ struct RunFields<'a> {
     /// A modal run: its displacement, strain and stress are those of mass-normalized
     /// eigenvectors, which carry no physical amplitude. It shows only its mode shapes.
     modal: bool,
+    /// The run fields the study's assessments read (G77 evidence). A view of an assessed
+    /// quantity draws the assessed field, so its legend and the assessment line state one peak.
+    assessed: &'a [String],
 }
 
 impl<'a> RunFields<'a> {
     fn new(
         run_id: &'a str,
         published: &'a [AnalysisFieldDescriptor],
+        assessed: &'a [String],
         values: &dyn PublishedValues,
     ) -> Result<Self> {
         let mut run = Self {
+            assessed,
             run_id,
             published,
             descriptors: published
@@ -811,6 +816,17 @@ impl<'a> RunFields<'a> {
         candidates: &[&'a AnalysisFieldDescriptor],
         values: &dyn PublishedValues,
     ) -> Result<Option<&'a AnalysisFieldDescriptor>> {
+        // The field an assessment reads is the one shown of its quantity.
+        let assessed: Vec<_> = candidates
+            .iter()
+            .copied()
+            .filter(|descriptor| self.assessed.contains(&descriptor.field_id))
+            .collect();
+        let candidates = if assessed.is_empty() {
+            candidates
+        } else {
+            assessed.as_slice()
+        };
         let frequencies: Vec<_> = candidates
             .iter()
             .copied()
@@ -940,12 +956,16 @@ const MODE_SHAPE_QUANTITIES: &[(Q, ObservationValueShape)] = &[
 impl CaptureProfile {
     /// The views for the captured runs (one per captured case of the study), chosen from their
     /// published field descriptors. Each quantity comes from the first run that publishes it.
-    pub(crate) fn from_runs(runs: &[(&str, &AnalysisResultsData)]) -> Result<Self> {
+    /// `assessed` gives each run's assessed field ids (G77 `evidence.source_field_id`).
+    pub(crate) fn from_runs(
+        runs: &[(&str, &AnalysisResultsData)],
+        assessed: &std::collections::BTreeMap<String, Vec<String>>,
+    ) -> Result<Self> {
         let published: Vec<(&str, &[AnalysisFieldDescriptor])> = runs
             .iter()
             .map(|(run_id, results)| (*run_id, results.field_descriptors.as_slice()))
             .collect();
-        Self::from_published(&published, &StoredValues)
+        Self::from_published_assessed(&published, assessed, &StoredValues)
     }
 
     /// Keep only the named views (all of them when none is named), in capture order. An
@@ -970,14 +990,33 @@ impl CaptureProfile {
         Ok(self)
     }
 
-    /// The views for runs given by their published field descriptors.
+    /// The views for runs given by their published field descriptors, with no assessments.
+    #[cfg(test)]
     pub(super) fn from_published(
         runs: &[(&str, &[AnalysisFieldDescriptor])],
         values: &dyn PublishedValues,
     ) -> Result<Self> {
+        Self::from_published_assessed(runs, &Default::default(), values)
+    }
+
+    /// The views for runs given by their published field descriptors and the field ids their
+    /// assessments read.
+    pub(super) fn from_published_assessed(
+        runs: &[(&str, &[AnalysisFieldDescriptor])],
+        assessed: &std::collections::BTreeMap<String, Vec<String>>,
+        values: &dyn PublishedValues,
+    ) -> Result<Self> {
+        let none = Vec::new();
         let runs: Vec<RunFields> = runs
             .iter()
-            .map(|(run_id, published)| RunFields::new(run_id, published, values))
+            .map(|(run_id, published)| {
+                RunFields::new(
+                    run_id,
+                    published,
+                    assessed.get(*run_id).unwrap_or(&none),
+                    values,
+                )
+            })
             .collect::<Result<_>>()?;
         let primary = runs.first().ok_or_else(|| anyhow!("snapshot has no run"))?;
         let mut views = vec![ViewSpec {
@@ -1803,6 +1842,60 @@ pub(super) mod tests {
         let displacement = view(&profile, "displacement");
         assert_eq!(field_of(displacement), "structural.harmonic.displacement.1");
         assert_eq!(displacement.label, "Displacement magnitude · 80.00 Hz");
+    }
+
+    /// The yaw arm: the run publishes nodal-averaged and element von Mises stress, and the study
+    /// assesses the element peak. The stress view draws the assessed element field, so its
+    /// legend and the assessment line report one peak; without an assessment the choice is the
+    /// same as before.
+    #[test]
+    fn a_stress_view_draws_the_field_the_assessment_reads() {
+        let fields = [
+            published(
+                "structural.displacement",
+                AnalysisFieldLayout::vector3(Q::Displacement, FieldLocation::Node),
+                vec![4, 3],
+            ),
+            published(
+                "structural.von_mises",
+                AnalysisFieldLayout::scalar(Q::VonMisesStress, FieldLocation::Element),
+                vec![2],
+            ),
+            published(
+                "structural.nodal_von_mises",
+                AnalysisFieldLayout::scalar(Q::VonMisesStress, FieldLocation::Node),
+                vec![4],
+            ),
+        ];
+        let unassessed =
+            CaptureProfile::from_published(&[("run", &fields)], &Values::default()).unwrap();
+        let assessed_field = |field: &str| {
+            let assessed = [("run".to_string(), vec![field.to_string()])].into();
+            let profile = CaptureProfile::from_published_assessed(
+                &[("run", &fields)],
+                &assessed,
+                &Values::default(),
+            )
+            .unwrap();
+            let stress = view(&profile, "stress");
+            (field_of(stress).to_string(), stress.source)
+        };
+        assert_eq!(
+            assessed_field("structural.von_mises"),
+            (
+                "structural.von_mises".to_string(),
+                Some((Q::VonMisesStress, FieldLocation::Element))
+            )
+        );
+        assert_eq!(
+            assessed_field("structural.nodal_von_mises").0,
+            "structural.nodal_von_mises"
+        );
+        // An assessment of another quantity leaves the stress view's choice alone.
+        assert_eq!(
+            assessed_field("structural.displacement").0,
+            field_of(view(&unassessed, "stress"))
+        );
     }
 
     /// Thermal steady: temperature and heat flux on the undeformed body (no displacement).

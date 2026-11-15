@@ -488,6 +488,7 @@ impl ScenePlot {
                 deformation,
                 instances: _,
                 lod_pixels: _,
+                owner_node_ids: _,
                 packed,
                 visible,
             } => {

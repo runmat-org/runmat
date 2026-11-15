@@ -68,6 +68,7 @@ pub(in crate::analysis) fn fixture() -> (
         states: Vec::new(),
         solver_mesh_artifact_path: None,
         meshing_evidence_artifact_path: None,
+        regions: Vec::new(),
         study_fingerprint: compiled.definition_digest().unwrap().to_string(),
         operation_sequence: Vec::new(),
         run_status: crate::analysis::RunStatus::Completed,

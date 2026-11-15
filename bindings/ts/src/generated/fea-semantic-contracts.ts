@@ -804,6 +804,9 @@ export interface AuthoredOutputDisplay {
   unit_source: DisplayUnitSource;
   range?: DisplayRange;
   precision?: WireU8;
+  hide?: string[];
+  context?: string[];
+  deformation?: number;
 }
 
 export type AuthoredOutputExpression = {
