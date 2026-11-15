@@ -1,5 +1,6 @@
 use super::*;
 use crate::analysis::{AnalysisRenderMesh, AnalysisRenderTopologySource};
+use runmat_plot::geometry_scene::ScalarRangeSource;
 use runmat_plot::{GeometrySceneDisplayMode, GeometryScenePresentation};
 
 #[test]
@@ -358,4 +359,83 @@ fn result_views_swap_the_full_wireframe_for_feature_edges() {
     let chunks = scene.chunks.len();
     use_result_view_edges(&mut scene);
     assert_eq!(scene.chunks.len(), chunks);
+}
+
+fn triangle_with_stress(values: Vec<f64>) -> (AnalysisRenderTopology, FieldData) {
+    let topology = AnalysisRenderTopology {
+        schema_version: "test".into(),
+        source: AnalysisRenderTopologySource::AnalysisMesh,
+        volume_element_count: 1,
+        meshes: vec![AnalysisRenderMesh {
+            mesh_id: "mesh".into(),
+            vertices: vec![[0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]],
+            triangles: vec![[0, 1, 2]],
+            regions: vec![],
+            vertex_volume_node_indices: vec![Some(0), Some(1), Some(2)],
+            triangle_volume_element_indices: vec![Some(0)],
+        }],
+    };
+    let field = FieldData::inline(AnalysisFieldLocation::Node, 1, values, "stress", "Pa");
+    (topology, field)
+}
+
+fn scene_with(
+    field_values: Vec<f64>,
+    extremes: Option<(f64, f64)>,
+    fixed: Option<(f64, f64)>,
+) -> GeometryScene {
+    let (topology, field) = triangle_with_stress(field_values);
+    scene_from_topology_with_stats(
+        "run",
+        &topology,
+        Some(&field),
+        None,
+        "undeformed",
+        1.0,
+        false,
+        Some(SceneStats {
+            element_count: 1,
+            scale: legend::ScalarScale { extremes, fixed },
+            automatic_scale: None,
+        }),
+    )
+    .unwrap()
+    .0
+}
+
+#[test]
+fn a_study_range_fixes_the_scale_clips_and_states_the_true_extremes() {
+    // Before G70 a given range was widened to the data: the bar ran 0 to 14.2 MPa and the
+    // 6 MPa vertex took the colour 42 % up the bar. With the study's 0–12 MPa range the bar
+    // stays 0–12 MPa, 6 MPa takes the middle colour, 14.2 MPa saturates at the top colour, and
+    // the legend states the 14.2 MPa peak above the range.
+    let scene = scene_with(vec![0.0, 6e6, 14.2e6], None, Some((0.0, 12e6)));
+    let legend = scene
+        .overlay
+        .as_ref()
+        .unwrap()
+        .scalar_legend
+        .clone()
+        .unwrap();
+    assert_eq!((legend.minimum, legend.maximum), (0.0, 12e6));
+    assert_eq!(legend.range_source, ScalarRangeSource::Study);
+    assert_eq!(legend.above, Some(14.2e6));
+    assert_eq!(legend.below, None);
+    let colors: Vec<_> = scene.chunks[0].vertices.iter().map(|v| v.color).collect();
+    assert_eq!(colors[1], scalar_color(0.5, 0.0, 1.0));
+    assert_eq!(colors[2], scalar_color(1.0, 0.0, 1.0));
+    assert_eq!(colors[0], scalar_color(0.0, 0.0, 1.0));
+    // True extremes beyond the drawn surface (an interior minimum) are stated too.
+    let interior = scene_with(vec![1e6, 6e6, 9e6], Some((-2e6, 9e6)), Some((0.0, 12e6)));
+    let legend = interior.overlay.unwrap().scalar_legend.unwrap();
+    assert_eq!((legend.below, legend.above), (Some(-2e6), None));
+}
+
+#[test]
+fn without_a_study_range_the_scale_still_follows_the_data() {
+    let scene = scene_with(vec![0.0, 6e6, 14.2e6], Some((0.0, 12e6)), None);
+    let legend = scene.overlay.unwrap().scalar_legend.unwrap();
+    assert_eq!((legend.minimum, legend.maximum), (0.0, 14.2e6));
+    assert_eq!(legend.range_source, ScalarRangeSource::Data);
+    assert_eq!((legend.below, legend.above), (None, None));
 }

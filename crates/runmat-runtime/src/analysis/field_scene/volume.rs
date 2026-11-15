@@ -237,14 +237,14 @@ pub fn build_volume_scene(
         vertex_count,
         triangle_count,
         progress_percent: None,
-        scalar_legend: Some(GeometrySceneScalarLegend {
-            label: request.legend.clone(),
-            unit: request.unit.clone(),
-            minimum: range.0,
-            maximum: range.1,
-            limit: None,
-            note: None,
-        }),
+        // The legend's range is the request's; when that is a study's fixed range, the caller
+        // states the field's true extremes beyond it (`legend::mark_fixed_range`).
+        scalar_legend: Some(GeometrySceneScalarLegend::of_data(
+            request.legend.clone(),
+            request.unit.clone(),
+            range.0,
+            range.1,
+        )),
         region_count: 0,
         mapped_region_count: 0,
         assembly_nodes: Vec::new(),

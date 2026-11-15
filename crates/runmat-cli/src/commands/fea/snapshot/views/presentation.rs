@@ -184,13 +184,16 @@ impl Presentation {
     }
 
     /// The legend's footprint in the poster, from its top-right corner, as shares of the
-    /// poster's width and height.
-    pub fn legend_footprint(&self, has_note: bool) -> runmat_plot::scalar_legend::LegendFootprint {
+    /// poster's width and height, with `note_lines` lines under its range.
+    pub fn legend_footprint(
+        &self,
+        note_lines: usize,
+    ) -> runmat_plot::scalar_legend::LegendFootprint {
         runmat_plot::scalar_legend::exported_footprint(
             self.poster_width,
             self.poster_height,
             self.pixels_per_point(),
-            has_note,
+            note_lines,
         )
     }
 
@@ -523,8 +526,8 @@ mod tests {
                 poster_height: height,
                 ..Default::default()
             };
-            for has_note in [false, true] {
-                let footprint = poster.legend_footprint(has_note);
+            for note_lines in [0, 1] {
+                let footprint = poster.legend_footprint(note_lines);
                 assert!(
                     footprint.label_px >= LEGEND_LABEL_SHARE * height as f32 * 0.9999,
                     "{width}x{height}: labels {} px",
@@ -543,7 +546,7 @@ mod tests {
                 poster_height: height,
                 ..Default::default()
             }
-            .legend_footprint(false)
+            .legend_footprint(0)
         };
         let (small, large) = (share(1200, 750), share(2400, 1500));
         assert!((small.width_share - large.width_share).abs() < 1e-4);

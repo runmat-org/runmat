@@ -165,6 +165,7 @@ fn page_real_values(values: AnalysisFieldPageValues) -> Vec<f64> {
 
 mod deformation;
 pub mod extrema;
+pub mod legend;
 pub mod volume;
 
 /// How [`build_scene`] draws the body's shape: `mode` is `"undeformed"`, `"true"` or
@@ -181,11 +182,8 @@ pub struct SceneShape<'a> {
 /// vector field of the same run, displaces it. Both are explicit selections of published
 /// fields (with their sample), so the caller decides from the field descriptors.
 ///
-/// `scalar_range` colors the field over a known range, such as the field's true extrema from
-/// [`extrema::field_extrema`]; without it the range is taken from the drawn surface.
-/// `solver_mesh` is the run's canonical solver mesh artifact: a run whose publication keeps no
-/// render tiles (frequency-sampled runs) is drawn from the boundary of that mesh, the same
-/// projection the tiles store.
+/// `solver_mesh` is the run's canonical solver mesh artifact: a run without render tiles
+/// (frequency-sampled runs) is drawn from its boundary, the projection the tiles store.
 ///
 /// `detail` [`SurfaceDetail::Corners`] draws each quadratic boundary face as one corner
 /// triangle (from the solver mesh), for a scene that must fit a payload budget; the returned
@@ -195,7 +193,7 @@ pub fn build_scene(
     solver_mesh: Option<&str>,
     field: Option<&AnalysisFieldSelection>,
     deformation: Option<&AnalysisFieldSelection>,
-    scalar_range: Option<(f64, f64)>,
+    scale: legend::ScalarScale,
     shape: SceneShape<'_>,
     detail: super::SurfaceDetail,
 ) -> Result<(GeometryScene, f64, SurfaceApproximation), String> {
@@ -250,9 +248,9 @@ pub fn build_scene(
             ));
         }
     }
-    let stats = scalar_range.map(|range| SceneStats {
+    let stats = Some(SceneStats {
         element_count: topology.volume_element_count,
-        scalar_range: Some(range),
+        scale,
         automatic_scale: None,
     });
     let (scene, scale) = scene_from_topology_with_stats(
@@ -349,6 +347,7 @@ pub fn build_scene_view(
     exaggeration: f64,
     show_undeformed_outline: bool,
     view: Option<RenderViewRequest>,
+    terms: &legend::FieldLegendTerms,
 ) -> Result<(GeometryScene, f64, bool), String> {
     if !matches!(shape_mode, "undeformed" | "true" | "exaggerated") {
         return Err(format!("unknown FEA shape mode '{shape_mode}'"));
@@ -399,7 +398,7 @@ pub fn build_scene_view(
         .or(additional_deformation.as_ref())
         .filter(|field| field.location == AnalysisFieldLocation::Node && field.components >= 3);
     let stats = SceneStats::from_selection(&selection, field.as_ref(), deformation);
-    if field.is_some() && stats.scalar_range.is_none() {
+    if field.is_some() && stats.scale.extremes.is_none() {
         return Err("the selected field has no persisted global plot range".into());
     }
     if shape_mode == "exaggerated" && deformation.is_some() && stats.automatic_scale.is_none() {
@@ -413,7 +412,7 @@ pub fn build_scene_view(
         shape_mode,
         exaggeration,
         show_undeformed_outline,
-        Some(stats),
+        Some(stats.with_terms(terms)),
     )?;
     let mut model_bounds = BoundingBox::default();
     let bounds = selection.model_bounds;
@@ -424,6 +423,7 @@ pub fn build_scene_view(
     model_bounds.expand_by_box(&scene.bounds);
     scene.bounds = model_bounds;
     if let Some(overlay) = scene.overlay.as_mut() {
+        legend::present_overlay(overlay, field.as_ref().map(|f| f.unit.as_str()), terms)?;
         overlay.mesh_count = selection.mesh_count;
         overlay.status = if selection.exact {
             GeometrySceneCompleteness::Complete
@@ -437,7 +437,7 @@ pub fn build_scene_view(
 
 struct SceneStats {
     element_count: usize,
-    scalar_range: Option<(f64, f64)>,
+    scale: legend::ScalarScale,
     automatic_scale: Option<f64>,
 }
 
@@ -447,7 +447,7 @@ impl SceneStats {
         field: Option<&FieldData>,
         deformation: Option<&FieldData>,
     ) -> Self {
-        let scalar_range = field.and_then(|field| {
+        let extremes = field.and_then(|field| {
             selection
                 .field_summaries
                 .iter()
@@ -470,7 +470,7 @@ impl SceneStats {
         });
         Self {
             element_count: selection.volume_element_count,
-            scalar_range,
+            scale: legend::ScalarScale::of_extremes(extremes),
             automatic_scale,
         }
     }

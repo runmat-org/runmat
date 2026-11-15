@@ -85,6 +85,10 @@ pub struct AuthoredStudy {
     pub outputs: Vec<AuthoredOutput>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub assessments: Vec<crate::AuthoredAssessment>,
+    /// How field outputs are shown: legend unit, fixed colour range and precision. Presentation
+    /// only; it never enters the compiled study's identity.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub displays: Vec<crate::AuthoredOutputDisplay>,
     pub sequence: AnalysisSequence,
 }
 

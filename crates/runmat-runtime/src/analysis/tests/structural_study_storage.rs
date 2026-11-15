@@ -223,6 +223,7 @@ fn authored_output_fields_are_chunked_and_selectively_readable() {
             1.0,
             false,
             None,
+            &Default::default(),
         )
         .expect("render selected field from persisted LOD tiles");
         assert_eq!(scale, 0.0);
