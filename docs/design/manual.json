@@ -825,6 +825,34 @@
       ]
     },
     {
+      "id": "mcad-assembly-features",
+      "route": "/docs/mcad/assembly/features",
+      "title": "Assembly features",
+      "summary": "Reference for assembly features in RunMat. Cut through several components, drill matching holes across parts, or add a weld bead, from a sketch in the assembly, without changing the part files.",
+      "keywords": [
+        "assembly feature",
+        "assembly cut",
+        "hole across parts",
+        "match drilling",
+        "weld bead",
+        "assembly-level machining"
+      ],
+      "group": "MCAD reference",
+      "order": 6,
+      "narrative": "docs/design/mcad/assembly/features.md",
+      "examples": [],
+      "related_topics": [
+        {
+          "title": "Sketches in an assembly",
+          "href": "/docs/mcad/assembly/sketches"
+        },
+        {
+          "title": "Occurrences and mates",
+          "href": "/docs/mcad/assembly/mates"
+        }
+      ]
+    },
+    {
       "id": "mcad-exploded",
       "route": "/docs/mcad/assembly/exploded-views",
       "title": "Exploded views",

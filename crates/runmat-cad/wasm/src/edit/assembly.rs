@@ -12,6 +12,7 @@
 //!   the smart mate ([`mate_edits`]).
 //! - `assembly.replace`, `assembly.subassembly`, `assembly.new-part`: structure ([`structure`]).
 //! - `assembly.sketch` and the `sketch.*` tools: sketches in the assembly ([`sketch`]).
+//! - `assembly.feature`: a cut, holes or a weld bead through components ([`operation`]).
 //! - `explode.new`, `explode.step`, `explode.radial`, `explode.lines`: exploded views, their
 //!   steps and trail lines ([`explode`]).
 //!
@@ -29,6 +30,7 @@ pub(crate) mod frames;
 mod mate;
 mod mate_edits;
 mod mirror;
+mod operation;
 mod path_picks;
 mod place;
 mod sketch;
@@ -38,6 +40,8 @@ mod use_edges;
 mod anchors_tests;
 #[cfg(test)]
 mod configure_tests;
+#[cfg(test)]
+mod operation_tests;
 #[cfg(test)]
 mod explode_tests;
 #[cfg(test)]
@@ -417,6 +421,12 @@ pub(super) fn edit(
         "assembly.delete" if !crate::edit::sketch::selected_entities(&request.selection).is_empty() => {
             sketch::delete_entities(&mut document, request)?
         }
+        "assembly.delete" | "assembly.suppress"
+            if operation::selected(request).next().is_some() =>
+        {
+            operation::delete_or_suppress(&mut document, request)?
+        }
+        "assembly.feature" => operation::apply(&mut document, &compiled, &request.values)?,
         "assembly.delete" | "assembly.suppress" if sketch::selected(request).next().is_some() => {
             sketch::delete_or_suppress(&mut document, request)?
         }

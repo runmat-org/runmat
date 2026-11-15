@@ -732,6 +732,34 @@ pub fn assembly_display_configured(
     parts: &BTreeMap<String, PartDisplay>,
     configured: &BTreeMap<(String, String), PartDisplay>,
 ) -> AssemblyDisplay {
+    assembly_display_operated(resolved, source, parts, configured, &BTreeMap::new())
+}
+
+/// The prototype key of node `id`: its [`configuration_key`], or its own key when an assembly
+/// feature changed its geometry (a component the assembly cut, drilled or welded draws its own
+/// prototype).
+pub fn prototype_key<T>(
+    id: usize,
+    node: &crate::assembly::resolve::OccNode,
+    operated: &BTreeMap<u32, T>,
+) -> (String, String) {
+    let (file, configuration) = configuration_key(node);
+    if operated.contains_key(&(id as u32)) {
+        (file, format!("{configuration}#operated:{id}"))
+    } else {
+        (file, configuration)
+    }
+}
+
+/// [`assembly_display_configured`] where a part occurrence the assembly's features changed
+/// draws its display from `operated` (by node index).
+pub fn assembly_display_operated(
+    resolved: &ResolvedAssembly,
+    source: &dyn DesignSource,
+    parts: &BTreeMap<String, PartDisplay>,
+    configured: &BTreeMap<(String, String), PartDisplay>,
+    operated: &BTreeMap<u32, PartDisplay>,
+) -> AssemblyDisplay {
     let mut out = AssemblyDisplay {
         sketches: resolved
             .sketches
@@ -752,11 +780,15 @@ pub fn assembly_display_configured(
         }
         let file = node.definition.file.as_str().to_string();
         let configuration = node.configuration.name.as_ref().map(|c| c.to_string());
-        let key = configuration_key(node);
+        let key = prototype_key(id, node, operated);
         let prototype = match prototype_of.get(&key) {
             Some(p) => *p,
             None => {
-                let shape = match configured.get(&key).or_else(|| parts.get(&file)) {
+                let shape = match operated
+                    .get(&(id as u32))
+                    .or_else(|| configured.get(&configuration_key(node)))
+                    .or_else(|| parts.get(&file))
+                {
                     // An occurrence is the folded part: a sheet metal flat pattern stays out.
                     Some(part) => PrototypeShape::Mesh {
                         part: Box::new(PartDisplay {

@@ -36,6 +36,7 @@ An assembly file declares one assembly: `assembly <name> { … }`.
 | `connector <name> = { occurrence, anchor, offset, flip }` | a frame that mates join | [Connectors](/docs/mcad/assembly/mates#connectors) |
 | `mate <name> = { kind, a, b }` | a joint between two connectors | [Mates](/docs/mcad/assembly/mates#mates) |
 | `sketch <name> on <plane> { … }` | a sketch on an origin plane or on a connector (`plane.<connector>`) | [Sketches in an assembly](/docs/mcad/assembly/sketches) |
+| `operation <name> = cut(…)`, `hole(…)`, `weld(…)` | an assembly feature: a cut, holes or a weld bead through components, from an assembly sketch | [Assembly features](/docs/mcad/assembly/features) |
 | `pattern <name> = <layout>(seeds = […], …)` | keyed copies of occurrences | [Patterns](/docs/mcad/assembly/patterns-and-mirrors#pattern-layouts) |
 | `mirror <name> = { seeds, plane, hand }` | reflected copies | [Mirrors](/docs/mcad/assembly/patterns-and-mirrors#mirrors) |
 | `fasteners <name> = { layout, fastener, stack, exceptions }` | a fastener set along a path | [Fasteners](/docs/mcad/assembly/patterns-and-mirrors#fasteners) |

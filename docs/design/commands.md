@@ -49,8 +49,8 @@ This file is generated from the command catalog.
 - `assembly.component-configuration`: Use another configuration of the component's file.
   - Required: `configuration` (text)
   - Runs on the `selection`: `occurrence`
-- `assembly.delete`: Delete components, mates, sketches or sketch curves.
-  - Runs on the `selection`: `occurrence`, `mate`, `sketch`, `sketch_entity`, `sketch_point`
+- `assembly.delete`: Delete components, mates, sketches, assembly features or sketch curves.
+  - Runs on the `selection`: `occurrence`, `mate`, `sketch`, `feature`, `sketch_entity`, `sketch_point`
 - `assembly.edit-mate`: Change the mate's type, distance, angle, limits or alignment.
   - Required: `type` (one of `fasten`, `revolute`, `slider`, `cylindrical`, `planar`, `ball`, `parallel`, `distance`, `angle`, `tangent`, `pin_slot`, `gear`, `rack_pinion`, `screw`, `cam`, `width`, `symmetric`, `path`, `linear_coupler`, `hinge`, `universal_joint`, default `fasten`); `offset` (number in mm, default 0) when `type` is distance; `angle` (number in deg, default 0) when `type` is angle; `min` (number in deg, default -30) when `angle_limits` is true; `max` (number in deg, default 45) when `angle_limits` is true; `near` (number in mm, default 0) when `distance_limits` is true; `far` (number in mm, default 10) when `distance_limits` is true; `ratio` (number, default 1) when `type` is gear or linear_coupler; `pitch` (number in mm, default 1) when `type` is screw or rack_pinion; `radius` (number in mm, default 5) when `type` is tangent; `profile` (text) when `type` is cam
   - Optional: `angle_limits` (true or false, default false) when `type` is revolute or cylindrical or hinge; `distance_limits` (true or false, default false) when `type` is slider or cylindrical; `flip` (true or false, default false); `first2` (pick: mate connector or face or edge or vertex or plane or axis or point or component or sketch entity or sketch point) when `type` is width; `second2` (pick: mate connector or face or edge or vertex or plane or axis or point or component or sketch entity or sketch point) when `type` is width; `plane` (pick: mate connector or face or edge or vertex or plane or axis or point or component or sketch entity or sketch point) when `type` is symmetric; `path` (picks: edge) when `type` is path; `joint_point` (true or false, default true) when `type` is universal_joint
@@ -58,6 +58,10 @@ This file is generated from the command catalog.
 - `assembly.export`: Export as a STEP assembly, glTF or USD.
   - Required: `format` (one of `step`, `gltf`, `usd`, default `step`)
   - Optional: `hidden` (true or false, default false)
+- `assembly.feature`: Cut, drill across parts or add a weld bead at the assembly level.
+  - Required: `type` (one of `cut`, `hole`, `weld`, default `cut`); `profile` (pick: sketch or sketch entity or sketch point); `end` (one of `through_all`, `through_all_both`, `blind`, `symmetric`, default `through_all`) when `type` is cut or hole; `distance` (number in mm, default 10) when `end` is blind or symmetric; `hole_type` (one of `simple`, `counterbore`, `countersink`, default `simple`) when `type` is hole; `fit` (one of `normal`, `close`, `loose`, default `normal`) when `type` is hole; `weld_size` (number in mm, default 5) when `type` is weld
+  - Optional: `reverse` (true or false, default false) when `type` is cut or hole; `size` (text) when `type` is hole; `diameter` (number in mm) when `type` is hole; `cbore_diameter` (number in mm) when `hole_type` is counterbore; `cbore_depth` (number in mm) when `hole_type` is counterbore; `csk_diameter` (number in mm) when `hole_type` is countersink; `csk_angle` (number in deg, default 90) when `hole_type` is countersink; `flip` (true or false, default false) when `type` is weld; `components` (picks: component)
+  - Runs on the `selection`: `feature`
 - `assembly.fix`: Fix a component in place, or let mates move it.
   - Required: `components` (picks: component); `state` (one of `fixed`, `float`, default `fixed`)
   - Runs on the `selection`: `occurrence`
@@ -98,8 +102,8 @@ This file is generated from the command catalog.
 - `assembly.subassembly`: Form a subassembly from components, dissolve one, or make it flexible or rigid.
   - Required: `action` (one of `form`, `dissolve`, `flexible`, `rigid`, default `form`); `components` (picks: component); `name` (text) when `action` is form
   - Runs on the `selection`: `occurrence`
-- `assembly.suppress`: Leave components out of this configuration, or turn a sketch off.
-  - Runs on the `selection`: `occurrence`, `mate`, `sketch`
+- `assembly.suppress`: Leave components out of this configuration, or turn a sketch or assembly feature off.
+  - Runs on the `selection`: `occurrence`, `mate`, `sketch`, `feature`
 - `assembly.where-used`: List where a component's file is used.
   - Runs on the `selection`: `occurrence`
 

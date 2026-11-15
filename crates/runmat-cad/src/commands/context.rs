@@ -311,6 +311,22 @@ pub(super) fn add(catalog: &mut Catalog) {
                 vec![c("design.show-source"), c("design.copy-reference")],
             ],
         ),
+        // An assembly feature (cut, hole, weld bead) in the assembly's Outline.
+        context_menu(
+            K::Feature,
+            &[EditorKind::Assembly],
+            &[
+                "assembly.feature",
+                "assembly.suppress",
+                "assembly.delete",
+                "design.show-source",
+            ],
+            vec![
+                vec![c("assembly.feature")],
+                vec![c("assembly.suppress"), c("assembly.delete")],
+                vec![c("design.show-source"), c("design.copy-reference")],
+            ],
+        ),
         // Topology picked in a part's view: a face, an edge or a vertex.
         context_menu(
             K::Face,

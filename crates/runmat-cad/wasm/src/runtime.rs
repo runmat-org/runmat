@@ -15,7 +15,7 @@ use runmat_cad::assembly::index::build_assembly_index;
 use runmat_cad::assembly::model::{AssemblyDocument, DefinitionKind, DefinitionRef};
 use runmat_cad::assembly::resolve::{resolve, ResolveContext, ResolveRequest};
 use runmat_cad::assembly::source::{Aabb, ConfiguredSummary, DefinitionSummary, MemorySource};
-use runmat_cad::display::{assembly_display_configured, part_display, sketch_display, PartDisplay};
+use runmat_cad::display::{part_display, sketch_display, PartDisplay};
 use runmat_cad::index::build_index;
 use runmat_cad::model::PartDocument;
 use runmat_cad::regen::kernel::TessellationOptions;
@@ -842,8 +842,45 @@ fn compile_assembly_with(
     also(&resolved, &source);
     let index = build_assembly_index(&resolved, Some(&source));
     let configured = crate::configured::configured_displays(&resolved, &documents);
-    let mut display = assembly_display_configured(&resolved, &source, &displays, &configured);
-    let prototype_digests = prototype_reuse::prototype_digests(&resolved, &documents, &digests);
+    // Assembly features (cuts, holes, weld beads) change the components they affect.
+    let assembly = runmat_cad::syntax::parse_assembly_in(
+        path,
+        text,
+        &crate::runtime::module_scope(path, text, files),
+    )
+    .document;
+    let operated = match &assembly {
+        Some(doc) if !doc.operations.is_empty() => {
+            crate::operated::operated_displays(&resolved, doc, &documents)
+        }
+        _ => Default::default(),
+    };
+    let mut problems = problems;
+    // Each at its `operation <name>` statement.
+    problems.extend(operated.problems.iter().map(|(name, why)| {
+        let word = format!("operation {name}");
+        let at = text.find(&word).unwrap_or(0);
+        Diagnostic {
+            path: path.to_owned(),
+            start: utf16(text, at),
+            end: utf16(text, at + if at == 0 { 0 } else { word.len() }),
+            severity: "error".into(),
+            message: format!("assembly feature `{name}`: {why}"),
+        }
+    }));
+    let mut display = runmat_cad::display::assembly_display_operated(
+        &resolved,
+        &source,
+        &displays,
+        &configured,
+        &operated.displays,
+    );
+    let prototype_digests = prototype_reuse::prototype_digests(
+        &resolved,
+        &documents,
+        &digests,
+        &operated.digests,
+    );
     let reused = prototype_reuse::omit_known(&mut display, &prototype_digests, known);
     let mut display = serde_json::to_value(&display).unwrap_or(Value::Null);
     prototype_reuse::mark(&mut display, &prototype_digests, &reused);

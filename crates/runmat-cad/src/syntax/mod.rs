@@ -206,6 +206,16 @@ pub const ASSEMBLY: DocumentGrammar = DocumentGrammar {
             }),
             ..named("pattern", "patterns", "pattern")
         },
+        // Assembly features, after the sketches they read:
+        // `operation slot = cut(profile = sketch.s1, extent = through_all, components = [plate])`.
+        Collection {
+            tagged: Some(Tagged {
+                field: "op",
+                tag: "operation",
+                extras: &["components", "suppressed"],
+            }),
+            ..named("operation", "operations", "operation")
+        },
         named("mirror", "mirrors", "mirror"),
         named("fasteners", "fasteners", "fasteners"),
         named("envelope", "envelopes", "envelope"),

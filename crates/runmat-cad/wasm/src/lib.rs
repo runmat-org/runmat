@@ -40,6 +40,7 @@ pub(crate) mod drawing_edits;
 pub mod draft_analysis;
 pub mod face_labels;
 mod configured;
+mod operated;
 pub mod drawing;
 pub mod edit;
 pub mod evaluate;

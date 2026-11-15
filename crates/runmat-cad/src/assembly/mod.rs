@@ -24,6 +24,7 @@ pub mod interference;
 mod cam;
 mod mates;
 pub mod model;
+pub mod operations;
 pub mod options;
 mod place;
 pub mod polyline_frame;

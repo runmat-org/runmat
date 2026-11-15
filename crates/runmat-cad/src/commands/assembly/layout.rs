@@ -64,8 +64,59 @@ pub(super) fn layout() -> Vec<CommandDescriptor> {
                     ("weld", "Weld bead"),
                 ],
             ),
-            pick("profile", "Sketch", &[K::Sketch]).shown("type", &["cut"]),
-            picks("components", "Affects", &[K::Occurrence]),
+            pick("profile", "Sketch", &[K::Sketch, K::SketchEntity, K::SketchPoint])
+                .help("A cut uses the sketch's closed profile; a hole goes at each point and circle center; a weld bead follows its lines and arcs."),
+            choice(
+                "end",
+                "End",
+                &[
+                    ("through_all", "Through all"),
+                    ("through_all_both", "Through all, both directions"),
+                    ("blind", "Blind"),
+                    ("symmetric", "Mid-plane"),
+                ],
+            )
+            .shown("type", &["cut", "hole"]),
+            length("distance", "Depth", 10.0).shown("end", &["blind", "symmetric"]),
+            flag("reverse", "Flip direction", false).shown("type", &["cut", "hole"]),
+            choice(
+                "hole_type",
+                "Hole type",
+                &[
+                    ("simple", "Simple"),
+                    ("counterbore", "Counterbore"),
+                    ("countersink", "Countersink"),
+                ],
+            )
+            .shown("type", &["hole"]),
+            text("size", "Fastener size", Some("M6")).optional().shown("type", &["hole"]),
+            choice(
+                "fit",
+                "Fit",
+                &[("normal", "Normal"), ("close", "Close"), ("loose", "Loose")],
+            )
+            .shown("type", &["hole"]),
+            qty("diameter", "Diameter", "length", None)
+                .optional()
+                .help("Leave empty for the fastener size's clearance diameter.")
+                .shown("type", &["hole"]),
+            qty("cbore_diameter", "Counterbore diameter", "length", None)
+                .optional()
+                .shown("hole_type", &["counterbore"]),
+            qty("cbore_depth", "Counterbore depth", "length", None)
+                .optional()
+                .shown("hole_type", &["counterbore"]),
+            qty("csk_diameter", "Countersink diameter", "length", None)
+                .optional()
+                .shown("hole_type", &["countersink"]),
+            qty("csk_angle", "Countersink angle", "angle", Some(90.0))
+                .optional()
+                .shown("hole_type", &["countersink"]),
+            length("weld_size", "Bead size", 5.0).shown("type", &["weld"]),
+            flag("flip", "Other side of the path", false).shown("type", &["weld"]),
+            picks("components", "Affects", &[K::Occurrence])
+                .optional()
+                .help("Leave empty to affect every component the feature meets."),
         ])
         .when(occurrences())
         .preview()
