@@ -122,6 +122,7 @@ pub(crate) fn analyze_program(assembly: &MirAssembly) -> ProgramAnalysis {
             let outputs = join_output_vectors(&current.outputs, &next_outputs, update > 3);
             let next = FunctionSummary {
                 outputs,
+                contextual_outputs: Vec::new(),
                 outputs_complete: body.abi.varargout.is_none(),
                 variadic_outputs: body.abi.varargout.is_some(),
                 effects: union_effects(&current.effects, &result.final_state.effects),
@@ -221,6 +222,7 @@ fn initial_summaries(assembly: &MirAssembly) -> BTreeMap<FunctionId, FunctionSum
             (
                 *function,
                 FunctionSummary {
+                    contextual_outputs: Vec::new(),
                     outputs: body
                         .abi
                         .fixed_outputs
@@ -432,7 +434,7 @@ fn propagate_capture_observations(
     changed
 }
 
-fn joined_outputs(returns: &[Vec<ValueFact>]) -> Vec<ValueFact> {
+pub(super) fn joined_outputs(returns: &[Vec<ValueFact>]) -> Vec<ValueFact> {
     let width = returns.iter().map(Vec::len).max().unwrap_or(0);
     (0..width)
         .map(|index| {

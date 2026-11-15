@@ -190,6 +190,23 @@ fn public_function_contexts_preserve_polymorphic_shapes_and_scalar_multiply() {
 }
 
 #[test]
+fn separately_parsed_function_results_reach_caller_shape_checks() {
+    let primary = "x=ones(10,1); y=twice(x); invalid=y*y;";
+    let result = check(primary, &[("twice", "function y=twice(x); y=2*x; end")]);
+    let diagnostic = result
+        .analysis
+        .diagnostics
+        .iter()
+        .find(|diagnostic| diagnostic.code == "RM-TYPE-MATMUL")
+        .expect("returned column shape must reach the driver's matrix product");
+    assert_eq!(result.sources.len(), 2);
+    assert_eq!(diagnostic.primary.source, Some(ProgramSourceId(0)));
+    let span = diagnostic.primary.span;
+    assert_eq!(&primary[span.start..span.end], "invalid=y*y");
+    assert!(diagnostic.secondary.is_empty());
+}
+
+#[test]
 fn reachable_wrapper_uses_existing_call_facts_but_recursion_stays_conservative() {
     let wrapper = "function C=wrapper(A,B); C=product(A,B); end";
     let result = check(

@@ -6,7 +6,7 @@ mod operator;
 mod parallel;
 mod value;
 
-pub(crate) use call::{infer_mir_call, FunctionSummary};
+pub(crate) use call::{infer_mir_call, ContextualOutputs, FunctionSummary};
 pub(crate) use contract::{
     apply_rvalue_contract, conservative_rvalue_contract, rvalue_operation_contract,
     statement_contract, statement_contract_with_facts, statement_phase_contract,
