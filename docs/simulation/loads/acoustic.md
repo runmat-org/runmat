@@ -5,7 +5,7 @@ $v_n=0$; an impedance boundary imposes $p=Zv_n$; a radiation boundary approximat
 relation. They change the Helmholtz boundary operator in different ways.
 
 The native typed executor supports standalone canonical acoustic harmonic studies;
-see the retained [authored duct evidence](../qualification/acoustic-right-lu.md). It does not cover
+see the [harmonic reference checks](../validation/acoustic.md#harmonic). It does not cover
 every acoustic declaration and is not a general exterior-wave solver.
 
 | Kind | Quantity/fields | Use |
@@ -168,8 +168,8 @@ domain. m/s and kg/s signals are different quantities and reject. There is no
 separate direction, follower motion or moment projection. Complex frequency
 samples retain both components through the ordinary shared signal contract.
 
-This bounded CPU implementation is under qualification; see the
-[volume-flow evidence and remaining gates](../qualification/acoustic-volume-velocity.md).
+This bounded CPU implementation is under qualification. The
+[volume-velocity source check](../validation/acoustic.md#volume-velocity-source) compares its pressure, velocity and power with the plane-wave reference.
 It is a finite boundary source, not an interior monopole or an arbitrary spatial
 distribution. Do not overlap another acoustic source, pressure prescription,
 rigid/impedance boundary or paired periodic relation on its patch.

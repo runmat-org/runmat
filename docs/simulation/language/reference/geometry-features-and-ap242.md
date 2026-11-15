@@ -1,3 +1,8 @@
+---
+description: Reference for .fea feature geometry and AP242: primitives, extrude, Booleans, persistent topology, AP242 inspection, CAD parameters, CAD properties and export.
+keywords: [geometry features, AP242, STEP, persistent topology, CAD parameters, Boolean operations, extrude, fillet]
+doc_type: language-reference
+---
 # Geometry features and AP242
 
 ## Feature operations

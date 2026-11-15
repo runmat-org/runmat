@@ -184,36 +184,36 @@ A laminate is the constitutive owner of its shell region. Do not also assign a h
 
 ### Laminate equations used by RunMat
 
-For ply (k), RunMat rotates its plane-stress matrix into shell axes as \(\bar{Q}_k\), locates its lower and upper surfaces at \(z_{k-1}\) and \(z_k\) relative to the selected reference surface, and forms
+For ply $k$, RunMat rotates its plane-stress matrix into shell axes as $\bar{Q}_k$, locates its lower and upper surfaces at $z_{k-1}$ and $z_k$ relative to the selected reference surface, and forms
 
-\[
+$$
 A = \sum_k \bar{Q}_k (z_k-z_{k-1}), \qquad
 B = \frac{1}{2}\sum_k \bar{Q}_k (z_k^2-z_{k-1}^2), \qquad
 D = \frac{1}{3}\sum_k \bar{Q}_k (z_k^3-z_{k-1}^3).
-\]
+$$
 
 The generalized section response is
 
-\[
+$$
 \begin{bmatrix}N\\M\end{bmatrix}
 =
 \begin{bmatrix}A&B\\B&D\end{bmatrix}
 \begin{bmatrix}\varepsilon_0\\\kappa\end{bmatrix},
 \qquad
 Q_s = A_s\gamma_s,
-\]
+$$
 
-where \(A_s\) is the thickness-integrated, angle-transformed `13`/`23` shear law including the selected shear correction. Unsymmetric stacking or a non-mid reference surface therefore retains nonzero \(B\); RunMat does not silently recenter the laminate.
+where $A_s$ is the thickness-integrated, angle-transformed `13`/`23` shear law including the selected shear correction. Unsymmetric stacking or a non-mid reference surface therefore retains nonzero $B$; RunMat does not silently recenter the laminate.
 
 Shell inertia uses all three thickness moments about the same reference surface:
 
-\[
+$$
 I_0 = \sum_k \rho_k(z_k-z_{k-1}), \qquad
 I_1 = \frac{1}{2}\sum_k \rho_k(z_k^2-z_{k-1}^2), \qquad
 I_2 = \frac{1}{3}\sum_k \rho_k(z_k^3-z_{k-1}^3).
-\]
+$$
 
-The sparse mass operator retains the translation–rotation coupling from \(I_1\). It therefore remains physically consistent for density-unsymmetric layups and reference surfaces away from the mass centroid; it is not reduced to diagonal mass plus rotary inertia. The two director rotations use \(I_2\). The formulation gives its stabilized drilling rotation the same positive nodal rotary term so that the numerical drilling degree of freedom is not massless. Rayleigh mass and stiffness terms are integrated per ply with the same moments, so different ply damping coefficients remain distinct rather than being averaged. Recovery evaluates each ply's top and bottom plane-stress state, publishes membrane force, bending moment, and transverse-shear resultants, and reports the maximum recovered ply-surface von Mises value for the existing shell scalar field. The compiled recovery record retains every ply layer so additional ply-specific criteria can be added without reconstructing the layup from source text.
+The sparse mass operator retains the translation–rotation coupling from $I_1$. It therefore remains physically consistent for density-unsymmetric layups and reference surfaces away from the mass centroid; it is not reduced to diagonal mass plus rotary inertia. The two director rotations use $I_2$. The formulation gives its stabilized drilling rotation the same positive nodal rotary term so that the numerical drilling degree of freedom is not massless. Rayleigh mass and stiffness terms are integrated per ply with the same moments, so different ply damping coefficients remain distinct rather than being averaged. Recovery evaluates each ply's top and bottom plane-stress state, publishes membrane force, bending moment, and transverse-shear resultants, and reports the maximum recovered ply-surface von Mises value for the existing shell scalar field. The compiled recovery record retains every ply layer so additional ply-specific criteria can be added without reconstructing the layup from source text.
 
 ## Initial Conditions And Spectral Environments
 

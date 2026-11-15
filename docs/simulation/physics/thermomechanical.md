@@ -113,7 +113,7 @@ analysis deformation after analysis.temperature {
 The typed state must retain mesh/topology, units, reference temperature, and producer identity.
 This is a one-way preload, not a bidirectional coupled solve or an interrupted-solve restart.
 The preload publishes structural-primary and geometric-stiffness states for a supported downstream
-consumer. The [complete authored fixture](../examples/thermal-prestress.fea) includes
+consumer. The complete authored fixture, `docs/simulation/examples/thermal-prestress.fea`, includes
 geometry, materials, constraints and a prestressed-modal consumer. Its regression replaces the
 driver and worker before execution, then cold-imports only declared result objects and checks
 the exact retained thermal state. It does not resume an interrupted thermal phase. The isolated
