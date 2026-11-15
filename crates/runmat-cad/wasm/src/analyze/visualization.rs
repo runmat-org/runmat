@@ -114,8 +114,9 @@ pub(super) fn visualization(
         .fold((f64::INFINITY, f64::NEG_INFINITY), |(l, h), v| {
             (l.min(*v), h.max(*v))
         });
+    let spread = hi > lo;
     let band = |v: f64| {
-        if !(hi > lo) {
+        if !spread {
             return BANDS.len() - 1;
         }
         (((v - lo) / (hi - lo)) * BANDS.len() as f64)
@@ -154,7 +155,7 @@ pub(super) fn visualization(
             color: BANDS[i],
         })
         .collect();
-    if !(hi > lo) {
+    if !spread {
         legend = legend.split_off(BANDS.len() - 1);
     }
     let offset = if hi > lo { 0 } else { BANDS.len() - 1 };
