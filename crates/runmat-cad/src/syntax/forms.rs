@@ -481,6 +481,7 @@ pub mod words {
         ("finish", "A surface finish on faces."),
         ("material", "The material a part or body is made of."),
         ("configuration", "A named set of input values the part or assembly can switch to."),
+        ("display_state", "A named way of showing an assembly: the components the view hides (`hidden = [lid]`), whatever configuration is active."),
         ("occurrence", "One placed copy of a part or assembly."),
         ("mate", "A joint between two occurrences: its type, the frames it joins and its limits."),
         ("connector", "A frame on an occurrence that mates attach to."),

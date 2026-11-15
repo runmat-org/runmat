@@ -47,11 +47,19 @@ pub(super) fn add(catalog: &mut Catalog) {
                 ],
             )])
             .edit(view_action("visibility")),
-        cmd("view.configuration", "Configuration", "configuration", &[Part])
+        cmd("view.configuration", "Configuration", "configuration", CAD_3D)
         .desc("Switch the active configuration.")
         .kw(&["config", "variant", "design table"])
         .inputs(vec![text("configuration", "Configuration", None)])
         .edit(view_action("configuration")),
+        cmd("view.display-state", "Display state", "visibility", &[Assembly])
+            .desc("Apply a display state: hide the components it hides and show the rest.")
+            .kw(&["display state", "hide", "show"])
+            .inputs(vec![text("state", "Display state", None)
+                .optional()
+                .help("Its name; empty applies the selected display state's row.")])
+            .on(&[K::DisplayState])
+            .edit(view_action("display_state")),
         cmd("view.front", "Front", "view-front", VIEW_3D)
             .desc("Look at the model from the front.")
             .edit(view_action("front")),

@@ -221,6 +221,7 @@ pub const ASSEMBLY: DocumentGrammar = DocumentGrammar {
         named("envelope", "envelopes", "envelope"),
         named("publish", "publishes", "publish"),
         named("configuration", "configurations", "configuration"),
+        named("display_state", "display_states", "display_state"),
         named("property", "properties", "property"),
         named("exploded", "exploded", "exploded"),
         // `view hero = { from = [-0.62, 0.7, -0.36], up = [0, 0, 1], default = true }`

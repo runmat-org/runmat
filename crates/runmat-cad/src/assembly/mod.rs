@@ -23,6 +23,7 @@ pub mod fasteners;
 pub mod index;
 pub mod interference;
 mod cam;
+pub mod configuration_rows;
 pub mod interface_rows;
 mod mates;
 pub mod model;

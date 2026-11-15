@@ -245,6 +245,12 @@ pub struct AssemblyIndex {
     /// What the top assembly publishes, in document order.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub publishes: Vec<crate::assembly::interface_rows::PublishRow>,
+    /// The top assembly's configuration it was compiled in (`None`: as written).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub configuration: Option<String>,
+    /// The top assembly's configurations, then its display states, in document order.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub configurations: Vec<crate::assembly::configuration_rows::ConfigurationRow>,
 }
 
 /// One assembly feature: its type, sketch and components, whether its tool builds, and its
@@ -630,6 +636,11 @@ pub fn build_assembly_index(
         operations: operation_rows(tree, top.as_deref()),
         connectors: crate::assembly::interface_rows::connector_rows(tree, top.as_deref()),
         publishes: crate::assembly::interface_rows::publish_rows(tree, top.as_deref()),
+        configuration: tree.configuration.as_ref().map(|c| c.as_str().to_owned()),
+        configurations: crate::assembly::configuration_rows::configuration_rows(
+            tree,
+            top.as_deref(),
+        ),
     }
 }
 

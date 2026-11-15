@@ -28,6 +28,7 @@
 //! the assembly declares.
 
 pub(crate) mod anchors;
+mod configurations;
 mod configure;
 mod connector;
 mod explode;
@@ -46,6 +47,8 @@ mod use_edges;
 mod anchors_tests;
 #[cfg(test)]
 mod configure_tests;
+#[cfg(test)]
+mod configurations_tests;
 #[cfg(test)]
 mod connector_tests;
 #[cfg(test)]
@@ -442,6 +445,12 @@ pub(super) fn edit(
             publishes::delete(&mut document, request)?
         }
         "assembly.publish" => publishes::apply(&mut document, &compiled, &request.values)?,
+        "assembly.delete" if configurations::selected(request).next().is_some() => {
+            configurations::delete(&mut document, request)?
+        }
+        "assembly.configurations" => {
+            configurations::apply(&mut document, &compiled, &request.values)?
+        }
         "assembly.mate-connector" => {
             connector::apply(&mut document, &compiled, &mut publisher, &request.values)?
         }

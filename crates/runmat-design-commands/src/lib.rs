@@ -158,6 +158,10 @@ pub enum SelectKind {
     ExplodeStep,
     /// A name the assembly publishes (`publish:<name>`).
     Publish,
+    /// A configuration of the file (`configuration:<name>`).
+    Configuration,
+    /// A display state of the assembly (`display_state:<name>`).
+    DisplayState,
     // Drawing.
     Sheet,
     View,
@@ -215,6 +219,8 @@ impl SelectKind {
             Hole => "hole",
             ExplodeStep => "explode step",
             Publish => "published item",
+            Configuration => "configuration",
+            DisplayState => "display state",
             Sheet => "sheet",
             View => "view",
             Annotation => "annotation",

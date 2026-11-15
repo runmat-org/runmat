@@ -22,7 +22,7 @@ pub(super) fn manage() -> Vec<CommandDescriptor> {
             "assembly.configurations",
             "Configurations and display states",
             "configuration",
-            "Add configurations and display states.",
+            "Add or change a configuration (input values and suppressed components) or a display state (hidden components).",
         )
         .inputs(vec![
             radio(
@@ -33,8 +33,21 @@ pub(super) fn manage() -> Vec<CommandDescriptor> {
                     ("display_state", "Display state"),
                 ],
             ),
-            text("name", "Name", Some("open")),
+            text("name", "Name", Some("open"))
+                .help("An existing configuration's or display state's name changes it."),
+            text("values", "Input values", None)
+                .optional()
+                .shown("kind", &["configuration"])
+                .help("The assembly's inputs this configuration sets, as `width = 40 mm, depth = 20 mm`."),
+            picks("suppress", "Suppressed components", &[K::Occurrence])
+                .optional()
+                .shown("kind", &["configuration"]),
+            picks("hidden", "Hidden components", &[K::Occurrence])
+                .optional()
+                .shown("kind", &["display_state"])
+                .help("The components the view leaves out while this display state is applied."),
         ])
+        .on(&[K::Configuration, K::DisplayState])
         .edit(edit(EditOp::Add, Section::Configurations).item("configuration")),
         asm(
             "assembly.document-settings",
@@ -132,13 +145,15 @@ pub(super) fn manage() -> Vec<CommandDescriptor> {
             "assembly.delete",
             "Delete",
             "delete",
-            "Delete components, mates, mate connectors, publishes, sketches, assembly features or sketch curves.",
+            "Delete components, mates, mate connectors, publishes, configurations, display states, sketches, assembly features or sketch curves.",
         )
         .when(selected(&[
             K::Occurrence,
             K::Mate,
             K::MateConnector,
             K::Publish,
+            K::Configuration,
+            K::DisplayState,
             K::Sketch,
             K::Feature,
             K::SketchEntity,
@@ -149,6 +164,8 @@ pub(super) fn manage() -> Vec<CommandDescriptor> {
             K::Mate,
             K::MateConnector,
             K::Publish,
+            K::Configuration,
+            K::DisplayState,
             K::Sketch,
             K::Feature,
             K::SketchEntity,

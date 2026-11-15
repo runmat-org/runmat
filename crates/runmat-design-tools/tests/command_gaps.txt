@@ -1,4 +1,3 @@
-assembly.configurations assembly
 assembly.contacts assembly
 assembly.copy-with-mates assembly
 assembly.document-settings assembly

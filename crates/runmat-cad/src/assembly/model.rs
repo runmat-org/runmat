@@ -845,6 +845,17 @@ pub struct AssemblyConfiguration {
     pub suppress: BTreeSet<String>,
 }
 
+/// A display state: how the assembly shows, without changing what it is. The components it
+/// hides drop out of the view (and only the view: the BOM, mass and studies keep them), in
+/// whichever configuration is active. `display_state exploded_look = { hidden = [lid, cover] }`.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct AssemblyDisplayState {
+    pub name: String,
+    /// Component names (the top assembly's children) the view leaves out.
+    #[serde(default)]
+    pub hidden: BTreeSet<String>,
+}
+
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct AssemblyDocument {
     pub path: FilePath,
@@ -887,6 +898,9 @@ pub struct AssemblyDocument {
     pub publishes: Vec<AssemblyPublish>,
     #[serde(default)]
     pub configurations: Vec<AssemblyConfiguration>,
+    /// Named display states ([`AssemblyDisplayState`]).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub display_states: Vec<AssemblyDisplayState>,
     #[serde(default)]
     pub properties: Vec<Property>,
     #[serde(default)]
@@ -922,6 +936,7 @@ impl AssemblyDocument {
             envelopes: Vec::new(),
             publishes: Vec::new(),
             configurations: Vec::new(),
+            display_states: Vec::new(),
             properties: Vec::new(),
             links: Vec::new(),
             exploded: Vec::new(),

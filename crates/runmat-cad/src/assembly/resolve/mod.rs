@@ -269,6 +269,8 @@ pub struct ResolvedAssembly {
     pub sketches: Vec<crate::assembly::sketches::ResolvedSketch>,
     /// The top assembly's mate connectors where they sit after the solve, in document order.
     pub connectors: Vec<ResolvedConnector>,
+    /// The top assembly's configuration it resolved in (`None`: as written).
+    pub configuration: Option<ConfigurationName>,
     /// Display paths of occurrences suppressed in this configuration.
     pub suppressed: Vec<String>,
     pub diagnostics: DiagnosticReport,
@@ -717,6 +719,7 @@ impl<'a, 'b> Resolver<'a, 'b> {
             envelopes: self.envelopes,
             sketches: self.sketches,
             connectors,
+            configuration: self.req.configuration.clone(),
             suppressed: self.suppressed,
             diagnostics: self.diags,
             stats: self.stats,
