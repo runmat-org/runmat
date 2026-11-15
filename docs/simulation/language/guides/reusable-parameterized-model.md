@@ -1,3 +1,8 @@
+---
+description: Build a reusable .fea model whose inputs change loads, regions or materials between studies while its physical structure stays the same, and bind them from a study.
+keywords: [parameterized model, model inputs, reusable model, region inputs, .fea model]
+doc_type: guide
+---
 # Reusable parameterized model
 
 Use model inputs for values or regions that change between studies while the model's physical

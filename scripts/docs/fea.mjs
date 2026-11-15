@@ -40,7 +40,7 @@ export function collectFea(source, output, register, examples, evidence, validat
         if (!obligation?.required_envelopes.some(scope => Object.keys(scope).every(key => scope[key] === record.scope[key])))
             throw new Error("Evidence claims an undeclared scope");
     }
-    // The ledger drives the site's "Not yet in RunMat" flags (fea/pending-features.json is its pending view).
+    // The ledger drives the site's "Not yet released" badges (fea/pending-features.json is its pending view).
     mkdirSync(join(output, "fea"), { recursive: true });
     for (const [name, value] of [["requirements", register], ["manual", manual], ["evidence-index", evidence], ["ledger", ledger], ["pending-features", pendingView(ledger)]])
         writeFileSync(join(output, `fea/${name}.json`), JSON.stringify(value, null, 2) + "\n");

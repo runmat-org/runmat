@@ -1,3 +1,8 @@
+---
+description: Drive a transient .fea study with a time history computed by an imported .m function, and compare it with the tabulated version of the same structural study.
+keywords: [transient analysis, generated input, time history, .m function, impact pulse, structural transient]
+doc_type: guide
+---
 # Transient study with generated inputs
 
 Use an imported `.m` function when a time history is more naturally computed than tabulated.
@@ -69,5 +74,5 @@ source digest and records materialization evidence. The function cannot change t
 configuration.
 
 The checked tabulated counterpart is
-[`structural-transient.fea`](../../examples/structural-transient.fea).
+`docs/simulation/examples/structural-transient.fea`.
 Use it to compare an explicit table with a generated signal at identical samples.

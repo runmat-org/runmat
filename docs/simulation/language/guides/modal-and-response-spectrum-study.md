@@ -1,3 +1,8 @@
+---
+description: Set up a modal response-spectrum study in .fea: a modal analysis publishes a basis, and a response analysis combines it with a spectrum declared in the model.
+keywords: [response spectrum, modal analysis, modal combination, seismic spectrum, modal basis, damping]
+doc_type: guide
+---
 # Modal response-spectrum study
 
 Response-spectrum analysis is a two-analysis graph. The modal analysis publishes a basis; the

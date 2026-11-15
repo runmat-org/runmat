@@ -1,11 +1,16 @@
+---
+description: Write and run a first static .fea study on a two-part STEP assembly: geometry and regions, mesh, materials, study definition, check and run, then plot an output.
+keywords: [first .fea study, linear static, STEP assembly, mesh, material assignment, runmat run, plot output]
+doc_type: guide
+---
 # First static study
 
 This guide uses the checked example at
-[`docs/simulation/examples/structural-static.fea`](../../examples/structural-static.fea).
+`docs/simulation/examples/structural-static.fea`.
 It uses a two-part STEP assembly so the complete exact import, mesh, multi-solid material coverage,
 model, solve, and result path can run in a release check.
 
-## 1. Inspect the geometry
+## Inspect the geometry
 
 Before writing selectors, inspect the CAD file:
 
@@ -17,7 +22,7 @@ In RunMat code, `geometry.inspect(path)` reports units, topology roles, persiste
 names and tags, assemblies, and AP242 capabilities. Choose selectors from that inventory. Do not
 guess a face ordinal from a viewport.
 
-## 2. Declare geometry and regions
+## Declare geometry and regions
 
 The example declares both solid occurrences, a support on each disconnected part, and a load face
 on the left part. Each region states its topology role and expected cardinality. Run `runmat check` after this step; a stale or ambiguous selector should fail before meshing.
@@ -37,7 +42,7 @@ geometry bracket {
 }
 ```
 
-## 3. Declare the mesh
+## Declare the mesh
 
 The mesh targets the same geometry by reference. `target_size` controls nominal volume resolution;
 `maximum_deviation` bounds geometric approximation. Start with a coarse mesh for model setup, then
@@ -53,7 +58,7 @@ mesh bracket on geometry.bracket {
 }
 ```
 
-## 4. Define and assign material behavior
+## Define and assign material behavior
 
 The steel declaration supplies elasticity and mass density. Separate assignments cover both solid
 occurrences, not their faces. The fixed constraints and force target face regions. This distinction
@@ -90,7 +95,7 @@ $6\,\mathrm{m^2}$, so `[166.6666666667, 0, 0] Pa` retains the original $1\,\math
 while boundary quadrature distributes it consistently over the surface mesh. Targeting a face does
 not implicitly rotate an arbitrary traction vector onto that face normal.
 
-## 5. Define the study
+## Define the study
 
 The study binds geometry, mesh, and model, then names one structural static analysis and the
 result fields to publish.
@@ -106,7 +111,7 @@ study structural_static {
 }
 ```
 
-## 6. Check, plan, and run
+## Check, plan, and run
 
 ```sh
 runmat check docs/simulation/examples/structural-static.fea
@@ -119,7 +124,7 @@ model, and logical phases. After execution, inspect mesh quality,
 property coverage, constraint rank, convergence, balance, and formulation evidence before reading
 the displacement or stress field.
 
-## 7. Plot an output
+## Plot an output
 
 From RunMat code, select a typed result field and pass it to ordinary `plot`:
 

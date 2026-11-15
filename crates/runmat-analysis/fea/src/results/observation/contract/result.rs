@@ -20,6 +20,7 @@ impl ObservationResult {
                 &self.entities,
                 &self.field,
                 self.partial_access,
+                &self.source_field_id,
             ),
             OBSERVATION_LIMITS,
         )?;

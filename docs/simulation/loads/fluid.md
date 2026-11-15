@@ -13,8 +13,8 @@ unsupported overlap; a pressure reference supplies a gauge rather than another f
 `runmat run` realizes every load on this page in steady and transient flow, standalone or coupled to
 heat transfer or a structure. `inlet_velocity` and `wall_motion` prescribe the face velocity from a
 vector signal, or from a scalar speed history with a unit `direction`; wall motion is tangential,
-and wall motion normal to the wall comes from a coupled structure. See the
-[signed-source witness](../qualification/fluid-mass-flow-native.md) for mass flow.
+and wall motion normal to the wall comes from a coupled structure. The
+[fluid flow reference checks](../validation/fluid.md) list each benchmark and its tolerance.
 
 | Kind | Quantity/fields | Use |
 | --- | --- | --- |

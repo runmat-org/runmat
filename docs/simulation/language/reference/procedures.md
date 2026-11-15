@@ -294,4 +294,4 @@ analysis modes {
     }
 ```
 
-The spectrum is a model declaration (`response_spectrum <name> { … }`), and a random excitation a `random_excitation <name> { … }` power spectral density; both are referenced from the step. The full studies are [`modal-response-spectrum.fea`](../../examples/modal-response-spectrum.fea) and [`modal-random-response.fea`](../../examples/modal-random-response.fea).
+The spectrum is a model declaration (`response_spectrum <name> { … }`), and a random excitation a `random_excitation <name> { … }` power spectral density; both are referenced from the step. The full studies are `docs/simulation/examples/modal-response-spectrum.fea` and `docs/simulation/examples/modal-random-response.fea`; the [modal and response spectrum guide](../guides/modal-and-response-spectrum-study.md) runs the first.

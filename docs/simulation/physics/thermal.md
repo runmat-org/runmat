@@ -15,7 +15,7 @@ The authored thermal-to-modal fixture passes actual-CAD execution after pre-exec
 replacement and cold import from declared objects. Other outer-root consumer/order combinations
 and mid-phase restart remain unqualified; the equations below describe implemented assembly,
 not a validation claim. See the
-[thermal-prestress example](../examples/thermal-prestress.fea) and
+[thermal-prestress step graph](../language/studies-analyses-and-state.md#order-steps-and-pass-state) and
 [state-transfer contract](./thermomechanical#how-do-i-transfer-a-solved-temperature-field-into-structural-analysis).
 
 ## Retained thermal field histories

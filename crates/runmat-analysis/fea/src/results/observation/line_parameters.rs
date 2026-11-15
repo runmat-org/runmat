@@ -149,6 +149,8 @@ pub fn evaluate_line_parameter_observations(
                 ),
                 partial_access: spec.storage.partial_access,
                 partition_evidence,
+                // Line parameters are computed from the section, not read from a run field.
+                source_field_id: None,
             };
             result.logical_identity = result.derive_identity()?;
             result.validate()?;

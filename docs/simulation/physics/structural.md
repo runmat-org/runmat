@@ -253,10 +253,10 @@ A modal-reduced sweep is accepted on its reduced-space residual and publishes it
 imbalance as the modal truncation measure; `static_correction = applied_loads` and modal
 `residual_vectors` reduce it (see [modal truncation and residual vectors](../language/reference/procedures.md#modal-truncation-and-residual-vectors)).
 
-The [solid harmonic qualification case](../qualification/solid-harmonic) checks physical
-Tet4/Tet10 direct and modal response against independent element integrals and oscillator
-amplitude, phase, and power references. Its one-DOF scope and remaining promotion gates are
-documented with the runnable test.
+The [harmonic reference check](../validation/structural.md#axial-rod-under-harmonic-end-traction)
+compares the direct harmonic response of a solid rod with the continuum solution, and the
+[axial rod modal check](../validation/structural.md#fundamental-frequency-of-an-axial-rod)
+compares the retained one-mode response with a direct harmonic solve.
 
 ## How do preload, prestressed modes, and buckling connect?
 
@@ -302,8 +302,8 @@ and variance follows from integration over angular frequency. Input PSD/CPSD uni
 the inverse-domain unit and cannot be substituted by an amplitude spectrum.
 
 The checked runnable examples
-[`modal-response-spectrum.fea`](../examples/modal-response-spectrum.fea)
-and [`modal-random-response.fea`](../examples/modal-random-response.fea)
+`docs/simulation/examples/modal-response-spectrum.fea`
+and `docs/simulation/examples/modal-random-response.fea`
 show the complete spectrum declarations, modal state flow, and outputs.
 
 ## How do I run nonlinear structural analysis?

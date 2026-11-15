@@ -1,3 +1,8 @@
+---
+description: How runmat check, runmat plan and the language server report .fea diagnostics, inspect the logical plan, and rename study symbols and imported functions safely.
+keywords: [.fea diagnostics, runmat check, runmat plan, language server, rename symbol, logical plan]
+doc_type: language-reference
+---
 # Diagnostics and tooling
 
 The parser, semantic compiler, CLI, and language server use the same `.fea` frontend. An editor

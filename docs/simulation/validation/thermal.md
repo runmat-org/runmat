@@ -56,7 +56,7 @@ Tests: `canonical_tet10_thermal_matrices_pass_constant_patch_and_capacity_integr
 
 ### Radiating bar
 
-**Problem.** A 1 m steel bar ($k$ = 45 W/m/K) takes 1000 W/m² on one end and radiates from the other ($\varepsilon$ = 0.8, 300 K surroundings). The public example is [radiating-bar.fea](../examples/radiating-bar.fea); the test runs the same bar on Tet4 and Tet10 meshes.
+**Problem.** A 1 m steel bar ($k$ = 45 W/m/K) takes 1000 W/m² on one end and radiates from the other ($\varepsilon$ = 0.8, 300 K surroundings). The same bar is the study file `docs/simulation/examples/radiating-bar.fea`; the test runs the same bar on Tet4 and Tet10 meshes.
 
 **Reference.** Gray-surface radiation at the radiating end, $q = \varepsilon\sigma_{SB}(T^4 - T_\infty^4)$, and conduction $qL/k$ across the bar.
 

@@ -439,14 +439,10 @@ fn canonical_cantilever_benchmark_runs() {
         field(&result, FEA_FIELD_STRUCTURAL_REACTION_FORCE).shape,
         vec![4, 3]
     );
-    assert_eq!(
-        field(&result, FEA_FIELD_STRUCTURAL_ROTATION).shape,
-        vec![0, 3]
-    );
-    assert_eq!(
-        field(&result, FEA_FIELD_STRUCTURAL_REACTION_MOMENT).shape,
-        vec![0, 3]
-    );
+    // A solid tet model has no rotational DOFs, so it publishes no rotation or moment field.
+    assert!(result.field(FEA_FIELD_STRUCTURAL_ROTATION).is_none());
+    assert!(result.field(FEA_FIELD_STRUCTURAL_REACTION_MOMENT).is_none());
+    assert!(result.fields.iter().all(|field| !field.is_empty()));
     let displacement = host_field(&result, FEA_FIELD_STRUCTURAL_DISPLACEMENT);
     assert!(displacement.iter().all(|value| value.is_finite()));
     assert!(displacement.iter().any(|value| value.abs() > 0.0));
@@ -3002,9 +2998,8 @@ fn modal_solver_emits_modes_for_modal_step_fixture() {
     assert!(result
         .recovered_modes
         .iter()
-        .all(|mode| mode.fields.len() == 2
-            && mode.fields[0].field_id == FEA_FIELD_STRUCTURAL_DISPLACEMENT
-            && mode.fields[1].field_id == FEA_FIELD_STRUCTURAL_ROTATION));
+        .all(|mode| mode.fields.len() == 1
+            && mode.fields[0].field_id == FEA_FIELD_STRUCTURAL_DISPLACEMENT));
     assert!(result.run.field(FEA_FIELD_STRUCTURAL_STRESS).is_none());
     assert!(result.run.field(FEA_FIELD_STRUCTURAL_VON_MISES).is_none());
     let encoded = serde_json::to_value(&result.basis).expect("modal basis should serialize");

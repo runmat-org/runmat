@@ -1,3 +1,8 @@
+---
+description: Choose .fea outputs for large studies: field outputs publish a manifest with partitions read independently, and reductions publish a compact value with evidence.
+keywords: [large results, field output, partitions, manifest, reductions, result reading]
+doc_type: guide
+---
 # Publish and read large results
 
 Choose outputs that answer the study question without forcing every field into one process. A

@@ -77,6 +77,7 @@ mod static_admission;
 mod structural_study_intent;
 mod structural_study_storage;
 mod topology_identity;
+mod static_assessments;
 mod transient_assessments;
 
 fn test_linear_workload_identity(
