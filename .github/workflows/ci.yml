@@ -70,6 +70,8 @@ jobs:
           scripts/distribution/release-ci-checkpoint.test.mjs
           bindings/ts/scripts/sync-wasm-artifacts.test.cjs
           scripts/runtime/builtin-example-verifier/protocol.test.mjs
+          scripts/runtime/builtin-example-verifier/presentation.test.mjs
+          scripts/meshing/offline-workflow.test.mjs
           scripts/development/check-reviewed-architecture.test.mjs
           scripts/development/verify-fea-lint-debt.test.mjs
           infra/scripts/bootstrap-vcpkg-tool.test.mjs
