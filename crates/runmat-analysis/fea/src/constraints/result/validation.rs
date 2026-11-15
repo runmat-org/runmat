@@ -11,7 +11,7 @@ use super::super::{
     CanonicalStructuralTopologyIdentity, ReactionRecovery,
 };
 use super::{
-    add_cross_product, component_vector, CanonicalStructuralConstraintResult,
+    add_cross_product, all_finite, component_vector, CanonicalStructuralConstraintResult,
     ConstraintGroupResult, ConstraintResultError, ConstraintViolation,
 };
 use crate::physics::structural::topology::node_space::CanonicalStructuralNodeSpace;
@@ -275,8 +275,4 @@ fn group_is_finite(group: &ConstraintGroupResult) -> bool {
                 && row.generalized_reaction.is_finite()
                 && row.violation.is_valid()
         })
-}
-
-fn all_finite(values: &[f64]) -> bool {
-    values.iter().all(|value| value.is_finite())
 }

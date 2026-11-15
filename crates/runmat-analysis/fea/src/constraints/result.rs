@@ -681,3 +681,7 @@ fn add_cross_product(moment: &mut [f64; 3], position: [f64; 3], force: [f64; 3])
     moment[1] += position[2] * force[0] - position[0] * force[2];
     moment[2] += position[0] * force[1] - position[1] * force[0];
 }
+
+fn all_finite(values: &[f64]) -> bool {
+    values.iter().all(|value| value.is_finite())
+}
