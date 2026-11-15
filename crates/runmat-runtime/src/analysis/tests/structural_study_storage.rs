@@ -895,7 +895,6 @@ fn filesystem_run_store_rejects_valid_json_with_wrong_envelope_identity() {
 #[test]
 fn memory_provider_run_publication_is_linearizable() {
     let _guard = analysis_test_guard();
-    let _provider_lock = runmat_filesystem::provider_override_lock();
     let _provider_guard =
         runmat_filesystem::replace_provider(Arc::new(runmat_filesystem::MemoryFsProvider::new()));
     let generated = analysis_run_linear_static_with_options(

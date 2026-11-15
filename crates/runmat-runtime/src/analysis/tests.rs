@@ -2776,7 +2776,6 @@ fn analysis_run_linear_static_rejects_thermo_coupling_on_structural_step() {
 #[test]
 fn analysis_run_linear_static_persists_artifacts_through_runtime_filesystem_provider() {
     let _guard = analysis_test_guard();
-    let _provider_lock = runmat_filesystem::provider_override_lock();
     storage::reset_artifact_store_for_tests();
     let sandbox_root = temp_artifact_root("artifact-provider");
     let _ = fs::remove_dir_all(&sandbox_root);

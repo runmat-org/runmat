@@ -2,6 +2,7 @@ use super::*;
 
 #[test]
 fn pruning_observation_attachment_preserves_other_runs_and_shared_objects() {
+    let _filesystem = runmat_filesystem::provider_override_lock();
     let directory = tempfile::tempdir().unwrap();
     let root = directory.path();
     std::fs::create_dir(root.join("observations")).unwrap();
@@ -23,6 +24,7 @@ fn pruning_observation_attachment_preserves_other_runs_and_shared_objects() {
 
 #[test]
 fn pruning_observation_attachment_rejects_unowned_targets() {
+    let _filesystem = runmat_filesystem::provider_override_lock();
     let directory = tempfile::tempdir().unwrap();
     let root = directory.path();
     std::fs::create_dir(root.join("observations")).unwrap();
