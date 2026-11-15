@@ -1,3 +1,8 @@
+---
+description: Syntax reference for .fea constraints, loads, natural boundary conditions, signals, excitations, initial conditions, connectors and interfaces, with examples.
+keywords: [.fea constraints, loads, boundary conditions, signals, excitations, initial conditions, connectors, interfaces]
+doc_type: language-reference
+---
 # Constraints, loads and interfaces
 
 This page is the syntax reference for constraints, loads and interfaces. To set up a study, see [Loads](../../loads) and [Constraints](../../constraints).

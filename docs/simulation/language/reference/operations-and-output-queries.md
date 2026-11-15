@@ -1,3 +1,8 @@
+---
+description: Reference for .fea field operations, spatial reductions, sampling, sweep operations and acceptance assessments, including imported assessments and saved-result reassessment.
+keywords: [field operations, spatial reduction, output query, acceptance assessment, sampling, sweep operations, magnitude, recover]
+doc_type: language-reference
+---
 # Operations and output queries
 
 FEA expressions resolve through RunMat's canonical operation catalog. One public operation name

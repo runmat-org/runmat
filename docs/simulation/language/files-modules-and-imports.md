@@ -1,3 +1,8 @@
+---
+description: How .fea files act as modules: declaring several studies in one file, importing single symbols or RunMat functions, explicit composition and source identity.
+keywords: [.fea modules, imports, RunMat function import, declarations, source identity, composition]
+doc_type: language-reference
+---
 # Files, modules and imports
 
 Each `.fea` file is a module. A module may declare several geometries, meshes, materials, models,

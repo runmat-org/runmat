@@ -14,7 +14,7 @@ Each check compares a RunMat result with an independent reference: a closed-form
 
 ### Thermal stress in a clamped bar
 
-**Problem.** The 1 m steel bar of [thermal-stress-static.fea](../examples/thermal-stress-static.fea), clamped at both ends and held at 373.15 K, 80 K above its reference temperature; Tet10 at 50 mm.
+**Problem.** The 1 m steel bar of the [thermal stress guide](../guides/thermal-stress.md) example, clamped at both ends and held at 373.15 K, 80 K above its reference temperature; Tet10 at 50 mm.
 
 **Reference.** A fully restrained one-dimensional bar: axial stress $E\alpha\Delta T$ = 192 MPa and clamp reaction $EA\alpha\Delta T$ = 1920 kN.
 

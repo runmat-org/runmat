@@ -1,3 +1,8 @@
+---
+description: Run a .fea study locally, then move it to parallel or cluster placement with an execution declaration while keeping its study identity, mesh and accuracy fixed.
+keywords: [cluster execution, scale out, execution declaration, distributed FEA, study identity, placement]
+doc_type: guide
+---
 # Scale from local to cluster
 
 First run the study locally and preserve its study-definition identity, mesh digest, and numerical

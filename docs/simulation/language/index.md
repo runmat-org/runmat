@@ -93,7 +93,7 @@ Read it top to bottom:
 - **`model`** assigns the material to the body, fixes one end face, applies the traction to the other, and groups the load in a load case.
 - **`study`** binds the geometry, mesh and model, runs one `structural static` step named `static`, and publishes results by path, `analysis.<step>.field.<location>.<quantity>`. The `assessment` turns the tip deflection into a pass or fail verdict.
 
-The file is the canonical example [`cantilever-static.fea`](../examples/cantilever-static.fea). The [linear static guide](../guides/linear-static.md) walks through modeling, running and reading it. A two-body version, with two material assignments and two supports, is [`structural-static.fea`](../examples/structural-static.fea).
+The file is the canonical example `cantilever-static.fea`. The [linear static guide](../guides/linear-static.md) walks through modeling, running and reading it, and opens the complete example with its saved results. A two-body version, with two material assignments and two supports, is `docs/simulation/examples/structural-static.fea`.
 
 ## Check, plan and run
 

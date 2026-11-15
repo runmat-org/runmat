@@ -1,3 +1,8 @@
+---
+description: How .fea inputs expose study parameters, and how product sweeps, zipped sweeps and explicit cases bind them into named runs with their own outputs.
+keywords: [.fea inputs, parameter sweep, product sweep, zipped sweep, load cases, design of experiments]
+doc_type: language-reference
+---
 # Inputs, sweeps and cases
 
 Inputs expose the parameters that a study or reusable model permits callers to change. Sweeps bind
