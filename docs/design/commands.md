@@ -10,6 +10,35 @@ Plane picks take an origin plane (`origin.xy`, `origin.yz`, `origin.zx`), a datu
 
 This file is generated from the command catalog.
 
+## `annotate.` commands (`.part`)
+
+- `annotate.annotation-view`: Save a view direction that groups annotations.
+  - Required: `name` (text); `orientation` (one of `current`, `front`, `back`, `top`, `bottom`, `right`, `left`, `isometric`, default `current`)
+  - Optional: `annotations` (picks: annotation)
+- `annotate.auto-dimension`: Dimension and tolerance a part from its datums.
+  - Required: `scheme` (one of `plus_minus`, `geometric`, default `plus_minus`); `tolerance` (number in mm, default 0.1)
+  - Optional: `datums` (picks: face)
+- `annotate.coating`: Specify a coating on faces or the whole part.
+  - Required: `spec` (text)
+  - Optional: `faces` (picks: face)
+- `annotate.datum`: Label a face or axis as a datum feature.
+  - Required: `target` (pick: face or axis)
+  - Optional: `label` (text)
+- `annotate.dimension`: Add a 3D dimension with tolerance: a hole's diameter, or the distance between two faces.
+  - Required: `targets` (picks: face); `tolerance` (one of `none`, `symmetric`, `bilateral`, `limit`, `fit`, default `none`); `plus` (number in mm, default 0.1) when `tolerance` is symmetric or bilateral or limit; `minus` (number in mm, default 0.1) when `tolerance` is bilateral or limit; `fit` (text) when `tolerance` is fit
+- `annotate.gdt`: Add a feature control frame to faces.
+  - Required: `targets` (picks: face); `characteristic` (one of `position`, `flatness`, `straightness`, `circularity`, `cylindricity`, `profile_of_line`, `profile_of_surface`, `perpendicularity`, `parallelism`, `angularity`, `concentricity`, `symmetry`, `circular_runout`, `total_runout`, default `position`); `tolerance` (number in mm, default 0.1); `modifier` (one of `none`, `mmc`, `lmc`, default `none`) when `characteristic` is position or straightness or perpendicularity or parallelism or angularity; `projected_height` (number in mm, default 10) when `projected` is true
+  - Optional: `diametral` (true or false, default false) when `characteristic` is position or straightness or perpendicularity or parallelism or angularity or concentricity; `datums` (text) when `characteristic` is position or perpendicularity or parallelism or angularity or profile_of_line or profile_of_surface or concentricity or symmetry or circular_runout or total_runout; `projected` (true or false, default false) when `characteristic` is position or perpendicularity
+- `annotate.note`: Add a note in the model, with a leader to a face, edge or vertex.
+  - Required: `text` (text)
+  - Optional: `anchor` (pick: face or edge or vertex)
+- `annotate.surface-finish`: Mark the roughness faces must have.
+  - Required: `faces` (picks: face); `ra` (number in um, default 1.6); `removal` (one of `any`, `removal_required`, `removal_prohibited`, default `any`); `lay` (one of `none`, `=`, `⊥`, `X`, `M`, `C`, `R`, `P`, default `none`)
+  - Optional: `method` (text)
+- `annotate.weld-symbol`: Add a weld symbol on edges.
+  - Required: `edges` (picks: edge); `type` (one of `fillet`, `groove`, `plug`, `spot`, default `fillet`); `side` (one of `arrow`, `other`, `both`, default `arrow`); `size` (number in mm, default 4); `length` (number in mm, default 50) when `intermittent` is true; `pitch` (number in mm, default 100) when `intermittent` is true
+  - Optional: `all_around` (true or false, default false); `field` (true or false, default false); `intermittent` (true or false, default false) when `type` is fillet or groove; `tail` (text)
+
 ## `assembly.` commands (`.assembly`)
 
 - `assembly.bom`: Show the bill of materials: top level, indented or parts only.
@@ -398,7 +427,7 @@ This file is generated from the command catalog.
   - Required: `points` (picks: vertex or point or sketch point)
   - Optional: `closed` (true or false, default false)
 - `part.delete`: Delete the item, after showing what depends on it.
-  - Runs on the `selection`: `feature`, `sketch`, `sketch_entity`, `sketch_point`, `region`, `input`, `plane`, `mate_connector`, `annotation`
+  - Runs on the `selection`: `feature`, `sketch`, `sketch_entity`, `sketch_point`, `region`, `input`, `plane`, `mate_connector`, `annotation`, `view`
 - `part.draft`: Taper faces for molding by neutral plane, parting line or step.
   - Required: `type` (one of `neutral_plane`, `parting_line`, `step`, default `neutral_plane`); `faces` (picks: face); `neutral` (pick: plane or face) when `type` is neutral_plane; `parting` (picks: edge or curve) when `type` is parting_line or step; `angle` (number in deg, default 1)
   - Optional: `pull` (pick: plane or face) when `type` is parting_line or step; `flip` (true or false, default false)

@@ -201,6 +201,8 @@ impl Field {
 pub fn quantity_spec(name: &str) -> QuantitySpec {
     let unit = match name {
         "length" => "mm",
+        // Surface roughness (Ra, Rz), in micrometres as finishes are written.
+        "roughness" => "um",
         "angle" => "deg",
         "mass" => "kg",
         "area" => "mm^2",

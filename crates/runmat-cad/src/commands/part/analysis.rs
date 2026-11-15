@@ -217,16 +217,32 @@ pub(super) fn annotate() -> Vec<CommandDescriptor> {
             .when(bodies_exist())
             .edit(edit(EditOp::Add, Section::Pmi).item(item))
     };
+    // Characteristics that take a diametral zone (a feature of size's axis) and a material
+    // condition (ASME Y14.5, ISO 1101).
+    let diametral = &["position", "straightness", "perpendicularity", "parallelism", "angularity", "concentricity"];
+    let sized = &["position", "straightness", "perpendicularity", "parallelism", "angularity"];
+    let related = &[
+        "position",
+        "perpendicularity",
+        "parallelism",
+        "angularity",
+        "profile_of_line",
+        "profile_of_surface",
+        "concentricity",
+        "symmetry",
+        "circular_runout",
+        "total_runout",
+    ];
     vec![
         pmi(
             "annotate.datum",
             "Datum",
             "datum",
             "datum",
-            "Label a face or feature as a datum.",
+            "Label a face or axis as a datum feature.",
             vec![
-                text("label", "Label", Some("A")),
-                pick("target", "Face or feature", &[K::Face, K::Feature, K::Axis]),
+                text("label", "Label", Some("A")).optional(),
+                pick("target", "Face or axis", &[K::Face, K::Axis]),
             ],
         ),
         pmi(
@@ -234,34 +250,47 @@ pub(super) fn annotate() -> Vec<CommandDescriptor> {
             "GD&T frame",
             "gdt",
             "tolerance",
-            "Add a feature control frame.",
+            "Add a feature control frame to faces.",
             vec![
+                picks("targets", "Applies to", &[K::Face]),
                 choice(
                     "characteristic",
                     "Characteristic",
                     &[
                         ("position", "Position"),
                         ("flatness", "Flatness"),
+                        ("straightness", "Straightness"),
+                        ("circularity", "Circularity"),
+                        ("cylindricity", "Cylindricity"),
+                        ("profile_of_line", "Profile of a line"),
+                        ("profile_of_surface", "Profile of a surface"),
                         ("perpendicularity", "Perpendicularity"),
                         ("parallelism", "Parallelism"),
-                        ("profile_surface", "Profile of a surface"),
-                        ("runout", "Circular runout"),
+                        ("angularity", "Angularity"),
                         ("concentricity", "Concentricity"),
-                        ("cylindricity", "Cylindricity"),
+                        ("symmetry", "Symmetry"),
+                        ("circular_runout", "Circular runout"),
+                        ("total_runout", "Total runout"),
                     ],
                 ),
+                flag("diametral", "Diametral zone (⌀)", false).shown("characteristic", diametral),
                 length("tolerance", "Tolerance", 0.1),
                 choice(
                     "modifier",
                     "Material condition",
                     &[
-                        ("none", "None"),
-                        ("mmc", "Maximum material"),
-                        ("lmc", "Least material"),
+                        ("none", "None (regardless of size)"),
+                        ("mmc", "Maximum material (Ⓜ)"),
+                        ("lmc", "Least material (Ⓛ)"),
                     ],
-                ),
-                text("datums", "Datums", Some("A|B|C")).optional(),
-                picks("targets", "Applies to", &[K::Face, K::Feature]),
+                )
+                .shown("characteristic", sized),
+                text("datums", "Datums", Some("A|B|C"))
+                    .optional()
+                    .help("Primary, secondary and tertiary, with (M) or (L) after a label for its material condition.")
+                    .shown("characteristic", related),
+                flag("projected", "Projected zone (Ⓟ)", false).shown("characteristic", &["position", "perpendicularity"]),
+                length("projected_height", "Projected height", 10.0).if_checked("projected"),
             ],
         ),
         pmi(
@@ -269,9 +298,9 @@ pub(super) fn annotate() -> Vec<CommandDescriptor> {
             "Dimension",
             "dimension",
             "size",
-            "Add a 3D dimension with tolerance.",
+            "Add a 3D dimension with tolerance: a hole's diameter, or the distance between two faces.",
             vec![
-                picks("targets", "Between", &[K::Face, K::Edge, K::Vertex]),
+                picks("targets", "Faces", &[K::Face]),
                 choice(
                     "tolerance",
                     "Tolerance",
@@ -283,8 +312,8 @@ pub(super) fn annotate() -> Vec<CommandDescriptor> {
                         ("fit", "Fit"),
                     ],
                 ),
-                length("plus", "Plus", 0.1).shown("tolerance", &["symmetric", "bilateral"]),
-                length("minus", "Minus", 0.1).shown("tolerance", &["bilateral"]),
+                length("plus", "Plus", 0.1).shown("tolerance", &["symmetric", "bilateral", "limit"]),
+                length("minus", "Minus", 0.1).shown("tolerance", &["bilateral", "limit"]),
                 text("fit", "Fit", Some("H7")).shown("tolerance", &["fit"]),
             ],
         ),
@@ -300,7 +329,10 @@ pub(super) fn annotate() -> Vec<CommandDescriptor> {
                     "Scheme",
                     &[("plus_minus", "Plus and minus"), ("geometric", "Geometric")],
                 ),
-                picks("datums", "Datums", &[K::Face, K::Feature]).optional(),
+                picks("datums", "Datums (A, B, C)", &[K::Face])
+                    .optional()
+                    .help("Planar faces in order. Empty: the part's datums, else its largest faces."),
+                length("tolerance", "Tolerance", 0.1),
             ],
         ),
         pmi(
@@ -308,17 +340,32 @@ pub(super) fn annotate() -> Vec<CommandDescriptor> {
             "Surface finish",
             "surface-finish",
             "finish",
-            "Mark a face's required roughness.",
+            "Mark the roughness faces must have.",
             vec![
                 picks("faces", "Faces", &[K::Face]),
-                qty("ra", "Ra", "length", Some(0.0016)),
+                qty("ra", "Ra", "roughness", Some(1.6)).min(0.0),
                 choice(
-                    "process",
+                    "removal",
                     "Process",
                     &[
                         ("any", "Any"),
                         ("removal_required", "Material removal required"),
                         ("removal_prohibited", "No material removal"),
+                    ],
+                ),
+                text("method", "Method", Some("ground")).optional(),
+                choice(
+                    "lay",
+                    "Lay",
+                    &[
+                        ("none", "Any"),
+                        ("=", "Parallel (=)"),
+                        ("⊥", "Perpendicular (⊥)"),
+                        ("X", "Crossed (X)"),
+                        ("M", "Multidirectional (M)"),
+                        ("C", "Circular (C)"),
+                        ("R", "Radial (R)"),
+                        ("P", "Particulate (P)"),
                     ],
                 ),
             ],
@@ -328,10 +375,12 @@ pub(super) fn annotate() -> Vec<CommandDescriptor> {
             "Coating",
             "coating",
             "coating",
-            "Specify a coating on faces or the part.",
+            "Specify a coating on faces or the whole part.",
             vec![
-                picks("faces", "Faces", &[K::Face, K::Body]).optional(),
                 text("spec", "Specification", Some("anodize type II, black")),
+                picks("faces", "Faces", &[K::Face])
+                    .optional()
+                    .help("Empty: the whole part."),
             ],
         ),
         pmi(
@@ -352,8 +401,18 @@ pub(super) fn annotate() -> Vec<CommandDescriptor> {
                         ("spot", "Spot"),
                     ],
                 ),
+                radio(
+                    "side",
+                    "Side",
+                    &[("arrow", "Arrow side"), ("other", "Other side"), ("both", "Both sides")],
+                ),
                 length("size", "Size", 4.0),
                 flag("all_around", "All around", false),
+                flag("field", "Field weld", false),
+                flag("intermittent", "Intermittent", false).shown("type", &["fillet", "groove"]),
+                length("length", "Length", 50.0).if_checked("intermittent"),
+                length("pitch", "Pitch", 100.0).if_checked("intermittent"),
+                text("tail", "Process (tail)", Some("GMAW")).optional(),
             ],
         ),
         pmi(
@@ -361,15 +420,10 @@ pub(super) fn annotate() -> Vec<CommandDescriptor> {
             "Note",
             "note",
             "note",
-            "Add a note attached to the model.",
+            "Add a note in the model, with a leader to a face, edge or vertex.",
             vec![
                 text("text", "Text", None),
-                pick(
-                    "anchor",
-                    "Attached to",
-                    &[K::Face, K::Edge, K::Vertex, K::Feature],
-                )
-                .optional(),
+                pick("anchor", "Attached to", &[K::Face, K::Edge, K::Vertex]).optional(),
             ],
         ),
         pmi(
@@ -379,17 +433,24 @@ pub(super) fn annotate() -> Vec<CommandDescriptor> {
             "view",
             "Save a view direction that groups annotations.",
             vec![
-                text("name", "Name", Some("Front annotations")),
+                text("name", "Name", Some("front_pmi")),
                 choice(
                     "orientation",
                     "Orientation",
                     &[
                         ("current", "Current view"),
                         ("front", "Front"),
+                        ("back", "Back"),
                         ("top", "Top"),
+                        ("bottom", "Bottom"),
                         ("right", "Right"),
+                        ("left", "Left"),
+                        ("isometric", "Isometric"),
                     ],
                 ),
+                picks("annotations", "Annotations", &[K::Annotation])
+                    .optional()
+                    .help("Empty: every annotation not in a view yet."),
             ],
         ),
     ]

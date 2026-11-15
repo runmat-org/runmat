@@ -466,6 +466,10 @@ pub fn edit(
                     size: (size > 0.0).then(|| ValueExpr::mm(size)),
                     all_around: flag(values, "all_around", false),
                     field: flag(values, "field", false),
+                    side: Default::default(),
+                    length: None,
+                    pitch: None,
+                    tail: None,
                 };
                 let id = add(&mut d, &view, "weld", kind, at(values)?);
                 format!("Added weld symbol {id}")

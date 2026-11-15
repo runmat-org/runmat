@@ -160,6 +160,35 @@ pub struct PartDisplay {
     /// draws with fewer triangles. Faces only; edges and names stay on `bodies`.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub levels: Vec<DisplayLevel>,
+    /// The part's 3D annotations as the view draws them (see [`AnnotationDisplay`]).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub annotations: Vec<AnnotationDisplay>,
+}
+
+/// One 3D annotation as the model view draws it: a leader from the point it is attached to
+/// (`anchor`) to its label (`at`), both in metres in part coordinates, the label's text in
+/// cells (a GD&T frame's characteristic, zone and datums), and the annotation view it belongs
+/// to. Recomputed on every rebuild from the annotation's canonical references, so it follows
+/// the geometry.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct AnnotationDisplay {
+    pub id: String,
+    /// `datum`, `gdt`, `dimension`, `finish`, `coating`, `weld` or `note`.
+    pub kind: String,
+    pub cells: Vec<String>,
+    pub anchor: [f32; 3],
+    pub at: [f32; 3],
+    /// The far point of a two-reference dimension, for its dimension line.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub to: Option<[f32; 3]>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub view: Option<String>,
+    /// Whether every reference it names resolved on this rebuild.
+    pub ok: bool,
+    /// A label attached to nothing (a note without a leader, a coating for the whole part):
+    /// drawn without a leader. Its `anchor` is the model's center, which `at` is offset from.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub free: bool,
 }
 
 /// One level of detail: every face of every body as one mesh (part coordinates, metres).

@@ -561,6 +561,27 @@ pub(super) fn add(catalog: &mut Catalog) {
                 vec![c("drawing.delete")],
             ],
         ),
+        // A part's 3D annotation and annotation view.
+        context_menu(
+            K::Annotation,
+            P,
+            &["view.zoom-selection", "design.show-source", "design.copy-reference", "part.delete"],
+            vec![
+                vec![c("view.zoom-selection")],
+                vec![c("design.show-source"), c("design.copy-reference")],
+                vec![c("part.delete")],
+            ],
+        ),
+        context_menu(
+            K::View,
+            P,
+            &["view.zoom-selection", "design.show-source", "design.copy-reference", "part.delete"],
+            vec![
+                vec![c("view.zoom-selection")],
+                vec![c("design.show-source"), c("design.copy-reference")],
+                vec![c("part.delete")],
+            ],
+        ),
     ]);
 }
 

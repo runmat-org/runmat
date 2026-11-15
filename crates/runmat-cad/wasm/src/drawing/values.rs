@@ -100,7 +100,7 @@ pub fn face<'v>(display: &'v Value, text: &str) -> Option<(Vec<P3>, &'v Value)> 
     None
 }
 
-fn centroid(points: &[P3]) -> P3 {
+pub(crate) fn centroid(points: &[P3]) -> P3 {
     let n = points.len().max(1) as f64;
     let mut c = [0.0; 3];
     for p in points {
@@ -115,7 +115,7 @@ fn dot(a: P3, b: P3) -> f64 {
     a[0] * b[0] + a[1] * b[1] + a[2] * b[2]
 }
 
-fn vec3(v: &Value) -> Option<P3> {
+pub(crate) fn vec3(v: &Value) -> Option<P3> {
     let f = floats(v);
     (f.len() == 3).then(|| [f[0], f[1], f[2]])
 }
@@ -138,7 +138,7 @@ pub fn cylinder(surface: &Value) -> Option<(P3, P3, f64)> {
     Some((p, d.map(|x| x / l), surface["radius"].as_f64()? * 1000.0))
 }
 
-fn symbol(c: Characteristic) -> &'static str {
+pub(crate) fn symbol(c: Characteristic) -> &'static str {
     match c {
         Characteristic::Straightness => "⏤",
         Characteristic::Flatness => "⏥",
@@ -245,7 +245,7 @@ pub fn arc_anchors(
     }
 }
 
-fn modifier(m: MaterialCondition) -> &'static str {
+pub(crate) fn modifier(m: MaterialCondition) -> &'static str {
     match m {
         MaterialCondition::Rfs => "",
         MaterialCondition::Mmc => " Ⓜ",
@@ -254,7 +254,7 @@ fn modifier(m: MaterialCondition) -> &'static str {
 }
 
 /// A length written in the part: millimetres, or the unit converted.
-fn length_mm(v: &ValueExpr) -> Option<f64> {
+pub(crate) fn length_mm(v: &ValueExpr) -> Option<f64> {
     runmat_cad::units::length_mm(v)
 }
 
@@ -388,6 +388,14 @@ impl AnnotationValues for Values<'_> {
         tolerance_text(&location.distance)
     }
 
+    fn treatment(&self, model: &ModelRef, name: &str) -> Option<String> {
+        let pmi = &self.documents.get(model.file.as_str())?.pmi;
+        pmi.treatments
+            .iter()
+            .find(|t| t.name == name)
+            .map(|t| t.specification.clone())
+    }
+
     fn surface_finish(&self, model: &ModelRef, on: &Reference) -> Option<String> {
         let pmi = &self.documents.get(model.file.as_str())?.pmi;
         let finish = pmi.finishes.iter().find(|f| f.on.contains(on))?;
@@ -403,7 +411,7 @@ impl AnnotationValues for Values<'_> {
 
 /// A tolerance as a drawing writes it after the nominal: `±0.1` when symmetric, else
 /// `+0.012/0` (upper over lower, a zero deviation without a sign).
-fn tolerance_text(value: &ValueExpr) -> Option<String> {
+pub(crate) fn tolerance_text(value: &ValueExpr) -> Option<String> {
     let ValueExpr::Toleranced { minus, plus, .. } = value else {
         return None;
     };

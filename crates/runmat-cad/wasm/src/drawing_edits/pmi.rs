@@ -6,7 +6,8 @@
 use super::*;
 use runmat_cad::pmi::{
     Characteristic, DatumFeature, DatumReference, DatumTarget, GeometricTolerance,
-    LocationTolerance, MaterialCondition, SizeTolerance, SurfaceFinish, TargetShape,
+    LocationTolerance, MaterialCondition, PmiSet, Removal, SizeTolerance, SurfaceFinish,
+    TargetShape,
 };
 use runmat_cad::syntax::edit::edit_part;
 use runmat_cad::syntax::parse_part;
@@ -27,7 +28,7 @@ pub fn part_of<'f>(d: &'f Drawing, view: &str) -> Result<(String, &'f String), E
     Ok((file, text))
 }
 
-fn fresh(names: &[&str], stem: &str) -> String {
+pub fn fresh(names: &[&str], stem: &str) -> String {
     (1..)
         .map(|n| format!("{stem}{n}"))
         .find(|n| !names.contains(&n.as_str()))
@@ -73,7 +74,7 @@ pub fn characteristic(word: &str) -> Result<Characteristic, EditFailure> {
     })
 }
 
-fn condition(word: &str) -> (String, MaterialCondition) {
+pub fn condition(word: &str) -> (String, MaterialCondition) {
     let w = word.trim();
     for (suffix, m) in [
         ("(M)", MaterialCondition::Mmc),
@@ -149,37 +150,114 @@ pub fn add_tolerance(
 ) -> Result<(String, FileEdit), EditFailure> {
     let (c, zone, diametral, modifier, datums) = frame(frame_text)?;
     let (file, text) = part_of(d, view)?;
-    let declared = parse_part(&file, text)
-        .document
-        .map(|p| {
-            p.pmi
-                .datums
-                .iter()
-                .map(|d| d.label.clone())
-                .collect::<Vec<_>>()
-        })
-        .unwrap_or_default();
-    if let Some(missing) = datums.iter().find(|r| !declared.contains(&r.label)) {
+    edit_pmi(&file, text, |pmi| {
+        declare_tolerance(
+            pmi,
+            Frame {
+                characteristic: c,
+                zone,
+                diametral,
+                modifier,
+                datums: datums.clone(),
+                projected: None,
+            },
+            vec![on.clone()],
+            None,
+        )
+    })
+}
+
+/// A feature control frame's cells.
+#[derive(Clone, Debug)]
+pub struct Frame {
+    pub characteristic: Characteristic,
+    /// The zone (mm).
+    pub zone: f64,
+    pub diametral: bool,
+    pub modifier: MaterialCondition,
+    pub datums: Vec<DatumReference>,
+    /// A projected zone's height (mm).
+    pub projected: Option<f64>,
+}
+
+/// Declares a geometric tolerance in `pmi` (named `name`, else a fresh name from the
+/// characteristic), answering its name. Its datums must be declared already.
+pub fn declare_tolerance(
+    pmi: &mut PmiSet,
+    frame: Frame,
+    on: Vec<Reference>,
+    name: Option<&str>,
+) -> Result<String, EditFailure> {
+    let c = frame.characteristic;
+    if c.needs_datum() && frame.datums.is_empty() {
+        return Err(model(format!(
+            "{} needs a datum reference frame (A, A|B or A|B|C)",
+            characteristic_words(c)
+        )));
+    }
+    if c.is_form() && !frame.datums.is_empty() {
+        return Err(model(format!(
+            "{} is a form tolerance and takes no datums",
+            characteristic_words(c)
+        )));
+    }
+    if frame.modifier != MaterialCondition::Rfs && !c.takes_material_condition() {
+        return Err(model(format!(
+            "{} takes no material condition",
+            characteristic_words(c)
+        )));
+    }
+    if let Some(missing) = frame
+        .datums
+        .iter()
+        .find(|r| !pmi.datums.iter().any(|d| d.label == r.label))
+    {
         return Err(model(format!(
             "the part declares no datum {}; add it with Datum first",
             missing.label
         )));
     }
-    edit_pmi(&file, text, |pmi| {
-        let names: Vec<&str> = pmi.tolerances.iter().map(|t| t.name.as_str()).collect();
-        let name = fresh(&names, &format!("{c:?}").to_lowercase());
-        pmi.tolerances.push(GeometricTolerance {
-            name: name.clone(),
-            characteristic: c,
-            on: vec![on.clone()],
-            tolerance: ValueExpr::mm(zone),
-            diametral,
-            modifier,
-            projected: None,
-            datums: datums.clone(),
-        });
-        Ok(name)
-    })
+    if frame.zone <= 0.0 {
+        return Err(model("the tolerance zone must be more than zero"));
+    }
+    let name = match name {
+        Some(n) => n.to_owned(),
+        None => {
+            let names: Vec<&str> = pmi.tolerances.iter().map(|t| t.name.as_str()).collect();
+            fresh(&names, &format!("{c:?}").to_lowercase())
+        }
+    };
+    pmi.tolerances.push(GeometricTolerance {
+        name: name.clone(),
+        characteristic: c,
+        on,
+        tolerance: ValueExpr::mm(frame.zone),
+        diametral: frame.diametral,
+        modifier: frame.modifier,
+        projected: frame.projected.map(ValueExpr::mm),
+        datums: frame.datums,
+    });
+    Ok(name)
+}
+
+/// A characteristic as a sentence names it (`Position`, `Profile of a surface`).
+pub fn characteristic_words(c: Characteristic) -> &'static str {
+    match c {
+        Characteristic::Straightness => "Straightness",
+        Characteristic::Flatness => "Flatness",
+        Characteristic::Circularity => "Circularity",
+        Characteristic::Cylindricity => "Cylindricity",
+        Characteristic::ProfileOfLine => "Profile of a line",
+        Characteristic::ProfileOfSurface => "Profile of a surface",
+        Characteristic::Parallelism => "Parallelism",
+        Characteristic::Perpendicularity => "Perpendicularity",
+        Characteristic::Angularity => "Angularity",
+        Characteristic::Position => "Position",
+        Characteristic::Concentricity => "Concentricity",
+        Characteristic::Symmetry => "Symmetry",
+        Characteristic::CircularRunout => "Circular runout",
+        Characteristic::TotalRunout => "Total runout",
+    }
 }
 
 /// Declares datum `label` on `on`, or answers the label when the part has it on that face.
@@ -190,26 +268,42 @@ pub fn add_datum(
     label: &str,
 ) -> Result<Option<FileEdit>, EditFailure> {
     let (file, text) = part_of(d, view)?;
-    if let Some(existing) = parse_part(&file, text)
-        .document
-        .and_then(|p| p.pmi.datums.into_iter().find(|x| x.label == label))
-    {
-        return if existing.on == on {
-            Ok(None)
+    if let Some(p) = parse_part(&file, text).document {
+        if !declare_datum(&mut p.pmi.clone(), label, &on)? {
+            return Ok(None);
+        }
+    }
+    let (_, edit) = edit_pmi(&file, text, |pmi| {
+        declare_datum(pmi, label, &on)?;
+        Ok(label.to_owned())
+    })?;
+    Ok(Some(edit))
+}
+
+/// Declares datum `label` on `on` in `pmi`: false when it is there on that face already.
+pub fn declare_datum(pmi: &mut PmiSet, label: &str, on: &Reference) -> Result<bool, EditFailure> {
+    let ok = !label.is_empty()
+        && label.chars().all(|c| c.is_ascii_uppercase() || c.is_ascii_digit())
+        && !label.contains(['I', 'O', 'Q']);
+    if !ok {
+        return Err(model(format!(
+            "`{label}` isn't a datum label: use capital letters other than I, O and Q (A, B, AA)"
+        )));
+    }
+    if let Some(existing) = pmi.datums.iter().find(|x| x.label == label) {
+        return if existing.on == *on {
+            Ok(false)
         } else {
             Err(model(format!(
                 "the part has datum {label} on another face already"
             )))
         };
     }
-    let (_, edit) = edit_pmi(&file, text, |pmi| {
-        pmi.datums.push(DatumFeature {
-            label: label.to_owned(),
-            on: on.clone(),
-        });
-        Ok(label.to_owned())
-    })?;
-    Ok(Some(edit))
+    pmi.datums.push(DatumFeature {
+        label: label.to_owned(),
+        on: on.clone(),
+    });
+    Ok(true)
 }
 
 /// Declares datum target `label` (`A1`: datum A, target 1) of `shape` on `on`.
@@ -272,26 +366,57 @@ pub fn add_finish(
     on: Reference,
     ra_um: f64,
 ) -> Result<FileEdit, EditFailure> {
-    if ra_um <= 0.0 {
-        return Err(model("Ra must be more than zero"));
-    }
     let (file, text) = part_of(d, view)?;
     Ok(edit_pmi(&file, text, |pmi| {
-        if pmi.finishes.iter().any(|f| f.on.contains(&on)) {
-            return Err(model("the part has a finish on that face already"));
-        }
-        let names: Vec<&str> = pmi.finishes.iter().map(|f| f.name.as_str()).collect();
-        let name = fresh(&names, "finish");
-        pmi.finishes.push(SurfaceFinish {
-            name: name.clone(),
-            on: vec![on.clone()],
-            ra: ValueExpr::mm(ra_um / 1000.0),
-            process: None,
-            lay: None,
-        });
-        Ok(name)
+        declare_finish(
+            pmi,
+            vec![on.clone()],
+            ra_um / 1000.0,
+            Removal::Any,
+            None,
+            None,
+            None,
+        )
     })?
     .1)
+}
+
+/// Declares a surface finish of `ra_mm` on `on` in `pmi`, answering its name.
+pub fn declare_finish(
+    pmi: &mut PmiSet,
+    on: Vec<Reference>,
+    ra_mm: f64,
+    removal: Removal,
+    process: Option<String>,
+    lay: Option<String>,
+    name: Option<&str>,
+) -> Result<String, EditFailure> {
+    if ra_mm <= 0.0 {
+        return Err(model("Ra must be more than zero"));
+    }
+    if pmi
+        .finishes
+        .iter()
+        .any(|f| f.on.iter().any(|r| on.contains(r)))
+    {
+        return Err(model("the part has a finish on that face already"));
+    }
+    let name = match name {
+        Some(n) => n.to_owned(),
+        None => {
+            let names: Vec<&str> = pmi.finishes.iter().map(|f| f.name.as_str()).collect();
+            fresh(&names, "finish")
+        }
+    };
+    pmi.finishes.push(SurfaceFinish {
+        name: name.clone(),
+        on,
+        ra: ValueExpr::mm(ra_mm),
+        process,
+        lay,
+        removal,
+    });
+    Ok(name)
 }
 
 /// A dimension's tolerance as the form gives it.
@@ -312,43 +437,73 @@ pub fn add_dimension_tolerance(
     tolerance: Tolerance,
 ) -> Result<(String, FileEdit), EditFailure> {
     let (file, text) = part_of(d, view)?;
+    edit_pmi(&file, text, |pmi| {
+        declare_dimension(pmi, references, nominal, Some(&tolerance), None)
+    })
+}
+
+/// Declares a size (one reference) or location (two) at `nominal` mm in `pmi`, toleranced by
+/// `tolerance` (a plain value without one), answering its name.
+pub fn declare_dimension(
+    pmi: &mut PmiSet,
+    references: &[Reference],
+    nominal: f64,
+    tolerance: Option<&Tolerance>,
+    name: Option<&str>,
+) -> Result<String, EditFailure> {
+    let nominal = ValueExpr::mm((nominal * 1.0e4).round() / 1.0e4);
     let toleranced = |plus: f64, minus: f64| ValueExpr::Toleranced {
-        nominal: Box::new(ValueExpr::mm((nominal * 1.0e4).round() / 1.0e4)),
+        nominal: Box::new(nominal.clone()),
         minus: Box::new(ValueExpr::mm(minus)),
         plus: Box::new(ValueExpr::mm(plus)),
     };
-    edit_pmi(&file, text, |pmi| match (references, &tolerance) {
+    let value = |t: Option<&Tolerance>| match t {
+        Some(Tolerance::Deviation { plus, minus }) => toleranced(*plus, *minus),
+        Some(Tolerance::Fit(_)) => toleranced(0.0, 0.0),
+        None => nominal.clone(),
+    };
+    match (references, tolerance) {
         ([on], t) => {
-            let names: Vec<&str> = pmi.sizes.iter().map(|s| s.name.as_str()).collect();
-            let name = fresh(&names, "size");
-            let (size, fit) = match t {
-                Tolerance::Deviation { plus, minus } => (toleranced(*plus, *minus), None),
-                Tolerance::Fit(f) => (toleranced(0.0, 0.0), Some(f.clone())),
+            let name = match name {
+                Some(n) => n.to_owned(),
+                None => {
+                    let names: Vec<&str> = pmi.sizes.iter().map(|s| s.name.as_str()).collect();
+                    fresh(&names, "size")
+                }
             };
             pmi.sizes.push(SizeTolerance {
                 name: name.clone(),
                 on: vec![on.clone()],
-                size,
-                fit,
+                size: value(t),
+                fit: match t {
+                    Some(Tolerance::Fit(f)) => Some(f.clone()),
+                    _ => None,
+                },
             });
             Ok(name)
         }
-        ([from, to], Tolerance::Deviation { plus, minus }) => {
-            let names: Vec<&str> = pmi.locations.iter().map(|s| s.name.as_str()).collect();
-            let name = fresh(&names, "distance");
+        ([_, _], Some(Tolerance::Fit(_))) => Err(model(
+            "a fit tolerances a size (a diameter); a distance takes a plus/minus tolerance",
+        )),
+        ([from, to], t) => {
+            let name = match name {
+                Some(n) => n.to_owned(),
+                None => {
+                    let names: Vec<&str> =
+                        pmi.locations.iter().map(|s| s.name.as_str()).collect();
+                    fresh(&names, "distance")
+                }
+            };
             pmi.locations.push(LocationTolerance {
                 name: name.clone(),
                 from: from.clone(),
                 to: to.clone(),
-                distance: toleranced(*plus, *minus),
+                distance: value(t),
             });
             Ok(name)
         }
-        ([_, _], Tolerance::Fit(_)) => Err(model(
-            "a fit tolerances a size (a diameter); a distance takes a plus/minus tolerance",
-        )),
         _ => Err(model(
-            "a tolerance goes on a dimension of one or two references",
+            "a dimension measures one reference (a diameter) or two (the distance between them)",
         )),
-    })
+    }
 }

@@ -438,6 +438,23 @@ pub enum Swing {
     Negative,
 }
 
+/// The side of the joint a weld symbol's weld is on: below the reference line (the arrow
+/// side), above it (the other side), or both.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum WeldSide {
+    #[default]
+    Arrow,
+    Other,
+    Both,
+}
+
+impl WeldSide {
+    pub fn is_arrow(&self) -> bool {
+        *self == WeldSide::Arrow
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case", tag = "annotation")]
 pub enum AnnotationKind {
@@ -511,6 +528,9 @@ pub enum AnnotationKind {
     SurfaceFinish {
         on: Reference,
     },
+    /// A weld symbol (AWS A2.4, ISO 2553) on an edge: `symbol` is `fillet`, `groove`, `plug`
+    /// or `spot`, on the arrow side, the other side or both; an intermittent weld has a
+    /// `length` and a `pitch`; the tail carries a process or specification.
     Weld {
         on: Reference,
         symbol: String,
@@ -520,6 +540,19 @@ pub enum AnnotationKind {
         all_around: bool,
         #[serde(default)]
         field: bool,
+        #[serde(default, skip_serializing_if = "WeldSide::is_arrow")]
+        side: WeldSide,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        length: Option<ValueExpr>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        pitch: Option<ValueExpr>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        tail: Option<String>,
+    },
+    /// A coating or treatment in the part's PMI, by name: its specification, pointing at the
+    /// faces it covers.
+    Coating {
+        treatment: String,
     },
     /// Text with `{property}` fields. `\n` breaks a line; the text wraps at spaces to `width`
     /// (a length on the sheet), else to the room it has on the sheet.
@@ -1321,6 +1354,8 @@ pub fn check_drawing_with(
             AnnotationKind::SurfaceFinish { on }
             | AnnotationKind::Weld { on, .. }
             | AnnotationKind::CenterMark { on } => refs.push(("on", on)),
+            // The treatment is the part's: its own check reports a missing one.
+            AnnotationKind::Coating { .. } => {}
             AnnotationKind::Note {
                 text,
                 leader,

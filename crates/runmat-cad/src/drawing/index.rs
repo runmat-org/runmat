@@ -72,6 +72,10 @@ pub trait AnnotationValues {
     fn surface_finish(&self, _model: &ModelRef, _on: &Reference) -> Option<String> {
         None
     }
+    /// A coating or treatment's specification in the part's PMI, by name.
+    fn treatment(&self, _model: &ModelRef, _name: &str) -> Option<String> {
+        None
+    }
 }
 
 /// No measurements: dimensions and frames fall back to their PMI names.
@@ -158,6 +162,9 @@ pub fn build_drawing_index(
                     .surface_finish(at, on)
                     .unwrap_or_else(|| "Surface finish".into()),
                 AnnotationKind::Weld { symbol, .. } => format!("Weld {symbol}"),
+                AnnotationKind::Coating { treatment } => values
+                    .treatment(at, treatment)
+                    .unwrap_or_else(|| treatment.clone()),
                 AnnotationKind::Note { text, .. } => fill_fields(text, |field| {
                     super::note_field(model, at, &doc.tables, field)
                 }),
