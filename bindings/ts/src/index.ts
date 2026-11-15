@@ -54,6 +54,7 @@ export {
   REMOTE_DRIVER_COMPLETION_CONTROL_BYTES,
 } from "./execution/remote-driver-resources.js";
 import type { InputManifest } from "./generated/collaboration-contracts.js";
+import type { AuthoredOutputDisplay, PublishedStudyAssessment } from "./fea-contracts.js";
 export type { InputManifest, AtomicCreateResult } from "./generated/collaboration-contracts.js";
 export { MAX_WORKSPACE_PUBLICATION_EDITS, MAX_WORKSPACE_PUBLICATION_BYTES } from "./generated/fea-workspace-contracts.js";
 export type {
@@ -1265,7 +1266,7 @@ export interface RunMatSessionHandle {
   exportGeometryScene?(handle: number): Promise<Uint8Array | null>;
   importFigureScene?(scene: Uint8Array): Promise<number | null>;
   importGeometryScene?(scene: Uint8Array): Promise<number | null>;
-  createFeaFieldScene?(runId: string, fieldId: string | null, shapeMode: "undeformed" | "true" | "exaggerated", exaggeration: number, showUndeformedOutline: boolean, view?: FeaFieldSceneView | null, replaceHandle?: number | null): Promise<{ handle: number; deformationScale: number; exact?: boolean }>;
+  createFeaFieldScene?(runId: string, fieldId: string | null, shapeMode: "undeformed" | "true" | "exaggerated", exaggeration: number, showUndeformedOutline: boolean, view?: FeaFieldSceneView | null, replaceHandle?: number | null, legend?: FeaFieldLegendTerms | null): Promise<{ handle: number; deformationScale: number; exact?: boolean }>;
   importFigureSceneFromPath?(path: string): Promise<number | null>;
   currentFigureHandle?(): Promise<number>;
   dispose(): void;
@@ -1383,7 +1384,7 @@ interface RunMatNativeSession extends ProjectEntrypointSessionExports {
   exportGeometryScene?: (handle: number) => Uint8Array | null;
   importFigureScene?: (scene: Uint8Array) => number | null | Promise<number | null>;
   importGeometryScene?: (scene: Uint8Array) => number | null | Promise<number | null>;
-  createFeaFieldScene?: (runId: string, fieldId: string | null, shapeMode: "undeformed" | "true" | "exaggerated", exaggeration: number, showUndeformedOutline: boolean, view?: FeaFieldSceneView | null, replaceHandle?: number | null) => { handle: number; deformationScale: number; exact?: boolean } | Promise<{ handle: number; deformationScale: number; exact?: boolean }>;
+  createFeaFieldScene?: (runId: string, fieldId: string | null, shapeMode: "undeformed" | "true" | "exaggerated", exaggeration: number, showUndeformedOutline: boolean, view?: FeaFieldSceneView | null, replaceHandle?: number | null, legend?: FeaFieldLegendTerms | null) => { handle: number; deformationScale: number; exact?: boolean } | Promise<{ handle: number; deformationScale: number; exact?: boolean }>;
   importFigureSceneFromPath?: (path: string) => number | null | Promise<number | null>;
   currentFigureHandle?: () => number;
   dispose?: () => void;
@@ -1472,6 +1473,17 @@ export interface PlotCameraState {
 export interface PlotSurfaceCameraState {
   activeAxes: number;
   axes: PlotCameraState[];
+}
+
+/**
+ * What the field scene's legend reads: the study's display of the shown field's output
+ * (`AuthoredStudy.displays`, verbatim) and the run's published assessments (verbatim). The legend
+ * then states the display unit, the study's fixed range with overflow markers, and the assessment
+ * line. Omitted draws the data range in the field's SI unit (runtime `FieldLegendTerms`).
+ */
+export interface FeaFieldLegendTerms {
+  display?: AuthoredOutputDisplay;
+  assessments?: PublishedStudyAssessment[];
 }
 
 export interface FeaFieldSceneView {
@@ -2887,12 +2899,12 @@ class WebRunMatSession implements RunMatSessionHandle {
     }
   }
 
-  async createFeaFieldScene(runId: string, fieldId: string | null, shapeMode: "undeformed" | "true" | "exaggerated", exaggeration: number, showUndeformedOutline: boolean, view?: FeaFieldSceneView | null, replaceHandle?: number | null): Promise<{ handle: number; deformationScale: number; exact?: boolean }> {
+  async createFeaFieldScene(runId: string, fieldId: string | null, shapeMode: "undeformed" | "true" | "exaggerated", exaggeration: number, showUndeformedOutline: boolean, view?: FeaFieldSceneView | null, replaceHandle?: number | null, legend?: FeaFieldLegendTerms | null): Promise<{ handle: number; deformationScale: number; exact?: boolean }> {
     this.ensureActive();
     if (typeof this.native.createFeaFieldScene !== "function") {
       throw new Error("FEA field visualization is unavailable in this runtime");
     }
-    return this.native.createFeaFieldScene(runId, fieldId, shapeMode, exaggeration, showUndeformedOutline, view, replaceHandle);
+    return this.native.createFeaFieldScene(runId, fieldId, shapeMode, exaggeration, showUndeformedOutline, view, replaceHandle, legend);
   }
 
   async importFigureSceneFromPath(path: string): Promise<number | null> {
