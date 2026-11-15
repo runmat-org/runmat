@@ -442,9 +442,56 @@ pub(super) fn add(catalog: &mut Catalog) {
                 ],
             )],
         ),
+        // A part's 3D annotation: Properties shows its command's fields (the Desktop fills them
+        // from the Outline row's values), then these.
         item(
             K::Annotation,
-            &[Drawing, Part],
+            &[Part],
+            "Annotation",
+            vec![section(
+                "Annotation",
+                vec![
+                    shown(text("kind", "Kind", None), "kind"),
+                    prop(
+                        text("view", "Annotation view", None).optional(),
+                        Section::Pmi,
+                        "view",
+                    ),
+                ],
+            )],
+        ),
+        // A part's annotation view.
+        item(
+            K::View,
+            &[Part],
+            "Annotation view",
+            vec![section(
+                "View",
+                vec![
+                    prop(
+                        choice(
+                            "orientation",
+                            "Orientation",
+                            &[
+                                ("front", "Front"),
+                                ("back", "Back"),
+                                ("top", "Top"),
+                                ("bottom", "Bottom"),
+                                ("right", "Right"),
+                                ("left", "Left"),
+                                ("isometric", "Isometric"),
+                            ],
+                        ),
+                        Section::Pmi,
+                        "orientation",
+                    ),
+                    prop(flag("default", "Open on this view", false), Section::Pmi, "default"),
+                ],
+            )],
+        ),
+        item(
+            K::Annotation,
+            &[Drawing],
             "Annotation",
             vec![section(
                 "Annotation",

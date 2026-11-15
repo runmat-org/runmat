@@ -328,6 +328,9 @@ pub fn regenerate_part_in(
         output.and_then(|p| p.color.as_deref()),
     ));
     runmat_cad::appearance::color_output_bodies(&document, &result, &mut display);
+    // 3D annotations placed on this rebuild's geometry, and their Outline rows.
+    display.annotations = crate::annotate::annotation_display(&document, &result, &display);
+    index.annotations = crate::annotate::annotation_rows(&document, &display.annotations);
     Ok(RegeneratedPart {
         document,
         spans: parsed.spans,

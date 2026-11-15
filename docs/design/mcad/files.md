@@ -20,7 +20,8 @@ A part file declares one part: `part <name> { … }`. The name matches the file 
 | `material = { body, material }` | a body's material | [Outputs](/docs/mcad/part/regions-and-publish#outputs) |
 | `region <name> : <kind> = { select, expect, label }` | a named, checked selection | [Regions](/docs/mcad/part/regions-and-publish#regions) |
 | `publish <name> = …` | a region, value or frame other files read | [Published values](/docs/mcad/part/regions-and-publish#published-values) |
-| `datum`, `tolerance`, `size`, `location`, `finish` | semantic PMI | [PMI](/docs/mcad/part/regions-and-publish#pmi) |
+| `datum`, `tolerance`, `size`, `location`, `finish`, `treatment` | semantic PMI | [PMI](/docs/mcad/part/regions-and-publish#pmi) |
+| `annotation <name> = <kind>(…)`, `view <name> = { from, up }` | 3D annotations and annotation views | [3D annotations](/docs/mcad/part/regions-and-publish#3d-annotations) |
 | `configuration <name> = { … }` | a member of the product family | [Configurations](/docs/mcad/part/configurations) |
 | `link <kind> <item> to "<target>"` | a traceable link | [Links](/docs/mcad/part/regions-and-publish#links) |
 

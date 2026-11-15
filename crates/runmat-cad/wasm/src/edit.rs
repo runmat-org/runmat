@@ -139,6 +139,10 @@ fn part_edit(
     text: &str,
     request: &EditRequest,
 ) -> Result<(SourceChange, String), EditFailure> {
+    // Annotations first: a delete or property change on a selected annotation is theirs.
+    if let Some(result) = crate::annotate::edit(path, text, request) {
+        return result;
+    }
     if let Some(result) = configuration::edit(path, text, request) {
         return result;
     }

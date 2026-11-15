@@ -1,6 +1,6 @@
 ---
 description: Reference for what a RunMat part file exposes to other files and to manufacturing. Outputs and part numbers, materials, regions, published values, semantic PMI (datums, GD&T, size and location tolerances, surface finish), properties and links.
-keywords: [part output, part number, material, regions, publish, PMI, GD&T, datum, flatness, parallelism, tolerance, surface finish, traceability, links]
+keywords: [part output, part number, material, regions, publish, PMI, GD&T, datum, flatness, parallelism, tolerance, surface finish, coating, weld symbol, 3D annotation, model-based definition, MBD, annotation view, auto-dimension, traceability, links]
 ---
 # Outputs, regions and published values
 
@@ -89,11 +89,78 @@ PMI is part of the part, attached by the same references as features and regions
 | `tolerance <name> = { … }` | a geometric tolerance | `characteristic`, `on`, `tolerance`, `datums`, `diametral`, `modifier`, `projected` |
 | `size <name> = { … }` | a toleranced size or a fit | `on`, `size` (a toleranced value), `fit` (such as `"H7"`) |
 | `location <name> = { … }` | a toleranced distance between two features | `from`, `to`, `distance` |
-| `finish <name> = { … }` | a surface finish | `on`, `ra`, `process` |
+| `finish <name> = { … }` | a surface finish | `on`, `ra`, `removal` (`any`, `required`, `prohibited`), `process` (the method, such as `"ground"`), `lay` |
+| `treatment <name> = { … }` | a coating or treatment | `on` (faces; none for the whole part), `specification` |
 
 Characteristics: `straightness`, `flatness`, `circularity`, `cylindricity` (form; no datums); `profile_of_line`, `profile_of_surface`; `parallelism`, `perpendicularity`, `angularity` (orientation); `position`, `concentricity`, `symmetry` (location); `circular_runout`, `total_runout`. Orientation, location and runout tolerances need at least one datum. A datum reference is `{ label = A, modifier = rfs }`, with the material condition `rfs`, `mmc` or `lmc`.
 
 The check resolves every attachment against the regenerated part and checks the semantics: datum labels unique and declared, form tolerances without datums, orientation and location tolerances with them, and tolerance values of the right dimension.
+
+## 3D annotations
+
+A part shows its PMI in the 3D model, with notes and weld symbols beside it (model-based definition). Each annotation is an `annotation` statement in the drawing's annotation form, placed in the model instead of on a sheet. A datum symbol, GD&T frame, dimension, finish or coating names the PMI item it shows, so the part keeps one declaration that its drawings, its model view and STEP AP242 all read. Annotations attach to the part's face and edge names and follow the geometry through every rebuild; one whose reference stops resolving is an error on the annotation.
+
+```runmat
+runmat 0.7
+std 1
+
+part plate {
+    sketch s1 on origin.xy {
+        l1 = line(start = [0 mm, 0 mm], end = [80 mm, 0 mm])
+        l2 = line(start = [80 mm, 0 mm], end = [80 mm, 50 mm])
+        l3 = line(start = [80 mm, 50 mm], end = [0 mm, 50 mm])
+        l4 = line(start = [0 mm, 50 mm], end = [0 mm, 0 mm])
+    }
+    feature body = extrude(profile = sketch.s1, distance = 10 mm)
+    feature h = hole(face = feature.body.face.end, at = { a = point(60 mm, 20 mm, 10 mm) }, diameter = 8 mm, through_all)
+
+    datum A = { on = feature.body.face.start }
+    datum B = { on = feature.body.face.side(s1.l4) }
+    tolerance position1 = { characteristic = position, on = [feature.h.face.wall(a)], tolerance = 0.2 mm, diametral = true, modifier = mmc, datums = [{ label = A, modifier = rfs }, { label = B, modifier = rfs }] }
+    size size1 = { on = [feature.h.face.wall(a)], size = 8 mm ± 0.1 mm }
+    treatment coating1 = { specification = "anodize type II, black" }
+
+    annotation datum1 = datum_symbol(label = "A", view = front_pmi)
+    annotation datum2 = datum_symbol(label = "B", view = front_pmi)
+    annotation gdt1 = gdt(tolerance = position1, view = front_pmi, at = [0, 0, 25])
+    annotation dim1 = dimension(style = diameter, references = [feature.h.face.wall(a)], pmi = size1)
+    annotation coating1 = coating(treatment = coating1)
+    annotation weld1 = weld(on = edges_between(feature.body.face.side(s1.l1), feature.body.face.end), symbol = "fillet", size = 5 mm, side = both, tail = "GMAW")
+    annotation note1 = note(text = "Break sharp edges", leader = feature.body.face.side(s1.l1))
+
+    view front_pmi = { from = [0, -1, 0], up = [0, 0, 1] }
+}
+```
+
+| Statement | Shows | Fields |
+|---|---|---|
+| `datum_symbol(label)` | a datum feature symbol | the `datum` it shows |
+| `gdt(tolerance)` | a feature control frame | the `tolerance` it shows |
+| `dimension(style, references, pmi)` | a hole's diameter (`diameter`) or the distance between two faces (`linear`), with the `size` or `location` that tolerances it | `references`: one face or two |
+| `surface_finish(on)` | the finish on a face | the `finish` on `on` |
+| `coating(treatment)` | a coating's specification | the `treatment` it shows |
+| `weld(on, symbol, size, side, all_around, field, length, pitch, tail)` | a weld symbol on an edge | `symbol`: `fillet`, `groove`, `plug` or `spot`; `side`: `arrow`, `other` or `both`; `length` and `pitch` for an intermittent weld; `tail`: the process |
+| `note(text, leader)` | a note, with a leader to a face, edge or vertex | `text`, `leader` |
+
+Every annotation takes `view`, the annotation view it is filed under, and `at`, its label's offset from the point it is attached to in millimetres along the part's axes. Without `at`, the label sits off the part, away from its center.
+
+An annotation view (`view <name> = { from, up }`) is a saved view direction: `from` points from the model toward the eye, `up` stays upright, and `default = true` opens the part on it. Selecting a view in the Outline turns the model to it and shows only its annotations.
+
+### Annotate commands
+
+| Command | Writes |
+|---|---|
+| `annotate.datum` | a datum on a face or axis (labels are capital letters other than I, O and Q) and its symbol |
+| `annotate.gdt` | a geometric tolerance on faces and its frame; form tolerances take no datums, orientation, location and runout tolerances need them, and a material condition goes only on straightness, orientation tolerances and position |
+| `annotate.dimension` | a size (one face: a hole's or boss's diameter) or a location (two parallel faces, a face and a hole, or two holes) at the measured value, with no tolerance, a symmetric, bilateral or limit tolerance, or a fit, and its dimension |
+| `annotate.auto-dimension` | datums A, B and C (the picked faces, else the part's datums, else its largest planar face and the largest faces square to it), then for each hole its diameter and either its location from each datum (plus and minus scheme) or a position frame at maximum material condition (geometric scheme); each other planar face its distance from a parallel datum, or a profile of a surface. Run again, it adds only what is missing. |
+| `annotate.surface-finish` | a finish (Ra in micrometres, the material-removal requirement, the method and the lay) on faces and its symbol |
+| `annotate.coating` | a treatment on faces, or the whole part, and its note |
+| `annotate.weld-symbol` | a weld symbol on each picked edge |
+| `annotate.note` | a note, with or without a leader |
+| `annotate.annotation-view` | an annotation view from a standard orientation or the current view, with the picked annotations (or every annotation not yet in a view) filed under it |
+
+Select an annotation in the Outline or the model to edit its definition in Properties: the change rewrites the PMI item and the annotation in place, under the same names. Drag a label in the model to move it. Delete removes the annotation with the PMI item only it shows; a datum that a frame uses stays until the frame is deleted or changed.
 
 ## Links
 

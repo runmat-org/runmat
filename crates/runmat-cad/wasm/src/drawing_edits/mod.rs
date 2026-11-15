@@ -14,7 +14,7 @@
 
 mod annotations;
 mod items;
-mod pmi;
+pub(crate) mod pmi;
 mod sheets;
 mod tables;
 mod views;

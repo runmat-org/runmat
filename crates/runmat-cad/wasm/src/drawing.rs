@@ -1220,7 +1220,7 @@ fn extent_of(display: &Value, reference: &runmat_cad::refs::reference::Reference
     json!([lo, hi])
 }
 
-fn point_of(
+pub(crate) fn point_of(
     display: &Value,
     reference: &runmat_cad::refs::reference::Reference,
 ) -> Option<[f64; 3]> {

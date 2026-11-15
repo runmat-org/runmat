@@ -1,16 +1,3 @@
-annotate.annotation-view part
-annotate.auto-dimension part
-annotate.coating part
-annotate.datum part
-annotate.dimension part
-annotate.gdt part
-annotate.note part
-annotate.surface-finish part
-annotate.weld-symbol part
-annotate.weld-symbol part type=fillet
-annotate.weld-symbol part type=groove
-annotate.weld-symbol part type=plug
-annotate.weld-symbol part type=spot
 assembly.configurations assembly
 assembly.contacts assembly
 assembly.copy-with-mates assembly

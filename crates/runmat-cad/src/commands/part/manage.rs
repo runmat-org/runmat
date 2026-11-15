@@ -297,6 +297,7 @@ pub(super) fn tree_actions() -> Vec<CommandDescriptor> {
                 K::Plane,
                 K::MateConnector,
                 K::Annotation,
+                K::View,
             ]))
             .on(&[
                 K::Feature,
@@ -308,6 +309,7 @@ pub(super) fn tree_actions() -> Vec<CommandDescriptor> {
                 K::Plane,
                 K::MateConnector,
                 K::Annotation,
+                K::View,
             ])
             .edit(edit(EditOp::Remove, Section::Features)),
     ]

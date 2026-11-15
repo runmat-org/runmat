@@ -151,6 +151,20 @@ pub const PART: DocumentGrammar = DocumentGrammar {
         named("size", "sizes", "size"),
         named("location", "locations", "location"),
         named("finish", "finishes", "finish"),
+        named("treatment", "treatments", "treatment"),
+        // 3D annotations, the drawing's statement form placed in the model:
+        // `annotation gdt1 = gdt(tolerance = position1, view = front_pmi, at = [0, 0, 12])`.
+        Collection {
+            id: Some("id"),
+            tagged: Some(Tagged {
+                field: "kind",
+                tag: "annotation",
+                extras: &["view", "at"],
+            }),
+            ..named("annotation", "annotations", "annotation")
+        },
+        // Annotation views: `view front_pmi = { from = [0, -1, 0], up = [0, 0, 1] }`.
+        named("view", "views", "view"),
     ],
     links: Some(LINKS),
 };

@@ -55,8 +55,27 @@ pub struct PartIndex {
     /// PMI items by name with their resolved entities (absent when the part has none).
     #[serde(default, skip_serializing_if = "PmiIndex::is_empty")]
     pub pmi: PmiIndex,
+    /// The 3D annotations as the Outline lists them and Properties edits them.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub annotations: Vec<AnnotationRow>,
     pub diagnostics: Vec<Diagnostic>,
     pub stats: ResolutionStats,
+}
+
+/// A 3D annotation's Outline row: the Annotate command that makes it, a label and detail to
+/// show, its annotation view, and its definition as that command's field values (what
+/// Properties shows and edits; each change re-applies the command in place).
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct AnnotationRow {
+    pub id: String,
+    pub command: String,
+    pub label: String,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub detail: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub view: Option<String>,
+    pub values: serde_json::Map<String, serde_json::Value>,
+    pub ok: bool,
 }
 
 /// The resolved PMI of a part: datum labels, tolerance and size names → entity names.
@@ -432,6 +451,7 @@ pub fn build_index(
             tolerances: result.pmi.tolerances.clone(),
             sizes: result.pmi.sizes.clone(),
         },
+        annotations: Vec::new(),
         diagnostics: result.diagnostics.diagnostics.clone(),
         stats: result.stats.clone(),
     }
