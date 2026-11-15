@@ -308,12 +308,7 @@ pub(super) fn add(catalog: &mut Catalog) {
                             choice(
                                 "representation",
                                 "Representation",
-                                &[
-                                    ("full", "Full"),
-                                    ("display", "Display only"),
-                                    ("envelope", "Envelope"),
-                                    ("defeatured", "Defeatured"),
-                                ],
+                                &crate::assembly::model::Representation::offered_choices(),
                             ),
                             Section::Occurrences,
                             "representation",

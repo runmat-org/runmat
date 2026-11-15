@@ -178,20 +178,14 @@ pub(super) fn evaluate() -> Vec<CommandDescriptor> {
             "assembly.representation",
             "Representation per component",
             "representation",
-            "Choose each component's representation for studies.",
+            "Draw and check components as their full model or as their envelope box.",
         )
         .inputs(vec![
             picks("components", "Components", &[K::Occurrence]),
             choice(
                 "representation",
                 "Representation",
-                &[
-                    ("full", "Full"),
-                    ("envelope", "Envelope"),
-                    ("defeatured", "Defeatured"),
-                    ("mid_surface", "Mid-surface"),
-                    ("beam", "Beam"),
-                ],
+                &crate::assembly::model::Representation::offered_choices(),
             ),
         ])
         .when(selected(&[K::Occurrence]))

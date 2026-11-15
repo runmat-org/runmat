@@ -73,6 +73,8 @@ pub struct Interference {
 enum Source<'a> {
     Part(&'a runmat_cad::assembly::source::ConfigKey),
     Board,
+    /// An occurrence at the envelope representation: its box, in its own frame.
+    Envelope(Aabb),
 }
 
 struct Placement<'a> {
@@ -162,7 +164,14 @@ pub fn assembly_clearance_of(
             loaded.insert(slot, Some(kept.clone()));
             return Some(kept);
         }
-        let entry = match p.source {
+        let entry = match &p.source {
+            Source::Envelope(b) => match envelope_body(b) {
+                Ok(body) => Some(body),
+                Err(e) => {
+                    errors.push(format!("{}: its envelope doesn't make a solid: {e}", p.path));
+                    None
+                }
+            },
             Source::Board => match crate::board_solid::board_body(&p.file, files) {
                 Ok(board) => {
                     let problems: Vec<String> = board
@@ -248,16 +257,30 @@ pub fn assembly_clearance_of(
     };
     let mut placements = Vec::new();
     for (id, node) in resolved.nodes.iter().enumerate() {
-        if node.parent.is_none() || node.failed || node.represented_by_ancestor {
+        // An occurrence at the envelope representation checks as its box (a sub-assembly's
+        // box stands in for everything under it).
+        let envelope = runmat_cad::assembly::representation::is_envelope(resolved, id as u32);
+        if !envelope && (node.parent.is_none() || node.failed || node.represented_by_ancestor) {
             continue;
         }
         let file = node.definition.file.0.clone();
         let source = match node.definition.kind {
+            _ if envelope => match runmat_cad::assembly::representation::envelope_box(
+                resolved,
+                &resolution.source,
+                id as u32,
+            ) {
+                Some(b) => Source::Envelope(b),
+                None => continue,
+            },
             DefinitionKind::Circuit => Source::Board,
             DefinitionKind::Part => Source::Part(&node.configuration),
             _ => continue,
         };
-        let key = cache::content_key(&file, &node.configuration.digest(), files);
+        let key = match source {
+            Source::Envelope(_) => None,
+            _ => cache::content_key(&file, &node.configuration.digest(), files),
+        };
         let occurrence_path = resolved.path(id as u32);
         let mut placement = Placement {
             changed: is_changed(&occurrence_path),
@@ -272,9 +295,10 @@ pub fn assembly_clearance_of(
                 max: [0.0; 3],
             },
         };
-        let local = match key.and_then(cache::bbox) {
-            Some(bbox) => Some(bbox),
-            None => {
+        let local = match (&placement.source, key.and_then(cache::bbox)) {
+            (Source::Envelope(b), _) => Some(*b),
+            (_, Some(bbox)) => Some(bbox),
+            (_, None) => {
                 let bbox = load(&placement, &mut errors).map(|b| b.bbox);
                 if let (Some(k), Some(b)) = (key, bbox) {
                     cache::set_bbox(k, b);
@@ -550,6 +574,46 @@ mod cache {
 /// Every pair of solids of `body_a` (placed as `a`) and `body_b` (as `b`) whose boxes come
 /// within `clearance`, through the kernel: the summed common volume, the least distance, and
 /// the first pair that overlaps.
+/// A box solid for an envelope: the box in its occurrence's frame, as one prism.
+fn envelope_body(b: &Aabb) -> Result<bodies::Body, String> {
+    // A flat box (a sheet's envelope) still makes a solid.
+    let (mut min, mut max) = (b.min, b.max);
+    for k in 0..3 {
+        if max[k] - min[k] < 1e-6 {
+            min[k] -= 5e-7;
+            max[k] += 5e-7;
+        }
+    }
+    let ring = [
+        (min[0], min[1]),
+        (max[0], min[1]),
+        (max[0], max[1]),
+        (min[0], max[1]),
+    ]
+    .map(|(x, y)| (x * 1e3, y * 1e3));
+    let kernel = crate::kernel::make();
+    let handle = crate::board_solid::prism(
+        kernel.as_ref(),
+        vec![crate::board_solid::ring_loop(&ring, "envelope")],
+        min[2],
+        max[2],
+        runmat_cad::regen::kernel::Combine::New,
+        &[],
+    )?;
+    let bbox = Aabb { min, max };
+    Ok(bodies::Body {
+        kernel,
+        solids: vec![bodies::Solid {
+            handle,
+            bbox,
+            name: "envelope".into(),
+        }],
+        bbox,
+        fill: 0,
+        problems: Vec::new(),
+    })
+}
+
 fn body_pairs(
     body_a: &bodies::Body,
     a: &Placement,

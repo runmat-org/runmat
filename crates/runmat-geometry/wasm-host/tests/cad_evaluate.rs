@@ -131,6 +131,31 @@ fn interference_and_clearance_between_placed_blocks() {
     }
 }
 
+/// A component at the envelope representation checks as its box: a pin through a plate's hole
+/// is clear of the plate, and inside the plate's envelope.
+#[test]
+fn an_envelope_checks_interference_as_its_box() {
+    let plate = "runmat 0.7\nstd 1\n\npart plate {\n    sketch s1 on origin.xy {\n        l1 = line(start = [0 mm, 0 mm], end = [40 mm, 0 mm])\n        l2 = line(start = [40 mm, 0 mm], end = [40 mm, 20 mm])\n        l3 = line(start = [40 mm, 20 mm], end = [0 mm, 20 mm])\n        l4 = line(start = [0 mm, 20 mm], end = [0 mm, 0 mm])\n    }\n    feature body = extrude(profile = sketch.s1, distance = 10 mm)\n    feature h = hole(face = feature.body.face.end, at = { a = point(30 mm, 10 mm, 10 mm) }, diameter = 4 mm, through_all)\n}\n";
+    let pin = "runmat 0.7\nstd 1\n\npart pin {\n    sketch s1 on origin.xy {\n        c1 = circle(center = [30 mm, 10 mm], radius = 1 mm)\n    }\n    feature body = extrude(profile = sketch.s1, distance = 10 mm)\n}\n";
+    let files = json!({ "/p/plate.part": plate, "/p/pin.part": pin }).to_string();
+    let overlaps = |representation: &str| {
+        let assembly = format!("runmat 0.7\nstd 1\n\nassembly fit {{\n    use part plate as plate {{\n        representation = {representation}\n    }}\n    use part pin as pin\n}}\n");
+        let request = json!({ "command": "evaluate.interference", "values": {} }).to_string();
+        let out = call("analyze", &["/p/fit.assembly", &assembly, &files, &request]);
+        assert_eq!(out["ok"], true, "{out}");
+        out["data"]["overlaps"].as_array().unwrap().clone()
+    };
+    assert!(overlaps("full").is_empty());
+    let inside = overlaps("envelope");
+    assert_eq!(inside.len(), 1, "{inside:?}");
+    // The pin's whole volume: pi * (1 mm)^2 * 10 mm.
+    let volume = std::f64::consts::PI * 1e-6 * 1e-2;
+    assert!(
+        (inside[0]["volume"].as_f64().unwrap() - volume).abs() < volume * 1e-3,
+        "{inside:?}"
+    );
+}
+
 /// A board is an exact solid in interference and clearance checks: the daq board (90 x 60 mm,
 /// 1.6 mm thick, components on top) placed through a block shares the block's 100 x 20 mm
 /// footprint over its thickness and the bodies inside it; placed 0.5 mm off the block's side,

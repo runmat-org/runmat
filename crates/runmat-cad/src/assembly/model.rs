@@ -335,6 +335,52 @@ impl Representation {
         Representation::Midsurface,
         Representation::Beam,
     ];
+
+    /// The representations a component can be set to from its menu, its Properties and
+    /// `assembly.representation`: each changes what the assembly draws or checks. `full` is the
+    /// exact model; `envelope` draws and checks the component (a sub-assembly, everything under
+    /// it) as its box. `defeatured`, `midsurface` and `beam` join when an engine fills them.
+    pub const OFFERED: [Representation; 2] = [Representation::Full, Representation::Envelope];
+
+    /// Its word in the source and in command values (`envelope`, `midsurface`): the one key
+    /// every surface uses.
+    pub fn key(self) -> &'static str {
+        match self {
+            Representation::Full => "full",
+            Representation::Envelope => "envelope",
+            Representation::Interface => "interface",
+            Representation::Display => "display",
+            Representation::Defeatured => "defeatured",
+            Representation::Midsurface => "midsurface",
+            Representation::Beam => "beam",
+        }
+    }
+
+    /// The representation a [`Representation::key`] names.
+    pub fn from_key(key: &str) -> Option<Representation> {
+        Representation::ALL.into_iter().find(|r| r.key() == key)
+    }
+
+    /// What a menu or form calls it.
+    pub fn label(self) -> &'static str {
+        match self {
+            Representation::Full => "Full",
+            Representation::Envelope => "Envelope",
+            Representation::Interface => "Interface",
+            Representation::Display => "Display only",
+            Representation::Defeatured => "Defeatured",
+            Representation::Midsurface => "Mid-surface",
+            Representation::Beam => "Beam",
+        }
+    }
+
+    /// The choices a form offers: [`Representation::OFFERED`] as (key, label) pairs.
+    pub fn offered_choices() -> Vec<(&'static str, &'static str)> {
+        Representation::OFFERED
+            .into_iter()
+            .map(|r| (r.key(), r.label()))
+            .collect()
+    }
 }
 
 /// A typed override on a descendant occurrence. There is no free attribute override.

@@ -114,6 +114,21 @@ Evaluate measures the assembly in its current pose:
 
 The bill of materials lists each part number with its quantity: one base, one turntable and four standoffs. A drawing places the same list as a BOM table with balloons. See [Evaluate](/docs/mcad/evaluate).
 
+## 6. Show a component as its envelope
+
+A component's representation sets what the assembly draws and checks for it. Right-click a component and choose **Representation**, or set it in the component's Properties:
+
+- **Full** draws and checks the part's exact solid. It is the default and writes nothing.
+- **Envelope** draws the component as its bounding box, shaded translucent, and interference and clearance checks use that box. A sub-assembly at envelope draws one box around all its parts.
+
+```assembly fragment
+use part base as base {
+    representation = envelope
+}
+```
+
+Use an envelope to keep space for a component whose detail doesn't matter here, such as a purchased motor or a neighboring module. Here the stage's base draws as its box. Mass properties still add the parts an envelope stands for at their own mass and center of gravity.
+
 ## Next
 
 - [Make a drawing](/docs/mcad/guides/make-a-drawing) of the assembly with its BOM.

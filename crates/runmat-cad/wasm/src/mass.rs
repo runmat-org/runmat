@@ -11,6 +11,9 @@
 //! rotated tensor and its parallel-axis term. A part with no density is listed, carries no
 //! mass, and makes the result incomplete.
 //!
+//! A component at the envelope representation (a sub-assembly's, everything under it) weighs
+//! its parts as above: the envelope changes what is drawn and checked for interference.
+//!
 //! A circuit board occurrence weighs what its layout holds ([`runmat_circuit::mass`]): the
 //! stackup's laminate, copper and mask, and its placed components (each at the mass its part
 //! gives, else its package's default), in the board's 3D frame.
@@ -331,7 +334,9 @@ pub fn assembly_mass(
     let mut report = MassReport::default();
     let mut placed_masses = Vec::new();
     for (id, node) in resolved.nodes.iter().enumerate() {
-        if node.parent.is_none() || node.failed || node.represented_by_ancestor {
+        // A component drawn as its envelope still weighs what its parts weigh: the envelope
+        // stands in for its geometry in the view and in interference, not for its mass.
+        if node.parent.is_none() || node.failed {
             continue;
         }
         if node.definition.kind == DefinitionKind::Circuit {

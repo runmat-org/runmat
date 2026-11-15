@@ -113,6 +113,9 @@ This file is generated from the command catalog.
   - Required: `components` (picks: component); `with` (text)
   - Optional: `remate` (true or false, default true)
   - Runs on the `selection`: `occurrence`
+- `assembly.representation`: Draw and check components as their full model or as their envelope box.
+  - Required: `components` (picks: component); `representation` (one of `full`, `envelope`, default `full`)
+  - Runs on the `selection`: `occurrence`
 - `assembly.sketch`: Start a sketch in the assembly on an origin plane or a component's planar face.
   - Required: `plane` (pick: plane or face)
 - `assembly.smart-mate`: Drag a component onto another and accept the suggested mate.

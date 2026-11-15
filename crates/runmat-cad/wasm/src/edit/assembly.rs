@@ -13,6 +13,8 @@
 //! - `assembly.replace`, `assembly.subassembly`, `assembly.new-part`: structure ([`structure`]).
 //! - `assembly.sketch` and the `sketch.*` tools: sketches in the assembly ([`sketch`]).
 //! - `assembly.feature`: a cut, holes or a weld bead through components ([`operation`]).
+//! - `assembly.representation`: the components' representation (full, or envelope: drawn and
+//!   checked as their box).
 //! - `assembly.mate-connector`: a named connector on a pick, and Delete on its row
 //!   ([`connector`]).
 //! - `assembly.publish`: a connector or component published by name, and Delete on its row
@@ -57,6 +59,8 @@ mod operation_tests;
 mod explode_tests;
 #[cfg(test)]
 mod sketch_tests;
+#[cfg(test)]
+mod representation_tests;
 #[cfg(test)]
 mod structure_tests;
 #[cfg(test)]
@@ -287,6 +291,33 @@ fn selected_names(compiled: &Compiled, request: &EditRequest) -> Result<Vec<Stri
     Ok(names)
 }
 
+/// `assembly.representation`: sets the components' representation (`full` writes none, the
+/// default). Only [`Representation::OFFERED`] ones: the others have no engine yet.
+///
+/// [`Representation::OFFERED`]: runmat_cad::assembly::model::Representation::OFFERED
+fn representation(
+    document: &mut AssemblyDocument,
+    names: &[String],
+    key: &str,
+) -> Result<String, EditFailure> {
+    use runmat_cad::assembly::model::Representation;
+    let key = if key.is_empty() { "full" } else { key };
+    let chosen = Representation::from_key(key)
+        .filter(|r| Representation::OFFERED.contains(r))
+        .ok_or_else(|| {
+            model(format!(
+                "`{key}` isn't a representation a component can take; choose {}",
+                Representation::OFFERED.map(|r| format!("`{}`", r.key())).join(" or ")
+            ))
+        })?;
+    for name in names {
+        let at = find(document, name)?;
+        document.occurrences[at].representation =
+            (chosen != Representation::Full).then_some(chosen);
+    }
+    Ok(format!("Representation of {}: {}", names.join(", "), chosen.label()))
+}
+
 fn find(document: &AssemblyDocument, name: &str) -> Result<usize, EditFailure> {
     document
         .occurrences
@@ -485,6 +516,10 @@ pub(super) fn edit(
                 if fixed { "Fixed" } else { "Floated" },
                 names.join(", ")
             )
+        }
+        "assembly.representation" => {
+            let names = selected_names(&compiled, request)?;
+            representation(&mut document, &names, text_value(&request.values, "representation"))?
         }
         "assembly.insert" => place::insert(&mut document, files, &request.values)?,
         "assembly.component-configuration" => {

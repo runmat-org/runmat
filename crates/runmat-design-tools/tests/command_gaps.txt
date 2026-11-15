@@ -4,7 +4,6 @@ assembly.document-settings assembly
 assembly.envelope assembly
 assembly.options assembly
 assembly.options-effectivity assembly
-assembly.representation assembly
 assembly.skeleton assembly
 assembly.update-pins assembly
 assembly.visualization assembly
