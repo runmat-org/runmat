@@ -34,6 +34,7 @@ pub(crate) mod testing;
 
 #[cfg(not(feature = "graphics-replay"))]
 pub(crate) mod fea_execution;
+mod fea_geometry_preview;
 #[cfg(not(feature = "graphics-replay"))]
 pub(crate) mod fea_run_context;
 #[cfg(not(feature = "graphics-replay"))]

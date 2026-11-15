@@ -151,12 +151,26 @@ impl CanonicalStructuralConstraintResult {
         let node_count = state.node_order.len();
         let translations =
             nodal_vector_field_for_count(fields, FEA_FIELD_STRUCTURAL_DISPLACEMENT, node_count)?;
-        let rotations =
-            nodal_vector_field_for_count(fields, FEA_FIELD_STRUCTURAL_ROTATION, node_count)?;
         let forces =
             nodal_vector_field_for_count(fields, FEA_FIELD_STRUCTURAL_REACTION_FORCE, node_count)?;
-        let moments =
-            nodal_vector_field_for_count(fields, FEA_FIELD_STRUCTURAL_REACTION_MOMENT, node_count)?;
+        // Rotation and reaction moment are published only for models with rotational DOFs, so
+        // they are required exactly when a resolved node owns a rotational row.
+        let has_rotational_rows = state
+            .nodes
+            .values()
+            .any(|node| node.dof_indices[3..].iter().any(Option::is_some));
+        let (rotations, moments): (&[f64], &[f64]) = if has_rotational_rows {
+            (
+                nodal_vector_field_for_count(fields, FEA_FIELD_STRUCTURAL_ROTATION, node_count)?,
+                nodal_vector_field_for_count(
+                    fields,
+                    FEA_FIELD_STRUCTURAL_REACTION_MOMENT,
+                    node_count,
+                )?,
+            )
+        } else {
+            (&[], &[])
+        };
         let mut displacement = vec![0.0; state.layout.total_dof_count()];
         let mut reaction = vec![0.0; state.layout.total_dof_count()];
         for (node_index, identity) in state.node_order.iter().enumerate() {

@@ -28,6 +28,7 @@ fn scalar_evidence_is_derived_and_authenticated_before_metadata_reads() {
         source_identity: Digest::sha256("substituted observation"),
         sample: None,
         entity: None,
+        source_field_id: None,
     };
     run.observation_scalars.push(forged.clone());
     let mut artifact = prepare_run_artifact(&run, Utc::now().to_rfc3339())

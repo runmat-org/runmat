@@ -117,6 +117,7 @@ pub fn execute_text_request_for_testing(
 pub use session::{
     admit_browser_solve, admit_worker_request, BrowserMemoryPlatform, BrowserResourceLimit,
     BrowserResourceTerm, FeaCheckEstimate, FeaExecutionPreflight, FeaGeometryExecutionHost,
-    FeaStudyPreparationError, PreparedSerialFeaExecutionError, PreparedSerialFeaStudy,
-    BROWSER_RESOURCE_LIMIT_CODE, RESOURCE_LIMIT_CODE, WASM32_ADDRESS_SPACE_BYTES,
+    FeaStudyGeometryPreviewProgram, FeaStudyPreparationError, PreparedSerialFeaExecutionError,
+    PreparedSerialFeaStudy, BROWSER_RESOURCE_LIMIT_CODE, RESOURCE_LIMIT_CODE,
+    WASM32_ADDRESS_SPACE_BYTES,
 };

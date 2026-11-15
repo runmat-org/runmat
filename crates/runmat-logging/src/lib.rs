@@ -27,7 +27,6 @@ pub use native_otel::{
     shutdown_otel_result, ExportStats,
 };
 
-#[cfg(not(target_arch = "wasm32"))]
 use tracing_subscriber::reload;
 
 #[cfg(all(
@@ -91,11 +90,9 @@ static TRACE_HOOK: OnceCell<TraceHook> = OnceCell::new();
 #[cfg(not(any(feature = "otlp", feature = "browser-otlp")))]
 static FALLBACK_TRACE_ID: OnceCell<String> = OnceCell::new();
 static EVENT_ID_COUNTER: AtomicUsize = AtomicUsize::new(1);
-#[cfg(not(target_arch = "wasm32"))]
 type LogFilterReloader = Box<dyn Fn(&str) -> Result<(), String> + Send + Sync>;
 
 /// Reloads the filter of the subscriber that is actually installed process-wide.
-#[cfg(not(target_arch = "wasm32"))]
 static LOG_FILTER_RELOADER: OnceCell<LogFilterReloader> = OnceCell::new();
 
 pub struct LoggingGuard {
@@ -134,7 +131,6 @@ impl Drop for LoggingGuard {
 
 /// Lets a host that owns the global subscriber serve `update_log_filter`.
 /// The first registration wins.
-#[cfg(not(target_arch = "wasm32"))]
 pub fn set_log_filter_reloader<F>(reloader: F)
 where
     F: Fn(&str) -> Result<(), String> + Send + Sync + 'static,
@@ -267,11 +263,12 @@ fn init_logging_impl(
 
         #[cfg(target_arch = "wasm32")]
         {
+            let (filter_layer, filter_handle) = reload::Layer::new(env_filter.clone());
             let subscriber = tracing_subscriber::registry()
-                .with(env_filter.clone())
+                .with(filter_layer)
                 .with(bridge_layer)
                 .with(trace_layer.clone());
-            (subscriber, None::<()>)
+            (subscriber, Some(filter_handle))
         }
     };
 
@@ -290,15 +287,12 @@ fn init_logging_impl(
         Ok(()) => {
             // Only the installed subscriber's handle is live; a dropped one reports
             // "subscriber no longer exists" on every reload.
-            #[cfg(not(target_arch = "wasm32"))]
             if let Some(handle) = filter_handle {
                 set_log_filter_reloader(move |spec| {
                     let filter = EnvFilter::try_new(spec).map_err(|err| err.to_string())?;
                     handle.reload(filter).map_err(|err| err.to_string())
                 });
             }
-            #[cfg(target_arch = "wasm32")]
-            let _ = filter_handle;
             None
         }
         Err(_) if global_only => return Err("Another tracing subscriber is already installed; configured file logging was not activated".into()),
@@ -337,17 +331,11 @@ pub fn shutdown_otel() {
 #[cfg(any(not(feature = "otlp"), target_arch = "wasm32"))]
 pub fn shutdown_otel() {}
 
-#[cfg(not(target_arch = "wasm32"))]
 pub fn update_log_filter(spec: &str) -> Result<(), String> {
     let reload = LOG_FILTER_RELOADER
         .get()
         .ok_or_else(|| "log filter handle not initialised".to_string())?;
     reload(spec)
-}
-
-#[cfg(target_arch = "wasm32")]
-pub fn update_log_filter(_spec: &str) -> Result<(), String> {
-    Err("runtime log filtering is not yet supported in wasm builds".to_string())
 }
 
 pub fn with_signal_trace<T>(trace_id: Option<&str>, name: &str, f: impl FnOnce() -> T) -> T {

@@ -19,6 +19,9 @@ pub struct ScalarObservationEvidence {
     pub source_identity: Digest,
     pub sample: Option<RecoveredFieldSample>,
     pub entity: Option<ObservationEntity>,
+    /// The run field the observation reads (for example the element von Mises field of a peak
+    /// stress), so a result view can open it. None when the value reads no run field.
+    pub source_field_id: Option<String>,
 }
 
 /// Project an already admitted scalar result without reducing or gathering numerical fields.
@@ -38,6 +41,7 @@ pub fn scalar_observation_evidence(
         source_identity: observation.logical_identity.digest(),
         sample: Some(observation.sample),
         entity: observation.entities.first().cloned(),
+        source_field_id: observation.source_field_id.clone(),
     })
 }
 
@@ -70,5 +74,7 @@ pub fn scalar_series_evidence(series: &SeriesReductionResult) -> Option<ScalarOb
         source_identity: series.identity.digest(),
         sample: governing.map(|value| value.source.coordinate),
         entity: governing.and_then(|value| value.entity.clone()),
+        // A series reduces an observation history across samples, not one run field.
+        source_field_id: None,
     })
 }

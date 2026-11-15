@@ -2,6 +2,8 @@ use super::super::*;
 use runmat_analysis_fea::results::observation::SeriesReductionPayload;
 
 mod acoustic_frequency;
+mod field_order;
+pub(crate) use field_order::{assessed_source_field_ids, move_fields_first};
 mod structural_frequency;
 
 macro_rules! visit_analysis_result_fields {
@@ -214,6 +216,12 @@ fn analysis_results_op_with_field_inventory(
             filtered.push(field.clone());
         }
         collected_fields = filtered;
+    } else {
+        move_fields_first(
+            &mut collected_fields,
+            &field_order::declared_output_source_field_ids(run_result),
+            |field| field.field_id.as_str(),
+        );
     }
     let field_descriptors = collected_fields
         .iter()

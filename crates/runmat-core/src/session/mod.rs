@@ -70,10 +70,12 @@ pub use fea_browser_budget::{
     BrowserResourceTerm, BROWSER_RESOURCE_LIMIT_CODE, WASM32_ADDRESS_SPACE_BYTES,
 };
 mod fea_execution;
+mod fea_geometry_program;
 pub use fea_execution::{
     FeaGeometryExecutionHost, FeaStudyPreparationError, PreparedSerialFeaExecutionError,
     PreparedSerialFeaStudy,
 };
+pub use fea_geometry_program::FeaStudyGeometryPreviewProgram;
 pub use fea_source::CheckedFeaSessionSource;
 mod fea_changes;
 mod fea_publication;

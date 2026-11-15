@@ -308,6 +308,8 @@ thread_local! {
 
 mod capture;
 pub mod design_source;
+mod inspect_payload;
+pub use inspect_payload::geometry_inspect_payload_from_asset;
 
 pub struct ThreadGeometryCaptureAdapterGuard {
     previous: Option<&'static dyn GeometryViewCaptureAdapter>,
