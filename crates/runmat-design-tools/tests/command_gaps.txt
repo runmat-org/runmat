@@ -3,10 +3,8 @@ assembly.contacts assembly
 assembly.copy-with-mates assembly
 assembly.document-settings assembly
 assembly.envelope assembly
-assembly.mate-connector assembly
 assembly.options assembly
 assembly.options-effectivity assembly
-assembly.publish assembly
 assembly.representation assembly
 assembly.skeleton assembly
 assembly.update-pins assembly

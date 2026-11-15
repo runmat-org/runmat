@@ -156,6 +156,8 @@ pub enum SelectKind {
     Part,
     Hole,
     ExplodeStep,
+    /// A name the assembly publishes (`publish:<name>`).
+    Publish,
     // Drawing.
     Sheet,
     View,
@@ -212,6 +214,7 @@ impl SelectKind {
             Part => "part",
             Hole => "hole",
             ExplodeStep => "explode step",
+            Publish => "published item",
             Sheet => "sheet",
             View => "view",
             Annotation => "annotation",

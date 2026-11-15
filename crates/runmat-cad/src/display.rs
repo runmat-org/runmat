@@ -700,6 +700,10 @@ pub struct AssemblyDisplay {
     /// The assembly's own sketches on their planes, drawn as a part's are.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub sketches: Vec<SketchDisplay>,
+    /// The assembly's mate connectors, each as three axes where the solve left it (id
+    /// `connector:<name>`, kind `connector`), sized to the assembly.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub references: Vec<references::ReferenceDisplay>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub bounds: Option<Bounds>,
 }
@@ -880,6 +884,7 @@ pub fn assembly_display_operated(
             transform,
         });
     }
+    out.references = references::connector_displays(resolved, out.bounds.as_ref());
     out
 }
 

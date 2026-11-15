@@ -49,8 +49,8 @@ This file is generated from the command catalog.
 - `assembly.component-configuration`: Use another configuration of the component's file.
   - Required: `configuration` (text)
   - Runs on the `selection`: `occurrence`
-- `assembly.delete`: Delete components, mates, sketches, assembly features or sketch curves.
-  - Runs on the `selection`: `occurrence`, `mate`, `sketch`, `feature`, `sketch_entity`, `sketch_point`
+- `assembly.delete`: Delete components, mates, mate connectors, publishes, sketches, assembly features or sketch curves.
+  - Runs on the `selection`: `occurrence`, `mate`, `mate_connector`, `publish`, `sketch`, `feature`, `sketch_entity`, `sketch_point`
 - `assembly.edit-mate`: Change the mate's type, distance, angle, limits or alignment.
   - Required: `type` (one of `fasten`, `revolute`, `slider`, `cylindrical`, `planar`, `ball`, `parallel`, `distance`, `angle`, `tangent`, `pin_slot`, `gear`, `rack_pinion`, `screw`, `cam`, `width`, `symmetric`, `path`, `linear_coupler`, `hinge`, `universal_joint`, default `fasten`); `offset` (number in mm, default 0) when `type` is distance; `angle` (number in deg, default 0) when `type` is angle; `min` (number in deg, default -30) when `angle_limits` is true; `max` (number in deg, default 45) when `angle_limits` is true; `near` (number in mm, default 0) when `distance_limits` is true; `far` (number in mm, default 10) when `distance_limits` is true; `ratio` (number, default 1) when `type` is gear or linear_coupler; `pitch` (number in mm, default 1) when `type` is screw or rack_pinion; `radius` (number in mm, default 5) when `type` is tangent; `profile` (text) when `type` is cam
   - Optional: `angle_limits` (true or false, default false) when `type` is revolute or cylindrical or hinge; `distance_limits` (true or false, default false) when `type` is slider or cylindrical; `flip` (true or false, default false); `first2` (pick: mate connector or face or edge or vertex or plane or axis or point or component or sketch entity or sketch point) when `type` is width; `second2` (pick: mate connector or face or edge or vertex or plane or axis or point or component or sketch entity or sketch point) when `type` is width; `plane` (pick: mate connector or face or edge or vertex or plane or axis or point or component or sketch entity or sketch point) when `type` is symmetric; `path` (picks: edge) when `type` is path; `joint_point` (true or false, default true) when `type` is universal_joint
@@ -67,9 +67,17 @@ This file is generated from the command catalog.
   - Runs on the `selection`: `occurrence`
 - `assembly.flip-mate`: Flip the mate's alignment.
   - Runs on the `selection`: `mate`
+- `assembly.hole-alignment`: Find holes across parts that don't line up.
+  - Required: `tolerance` (number in mm, default 0.1)
+  - Optional: `components` (picks: component)
+- `assembly.hole-check`: Check hole alignment, fastener length and grip.
+  - Required: `tolerance` (number in mm, default 0.1)
+  - Optional: `components` (picks: component)
 - `assembly.insert`: Insert a part, assembly or circuit board from the project.
   - Required: `source` (one of `part`, `assembly`, `circuit`, default `part`); `file` (text); `quantity` (whole number, default 1); `x` (number in mm, default 0); `y` (number in mm, default 0); `z` (number in mm, default 0)
   - Optional: `configuration` (text); `fix` (true or false, default false)
+- `assembly.interface-check`: Check that mated interfaces still match their published definitions.
+  - Required: `tolerance` (number in mm, default 0.01)
 - `assembly.interference`: Find components that overlap.
   - Optional: `components` (picks: component); `fasteners` (true or false, default false)
 - `assembly.mass-properties`: Mass, center of mass and inertia of the assembly.
@@ -78,6 +86,9 @@ This file is generated from the command catalog.
   - Required: `type` (one of `coincident`, `concentric`, `distance`, `angle`, `parallel`, `perpendicular`, `tangent`, `fasten`, `revolute`, `slider`, `cylindrical`, `planar`, `ball`, `pin_slot`, `gear`, `rack_pinion`, `screw`, `cam`, `width`, `symmetric`, `path`, `linear_coupler`, `hinge`, `universal_joint`, default `coincident`); `first` (pick: mate connector or face or edge or vertex or plane or axis or point or component or sketch entity or sketch point); `second` (pick: mate connector or face or edge or vertex or plane or axis or point or component or sketch entity or sketch point); `offset` (number in mm, default 0) when `type` is distance; `angle` (number in deg, default 0) when `type` is angle; `min` (number in deg, default -30) when `angle_limits` is true; `max` (number in deg, default 45) when `angle_limits` is true; `near` (number in mm, default 0) when `distance_limits` is true; `far` (number in mm, default 10) when `distance_limits` is true; `ratio` (number, default 1) when `type` is gear or linear_coupler; `pitch` (number in mm, default 1) when `type` is screw or rack_pinion; `first2` (pick: mate connector or face or edge or vertex or plane or axis or point or component or sketch entity or sketch point) when `type` is width; `second2` (pick: mate connector or face or edge or vertex or plane or axis or point or component or sketch entity or sketch point) when `type` is width; `plane` (pick: mate connector or face or edge or vertex or plane or axis or point or component or sketch entity or sketch point) when `type` is symmetric; `profile` (text) when `type` is cam; `path` (picks: edge) when `type` is path
   - Optional: `flip` (true or false, default false); `angle_limits` (true or false, default false) when `type` is revolute or cylindrical or hinge; `distance_limits` (true or false, default false) when `type` is slider or cylindrical; `joint_point` (true or false, default true) when `type` is universal_joint
   - Runs on the `selection`: `occurrence`
+- `assembly.mate-connector`: Add a frame on a component to mate to.
+  - Optional: `name` (text); `on` (pick: face or edge or vertex or plane or axis or point or coordinate system or sketch point or sketch entity); `flip` (true or false, default false); `x` (number in mm, default 0); `y` (number in mm, default 0); `z` (number in mm, default 0); `angle` (number in deg, default 0)
+  - Runs on the `selection`: `mate_connector`
 - `assembly.mirror`: Mirror components about a plane, as copies or as an opposite-hand part.
   - Required: `plane` (pick: plane or face); `components` (picks: component); `result` (one of `copy`, `opposite`, default `copy`); `opposite` (text) when `result` is opposite
 - `assembly.move`: Move components by dragging, with a triad or by aligning.
@@ -91,6 +102,9 @@ This file is generated from the command catalog.
 - `assembly.pattern`: Repeat components in a line, a circle, or by a part's feature pattern.
   - Required: `layout` (one of `linear`, `circular`, `feature`, default `linear`); `components` (picks: component); `direction` (pick: edge or axis or face) when `layout` is linear or circular; `spacing` (number in mm, default 20) when `layout` is linear; `angle` (number in deg, default 360) when `layout` is circular; `instances` (whole number, default 3) when `layout` is linear or circular; `feature` (pick: feature) when `layout` is feature
   - Runs on the `selection`: `occurrence`
+- `assembly.publish`: Publish an interface, frame or value for parent assemblies.
+  - Required: `name` (text); `item` (pick: mate connector or component)
+  - Runs on the `selection`: `publish`
 - `assembly.replace`: Replace components with another file; mates follow where they can.
   - Required: `components` (picks: component); `with` (text)
   - Optional: `remate` (true or false, default true)

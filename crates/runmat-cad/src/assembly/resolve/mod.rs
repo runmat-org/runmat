@@ -188,6 +188,18 @@ pub struct ResolveStats {
     pub suppressed: u64,
 }
 
+/// A mate connector of the top assembly, placed: the occurrence it is fixed in (the root for
+/// the assembly's own) and its frame in top coordinates, or why it doesn't resolve.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct ResolvedConnector {
+    pub name: String,
+    pub host: NodeId,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub world: Option<Transform>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub problem: Option<String>,
+}
+
 /// Which configuration of the product to resolve.
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case", tag = "variant")]
@@ -255,6 +267,8 @@ pub struct ResolvedAssembly {
     pub envelopes: Vec<ResolvedEnvelope>,
     /// The top assembly's sketches, solved on their planes ([`crate::assembly::sketches`]).
     pub sketches: Vec<crate::assembly::sketches::ResolvedSketch>,
+    /// The top assembly's mate connectors where they sit after the solve, in document order.
+    pub connectors: Vec<ResolvedConnector>,
     /// Display paths of occurrences suppressed in this configuration.
     pub suppressed: Vec<String>,
     pub diagnostics: DiagnosticReport,
@@ -656,6 +670,29 @@ impl<'a, 'b> Resolver<'a, 'b> {
             };
             self.nodes[i].world = w;
         }
+        // The top assembly's connectors, where the solve left them.
+        let names: Vec<String> = self
+            .asm
+            .get(&0)
+            .map(|info| info.doc.connectors.iter().map(|c| c.name.clone()).collect())
+            .unwrap_or_default();
+        let connectors = names
+            .into_iter()
+            .map(|name| match self.connector(0, &name) {
+                Ok((host, f)) => ResolvedConnector {
+                    name,
+                    host,
+                    world: Some(self.nodes[host as usize].world.compose(&f)),
+                    problem: None,
+                },
+                Err(problem) => ResolvedConnector {
+                    name,
+                    host: 0,
+                    world: None,
+                    problem: Some(problem),
+                },
+            })
+            .collect();
         for e in &mut self.envelopes {
             e.world = e
                 .local
@@ -679,6 +716,7 @@ impl<'a, 'b> Resolver<'a, 'b> {
             prototypes: self.prototypes,
             envelopes: self.envelopes,
             sketches: self.sketches,
+            connectors,
             suppressed: self.suppressed,
             diagnostics: self.diags,
             stats: self.stats,

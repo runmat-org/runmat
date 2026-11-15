@@ -21,13 +21,12 @@ pub(super) fn layout() -> Vec<CommandDescriptor> {
             "Publish an interface, frame or value for parent assemblies.",
         )
         .inputs(vec![
-            text("name", "Name", Some("mount")),
-            pick(
-                "item",
-                "Item",
-                &[K::MateConnector, K::Region, K::Occurrence],
-            ),
+            text("name", "Name", Some("mount"))
+                .help("The name parent assemblies read it by; an existing publish's name changes that publish."),
+            pick("item", "Item", &[K::MateConnector, K::Occurrence])
+                .help("A mate connector (a frame a parent mates to) or a whole component."),
         ])
+        .on(&[K::Publish])
         .edit(edit(EditOp::Add, Section::Publishes).item("publish")),
         asm(
             "assembly.envelope",

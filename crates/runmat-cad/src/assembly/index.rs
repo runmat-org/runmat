@@ -239,6 +239,12 @@ pub struct AssemblyIndex {
     /// The top assembly's features (cuts, holes, weld beads), in the order they apply.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub operations: Vec<OperationRow>,
+    /// The top assembly's mate connectors, placed, in document order.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub connectors: Vec<crate::assembly::interface_rows::ConnectorRow>,
+    /// What the top assembly publishes, in document order.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub publishes: Vec<crate::assembly::interface_rows::PublishRow>,
 }
 
 /// One assembly feature: its type, sketch and components, whether its tool builds, and its
@@ -622,6 +628,8 @@ pub fn build_assembly_index(
             .unwrap_or_default(),
         sketches: sketch_rows(tree, top.as_deref()),
         operations: operation_rows(tree, top.as_deref()),
+        connectors: crate::assembly::interface_rows::connector_rows(tree, top.as_deref()),
+        publishes: crate::assembly::interface_rows::publish_rows(tree, top.as_deref()),
     }
 }
 

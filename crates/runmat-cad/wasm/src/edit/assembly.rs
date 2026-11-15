@@ -13,6 +13,10 @@
 //! - `assembly.replace`, `assembly.subassembly`, `assembly.new-part`: structure ([`structure`]).
 //! - `assembly.sketch` and the `sketch.*` tools: sketches in the assembly ([`sketch`]).
 //! - `assembly.feature`: a cut, holes or a weld bead through components ([`operation`]).
+//! - `assembly.mate-connector`: a named connector on a pick, and Delete on its row
+//!   ([`connector`]).
+//! - `assembly.publish`: a connector or component published by name, and Delete on its row
+//!   ([`publishes`]).
 //! - `explode.new`, `explode.step`, `explode.radial`, `explode.lines`: exploded views, their
 //!   steps and trail lines ([`explode`]).
 //!
@@ -25,6 +29,7 @@
 
 pub(crate) mod anchors;
 mod configure;
+mod connector;
 mod explode;
 pub(crate) mod frames;
 mod mate;
@@ -33,6 +38,7 @@ mod mirror;
 mod operation;
 mod path_picks;
 mod place;
+mod publishes;
 mod sketch;
 mod structure;
 mod use_edges;
@@ -40,6 +46,8 @@ mod use_edges;
 mod anchors_tests;
 #[cfg(test)]
 mod configure_tests;
+#[cfg(test)]
+mod connector_tests;
 #[cfg(test)]
 mod operation_tests;
 #[cfg(test)]
@@ -427,6 +435,16 @@ pub(super) fn edit(
             operation::delete_or_suppress(&mut document, request)?
         }
         "assembly.feature" => operation::apply(&mut document, &compiled, &request.values)?,
+        "assembly.delete" if connector::selected(request).next().is_some() => {
+            connector::delete(&mut document, request)?
+        }
+        "assembly.delete" if publishes::selected(request).next().is_some() => {
+            publishes::delete(&mut document, request)?
+        }
+        "assembly.publish" => publishes::apply(&mut document, &compiled, &request.values)?,
+        "assembly.mate-connector" => {
+            connector::apply(&mut document, &compiled, &mut publisher, &request.values)?
+        }
         "assembly.delete" | "assembly.suppress" if sketch::selected(request).next().is_some() => {
             sketch::delete_or_suppress(&mut document, request)?
         }
