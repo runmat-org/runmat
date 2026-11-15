@@ -97,6 +97,43 @@ A connector is a frame on an occurrence (or on the assembly itself) that mates j
 
 Publishing frames from the parts (`mate_connector` features) keeps an assembly's connectors on the geometry as the parts change.
 
+### The Mate connector command
+
+**Assemble > Mate connector** (`assembly.mate-connector`) writes a named connector from a pick:
+
+| Field | What it does |
+|---|---|
+| **Name** | The connector's name. Leave it empty for the next free name (`block_c1`). An existing connector's name changes that connector. |
+| **On** | A face, edge, vertex or datum of a component, or a point or line of the assembly's sketch. A face, edge or vertex is published from its part file (`publish mate_face1 = …`), the same entry a mate writes, so the connector follows that face when the part changes. When you edit a connector, leave **On** empty to keep what it stands on. |
+| **Flip Z** | Turns the connector so its Z points the other way. |
+| **Offset X**, **Offset Y**, **Offset Z** | Moves the connector along the axes of what it stands on (a face's normal is its Z), before the flip. |
+| **Rotate about Z** | Turns the connector about that Z. |
+
+The command writes, for example:
+
+```
+connector mount = { occurrence = [{ name = block }], anchor = { anchor = published, name = mate_face1 }, offset = { translation = [0 mm, 0 mm, 5 mm], rotation = { rotation = axis_angle, axis = [0, 0, 1], angle = 90 deg } }, flip = true }
+```
+
+The Outline lists the connectors under **Mate connectors**, each with its component, what it stands on and the mates that use it. A connector that doesn't resolve, for example because its part no longer publishes the face, shows an error with the reason. The view draws each connector as three axes where the solve left it. To edit a connector, right-click its row and choose **Mate connector**; the form starts from its values. **Delete** removes a connector unless a mate or a `publish` uses it; delete those first. Mates take a connector as a pick (`connector:<name>`).
+
+### Publishing from an assembly
+
+An assembly publishes frames for the assemblies that use it, as a part does. A parent mates to a published name with `{ anchor = published, name = <name> }` on a connector of the sub-assembly occurrence, so the parent keeps working when the sub-assembly's insides change.
+
+```
+publish mount = { target = { publishes = connector, connector = flange_c1 } }
+publish body = { target = { publishes = occurrence, path = [{ name = housing }] } }
+```
+
+| `publishes` | Names | A parent reads it as |
+|---|---|---|
+| `connector` | one of the assembly's connectors | that connector's frame |
+| `occurrence` | a component, by its path | the component's frame |
+| `envelope` | one of the assembly's envelopes | a reserved space (not a frame) |
+
+**Layout > Publish** (`assembly.publish`) writes a publish from a pick: **Name**, and **Item**, a mate connector (from the Outline's Mate connectors) or a whole component. An existing publish's name changes that publish. To publish a face, add a mate connector on it first, then publish the connector. The Outline lists the publishes under **Published**, each with what it names; one whose connector or component is gone shows an error. **Delete** on a publish row removes it. Interface check (**Layout > Interface check**) also checks every publish.
+
 ### Seating a part on a curved body
 
 A part that mounts to a curved surface, such as a clamp foot on a lofted lower shell, needs a connector at a point on that surface. Work in three steps.

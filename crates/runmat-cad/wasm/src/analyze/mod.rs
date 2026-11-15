@@ -37,7 +37,12 @@
 //!   ([`crate::parents`]).
 //!
 //! The assembly Evaluate tab's `assembly.mass-properties`, `assembly.interference` and
-//! `assembly.clearance` run the same checks.
+//! `assembly.clearance` run the same checks. On assemblies only:
+//!
+//! - `assembly.interface-check`: each mate's connectors, attachments and publishes against what
+//!   the definitions publish now ([`interfaces`]).
+//! - `assembly.hole-alignment`, `assembly.hole-check`: holes in different parts that meet and
+//!   whether they line up; the check adds each fastener's hole fit and grip ([`holes`]).
 //!
 //! `values.configuration` names the active configuration. Rows name occurrences by path in
 //! `items`, so selecting a row selects them.
@@ -48,6 +53,8 @@ mod curvature;
 mod deviation;
 mod dfm;
 mod field;
+mod holes;
+mod interfaces;
 mod section_properties;
 mod sketch_check;
 mod thickness;
@@ -770,6 +777,17 @@ pub fn analyze(
             &request.selection,
         ),
         "view.measure" => crate::measure::measure(path, text, files, &request.values),
+        "assembly.interface-check" if assembly => {
+            interfaces::interface_check(path, text, files, configuration, &request.values)
+        }
+        "assembly.hole-alignment" | "assembly.hole-check" if assembly => holes::hole_check(
+            path,
+            text,
+            files,
+            configuration,
+            &request.values,
+            request.command == "assembly.hole-check",
+        ),
         "part.parents-children" | "part.show-references" if !assembly => {
             crate::parents::parents_children(path, text, &request.selection)
         }
@@ -800,3 +818,6 @@ pub fn analyze_json(path: &str, text: &str, files: &Files, request: &str) -> Str
 
 #[cfg(test)]
 pub(crate) mod tests;
+
+#[cfg(test)]
+mod fit_tests;

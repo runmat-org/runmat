@@ -100,10 +100,10 @@ pub(super) fn manage() -> Vec<CommandDescriptor> {
             "assembly.suppress",
             "Suppress",
             "suppress",
-            "Leave components out of this configuration, or turn a sketch off.",
+            "Leave components out of this configuration, or turn a sketch or assembly feature off.",
         )
-        .when(selected(&[K::Occurrence, K::Mate, K::Sketch]))
-        .on(&[K::Occurrence, K::Mate, K::Sketch])
+        .when(selected(&[K::Occurrence, K::Mate, K::Sketch, K::Feature]))
+        .on(&[K::Occurrence, K::Mate, K::Sketch, K::Feature])
         .edit(edit(EditOp::Suppress, Section::Occurrences)),
         asm(
             "assembly.pack-and-share",
@@ -132,10 +132,28 @@ pub(super) fn manage() -> Vec<CommandDescriptor> {
             "assembly.delete",
             "Delete",
             "delete",
-            "Delete components, mates, sketches or sketch curves.",
+            "Delete components, mates, mate connectors, publishes, sketches, assembly features or sketch curves.",
         )
-        .when(selected(&[K::Occurrence, K::Mate, K::Sketch, K::SketchEntity, K::SketchPoint]))
-        .on(&[K::Occurrence, K::Mate, K::Sketch, K::SketchEntity, K::SketchPoint])
+        .when(selected(&[
+            K::Occurrence,
+            K::Mate,
+            K::MateConnector,
+            K::Publish,
+            K::Sketch,
+            K::Feature,
+            K::SketchEntity,
+            K::SketchPoint,
+        ]))
+        .on(&[
+            K::Occurrence,
+            K::Mate,
+            K::MateConnector,
+            K::Publish,
+            K::Sketch,
+            K::Feature,
+            K::SketchEntity,
+            K::SketchPoint,
+        ])
         .edit(edit(EditOp::Remove, Section::Occurrences)),
         asm(
             "assembly.edit-mate",

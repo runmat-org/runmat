@@ -236,6 +236,145 @@ pub struct AssemblyIndex {
     /// The top assembly's sketches, in document order, for the Outline.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub sketches: Vec<SketchRow>,
+    /// The top assembly's features (cuts, holes, weld beads), in the order they apply.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub operations: Vec<OperationRow>,
+    /// The top assembly's mate connectors, placed, in document order.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub connectors: Vec<crate::assembly::interface_rows::ConnectorRow>,
+    /// What the top assembly publishes, in document order.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub publishes: Vec<crate::assembly::interface_rows::PublishRow>,
+}
+
+/// One assembly feature: its type, sketch and components, whether its tool builds, and its
+/// values as the Assembly feature form takes them (`values`, which editing it starts from).
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct OperationRow {
+    pub name: String,
+    /// `cut`, `hole` or `weld`.
+    pub kind: String,
+    pub sketch: String,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub components: Vec<String>,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub suppressed: bool,
+    /// Why its tool doesn't build (a missing sketch, an open profile), if it doesn't.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub problem: Option<String>,
+    pub values: serde_json::Map<String, serde_json::Value>,
+}
+
+/// The Assembly feature form's values for `op`: `type`, `profile` (the sketch's Outline id),
+/// `end` (`blind`, `symmetric`, `through_all`, `through_all_both`), `distance`, `reverse`,
+/// a hole's `diameter`, `size`, `hole_type` (`simple`, `counterbore`, `countersink`) with
+/// `cbore_diameter`/`cbore_depth` or `csk_diameter`/`csk_angle`, a weld's `weld_size` and `flip`,
+/// and `components` (component names). Values are value edits, as [`mate_form_values`] writes.
+pub fn operation_form_values(
+    op: &crate::assembly::operations::AssemblyOperation,
+) -> serde_json::Map<String, serde_json::Value> {
+    use crate::assembly::operations::OperationKind;
+    use crate::model::feature::Extent;
+    use serde_json::{json, Value};
+    let edit = |e: &crate::value::ValueExpr| -> Value {
+        let text = crate::syntax::value::print_value(e).unwrap_or_default();
+        json!({ "kind": "value", "value": e, "text": text, "scope": { "scope": "all" } })
+    };
+    let mut out = serde_json::Map::new();
+    out.insert("name".into(), json!(op.name));
+    out.insert("type".into(), json!(op.op.word()));
+    out.insert("profile".into(), json!(format!("feature:{}", op.op.sketch())));
+    let extent = |out: &mut serde_json::Map<String, Value>, e: &Extent, both: bool| match e {
+        Extent::Blind { distance } => {
+            out.insert("end".into(), json!("blind"));
+            out.insert("distance".into(), edit(distance));
+        }
+        Extent::Symmetric { distance } => {
+            out.insert("end".into(), json!("symmetric"));
+            out.insert("distance".into(), edit(distance));
+        }
+        _ => {
+            out.insert(
+                "end".into(),
+                json!(if both { "through_all_both" } else { "through_all" }),
+            );
+        }
+    };
+    match &op.op {
+        OperationKind::Cut {
+            extent: e,
+            reverse,
+            both,
+            ..
+        } => {
+            extent(&mut out, e, *both);
+            out.insert("reverse".into(), json!(reverse));
+        }
+        OperationKind::Hole {
+            diameter,
+            extent: e,
+            reverse,
+            size,
+            counterbore,
+            countersink,
+            ..
+        } => {
+            extent(&mut out, e, false);
+            out.insert("reverse".into(), json!(reverse));
+            out.insert("diameter".into(), edit(diameter));
+            if let Some(size) = size {
+                out.insert("size".into(), json!(size));
+            }
+            let kind = match (counterbore, countersink) {
+                (Some(c), _) => {
+                    out.insert("cbore_diameter".into(), edit(&c.diameter));
+                    out.insert("cbore_depth".into(), edit(&c.depth));
+                    "counterbore"
+                }
+                (None, Some(c)) => {
+                    out.insert("csk_diameter".into(), edit(&c.diameter));
+                    out.insert("csk_angle".into(), edit(&c.angle));
+                    "countersink"
+                }
+                (None, None) => "simple",
+            };
+            out.insert("hole_type".into(), json!(kind));
+        }
+        OperationKind::Weld { size, flip, .. } => {
+            out.insert("weld_size".into(), edit(size));
+            out.insert("flip".into(), json!(flip));
+        }
+    }
+    out.insert("components".into(), json!(op.components));
+    out
+}
+
+fn operation_rows(
+    tree: &ResolvedAssembly,
+    doc: Option<&crate::assembly::AssemblyDocument>,
+) -> Vec<OperationRow> {
+    let Some(doc) = doc else { return Vec::new() };
+    doc.operations
+        .iter()
+        .map(|op| {
+            let problem = match tree.sketch(op.op.sketch()) {
+                None => Some(format!(
+                    "the sketch `{}` is missing or didn't solve",
+                    op.op.sketch()
+                )),
+                Some(sketch) => crate::assembly::operations::tool(&op.op, sketch).err(),
+            };
+            OperationRow {
+                name: op.name.clone(),
+                kind: op.op.word().into(),
+                sketch: op.op.sketch().into(),
+                components: op.components.clone(),
+                suppressed: op.suppressed,
+                problem: if op.suppressed { None } else { problem },
+                values: operation_form_values(op),
+            }
+        })
+        .collect()
 }
 
 /// One sketch of the assembly: where it sits and how it solved.
@@ -488,6 +627,9 @@ pub fn build_assembly_index(
             .map(|doc| doc.views.clone())
             .unwrap_or_default(),
         sketches: sketch_rows(tree, top.as_deref()),
+        operations: operation_rows(tree, top.as_deref()),
+        connectors: crate::assembly::interface_rows::connector_rows(tree, top.as_deref()),
+        publishes: crate::assembly::interface_rows::publish_rows(tree, top.as_deref()),
     }
 }
 

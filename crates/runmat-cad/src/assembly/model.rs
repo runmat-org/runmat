@@ -871,6 +871,10 @@ pub struct AssemblyDocument {
     /// ([`crate::assembly::sketches`]).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub features: Vec<crate::model::Feature>,
+    /// Assembly features: cuts, holes and weld beads through the components
+    /// ([`crate::assembly::operations`]), applied in this order after the sketches.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub operations: Vec<crate::assembly::operations::AssemblyOperation>,
     #[serde(default)]
     pub patterns: Vec<OccurrencePattern>,
     #[serde(default)]
@@ -911,6 +915,7 @@ impl AssemblyDocument {
             connectors: Vec::new(),
             mates: Vec::new(),
             features: Vec::new(),
+            operations: Vec::new(),
             patterns: Vec::new(),
             mirrors: Vec::new(),
             fasteners: Vec::new(),

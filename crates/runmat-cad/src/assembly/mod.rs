@@ -13,7 +13,8 @@
 //! - [`explode`]: named exploded states (ordered and radial steps, explode lines with jogs).
 //! - [`sketches`]: sketches in the assembly, on its origin planes or its connectors.
 //! - [`interference`]: interference and clearance requests through the kernel seam.
-//! - [`index`]: the assembly JSON index and summary cards.
+//! - [`index`]: the assembly JSON index and summary cards; [`interface_rows`]: its mate
+//!   connectors, placed, and its publishes.
 //! - [`synth`]: synthetic aircraft-scale fixtures for the scale gate.
 
 pub mod bom;
@@ -22,8 +23,10 @@ pub mod fasteners;
 pub mod index;
 pub mod interference;
 mod cam;
+pub mod interface_rows;
 mod mates;
 pub mod model;
+pub mod operations;
 pub mod options;
 mod place;
 pub mod polyline_frame;

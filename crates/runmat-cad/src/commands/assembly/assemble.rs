@@ -134,11 +134,24 @@ pub(super) fn assemble(conn: &[SelectKind]) -> Vec<CommandDescriptor> {
             "Add a frame on a component to mate to.",
         )
         .inputs(vec![
-            text("name", "Name", Some("pin")),
-            pick("on", "On", &[K::Face, K::Edge, K::Vertex]),
-            flag("flip", "Flip", false),
+            text("name", "Name", None)
+                .optional()
+                .help("Leave empty for the next free name; an existing connector's name changes that connector."),
+            pick(
+                "on",
+                "On",
+                &[K::Face, K::Edge, K::Vertex, K::Plane, K::Axis, K::Point, K::CoordinateSystem, K::SketchPoint, K::SketchEntity],
+            )
+            .optional()
+            .help("A face, edge, vertex or datum of a component, or a point or line of the assembly's sketch. Editing a connector keeps what it stands on when this is empty."),
+            flag("flip", "Flip Z", false),
+            length("x", "Offset X", 0.0).optional(),
+            length("y", "Offset Y", 0.0).optional(),
+            length("z", "Offset Z", 0.0).optional(),
+            qty("angle", "Rotate about Z", "angle", Some(0.0)).optional(),
         ])
         .when(occurrences())
+        .on(&[K::MateConnector])
         .edit(edit(EditOp::Add, Section::Mates).item("connector")),
         asm(
             "assembly.smart-mate",

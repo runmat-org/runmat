@@ -21,13 +21,12 @@ pub(super) fn layout() -> Vec<CommandDescriptor> {
             "Publish an interface, frame or value for parent assemblies.",
         )
         .inputs(vec![
-            text("name", "Name", Some("mount")),
-            pick(
-                "item",
-                "Item",
-                &[K::MateConnector, K::Region, K::Occurrence],
-            ),
+            text("name", "Name", Some("mount"))
+                .help("The name parent assemblies read it by; an existing publish's name changes that publish."),
+            pick("item", "Item", &[K::MateConnector, K::Occurrence])
+                .help("A mate connector (a frame a parent mates to) or a whole component."),
         ])
+        .on(&[K::Publish])
         .edit(edit(EditOp::Add, Section::Publishes).item("publish")),
         asm(
             "assembly.envelope",
@@ -46,8 +45,11 @@ pub(super) fn layout() -> Vec<CommandDescriptor> {
             "check",
             "Check that mated interfaces still match their published definitions.",
         )
+        .inputs(vec![length("tolerance", "Tolerance", 0.01).help(
+            "A pinned interface that moved further than this in its file's working copy is listed.",
+        )])
         .when(has(Facet::Mates))
-        .edit(check("interfaces")),
+        .edit(analyze("interfaces")),
         asm(
             "assembly.feature",
             "Assembly feature",
@@ -55,6 +57,9 @@ pub(super) fn layout() -> Vec<CommandDescriptor> {
             "Cut, drill across parts or add a weld bead at the assembly level.",
         )
         .inputs(vec![
+            text("name", "Name", Some("cut1"))
+                .optional()
+                .help("Leave empty for the next free name; an existing feature's name changes that feature."),
             choice(
                 "type",
                 "Feature",
@@ -64,8 +69,59 @@ pub(super) fn layout() -> Vec<CommandDescriptor> {
                     ("weld", "Weld bead"),
                 ],
             ),
-            pick("profile", "Sketch", &[K::Sketch]).shown("type", &["cut"]),
-            picks("components", "Affects", &[K::Occurrence]),
+            pick("profile", "Sketch", &[K::Sketch, K::SketchEntity, K::SketchPoint])
+                .help("A cut uses the sketch's closed profile; a hole goes at each point and circle center; a weld bead follows its lines and arcs."),
+            choice(
+                "end",
+                "End",
+                &[
+                    ("through_all", "Through all"),
+                    ("through_all_both", "Through all, both directions"),
+                    ("blind", "Blind"),
+                    ("symmetric", "Mid-plane"),
+                ],
+            )
+            .shown("type", &["cut", "hole"]),
+            length("distance", "Depth", 10.0).shown("end", &["blind", "symmetric"]),
+            flag("reverse", "Flip direction", false).shown("type", &["cut", "hole"]),
+            choice(
+                "hole_type",
+                "Hole type",
+                &[
+                    ("simple", "Simple"),
+                    ("counterbore", "Counterbore"),
+                    ("countersink", "Countersink"),
+                ],
+            )
+            .shown("type", &["hole"]),
+            text("size", "Fastener size", Some("M6")).optional().shown("type", &["hole"]),
+            choice(
+                "fit",
+                "Fit",
+                &[("normal", "Normal"), ("close", "Close"), ("loose", "Loose")],
+            )
+            .shown("type", &["hole"]),
+            qty("diameter", "Diameter", "length", None)
+                .optional()
+                .help("Leave empty for the fastener size's clearance diameter.")
+                .shown("type", &["hole"]),
+            qty("cbore_diameter", "Counterbore diameter", "length", None)
+                .optional()
+                .shown("hole_type", &["counterbore"]),
+            qty("cbore_depth", "Counterbore depth", "length", None)
+                .optional()
+                .shown("hole_type", &["counterbore"]),
+            qty("csk_diameter", "Countersink diameter", "length", None)
+                .optional()
+                .shown("hole_type", &["countersink"]),
+            qty("csk_angle", "Countersink angle", "angle", Some(90.0))
+                .optional()
+                .shown("hole_type", &["countersink"]),
+            length("weld_size", "Bead size", 5.0).shown("type", &["weld"]),
+            flag("flip", "Other side of the path", false).shown("type", &["weld"]),
+            picks("components", "Affects", &[K::Occurrence])
+                .optional()
+                .help("Leave empty to affect every component the feature meets."),
         ])
         .when(occurrences())
         .preview()
@@ -131,8 +187,15 @@ pub(super) fn layout() -> Vec<CommandDescriptor> {
             "check",
             "Check hole alignment, fastener length and grip.",
         )
+        .inputs(vec![
+            length("tolerance", "Tolerance", 0.1)
+                .help("Holes and fasteners further off their axes than this are listed."),
+            picks("components", "Components", &[K::Occurrence])
+                .optional()
+                .help("Leave empty to check every part."),
+        ])
         .when(occurrences())
-        .edit(check("fasteners")),
+        .edit(analyze("fasteners")),
         // Motion.
         asm(
             "motion.drag",
