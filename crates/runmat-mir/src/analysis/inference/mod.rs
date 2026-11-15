@@ -1,5 +1,6 @@
 mod call;
 mod contract;
+mod index_bounds;
 mod legacy_builtin;
 mod mutation;
 mod operator;
@@ -10,6 +11,10 @@ pub(crate) use call::{infer_mir_call, ContextualOutputs, FunctionSummary};
 pub(crate) use contract::{
     apply_rvalue_contract, conservative_rvalue_contract, rvalue_operation_contract,
     statement_contract, statement_contract_with_facts, statement_phase_contract,
+};
+pub(crate) use index_bounds::{
+    index_selectors, join_index_bounds, literal_index_bounds, literal_index_position,
+    rvalue_index_bounds,
 };
 pub(crate) use legacy_builtin::infer_legacy_builtin;
 pub(crate) use mutation::assign_place;

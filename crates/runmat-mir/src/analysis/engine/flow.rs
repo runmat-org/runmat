@@ -15,7 +15,8 @@ use super::state::FlowState;
 use crate::analysis::inference::FunctionSummary;
 use crate::analysis::inference::{
     append_inference_diagnostics, apply_rvalue_contract, assign_place, infer_expansion_sequence,
-    infer_rvalue, infer_rvalue_outputs, operand_fact, rvalue_literal, statement_phase_contract,
+    infer_rvalue, infer_rvalue_outputs, operand_fact, rvalue_index_bounds, rvalue_literal,
+    statement_phase_contract,
 };
 use crate::analysis::workspace_effect::statement_exposes_current_workspace;
 use crate::analysis::{AssignmentFact, ProgramLocalFact, ProgramPointFacts};
@@ -341,10 +342,12 @@ fn transfer_statement(
                     let assigned =
                         infer_rvalue(&value, state, summaries, statement.span, diagnostics);
                     let literal = rvalue_literal(&value, state);
+                    let bounds = rvalue_index_bounds(&value, state);
                     assign_place(
                         &crate::MirPlace::Local(*local),
                         assigned,
                         literal,
+                        bounds,
                         None,
                         state,
                     );
@@ -377,6 +380,7 @@ fn transfer_statement(
             transfer_short_circuit_temps(value, state, summaries, diagnostics);
             let assigned = infer_rvalue(value, state, summaries, statement.span, diagnostics);
             let literal = rvalue_literal(value, state);
+            let bounds = rvalue_index_bounds(value, state);
             apply_rvalue_contract(value, state, summaries);
             if statement_exposes_current_workspace(&statement.kind) {
                 state.invalidate_current_workspace_bindings();
@@ -398,6 +402,7 @@ fn transfer_statement(
                 &preparation.mutation.place,
                 assigned,
                 literal,
+                bounds,
                 Some(&preparation.mutation),
                 state,
             );
@@ -407,6 +412,7 @@ fn transfer_statement(
             transfer_short_circuit_temps(value, state, summaries, diagnostics);
             let assigned = infer_rvalue(value, state, summaries, statement.span, diagnostics);
             let literal = rvalue_literal(value, state);
+            let bounds = rvalue_index_bounds(value, state);
             apply_rvalue_contract(value, state, summaries);
             if statement_exposes_current_workspace(&statement.kind) {
                 state.invalidate_current_workspace_bindings();
@@ -415,6 +421,7 @@ fn transfer_statement(
                 place,
                 assigned,
                 literal,
+                bounds,
                 pending_mutation.take().as_ref(),
                 state,
             );
@@ -439,6 +446,7 @@ fn transfer_statement(
                         place,
                         outputs.get(index).cloned().unwrap_or_else(dynamic_value),
                         LiteralValue::Unknown,
+                        None,
                         pending_mutation.take().as_ref(),
                         state,
                     ),
@@ -626,7 +634,14 @@ fn edge_states(
                 .0
                 .insert(CapabilityRequirement::ParallelRuntime);
             if let Some(place) = result {
-                assign_place(place, output, LiteralValue::Unknown, None, &mut resumed);
+                assign_place(
+                    place,
+                    output,
+                    LiteralValue::Unknown,
+                    None,
+                    None,
+                    &mut resumed,
+                );
             }
             vec![(*resume, resumed)]
         }
@@ -644,15 +659,18 @@ fn loop_edges(
     parallel: bool,
 ) -> Vec<(BasicBlockId, FlowState)> {
     let mut body = state.clone();
-    let iterable = infer_rvalue(
+    let inferred = infer_rvalue(
         iterable,
         &mut body,
         summaries,
         Span::default(),
         &mut Vec::new(),
     );
-    let element = iteration_element(&iterable);
+    let bounds = rvalue_index_bounds(iterable, &body);
+    let scalar_elements = parallel || matches!(iterable, MirRvalue::Range { .. });
+    let element = iteration_element(&inferred, scalar_elements);
     body.locals[binding.0].set(element, LiteralValue::Unknown);
+    body.locals[binding.0].index_bounds = bounds;
     if parallel {
         body.capabilities
             .0
@@ -661,7 +679,19 @@ fn loop_edges(
     vec![(body_block, body), (exit_block, state.clone())]
 }
 
-fn iteration_element(iterable: &ValueFact) -> ValueFact {
+fn iteration_element(iterable: &ValueFact, scalar_elements: bool) -> ValueFact {
+    if !scalar_elements {
+        return runmat_types::infer_index(
+            iterable,
+            runmat_types::IndexKind::Paren,
+            &[
+                runmat_types::IndexSelectorFact::Colon,
+                runmat_types::IndexSelectorFact::Scalar,
+            ],
+            runmat_types::IndexResultContext::ReadSingle,
+        )
+        .fact;
+    }
     let mut fact = iterable.clone();
     fact.shape = runmat_types::ShapeFact::Scalar;
     fact.storage = runmat_types::StorageFact::Scalar;
