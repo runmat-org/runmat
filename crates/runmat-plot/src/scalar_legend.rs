@@ -2,6 +2,57 @@
 //! draws the legend and the poster renderers that keep the result clear of it share this one
 //! layout.
 
+use crate::geometry_scene::{GeometrySceneScalarLegend, ScalarRangeSource};
+
+impl GeometrySceneScalarLegend {
+    /// A legend from `minimum` to `maximum` of the field's extremes, with no limit or note.
+    pub fn of_data(label: String, unit: String, minimum: f64, maximum: f64) -> Self {
+        Self {
+            label,
+            unit,
+            minimum,
+            maximum,
+            limit: None,
+            note: None,
+            range_source: ScalarRangeSource::Data,
+            below: None,
+            above: None,
+            precision: None,
+        }
+    }
+
+    /// How the legend's numbers are written: the study's significant digits, else the
+    /// precision its range needs.
+    pub fn number_precision(&self) -> crate::legend_text::LegendPrecision {
+        use crate::legend_text::LegendPrecision;
+        match self.precision {
+            Some(digits) => LegendPrecision::significant(self.minimum, self.maximum, digits),
+            None => LegendPrecision::for_range(self.minimum, self.maximum),
+        }
+    }
+
+    /// The overflow lines of a fixed range the field leaves (the highest first), such as
+    /// "▲ 14.2 MPa above the range".
+    pub fn overflow_lines(&self) -> Vec<String> {
+        let precision = self.number_precision();
+        [(self.above, true), (self.below, false)]
+            .into_iter()
+            .filter_map(|(value, above)| {
+                value.map(|value| {
+                    crate::legend_text::overflow_line(value, &self.unit, above, precision)
+                })
+            })
+            .collect()
+    }
+
+    /// Text lines under the range: one per overflow and one for the note.
+    pub fn note_lines(&self) -> usize {
+        usize::from(self.above.is_some())
+            + usize::from(self.below.is_some())
+            + usize::from(self.note.is_some())
+    }
+}
+
 /// Size of the legend's label and range values, in points, before the overlay's font scale.
 pub const LABEL_POINTS: f32 = 11.0;
 
@@ -22,15 +73,22 @@ pub struct ScalarLegendPanel {
     pub bar_height: f32,
     /// Size of the label and of the range values.
     pub label_points: f32,
-    /// Height of the note line under the range, when the legend has a note.
+    /// Height of the text lines under the range: the overflow lines of a fixed range and the
+    /// note, each one line.
     pub note_height: f32,
 }
 
 impl ScalarLegendPanel {
-    /// The panel for a plot `plot_width` points wide drawn at `font_scale`.
-    pub fn for_plot(plot_width: f32, font_scale: f32, has_note: bool) -> Self {
+    /// One text line under the range, in points before the font scale.
+    pub const LINE_POINTS: f32 = 16.0;
+
+    /// The panel for a plot `plot_width` points wide drawn at `font_scale`, with `note_lines`
+    /// text lines under the range ([`GeometrySceneScalarLegend::note_lines`]).
+    ///
+    /// [`GeometrySceneScalarLegend::note_lines`]: GeometrySceneScalarLegend::note_lines
+    pub fn for_plot(plot_width: f32, font_scale: f32, note_lines: usize) -> Self {
         let scale = font_scale.max(0.75);
-        let note_height = if has_note { 16.0 * scale } else { 0.0 };
+        let note_height = Self::LINE_POINTS * scale * note_lines as f32;
         Self {
             pad: 12.0 * scale,
             width: (plot_width * 0.34).clamp(190.0, 300.0),
@@ -57,17 +115,17 @@ pub struct LegendFootprint {
 }
 
 /// The legend's footprint in an exported `width_px` × `height_px` image drawn at
-/// `pixels_per_point`.
+/// `pixels_per_point`, with `note_lines` text lines under the range.
 pub fn exported_footprint(
     width_px: u32,
     height_px: u32,
     pixels_per_point: f32,
-    has_note: bool,
+    note_lines: usize,
 ) -> LegendFootprint {
     // The exporter lays its overlay out in points of this size.
     let ppp = pixels_per_point.max(0.5);
     let (width, height) = (width_px.max(1) as f32, height_px.max(1) as f32);
-    let panel = ScalarLegendPanel::for_plot(width / ppp, EXPORT_FONT_SCALE, has_note);
+    let panel = ScalarLegendPanel::for_plot(width / ppp, EXPORT_FONT_SCALE, note_lines);
     LegendFootprint {
         label_px: panel.label_points * ppp,
         width_share: ((panel.pad + panel.width + panel.halo) * ppp / width).min(1.0),
@@ -87,15 +145,18 @@ mod tests {
     #[test]
     fn the_footprint_follows_the_pixels_per_point() {
         let ppp = export_pixels_per_point_for_label(18.75);
-        let footprint = exported_footprint(1200, 750, ppp, false);
+        let footprint = exported_footprint(1200, 750, ppp, 0);
         assert!((footprint.label_px - 18.75).abs() < 1e-4);
         // A 1200 px poster at that density is 880 points wide: the panel is at its widest.
-        let panel = ScalarLegendPanel::for_plot(1200.0 / ppp, EXPORT_FONT_SCALE, false);
+        let panel = ScalarLegendPanel::for_plot(1200.0 / ppp, EXPORT_FONT_SCALE, 0);
         assert_eq!(panel.width, 0.34 * 1200.0 / ppp);
         assert!(footprint.width_share > 0.3 && footprint.width_share < 0.45);
         assert!(footprint.height_share > 0.1 && footprint.height_share < 0.25);
-        let noted = exported_footprint(1200, 750, ppp, true);
+        let noted = exported_footprint(1200, 750, ppp, 1);
         assert!(noted.height_share > footprint.height_share);
         assert_eq!(noted.width_share, footprint.width_share);
+        // A fixed range that the result leaves on both sides adds two lines above the note.
+        let overflowing = exported_footprint(1200, 750, ppp, 3);
+        assert!(overflowing.height_share > noted.height_share);
     }
 }

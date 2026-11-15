@@ -5,7 +5,7 @@
 
 use crate::core::{plot_utils, PlotRenderer};
 use crate::geometry_scene::GeometrySceneScalarLegend;
-use crate::legend_text::{with_unit, LegendPrecision};
+use crate::legend_text::with_unit;
 use crate::overlay::cad_overlay::{CadOverlayActions, CadOverlayRenderInput, CadOverlayState};
 use crate::plots::TextStyle;
 use crate::styling::{ModernDarkTheme, PlotThemeConfig, ThemeVariant};
@@ -3282,7 +3282,7 @@ impl PlotOverlay {
         let panel = crate::scalar_legend::ScalarLegendPanel::for_plot(
             plot_rect.width(),
             scale,
-            legend.note.is_some(),
+            legend.note_lines(),
         );
         let scale = scale.max(0.75);
         let bar_height = panel.bar_height;
@@ -3358,7 +3358,7 @@ impl PlotOverlay {
                 color,
             );
         }
-        let precision = LegendPrecision::for_range(legend.minimum, legend.maximum);
+        let precision = legend.number_precision();
         ui.painter().text(
             bar_rect.left_bottom() + egui::vec2(0.0, 3.0 * scale),
             Align2::LEFT_TOP,
@@ -3387,14 +3387,50 @@ impl PlotOverlay {
                 Stroke::new(2.0 * scale, text_color),
             );
         }
+        // Lines under the range, bottom up: the note, then a fixed range's overflow lines, each
+        // led by a triangle in the end colour the overflowing values take.
+        let line = crate::scalar_legend::ScalarLegendPanel::LINE_POINTS * scale;
+        let mut bottom = rect.max.y;
         if let Some(note) = &legend.note {
             ui.painter().text(
-                rect.right_bottom(),
+                egui::pos2(rect.max.x, bottom),
                 Align2::RIGHT_BOTTOM,
                 note,
-                detail_font,
+                detail_font.clone(),
                 text_color,
             );
+            bottom -= line;
+        }
+        let overflows = [(legend.below, false), (legend.above, true)];
+        for (value, above) in overflows {
+            let Some(value) = value else {
+                continue;
+            };
+            let text = crate::legend_text::overflow_line(value, &legend.unit, above, precision);
+            let drawn = ui.painter().text(
+                egui::pos2(rect.max.x, bottom),
+                Align2::RIGHT_BOTTOM,
+                text,
+                detail_font.clone(),
+                text_color,
+            );
+            let size = 0.6 * panel.label_points;
+            let center = egui::pos2(drawn.min.x - 0.8 * size, drawn.center().y);
+            let (tip, base) = if above {
+                (-0.5 * size, 0.5 * size)
+            } else {
+                (0.5 * size, -0.5 * size)
+            };
+            ui.painter().add(egui::Shape::convex_polygon(
+                vec![
+                    center + egui::vec2(0.0, tip),
+                    center + egui::vec2(0.5 * size, base),
+                    center + egui::vec2(-0.5 * size, base),
+                ],
+                if above { stops[4] } else { stops[0] },
+                Stroke::new(1.0, text_color),
+            ));
+            bottom -= line;
         }
     }
 

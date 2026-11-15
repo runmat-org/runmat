@@ -290,7 +290,9 @@ fn cube_by_face() -> GeometryScene {
         .collect::<Vec<_>>();
     // The edge chunks belong to the same body: a cap reads only its surface triangles.
     assert_eq!(chunks.len(), 12);
-    assert!(chunks.iter().all(|chunk| chunk.mesh_id.as_deref() == Some("mesh_1")));
+    assert!(chunks
+        .iter()
+        .all(|chunk| chunk.mesh_id.as_deref() == Some("mesh_1")));
     GeometryScene::new("cube-by-face", 1, chunks)
 }
 
@@ -335,7 +337,11 @@ fn a_body_drawn_one_face_per_chunk_is_capped_across_its_chunks_in_the_body_color
     let colors = |caps: &[RenderData]| caps[0].vertices.iter().map(|v| v.color).collect::<Vec<_>>();
     assert_eq!(colors(&cap_nodes(&tinted)), colors(&caps));
     // Open, or with no section, there is no cap.
-    assert!(cap_nodes(&GeometryScenePresentation { section: section(false), ..Default::default() }).is_empty());
+    assert!(cap_nodes(&GeometryScenePresentation {
+        section: section(false),
+        ..Default::default()
+    })
+    .is_empty());
     assert!(cap_nodes(&GeometryScenePresentation::default()).is_empty());
 }
 

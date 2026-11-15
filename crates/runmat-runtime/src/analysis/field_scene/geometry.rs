@@ -63,11 +63,11 @@ pub(super) fn scene_from_topology_with_stats(
     };
     let mut minimum = stats
         .as_ref()
-        .and_then(|stats| stats.scalar_range)
+        .and_then(|stats| stats.scale.extremes)
         .map_or(f64::INFINITY, |range| range.0);
     let mut maximum = stats
         .as_ref()
-        .and_then(|stats| stats.scalar_range)
+        .and_then(|stats| stats.scale.extremes)
         .map_or(f64::NEG_INFINITY, |range| range.1);
     let mut sample_count = 0_usize;
     if let Some(field) = field {
@@ -99,6 +99,9 @@ pub(super) fn scene_from_topology_with_stats(
             ));
         }
     }
+    // A study's fixed range colours the field and clips; otherwise the extremes do.
+    let fixed = stats.as_ref().and_then(|stats| stats.scale.fixed);
+    let (extremes, (minimum, maximum)) = ((minimum, maximum), fixed.unwrap_or((minimum, maximum)));
     let mut chunks = Vec::new();
     let mut vertex_count = 0usize;
     let mut triangle_count = 0usize;
@@ -203,19 +206,23 @@ pub(super) fn scene_from_topology_with_stats(
         vertex_count,
         triangle_count,
         progress_percent: None,
-        scalar_legend: field.map(|field| GeometrySceneScalarLegend {
-            label: if element_stride > 1 {
-                format!("{} mean magnitude", field.label)
-            } else if field.components > 1 {
-                format!("{} magnitude", field.label)
-            } else {
-                field.label.clone()
-            },
-            unit: field.unit.clone(),
-            minimum,
-            maximum,
-            limit: None,
-            note: None,
+        scalar_legend: field.map(|field| {
+            let mut legend = GeometrySceneScalarLegend::of_data(
+                if element_stride > 1 {
+                    format!("{} mean magnitude", field.label)
+                } else if field.components > 1 {
+                    format!("{} magnitude", field.label)
+                } else {
+                    field.label.clone()
+                },
+                field.unit.clone(),
+                minimum,
+                maximum,
+            );
+            if fixed.is_some() {
+                super::legend::mark_fixed_range(&mut legend, extremes);
+            }
+            legend
         }),
         region_count: 0,
         mapped_region_count: 0,

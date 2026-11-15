@@ -798,6 +798,14 @@ export interface AuthoredOutput {
   policy: AuthoredOutputPolicy;
 }
 
+export interface AuthoredOutputDisplay {
+  output_id: string;
+  unit?: string;
+  unit_source: DisplayUnitSource;
+  range?: DisplayRange;
+  precision?: WireU8;
+}
+
 export type AuthoredOutputExpression = {
   step_id: string;
   quantity: ObservationQuantity;
@@ -1032,6 +1040,7 @@ export interface AuthoredStudy {
   inputs: AuthoredInputDefinition[];
   outputs: AuthoredOutput[];
   assessments?: AuthoredAssessment[];
+  displays?: AuthoredOutputDisplay[];
   sequence: AnalysisSequence;
 }
 
@@ -1416,6 +1425,15 @@ export type DirectionalCombination = "srss"
 export interface Displacement {
   meters: number;
 }
+
+export interface DisplayRange {
+  minimum: number;
+  maximum: number;
+}
+
+export type DisplayUnitSource = "display"
+  | "study"
+  | "si";
 
 export interface DynamicDimension {
   dimension: PhysicalDimension;

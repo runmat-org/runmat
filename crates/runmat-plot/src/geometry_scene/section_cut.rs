@@ -78,7 +78,10 @@ impl super::GeometryScene {
     pub(super) fn section_cap_nodes(
         &self,
         presentation: &super::GeometryScenePresentation,
-        cap_sources: &std::collections::BTreeMap<Option<String>, (crate::core::Material, Vec<[Vertex; 3]>)>,
+        cap_sources: &std::collections::BTreeMap<
+            Option<String>,
+            (crate::core::Material, Vec<[Vertex; 3]>),
+        >,
     ) -> Vec<crate::core::SceneNode> {
         let Some(section) = presentation.active_section().filter(|section| section.cap) else {
             return Vec::new();

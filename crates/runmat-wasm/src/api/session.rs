@@ -1834,6 +1834,7 @@ impl RunMatWasm {
         show_undeformed_outline: bool,
         view: JsValue,
         replace_handle: Option<u32>,
+        legend: JsValue,
     ) -> Result<JsValue, JsValue> {
         self.ensure_not_disposed()?;
         let view = if view.is_null() || view.is_undefined() {
@@ -1844,6 +1845,16 @@ impl RunMatWasm {
                     .map_err(|error| JsValue::from_str(&format!("invalid FEA view: {error}")))?,
             )
         };
+        // The study's display of the field's output and the run's assessments; null or
+        // undefined draws the data range in the field's SI unit with no assessment line.
+        let legend: runmat_runtime::analysis::field_scene::legend::FieldLegendTerms =
+            if legend.is_null() || legend.is_undefined() {
+                Default::default()
+            } else {
+                serde_wasm_bindgen::from_value(legend).map_err(|error| {
+                    JsValue::from_str(&format!("invalid FEA legend terms: {error}"))
+                })?
+            };
         let (mut scene, deformation_scale, exact) =
             runmat_runtime::analysis::storage::with_artifact_access(false, |_| {
                 runmat_runtime::analysis::field_scene::build_scene_view(
@@ -1853,6 +1864,7 @@ impl RunMatWasm {
                     exaggeration,
                     show_undeformed_outline,
                     view,
+                    &legend,
                 )
             })
             .await

@@ -106,6 +106,31 @@ The checker verifies that the sampling domain belongs to the field (time for a t
 
 An assessment compares an output with a `minimum`, a `maximum` or both, in the output's unit, and publishes a pass or fail verdict with the run. `runmat reassess` evaluates revised assessments against a saved result without solving again. See [operations and output queries](./reference/operations-and-output-queries.md).
 
+## Display a field
+
+A `display` statement sets how result views show one field output: the snapshot posters, the saved scenes and the live result view.
+
+```fea fragment
+output von_mises = analysis.static.field.element.von_mises_stress
+display von_mises {
+    unit = MPa
+    range = [0 MPa, 12 MPa]
+    precision = 3
+}
+```
+
+| Member | Value | Effect |
+| --- | --- | --- |
+| `unit` | A unit of the field's quantity: `MPa`, `degC`, or a quoted compound unit such as `"kW/m^2"` | The legend's range, limit and notes are written in this unit. |
+| `range` | Two values in the field's quantity, minimum below maximum: `[0 MPa, 12 MPa]` or `[0, 12] MPa` | The colour scale is fixed to this range. Values outside it take the end colours, and the legend states the field's true extremes beyond it, such as "▲ 14.2 MPa above the range". Two runs with the same range share one colour scale. |
+| `precision` | An integer from 1 to 6 | The legend writes its numbers with this many significant digits. |
+
+Each member is optional, and a `display` statement needs at least one. The named output must be a field output of the study. The checker refuses a unit or range in another quantity, a range whose minimum is not below its maximum, and a precision outside 1 to 6.
+
+Without a `unit`, the legend uses the unit the study already writes that quantity in. The checker looks, in order, at the study's assessment bounds, its analysis blocks, and the loads, constraints, interfaces, excitations and initial conditions of its model. The first value of the field's quantity sets the unit. A thermal study whose model sets `reference_temperature = 20 degC` shows temperatures in °C, with or without a `display` statement. A study that writes no value of that quantity shows SI units. Without a `range`, the colour scale runs from the field's lowest to its highest value.
+
+When the study assesses the shown quantity, the legend states the run's result first, then the limit, then the factor between them: "Peak 17.7 MPa · limit 184 MPa · factor 10.4". A minimum criterion reads "Lowest …". A temperature states its margin instead of a factor: "Peak 63.4 °C · limit 85 °C · margin 21.6 K".
+
 ## Read results in `.m` code
 
 Fields are published separately from rendering. After a run, `.m` code loads the result, selects a field and plots or post-processes it:
