@@ -55,6 +55,9 @@ pub(super) fn layout() -> Vec<CommandDescriptor> {
             "Cut, drill across parts or add a weld bead at the assembly level.",
         )
         .inputs(vec![
+            text("name", "Name", Some("cut1"))
+                .optional()
+                .help("Leave empty for the next free name; an existing feature's name changes that feature."),
             choice(
                 "type",
                 "Feature",
