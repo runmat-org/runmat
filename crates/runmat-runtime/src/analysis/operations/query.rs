@@ -7,7 +7,9 @@ pub(crate) use field_inventory::{
     visit_analysis_result_fields_mut,
 };
 mod field_order;
-pub(crate) use field_order::{assessed_source_field_ids, move_fields_first};
+pub(crate) use field_order::{
+    assessed_source_field_ids, move_fields_first, result_field_inventory,
+};
 mod structural_frequency;
 
 fn filter_analysis_fields_by_indices(
@@ -37,8 +39,10 @@ fn analysis_results_op_with_field_inventory(
     context: OperationContext,
     field_inventory: Option<Vec<AnalysisField>>,
 ) -> Result<OperationEnvelope<AnalysisResultsData>, OperationErrorEnvelope> {
+    // A stored run's inventory was put in result order when it was published, while the run
+    // still held its observations; metadata reads no longer do.
     let mut collected_fields =
-        field_inventory.unwrap_or_else(|| collect_analysis_result_fields(run_result));
+        field_inventory.unwrap_or_else(|| result_field_inventory(run_result));
 
     if !query.include_fields.is_empty() {
         let mut filtered = Vec::new();
@@ -74,12 +78,6 @@ fn analysis_results_op_with_field_inventory(
             filtered.push(field.clone());
         }
         collected_fields = filtered;
-    } else {
-        move_fields_first(
-            &mut collected_fields,
-            &field_order::declared_output_source_field_ids(run_result),
-            |field| field.field_id.as_str(),
-        );
     }
     let field_descriptors = collected_fields
         .iter()

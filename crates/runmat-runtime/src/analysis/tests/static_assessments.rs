@@ -192,3 +192,85 @@ fn static_peak_stress_evidence_names_the_element_von_mises_field_and_leads_the_f
     );
     assert_eq!(study_order.len(), run_order.len());
 }
+
+/// A field output names its source field only on its observation, which a stored run keeps
+/// outside its metadata. The stored inventory carries the result order, so a metadata read and
+/// a full read of the published run list the same descriptors in the same order.
+#[test]
+fn stored_run_lists_field_outputs_first_in_metadata_and_full_reads() {
+    let _guard = analysis_test_guard();
+    let (_mesh_root, mesh_path) =
+        write_ready_minimal_analysis_mesh_artifact("static-field-output-order");
+    let mut model = sample_solid_model();
+    let step_id = model.sequence.steps[0].step_id.0.clone();
+    // The field output is declared ahead of the scalar one, so only the field output's
+    // observation can put von Mises first.
+    let outputs = vec![
+        AuthoredOutput {
+            output_id: "stress".into(),
+            expression: AuthoredOutputExpression::AnalysisField {
+                step_id: step_id.clone(),
+                quantity: ObservationQuantity::VonMisesStress,
+                location: FieldLocation::Element,
+            },
+            policy: Default::default(),
+        },
+        displacement_peak(&step_id, &model.geometry_id),
+    ];
+    attach_authored_outputs(&outputs, &mut model.sequence).unwrap();
+    let run = analysis_run_linear_static_with_options(
+        &model,
+        ComputeBackend::Cpu,
+        AnalysisRunOptions {
+            deterministic_mode: true,
+            precision_mode: PrecisionMode::Fp64,
+            preconditioner_mode: PreconditionerMode::Auto,
+            quality_policy: QualityPolicy::Balanced,
+            solver_mesh_artifact_path: Some(mesh_path.display().to_string()),
+        },
+        OperationContext::new(None, None),
+    )
+    .unwrap()
+    .data;
+    assert!(run.run.observations.iter().any(|observation| {
+        observation.source_field_id.as_deref() == Some(FEA_FIELD_STRUCTURAL_VON_MISES)
+    }));
+    let live = analysis_results_op(
+        &run,
+        AnalysisResultsQuery::metadata_only(),
+        OperationContext::new(None, None),
+    )
+    .unwrap()
+    .data
+    .field_descriptors;
+    let store: Arc<dyn storage::AnalysisArtifactStore> =
+        Arc::new(storage::InMemoryAnalysisArtifactStore::new());
+    store.persist_run(&run).unwrap();
+    storage::set_artifact_store_for_tests(store);
+
+    let read = |query| {
+        analysis_results_by_run_id_op(&run.run_id, query, OperationContext::new(None, None))
+            .unwrap()
+            .data
+            .field_descriptors
+            .into_iter()
+            .map(|descriptor| descriptor.field_id)
+            .collect::<Vec<_>>()
+    };
+    let metadata = read(AnalysisResultsQuery::metadata_only());
+    let full = read(AnalysisResultsQuery::default());
+    assert_eq!(
+        &metadata[..2],
+        &[
+            FEA_FIELD_STRUCTURAL_VON_MISES,
+            FEA_FIELD_STRUCTURAL_DISPLACEMENT
+        ]
+    );
+    assert_eq!(metadata, full);
+    assert_eq!(
+        live.iter()
+            .map(|descriptor| descriptor.field_id.as_str())
+            .collect::<Vec<_>>(),
+        metadata
+    );
+}

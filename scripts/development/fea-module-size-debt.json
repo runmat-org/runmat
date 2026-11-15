@@ -5,7 +5,7 @@
   "crates/runmat-runtime/src/analysis/contracts.rs": 2528,
   "crates/runmat-runtime/src/analysis/storage.rs": 869,
   "crates/runmat-analysis/fea/src/fixtures.rs": 1647,
-  "crates/runmat-runtime/src/analysis/operations/query.rs": 1465,
+  "crates/runmat-runtime/src/analysis/operations/query.rs": 1463,
   "crates/runmat-analysis/fea/src/results/observation/distributed.rs": 802,
   "crates/runmat-analysis/fea/src/execution/transient_segment.rs": 1125,
   "crates/runmat-analysis/fea/src/pipeline/electro_thermal.rs": 1108,

@@ -288,8 +288,9 @@ pub(super) fn prepare_run_artifact_with_admission(
             }
         }
     });
-    let field_inventory =
-        crate::analysis::operations::collect_analysis_result_fields(&stripped_run);
+    // Ordered here, while the stripped run still holds the observations that name the declared
+    // outputs' source fields; the stored inventory is the order every read of the run reports.
+    let field_inventory = crate::analysis::operations::result_field_inventory(&stripped_run);
     // Materialized observations and series reductions are chunked out so the typed metadata is
     // the record's only copy of the run content.
     let observation_payload = if stripped_run.run.observations.is_empty()

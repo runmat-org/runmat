@@ -5,10 +5,24 @@
 //! of those, so the first descriptor is the field behind the study's verdict.
 use super::*;
 
-/// Run field ids read by the run's declared outputs, in output order, without repeats.
-pub(crate) fn declared_output_source_field_ids(run_result: &AnalysisRunResult) -> Vec<String> {
-    // Stored run metadata keeps the scalar inventory and drops inline observation payloads, so
-    // both carry the source field id of the same outputs.
+/// A run's fields in result order: the run fields its declared outputs read first, in output
+/// order, then every other field in producer order. Publication stores the inventory in this
+/// order, so a metadata read (whose run no longer holds the observations) and a full read list
+/// the same fields in the same order.
+pub(crate) fn result_field_inventory(run_result: &AnalysisRunResult) -> Vec<AnalysisField> {
+    let mut fields = collect_analysis_result_fields(run_result);
+    move_fields_first(
+        &mut fields,
+        &declared_output_source_field_ids(run_result),
+        |field| field.field_id.as_str(),
+    );
+    fields
+}
+
+/// Run field ids read by the run's declared outputs, in output order, without repeats. Field
+/// outputs name their source only on their observations, so this needs the run with its
+/// observations; the scalar inventory alone covers only the scalar outputs.
+fn declared_output_source_field_ids(run_result: &AnalysisRunResult) -> Vec<String> {
     let observed = run_result
         .run
         .observations
