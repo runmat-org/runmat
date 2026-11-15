@@ -97,14 +97,27 @@ pub(crate) fn require_canonical_ceiling(
         )?,
     )?;
     let reservation = from_counts(
-        count(mesh.topology.nodes.len())?,
-        count(mesh.topology.volume_elements.len())?,
-        count(mesh.topology.boundary_faces.len())?,
+        MeshCounts {
+            nodes: count(mesh.topology.nodes.len())?,
+            elements: count(mesh.topology.volume_elements.len())?,
+            edges: corner_edge_count(mesh)?,
+            faces: count(mesh.topology.boundary_faces.len())?,
+        },
         projection,
         metadata.materialization_resident_bytes_estimate,
         add(selected, assignment)?,
         current_drives,
     )?;
+    tracing::info!(
+        elements = mesh.topology.volume_elements.len(),
+        edges = reservation.edge_count_upper_bound,
+        support_entries = reservation.support_entries_upper_bound,
+        topology = reservation.topology_and_properties_bytes,
+        retained = reservation.compiled_and_retained_bytes,
+        numerical = reservation.assembly_and_solver_bytes,
+        total = reservation.total_bytes,
+        "Maxwell reservation components (bytes)"
+    );
     if reservation.total_bytes > maximum {
         return Err(resource(format!(
             "requested local numerical heap {} exceeds authored maximum_resident_bytes {maximum}",
@@ -114,17 +127,51 @@ pub(crate) fn require_canonical_ceiling(
     Ok(reservation)
 }
 
-fn from_counts(
+/// Distinct corner edges of the tetrahedra: the lowest-order edge unknowns before grounding.
+/// Neighboring tetrahedra share edges, so a conforming mesh has about 1.2 edges per element,
+/// not six. An element listing fewer than four nodes is malformed (validation refuses it after
+/// admission); it is charged six unshared edges so malformed input cannot shrink the count.
+pub(crate) fn corner_edge_count(mesh: &SolverMeshArtifact) -> Result<u64, MaxwellError> {
+    let mut edges = Vec::new();
+    let mut unshared = 0_u64;
+    for element in &mesh.topology.volume_elements {
+        let Some(corners) = element.node_ids.get(..4) else {
+            unshared = add(unshared, 6)?;
+            continue;
+        };
+        for a in 0..4 {
+            for b in a + 1..4 {
+                edges.push((corners[a].min(corners[b]), corners[a].max(corners[b])));
+            }
+        }
+    }
+    edges.sort_unstable();
+    edges.dedup();
+    add(count(edges.len())?, unshared)
+}
+
+/// Mesh cardinalities the reservation scales with.
+#[derive(Debug, Clone, Copy)]
+struct MeshCounts {
     nodes: u64,
     elements: u64,
+    edges: u64,
     faces: u64,
+}
+
+fn from_counts(
+    MeshCounts {
+        nodes,
+        elements,
+        edges,
+        faces,
+    }: MeshCounts,
     projection: u64,
     metadata: u64,
     selected: u64,
     current_drives: u64,
 ) -> Result<MaxwellNumericalReservation, MaxwellError> {
     // Lowest-order corner-edge E, including affine Tet10. Grounding only reduces these.
-    let edges = mul(elements, 6)?;
     let dimension = add(edges, current_drives)?;
     let samples = mul(elements, 15)?;
     let entries = mul(elements, add(36, mul(current_drives, 13)?)?)?;

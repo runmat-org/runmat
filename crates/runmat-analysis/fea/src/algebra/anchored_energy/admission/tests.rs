@@ -45,7 +45,7 @@ fn original_ten_vertex_energy_proves_the_one_dof_selection_with_bounded_work() {
     };
     // Independent exact reduced eigenvalue is9. This demand does not establish that fact.
     assert!(proof.lower_bound() > 0. && proof.lower_bound() <= 9.);
-    assert!(proof.resident_bytes() > base.resident_bytes_limit());
+    assert!(proof.resident_bytes() > base.energy_entry_resident_bytes());
     assert!(proof.resident_bytes() <= demand.resident_bytes());
     assert!(proof.scalar_operations() <= demand.scalar_operations());
     assert_eq!(
