@@ -189,6 +189,48 @@ fn working_check_uses_native_drafts_and_imports_without_writing_the_provider() {
     );
 }
 
+/// A project like the owner's dev report: a part, a study in a folder and the study's geometry in a
+/// nested folder. Each folder is listed once and only its own children count.
+#[test]
+fn working_check_walks_nested_folders_once() {
+    use runmat_filesystem::{FsProvider, MemoryFsProvider};
+    let _guard = runmat_filesystem::provider_override_lock();
+    let provider = std::sync::Arc::new(MemoryFsProvider::with_current_dir("/project"));
+    for (file, bytes) in [
+        ("/project/l_bracket.part", b"part l_bracket {}\n".as_slice()),
+        (
+            "/project/simulation/geometry/l_bracket.step",
+            b"ISO-10303-21;\n".as_slice(),
+        ),
+        (
+            "/project/simulation/main.fea",
+            b"model assembly {}\n".as_slice(),
+        ),
+        (
+            "/project/.artifacts/agent/session/ops.jsonl",
+            b"{}\n".as_slice(),
+        ),
+    ] {
+        futures::executor::block_on(
+            provider.create_dir_all(std::path::Path::new(file).parent().unwrap()),
+        )
+        .unwrap();
+        futures::executor::block_on(provider.write(std::path::Path::new(file), bytes)).unwrap();
+    }
+    runmat_filesystem::with_provider_override(provider, || {
+        let mut session = RunMatSession::with_options(false, false).unwrap();
+        let result = futures::executor::block_on(session.check_fea_working_source(
+            runmat_core::FeaWorkingCheckRequest {
+                root: path("simulation/main.fea"),
+                overlays: vec![],
+            },
+        ));
+        let message = result.as_ref().err().cloned().unwrap_or_default();
+        assert!(!message.contains("more than"), "{message}");
+        assert!(!message.contains("inconsistent"), "{message}");
+    });
+}
+
 #[test]
 fn working_check_rejects_duplicate_overlays_and_root_as_a_source_file() {
     use runmat_filesystem::MemoryFsProvider;
