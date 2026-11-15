@@ -490,6 +490,7 @@ pub mod words {
         ("exploded", "An exploded view: steps that move occurrences apart."),
         ("fasteners", "Fasteners placed through matching holes."),
         ("envelope", "A space a design must stay inside."),
+        ("contact", "A contact region: a face of one component touching a face of another, bonded or free to slide."),
         ("location", "A named place in an assembly."),
         ("view", "A drawing view of the model: orientation, scale and placement."),
         ("format", "The sheet format: size, title block and border."),

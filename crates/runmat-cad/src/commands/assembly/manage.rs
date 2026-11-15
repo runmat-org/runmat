@@ -13,10 +13,17 @@ pub(super) fn manage() -> Vec<CommandDescriptor> {
             "Define product options and the serial ranges they apply to.",
         )
         .inputs(vec![
-            text("option", "Option", Some("engine")),
-            text("values", "Values", Some("a, b")),
-            text("effectivity", "Effectivity", Some("MSN 1-99")).optional(),
+            text("option", "Option", Some("engine")).help(
+                "An existing option's name changes it.",
+            ),
+            text("values", "Values", Some("a, b")).help(
+                "The values the option takes, the first one standard; `1-99` makes a serial-number range.",
+            ),
+            text("effectivity", "Effectivity", Some("MSN 1-99")).optional().help(
+                "The serial range the option's other values apply in, as `MSN 1-99` (or `LOT 3-5`); left empty, they apply everywhere.",
+            ),
         ])
+        .on(&[K::ProductOption])
         .edit(edit(EditOp::Add, Section::Options).item("option")),
         asm(
             "assembly.configurations",
@@ -145,7 +152,7 @@ pub(super) fn manage() -> Vec<CommandDescriptor> {
             "assembly.delete",
             "Delete",
             "delete",
-            "Delete components, mates, mate connectors, publishes, configurations, display states, envelopes, sketches, assembly features or sketch curves.",
+            "Delete components, mates, mate connectors, publishes, configurations, display states, envelopes, contact regions, options, sketches, assembly features or sketch curves.",
         )
         .when(selected(&[
             K::Occurrence,
@@ -155,6 +162,8 @@ pub(super) fn manage() -> Vec<CommandDescriptor> {
             K::Configuration,
             K::DisplayState,
             K::Envelope,
+            K::Contact,
+            K::ProductOption,
             K::Sketch,
             K::Feature,
             K::SketchEntity,
@@ -168,6 +177,8 @@ pub(super) fn manage() -> Vec<CommandDescriptor> {
             K::Configuration,
             K::DisplayState,
             K::Envelope,
+            K::Contact,
+            K::ProductOption,
             K::Sketch,
             K::Feature,
             K::SketchEntity,

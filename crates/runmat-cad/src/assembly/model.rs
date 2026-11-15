@@ -871,6 +871,26 @@ pub struct EnvelopeDecl {
     pub keep_out: bool,
 }
 
+/// A contact region: a face of one component touching a face of another, for studies and
+/// checks (`assembly.contacts` finds them). Each face is one its part publishes.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct ContactDecl {
+    pub name: String,
+    pub a: ContactFace,
+    pub b: ContactFace,
+    /// Bonded: the faces are glued together in a study. Otherwise they touch and may slide
+    /// or separate.
+    #[serde(default = "yes")]
+    pub bonded: bool,
+}
+
+/// One side of a contact region: a face the component's part publishes.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct ContactFace {
+    pub occurrence: RelPath,
+    pub face: PublishName,
+}
+
 /// What an assembly exposes to the assemblies that use it.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case", tag = "publishes")]
@@ -945,6 +965,9 @@ pub struct AssemblyDocument {
     pub fasteners: Vec<FastenerSet>,
     #[serde(default)]
     pub envelopes: Vec<EnvelopeDecl>,
+    /// Contact regions between components' faces ([`ContactDecl`]).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub contacts: Vec<ContactDecl>,
     #[serde(default)]
     pub publishes: Vec<AssemblyPublish>,
     #[serde(default)]
@@ -985,6 +1008,7 @@ impl AssemblyDocument {
             mirrors: Vec::new(),
             fasteners: Vec::new(),
             envelopes: Vec::new(),
+            contacts: Vec::new(),
             publishes: Vec::new(),
             configurations: Vec::new(),
             display_states: Vec::new(),

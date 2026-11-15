@@ -10,12 +10,18 @@
 //!   each pick becoming a mate connector on its component ([`mate`], [`frames`]).
 //! - `assembly.flip-mate`, `assembly.edit-mate`, `assembly.smart-mate`: mates that exist and
 //!   the smart mate ([`mate_edits`]).
+//! - `assembly.copy-with-mates`: components copied with their connectors and mates, each mate to
+//!   an outside reference taking the next picked new reference ([`copy`]).
 //! - `assembly.replace`, `assembly.subassembly`, `assembly.new-part`, `assembly.skeleton`:
 //!   structure ([`structure`]).
 //! - `assembly.sketch` and the `sketch.*` tools: sketches in the assembly ([`sketch`]).
 //! - `assembly.feature`: a cut, holes or a weld bead through components ([`operation`]).
 //! - `assembly.envelope`: a reserved box of space fitted round components, and Delete on its row
 //!   ([`envelopes`]).
+//! - `assembly.contacts`: contact regions between touching faces of components, whether each is
+//!   bonded, and Delete on its row ([`contacts`]).
+//! - `assembly.options-effectivity`, `assembly.options`: option axes, the serial range their
+//!   values apply in and the values shown, and Delete on an option's row ([`product_options`]).
 //! - `assembly.representation`: the components' representation (full, or envelope: drawn and
 //!   checked as their box).
 //! - `assembly.mate-connector`: a named connector on a pick, and Delete on its row
@@ -36,6 +42,8 @@ pub(crate) mod anchors;
 mod configurations;
 mod configure;
 mod connector;
+mod contacts;
+mod copy;
 mod envelopes;
 mod explode;
 pub(crate) mod frames;
@@ -45,6 +53,7 @@ mod mirror;
 mod operation;
 mod path_picks;
 mod place;
+mod product_options;
 mod publishes;
 mod sketch;
 mod structure;
@@ -57,6 +66,12 @@ mod configure_tests;
 mod configurations_tests;
 #[cfg(test)]
 mod connector_tests;
+#[cfg(test)]
+mod contacts_tests;
+#[cfg(test)]
+mod copy_tests;
+#[cfg(test)]
+mod product_options_tests;
 #[cfg(test)]
 mod operation_tests;
 #[cfg(test)]
@@ -491,6 +506,20 @@ pub(super) fn edit(
             envelopes::delete(&mut document, request)?
         }
         "assembly.envelope" => envelopes::apply(&mut document, &compiled, &request.values)?,
+        "assembly.delete" if product_options::selected(request).next().is_some() => {
+            product_options::delete(&mut document, request)?
+        }
+        "assembly.options-effectivity" => product_options::define(&mut document, &request.values)?,
+        "assembly.options" => product_options::show(&mut document, &request.values)?,
+        "assembly.delete" if contacts::selected(request).next().is_some() => {
+            contacts::delete(&mut document, request)?
+        }
+        "assembly.contacts" if contacts::selected(request).next().is_some() => {
+            contacts::set_bonded(&mut document, request)?
+        }
+        "assembly.contacts" => {
+            contacts::find(&mut document, &compiled, &mut publisher, &request.values)?
+        }
         "assembly.configurations" => {
             configurations::apply(&mut document, &compiled, &request.values)?
         }
@@ -554,6 +583,16 @@ pub(super) fn edit(
         "assembly.mirror" => {
             let names = selected_names(&compiled, request)?;
             mirror::mirror(&mut document, &compiled, files, &names, &request.values)?
+        }
+        "assembly.copy-with-mates" => {
+            let names = selected_names(&compiled, request)?;
+            copy::copy_with_mates(
+                &mut document,
+                &compiled,
+                &mut publisher,
+                &names,
+                &request.values,
+            )?
         }
         "assembly.mate" => {
             let values =

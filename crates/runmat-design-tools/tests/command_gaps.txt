@@ -1,10 +1,5 @@
-assembly.contacts assembly
-assembly.copy-with-mates assembly
 assembly.document-settings assembly
-assembly.options assembly
-assembly.options-effectivity assembly
 assembly.update-pins assembly
-assembly.visualization assembly
 board.align circuit
 board.align circuit.layout
 board.place circuit

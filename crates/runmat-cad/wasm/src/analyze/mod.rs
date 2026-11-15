@@ -39,6 +39,8 @@
 //! The assembly Evaluate tab's `assembly.mass-properties`, `assembly.interference` and
 //! `assembly.clearance` run the same checks. On assemblies only:
 //!
+//! - `assembly.visualization`: part occurrences sorted by mass, volume, cost or count and
+//!   colored by it ([`visualization`]).
 //! - `assembly.interface-check`: each mate's connectors, attachments and publishes against what
 //!   the definitions publish now ([`interfaces`]).
 //! - `assembly.hole-alignment`, `assembly.hole-check`: holes in different parts that meet and
@@ -58,6 +60,7 @@ mod interfaces;
 mod section_properties;
 mod sketch_check;
 mod thickness;
+mod visualization;
 mod zebra;
 
 use crate::mass::{assembly_mass, part_mass, MassReport};
@@ -777,6 +780,13 @@ pub fn analyze(
             &request.selection,
         ),
         "view.measure" => crate::measure::measure(path, text, files, &request.values),
+        "assembly.visualization" if assembly => visualization::visualization(
+            path,
+            text,
+            files,
+            configuration,
+            &request.values,
+        ),
         "assembly.interface-check" if assembly => {
             interfaces::interface_check(path, text, files, configuration, &request.values)
         }

@@ -257,6 +257,12 @@ pub struct AssemblyIndex {
     /// The top assembly's envelopes, in document order.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub envelopes: Vec<crate::assembly::envelope_rows::EnvelopeRow>,
+    /// The top assembly's contact regions, in document order.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub contacts: Vec<crate::assembly::contact_rows::ContactRow>,
+    /// The top assembly's option and effectivity axes, in document order.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub options: Vec<crate::assembly::option_rows::OptionRow>,
 }
 
 /// One assembly feature: its type, sketch and components, whether its tool builds, and its
@@ -649,6 +655,8 @@ pub fn build_assembly_index(
             top.as_deref(),
         ),
         envelopes: crate::assembly::envelope_rows::envelope_rows(tree, top.as_deref()),
+        contacts: crate::assembly::contact_rows::contact_rows(top.as_deref()),
+        options: crate::assembly::option_rows::option_rows(top.as_deref()),
     }
 }
 

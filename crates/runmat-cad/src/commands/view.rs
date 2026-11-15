@@ -141,8 +141,12 @@ pub(super) fn add(catalog: &mut Catalog) {
             .desc("Pick the product options and effectivity the assembly shows.")
             .kw(&["effectivity", "variant", "serial", "msn"])
             .inputs(vec![
-                text("options", "Options", Some("engine=b")),
-                text("effectivity", "Effectivity", Some("MSN 42")).optional(),
+                text("options", "Options", Some("engine=b")).optional().help(
+                    "Each option and the value to show, as `engine=b, cabin=lux`; options left out keep theirs.",
+                ),
+                text("effectivity", "Effectivity", Some("MSN 42")).optional().help(
+                    "The serial number to show, as `MSN 42` (or `LOT 3`).",
+                ),
             ])
             .edit(edit(EditOp::Set, Section::Options).item("active")),
     ];
