@@ -35,6 +35,9 @@ pub struct GeometryLines {
     /// The projected diameters (device px) placements draw at.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub lod_pixels: Option<[f32; 2]>,
+    /// The scene owners the segments belong to (a solved body's region), as on the mesh.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub owner_node_ids: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -78,6 +81,7 @@ impl GeometryLines {
                 .collect(),
             instances: chunk.instances.clone(),
             lod_pixels: chunk.lod_pixels,
+            owner_node_ids: chunk.owner_node_ids.clone(),
         })
     }
     pub(crate) fn restore(mut self, id: String) -> Result<GeometrySceneChunk, String> {
@@ -138,6 +142,7 @@ impl GeometryLines {
         chunk.label = self.label;
         chunk.visible = self.visible;
         chunk.wireframe_only = self.wireframe_only;
+        chunk.owner_node_ids = self.owner_node_ids;
         let segments = (count / 2) as u64;
         for region in self.segment_regions {
             if region

@@ -28,7 +28,12 @@ pub use frequency_results::{
     AcousticFrequencyEntryEvidence, AcousticFrequencyResultsData, StructuralFrequencyResultsData,
 };
 mod nonlinear_run_options;
+mod render_topology;
 pub use nonlinear_run_options::AnalysisNonlinearRunOptions;
+pub use render_topology::{
+    AnalysisRenderMesh, AnalysisRenderRegion, AnalysisRenderTopology, AnalysisRenderTopologySource,
+    AnalysisRenderTriangleRange, AnalysisStudyRegion,
+};
 mod execution_choices;
 pub use execution_choices::{
     AnalysisExecutionCandidate, AnalysisExecutionChoices, AnalysisExecutionDuration,
@@ -589,52 +594,6 @@ pub struct RunProvenance {
 pub struct StaticSolvePlacement {
     pub effective_memory_ceiling_bytes: Option<u64>,
     pub static_solve_path: Option<runmat_analysis_fea::planning::resource::StaticSolvePath>,
-}
-
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct AnalysisRenderTopology {
-    pub schema_version: String,
-    pub source: AnalysisRenderTopologySource,
-    #[serde(default)]
-    pub volume_element_count: usize,
-    pub meshes: Vec<AnalysisRenderMesh>,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum AnalysisRenderTopologySource {
-    SolverPrep,
-    AnalysisMesh,
-}
-
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct AnalysisRenderMesh {
-    pub mesh_id: String,
-    pub vertices: Vec<[f64; 3]>,
-    pub triangles: Vec<[u32; 3]>,
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub regions: Vec<AnalysisRenderRegion>,
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub vertex_volume_node_indices: Vec<Option<usize>>,
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub triangle_volume_element_indices: Vec<Option<usize>>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct AnalysisRenderRegion {
-    pub region_id: String,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub label: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub tag: Option<String>,
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub triangle_ranges: Vec<AnalysisRenderTriangleRange>,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-pub struct AnalysisRenderTriangleRange {
-    pub start: u32,
-    pub count: u32,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -1944,6 +1903,9 @@ pub struct AnalysisStudyRunData {
     pub solver_mesh_artifact_path: Option<String>,
     #[serde(default)]
     pub meshing_evidence_artifact_path: Option<String>,
+    /// The solid regions the model assigns materials to (each solved body), by region name.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub regions: Vec<AnalysisStudyRegion>,
     pub study_fingerprint: String,
     pub operation_sequence: Vec<String>,
     pub run_status: RunStatus,

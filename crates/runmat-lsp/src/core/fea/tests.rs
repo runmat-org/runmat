@@ -59,7 +59,7 @@ fn keyword_inventory_matches_the_lexer() {
     }
     assert_eq!(
         names.len(),
-        56,
+        59,
         "preserve the complete existing completion inventory"
     );
 }

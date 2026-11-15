@@ -396,7 +396,7 @@ fn scene_with(
         Some(SceneStats {
             element_count: 1,
             scale: legend::ScalarScale { extremes, fixed },
-            automatic_scale: None,
+            ..SceneStats::default()
         }),
     )
     .unwrap()

@@ -319,6 +319,10 @@ pub enum ScenePlot {
         /// The mesh packed (base64), in place of `vertices`, `triangles` and `vertex_normals`.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         packed: Option<packed::PackedMesh>,
+        /// The scene owners the mesh belongs to (a solved body's region, an assembly node), so a
+        /// replayed scene can be isolated by owner.
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        owner_node_ids: Vec<String>,
         visible: bool,
     },
     Line3 {

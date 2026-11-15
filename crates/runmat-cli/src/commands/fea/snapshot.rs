@@ -103,11 +103,30 @@ async fn write_snapshot(
         .parent()
         .context("snapshot output requires a parent directory")?;
     std::fs::create_dir_all(parent)?;
+    // The run fields each run's assessments read: a view of an assessed quantity draws them.
+    let assessed = runs
+        .iter()
+        .map(|run| {
+            let mut ids: Vec<String> = Vec::new();
+            for assessment in &run.publication.assessments {
+                let read = assessment
+                    .evidence
+                    .as_ref()
+                    .and_then(|evidence| evidence.source_field_id.as_ref())
+                    .filter(|_| assessment.run_id.as_deref() == Some(run.run_id.as_str()));
+                if let Some(id) = read.filter(|id| !ids.contains(id)) {
+                    ids.push(id.clone());
+                }
+            }
+            (run.run_id.clone(), ids)
+        })
+        .collect();
     let profile = views::CaptureProfile::from_runs(
         &runs
             .iter()
             .map(|run| (run.run_id.as_str(), &run.results))
             .collect::<Vec<_>>(),
+        &assessed,
     )?
     .select(selected)?;
     let views = views::capture(
@@ -124,6 +143,22 @@ async fn write_snapshot(
             assessments: runs
                 .iter()
                 .map(|run| (run.run_id.clone(), run.publication.assessments.clone()))
+                .collect(),
+            regions: runs
+                .iter()
+                .map(|run| (run.run_id.clone(), run.publication.regions.clone()))
+                .collect(),
+            locations: runs
+                .iter()
+                .map(|run| {
+                    let locations = run
+                        .results
+                        .field_descriptors
+                        .iter()
+                        .map(|field| (field.field_id.clone(), field.location))
+                        .collect();
+                    (run.run_id.clone(), locations)
+                })
                 .collect(),
         },
         outputs,

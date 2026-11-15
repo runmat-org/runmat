@@ -1,7 +1,8 @@
 //! `display <output> { unit = MPa; range = [0 MPa, 12 MPa]; precision = 3 }`: how a study shows
 //! one of its field outputs. Every member is optional and at least one is required. Without a
 //! `unit`, the legend takes the unit the study writes that quantity in elsewhere (see
-//! [`units`]); a field output with no `display` statement still gets that default.
+//! [`units`]); a field output with no `display` statement still gets that default. The view's
+//! solved bodies and deformation scale (`hide`, `context`, `deformation`) are in [`view`].
 use super::values;
 use crate::{
     CheckedExpression, CheckedExpressionKind, CheckedFeaDeclaration, CheckedFeaStatement,
@@ -18,6 +19,7 @@ use runmat_types::Span;
 use std::collections::BTreeMap;
 
 mod units;
+mod view;
 
 /// The checked statements whose authored units set a field output's default display unit:
 /// the study's own and those of every model it runs.
@@ -120,16 +122,9 @@ pub(super) fn lower_displays(
         .iter()
         .filter_map(|output| {
             let dimension = *fields.get(output.output_id.as_str())?;
-            let mut display =
-                authored
-                    .remove(&output.output_id)
-                    .unwrap_or_else(|| AuthoredOutputDisplay {
-                        output_id: output.output_id.clone(),
-                        unit: None,
-                        unit_source: DisplayUnitSource::Si,
-                        range: None,
-                        precision: None,
-                    });
+            let mut display = authored.remove(&output.output_id).unwrap_or_else(|| {
+                AuthoredOutputDisplay::unit_only(&output.output_id, DisplayUnitSource::Si)
+            });
             if display.unit.is_none() {
                 if let Some(unit) = units::authored_unit(sources, dimension) {
                     display.unit = Some(unit);
@@ -139,6 +134,8 @@ pub(super) fn lower_displays(
             let shown = display.unit_source == DisplayUnitSource::Display
                 || display.range.is_some()
                 || display.precision.is_some()
+                || !display.shows_every_region()
+                || display.deformation.is_some()
                 || display
                     .unit
                     .as_deref()
@@ -192,6 +189,9 @@ fn lower_members(
                             FeaContextualWord::Unit
                                 | FeaContextualWord::Range
                                 | FeaContextualWord::Precision
+                                | FeaContextualWord::Hide
+                                | FeaContextualWord::Context
+                                | FeaContextualWord::Deformation
                         )
                     })
                     .map(|word| (word, value))
@@ -203,7 +203,7 @@ fn lower_members(
                 declaration,
                 "fea.semantic.display_member",
                 statement.span,
-                "display accepts unit, range and precision",
+                "display accepts unit, range, precision, hide, context and deformation",
                 diagnostics,
             );
             continue;
@@ -226,7 +226,10 @@ fn lower_members(
             declaration,
             "fea.semantic.display_member",
             span,
-            format!("`display {output}` sets nothing; give it a unit, a range or a precision"),
+            format!(
+                "`display {output}` sets nothing; give it a unit, a range, a precision, hide, \
+                 context or deformation"
+            ),
             diagnostics,
         );
     }
@@ -239,8 +242,16 @@ fn lower_members(
     let precision = members
         .get(FeaContextualWord::Precision.as_source())
         .and_then(|(value, _)| display_precision(declaration, value, diagnostics));
+    let member = |word: FeaContextualWord| members.get(word.as_source()).map(|(value, _)| *value);
+    let regions = view::display_regions(
+        declaration,
+        member(FeaContextualWord::Hide),
+        member(FeaContextualWord::Context),
+        diagnostics,
+    );
+    let deformation = member(FeaContextualWord::Deformation)
+        .and_then(|value| view::display_deformation(declaration, value, diagnostics));
     (diagnostics.len() == initial).then(|| AuthoredOutputDisplay {
-        output_id: output.to_string(),
         unit_source: if unit.is_some() {
             DisplayUnitSource::Display
         } else {
@@ -249,6 +260,10 @@ fn lower_members(
         unit,
         range,
         precision,
+        hide: regions.hide,
+        context: regions.context,
+        deformation,
+        ..AuthoredOutputDisplay::unit_only(output, DisplayUnitSource::Si)
     })
 }
 

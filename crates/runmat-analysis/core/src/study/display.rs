@@ -1,6 +1,7 @@
 //! How a study shows one of its field outputs: the unit its legend is written in, a fixed colour
-//! range and the significant digits of the legend's numbers. The study's `display` statement
-//! sets these; without one, the unit is the one the study writes that quantity in elsewhere.
+//! range, the significant digits of the legend's numbers, the solved bodies it leaves out or
+//! draws as grey context, and a fixed deformation scale. The study's `display` statement sets
+//! these; without one, the unit is the one the study writes that quantity in elsewhere.
 use serde::{Deserialize, Serialize};
 
 /// The display of one field output. The compiler records one for each field output that has a
@@ -22,6 +23,18 @@ pub struct AuthoredOutputDisplay {
     /// Significant digits of the legend's numbers, 1 to 6.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub precision: Option<u8>,
+    /// Solid regions of the study geometry the view leaves out, by region name (the CAD name).
+    /// They are not drawn and do not count toward the legend's extremes.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub hide: Vec<String>,
+    /// Solid regions drawn as translucent grey context, by region name: no field colour, and
+    /// they do not count toward the legend's extremes.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub context: Vec<String>,
+    /// A fixed deformation scale (a positive dimensionless factor on the displacement), so two
+    /// runs exaggerate their shapes equally. `None` lets each view choose its own scale.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub deformation: Option<f64>,
 }
 
 /// Where a display's unit comes from.
@@ -54,5 +67,24 @@ impl AuthoredOutputDisplay {
         displays
             .iter()
             .find(|display| display.output_id == output_id)
+    }
+
+    /// A display that only states `output_id`'s unit and where it comes from.
+    pub fn unit_only(output_id: impl Into<String>, unit_source: DisplayUnitSource) -> Self {
+        Self {
+            output_id: output_id.into(),
+            unit: None,
+            unit_source,
+            range: None,
+            precision: None,
+            hide: Vec::new(),
+            context: Vec::new(),
+            deformation: None,
+        }
+    }
+
+    /// Whether the view of this output draws every solved body in field colour.
+    pub fn shows_every_region(&self) -> bool {
+        self.hide.is_empty() && self.context.is_empty()
     }
 }

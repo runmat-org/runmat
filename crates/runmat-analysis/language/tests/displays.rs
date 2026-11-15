@@ -14,6 +14,8 @@ geometry part {{
         result = feature.body
     }}
     region body : solid {{ select result; expect exactly_one }}
+    region lid : solid {{ select result; expect exactly_one }}
+    region skin : face {{ select result; expect one_or_more }}
 }}
 mesh part on geometry.part {{
     tetrahedra {{ order = linear; target_size = 0.5 m; maximum_deviation = 0.01 m }}
@@ -165,6 +167,44 @@ fn malformed_displays_are_refused_with_their_codes() {
             "display temperature { precision = 2.5 }",
             "fea.semantic.display_precision",
         ),
+        // Hidden and context regions are solid regions of the study geometry, in one list.
+        (
+            "display temperature { hide = [geometry.part.region.missing] }",
+            "fea.semantic.display_region",
+        ),
+        (
+            "display temperature { context = [geometry.part.region.skin] }",
+            "fea.semantic.display_region",
+        ),
+        (
+            "display temperature { hide = [material.copper] }",
+            "fea.semantic.display_region",
+        ),
+        (
+            "display temperature { hide = [3] }",
+            "fea.semantic.display_region",
+        ),
+        (
+            "display temperature { hide = [geometry.part.region.lid]; \
+             context = [geometry.part.region.lid] }",
+            "fea.semantic.display_region",
+        ),
+        (
+            "display temperature { hide = [geometry.part.region.lid, geometry.part.region.lid] }",
+            "fea.semantic.display_region",
+        ),
+        (
+            "display temperature { deformation = 0 }",
+            "fea.semantic.display_deformation",
+        ),
+        (
+            "display temperature { deformation = -2 }",
+            "fea.semantic.display_deformation",
+        ),
+        (
+            "display temperature { deformation = 2 mm }",
+            "fea.semantic.display_deformation",
+        ),
     ] {
         let program = check("293.15 K", display);
         assert!(
@@ -177,4 +217,27 @@ fn malformed_displays_are_refused_with_their_codes() {
             program.diagnostics
         );
     }
+}
+
+#[test]
+fn hidden_and_context_regions_and_the_deformation_scale_compile_by_region_name() {
+    let program = check(
+        "293.15 K",
+        "display temperature { hide = [geometry.part.region.lid]; \
+         context = geometry.part.region.body; deformation = 200 }",
+    );
+    let [display] = displays(&program).try_into().unwrap();
+    assert_eq!(display.hide, ["lid"]);
+    assert_eq!(display.context, ["body"]);
+    assert_eq!(display.deformation, Some(200.0));
+    assert!(!display.shows_every_region());
+    // Without a unit, a range or a precision, the view settings alone record a display; its
+    // unit is still the one the study writes temperatures in.
+    assert_eq!(display.unit.as_deref(), Some("K"));
+    assert_eq!(display.unit_source, DisplayUnitSource::Study);
+    let program = check("293.15 K", "display heat_flux { deformation = 2.5 }");
+    let [display] = displays(&program).try_into().unwrap();
+    assert_eq!(display.output_id, "heat_flux");
+    assert_eq!(display.deformation, Some(2.5));
+    assert!(display.shows_every_region());
 }

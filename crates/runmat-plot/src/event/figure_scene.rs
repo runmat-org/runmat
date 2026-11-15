@@ -366,6 +366,7 @@ pub(super) fn append_geometry_scene_chunks(
         instances,
         lod_pixels,
         packed,
+        owner_node_ids,
         visible,
     } = plot
     else {
@@ -439,7 +440,8 @@ pub(super) fn append_geometry_scene_chunks(
         .with_mesh_id(mesh_id_for_chunk.clone())
         .with_label(label.clone().unwrap_or_else(|| mesh_id_for_chunk.clone()))
         .with_regions(region_metadata)
-        .with_instances(instances.clone(), lod_pixels),
+        .with_instances(instances.clone(), lod_pixels)
+        .with_owner_node_ids(owner_node_ids.clone()),
     );
 
     if let Some(edge_render_data) = mesh.edge_render_data() {
@@ -453,7 +455,8 @@ pub(super) fn append_geometry_scene_chunks(
                 "{} edges",
                 label.clone().unwrap_or_else(|| mesh_id_for_chunk.clone())
             ))
-            .with_instances(instances.clone(), lod_pixels),
+            .with_instances(instances.clone(), lod_pixels)
+            .with_owner_node_ids(owner_node_ids.clone()),
         );
     }
 
@@ -518,6 +521,7 @@ pub(super) fn scene_chunk_to_mesh_plot(
         instances: chunk.instances.clone(),
         lod_pixels: chunk.lod_pixels,
         packed: None,
+        owner_node_ids: chunk.owner_node_ids.clone(),
         visible: chunk.visible,
     })
 }

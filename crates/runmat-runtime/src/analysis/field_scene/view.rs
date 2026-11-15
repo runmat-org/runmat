@@ -72,11 +72,15 @@ pub fn build_scene_view(
         .filter(|field| field.deforms)
         .or(additional_deformation.as_ref())
         .filter(|field| field.location == AnalysisFieldLocation::Node && field.components >= 3);
-    let stats = SceneStats::from_selection(&selection, field.as_ref(), deformation);
+    let stats =
+        SceneStats::from_selection(&selection, field.as_ref(), deformation).with_terms(terms);
     if field.is_some() && stats.scale.extremes.is_none() {
         return Err("the selected field has no persisted global plot range".into());
     }
-    if shape_mode == "exaggerated" && deformation.is_some() && stats.automatic_scale.is_none() {
+    if shape_mode == "exaggerated"
+        && deformation.is_some()
+        && stats.exaggerated_scale(1.0).is_none()
+    {
         return Err("the displacement field has no persisted deformation range".into());
     }
     let (mut scene, scale) = scene_from_topology_with_stats(
@@ -87,7 +91,7 @@ pub fn build_scene_view(
         shape_mode,
         exaggeration,
         show_undeformed_outline,
-        Some(stats.with_terms(terms)),
+        Some(stats),
     )?;
     let mut model_bounds = BoundingBox::default();
     let bounds = selection.model_bounds;
@@ -98,7 +102,22 @@ pub fn build_scene_view(
     model_bounds.expand_by_box(&scene.bounds);
     scene.bounds = model_bounds;
     if let Some(overlay) = scene.overlay.as_mut() {
-        legend::present_overlay(overlay, field.as_ref().map(|f| f.unit.as_str()), terms)?;
+        let shown = field.as_ref().map(|field| legend::ShownField {
+            field_id: &field.label,
+            location: field.location,
+        });
+        let locate = |field_id: &str| {
+            super::load_field_page(run_id, &AnalysisFieldSelection::new(field_id, None), 0)
+                .ok()
+                .map(|page| page.descriptor.location)
+        };
+        legend::present_overlay(
+            overlay,
+            field.as_ref().map(|f| f.unit.as_str()),
+            terms,
+            shown,
+            &locate,
+        )?;
         overlay.mesh_count = selection.mesh_count;
         overlay.status = if selection.exact {
             GeometrySceneCompleteness::Complete

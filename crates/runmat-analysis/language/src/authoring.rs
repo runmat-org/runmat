@@ -16,11 +16,15 @@ pub enum FeaContextualWord {
     Maximum,
     Evidence,
     EvidenceValue(AssessmentEvidenceRequirement),
-    /// `display <output> { unit; range; precision }`: how a study shows a field output.
+    /// `display <output> { unit; range; precision; hide; context; deformation }`: how a study
+    /// shows a field output.
     Display,
     Unit,
     Range,
     Precision,
+    Hide,
+    Context,
+    Deformation,
 }
 
 impl FeaContextualWord {
@@ -35,6 +39,9 @@ impl FeaContextualWord {
         Self::Unit,
         Self::Range,
         Self::Precision,
+        Self::Hide,
+        Self::Context,
+        Self::Deformation,
     ];
 
     pub const fn as_source(self) -> &'static str {
@@ -51,6 +58,9 @@ impl FeaContextualWord {
             Self::Unit => "unit",
             Self::Range => "range",
             Self::Precision => "precision",
+            Self::Hide => "hide",
+            Self::Context => "context",
+            Self::Deformation => "deformation",
         }
     }
 
@@ -69,7 +79,10 @@ impl FeaContextualWord {
             | Self::Evidence
             | Self::Unit
             | Self::Range
-            | Self::Precision => FeaAuthoringWordRole::Property,
+            | Self::Precision
+            | Self::Hide
+            | Self::Context
+            | Self::Deformation => FeaAuthoringWordRole::Property,
             Self::EvidenceValue(_) => FeaAuthoringWordRole::EnumValue,
         }
     }
