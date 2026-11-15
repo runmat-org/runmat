@@ -36,7 +36,13 @@ pub(super) fn evaluate() -> Vec<CommandDescriptor> {
             "hole",
             "Find holes across parts that don't line up.",
         )
-        .inputs(vec![length("tolerance", "Tolerance", 0.1)])
+        .inputs(vec![
+            length("tolerance", "Tolerance", 0.1)
+                .help("Holes whose axes are further apart than this are listed as off."),
+            picks("components", "Components", &[K::Occurrence])
+                .optional()
+                .help("Leave empty to check every part."),
+        ])
         .when(occurrences())
         .edit(analyze("hole_alignment")),
         asm(

@@ -3,9 +3,6 @@ assembly.contacts assembly
 assembly.copy-with-mates assembly
 assembly.document-settings assembly
 assembly.envelope assembly
-assembly.hole-alignment assembly
-assembly.hole-check assembly
-assembly.interface-check assembly
 assembly.mate-connector assembly
 assembly.options assembly
 assembly.options-effectivity assembly

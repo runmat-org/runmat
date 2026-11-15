@@ -1,6 +1,6 @@
 ---
 description: Evaluate a RunMat part or assembly. Mass, center of gravity and inertia from materials, interference and clearance between parts, weldment cut lists, and design-for-manufacture checks for machining, sheet metal, molding and additive.
-keywords: [check geometry, wall thickness map, curvature, zebra stripes, surface continuity, deviation, short edges, invalid faces, self-intersection, mass properties, center of gravity, moment of inertia, interference detection, clearance check, cut list, weldment, DFM, design for manufacturing, wall thickness, draft analysis]
+keywords: [check geometry, wall thickness map, curvature, zebra stripes, surface continuity, deviation, short edges, invalid faces, self-intersection, mass properties, center of gravity, moment of inertia, interference detection, clearance check, interface check, hole alignment, hole and fastener check, fastener grip, cut list, weldment, DFM, design for manufacturing, wall thickness, draft analysis]
 ---
 # Evaluate
 
@@ -11,6 +11,9 @@ Evaluate measures a part or an assembly in its active configuration. The Desktop
 | `evaluate.mass-properties` | a part or an assembly | mass, center of gravity and inertia about it |
 | `evaluate.interference` | an assembly | pairs of occurrences whose solids overlap, with the overlap volume |
 | `evaluate.clearance` | an assembly | pairs closer than a gap you set |
+| `assembly.interface-check` | an assembly | each mate's connectors, attachments and publishes, checked against what the parts publish now |
+| `assembly.hole-alignment` | an assembly | holes in different parts that meet, and how far apart their axes are |
+| `assembly.hole-check` | an assembly | hole alignment, plus each fastener's hole fit and grip against the stack it passes through |
 | `weldment.cut-list` | a weldment part | its structural members, grouped |
 | `evaluate.draft` | a part | each face's draft angle for a pull direction, in bands, with the model colored by band |
 | `evaluate.section-properties` | planar faces of a part, or a sketch | area, centroid, second, polar and principal moments of area |
@@ -91,6 +94,35 @@ A check after a change can be limited to the occurrences the change added or mov
 
 ```json
 { "path": "/drone.assembly", "sections": ["interference"], "changed": ["skid_*", "tube_*"] }
+```
+
+## Interface check
+
+Interface check (**Evaluate > Interface check**, `assembly.interface-check`) lists every mate in the open assembly with its solve status. Under each mate, it lists what each connector stands on:
+
+- A name a part or sub-assembly publishes (a `publish` entry, which a mate on a picked face writes). The check fails when the file no longer publishes that name, or when the name now publishes something that isn't a frame, plane, axis or point, such as a value.
+- A pinned occurrence (`@ "R3"`): its interface is compared with the working copy of its file. A frame that moved further than **Tolerance** (default 0.01 mm) or turned is listed as a warning, so you know to update the pin.
+- The assembly's own sketch, or a frame written in the assembly (`at = …`, the origin). These have no published interface to break and are listed for information.
+
+Occurrences attached to another file's published frame (`to = { frame = interface, … }`, such as a skeleton's) and this assembly's own `publish` entries are checked the same way: each must still name a connector, envelope or occurrence that exists.
+
+Selecting a row selects the mate and its components.
+
+## Hole alignment and hole/fastener check
+
+Hole alignment (`assembly.hole-alignment`) finds holes in different parts that meet and measures how far apart their axes are. A hole is a concave cylindrical face. Two holes meet when their axes are parallel, their bores overlap seen along the axis, and their lengths touch or come within 1 mm of each other along it, as in a stack of plates. A pair whose axes are further apart than **Tolerance** (default 0.1 mm) is listed as an error. The model shows a dimension between the two axes, and selecting the row selects both holes' faces. Holes an assembly feature drills count, and fastener parts (a nut's bore) don't. **Components** limits the check to pairs with one of the components you pick.
+
+Hole/fastener check (`assembly.hole-check`) lists the same pairs, then each fastener of the assembly's fastener sets:
+
+| Finding | When |
+|---|---|
+| No hole on its axis | No hole's bore contains the fastener's axis. |
+| Ø6.00 mm fastener in the Ø5.50 mm hole of `plate` | A hole on its axis is smaller than the fastener. |
+| 0.40 mm off `plate`'s hole axis | The fastener's axis sits further from a hole's axis than the hole's clearance allows, plus the tolerance. |
+| Grip 10.00 mm for a 12.00 mm stack | The holes' combined length along the fastener differs from the grip its size was chosen for. |
+
+```json
+{ "command": "assembly.hole-check", "values": { "tolerance": 0.05 } }
 ```
 
 ## Study checks

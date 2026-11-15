@@ -46,8 +46,11 @@ pub(super) fn layout() -> Vec<CommandDescriptor> {
             "check",
             "Check that mated interfaces still match their published definitions.",
         )
+        .inputs(vec![length("tolerance", "Tolerance", 0.01).help(
+            "A pinned interface that moved further than this in its file's working copy is listed.",
+        )])
         .when(has(Facet::Mates))
-        .edit(check("interfaces")),
+        .edit(analyze("interfaces")),
         asm(
             "assembly.feature",
             "Assembly feature",
@@ -185,8 +188,15 @@ pub(super) fn layout() -> Vec<CommandDescriptor> {
             "check",
             "Check hole alignment, fastener length and grip.",
         )
+        .inputs(vec![
+            length("tolerance", "Tolerance", 0.1)
+                .help("Holes and fasteners further off their axes than this are listed."),
+            picks("components", "Components", &[K::Occurrence])
+                .optional()
+                .help("Leave empty to check every part."),
+        ])
         .when(occurrences())
-        .edit(check("fasteners")),
+        .edit(analyze("fasteners")),
         // Motion.
         asm(
             "motion.drag",
