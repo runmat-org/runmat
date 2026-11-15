@@ -457,6 +457,7 @@ function formatInterface(name, fields) {
 function main() {
   const analysisSource = fs.readFileSync(rustAnalysisContractsPath, "utf8")
     + "\n" + fs.readFileSync(path.resolve(repoRoot, "crates/runmat-runtime/src/analysis/contracts/nonlinear_run_options.rs"), "utf8")
+    + "\n" + fs.readFileSync(path.resolve(repoRoot, "crates/runmat-runtime/src/analysis/contracts/execution_choices.rs"), "utf8")
     + "\n" + fs.readFileSync(rustMaxwellRunOptionsPath, "utf8")
     + "\n" + fs.readFileSync(path.resolve(repoRoot, "crates/runmat-analysis/fea/src/physics/cfd/canonical.rs"), "utf8")
     + "\n" + fs.readFileSync(path.resolve(repoRoot, "crates/runmat-analysis/fea/src/solve/fixed_point.rs"), "utf8")
