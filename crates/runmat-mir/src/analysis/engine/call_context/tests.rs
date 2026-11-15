@@ -81,6 +81,20 @@ fn conditional_return_shapes_do_not_invent_a_concrete_caller_failure() {
 }
 
 #[test]
+fn contextual_multiple_results_keep_their_distinct_output_slots() {
+    let source = "[a,b] = helper(ones(2,3), ones(4,2)); good = a * ones(3,1); bad = b * ones(3,1);\nfunction [u,v] = helper(x,y)\nu = 2*x; v = y;\nend\n";
+    let report = diagnose_call_contexts(&lower(source));
+    assert!(!report.budget_exhausted);
+    let [diagnostic] = report.diagnostics.as_slice() else {
+        panic!("only the second output's caller product is incompatible: {report:#?}");
+    };
+    assert_eq!(diagnostic.code, "RM-TYPE-MATMUL");
+    assert_eq!(diagnostic.primary.source, Some(ProgramSourceId(0)));
+    let span = diagnostic.primary.span;
+    assert_eq!(&source[span.start..span.end], "bad = b * ones(3,1)");
+}
+
+#[test]
 fn actual_ones_producers_supply_exact_call_facts_and_local_matrix_error() {
     let local = lower("A = ones(2,3); B = ones(4,2); C = A * B;");
     assert!(crate::analysis::analyze_assembly(&local)
