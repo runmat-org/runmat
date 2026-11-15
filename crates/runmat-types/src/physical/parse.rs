@@ -84,6 +84,16 @@ fn parse_with(
     if compact.is_empty() {
         return Err(UnitExpressionError::Empty);
     }
+    // `1` is the unit of a bare number (a count or a ratio), as the unit table's dimensionless
+    // row writes it, so a dimensionless quantity has a unit to name.
+    if compact == "1" {
+        return Ok(UnitDefinition {
+            dimension: PhysicalDimension::DIMENSIONLESS,
+            angle_power: 0,
+            scale_bits: 1.0_f64.to_bits(),
+            offset_bits: 0.0_f64.to_bits(),
+        });
+    }
     let bytes = compact.as_bytes();
     let mut cursor = 0usize;
     let mut divide = false;
