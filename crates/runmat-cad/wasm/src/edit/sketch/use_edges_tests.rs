@@ -96,7 +96,7 @@ fn offset_on_surface_insets_a_face_s_edges_into_a_closed_profile() {
     // The inset is a closed profile: a pocket cuts through it.
     let pocket = text.replace(
         "    }\n}\n",
-        "    }\n    feature pocket = extrude(profile = sketch.top, distance = 2 mm, mode = cut, reverse)\n}\n",
+        "    }\n    feature pocket = extrude(profile = sketch.top, distance = 2 mm, mode = cut)\n}\n",
     );
     let compiled = compile_part("/p/plate.part", &pocket).unwrap_or_else(|d| panic!("{d:?}"));
     let errors: Vec<&str> = compiled

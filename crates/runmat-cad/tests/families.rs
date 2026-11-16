@@ -1545,7 +1545,8 @@ fn delete_face_heals_a_pocket_and_a_dimension_edit_is_recorded() {
         FeatureKind::Extrude(Extrude {
             profile: ProfileRef::sketch("s_pocket").into(),
             extent: Extent::Blind { distance: mm(4.0) },
-            reverse: true,
+            // A cut from a sketch on a face goes into the body by default (DEFECTS-072).
+            reverse: false,
             mode: BodyMode::cut(),
             from: Default::default(),
             second: None,

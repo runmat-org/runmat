@@ -1122,8 +1122,12 @@ mod tests {
     #[test]
     fn an_assembly_draws_its_parts_from_their_text() {
         let assembly = "runmat 0.7\nstd 1\n\nassembly rig {\n    use part bracket as a\n    use part bracket as b {\n        placement = { placement = offset, offset = { translation = [100 mm, 0 mm, 0 mm] } }\n    }\n}\n";
-        // The parts are named in the assembly's folder: the host lists `/p/` and reads them.
-        assert_eq!(dependencies("/p/rig.assembly", assembly), ["/p/"]);
+        // The parts are named in the assembly's folder: the host lists `/p/` and reads them, and
+        // the release store beside them, which pinned revisions are read from.
+        assert_eq!(
+            dependencies("/p/rig.assembly", assembly),
+            ["/p/", "/p/.runmat/releases/"]
+        );
         let files: Files = [("/p/bracket.part".to_owned(), BRACKET.to_owned())].into();
         let out: Value =
             serde_json::from_str(&compile_json("/p/rig.assembly", assembly, &files)).unwrap();
