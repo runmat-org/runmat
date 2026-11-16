@@ -666,11 +666,17 @@ pub fn over_lines(f: &BoxR, views: &[ViewPlan]) -> bool {
         }
         let hidden: &[Vec<f64>] = if v.show_hidden { &v.hidden } else { &[] };
         v.edges.iter().chain(&v.tangent).chain(hidden).any(|e| {
-            e.chunks_exact(2)
+            let pts: Vec<Xy> = e
+                .chunks_exact(2)
                 .map(|p| v.to_sheet([p[0], p[1]]))
-                .collect::<Vec<_>>()
-                .windows(2)
+                .collect();
+            // Across a line, or inside a hole it crosses none of the lines of.
+            pts.windows(2)
                 .any(|w| clip_segment(w[0], w[1], &g).is_some())
+                || crate::analyze::drawing_check::in_small_loop(
+                    &pts.concat(),
+                    &[f.x0, f.y0, f.x1, f.y1],
+                )
         })
     })
 }

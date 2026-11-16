@@ -124,6 +124,40 @@ fn overlap(a: &Bx, b: &Bx) -> (f64, f64) {
     )
 }
 
+/// Whether text box `b` sits inside the closed polyline `pts` when that loop is about the text's
+/// own size (at most four times its area): a figure set inside a hole is on the hole, though it
+/// crosses none of its lines. A view's outline is larger, so text in a clear face isn't.
+pub(crate) fn in_small_loop(pts: &[f64], b: &Bx) -> bool {
+    let n = pts.len() / 2;
+    if n < 4 {
+        return false;
+    }
+    let closed = (pts[0] - pts[2 * n - 2]).abs() < 1e-3 && (pts[1] - pts[2 * n - 1]).abs() < 1e-3;
+    if !closed {
+        return false;
+    }
+    let (mut lo, mut hi) = ([f64::MAX; 2], [f64::MIN; 2]);
+    for c in pts.chunks_exact(2) {
+        lo = [lo[0].min(c[0]), lo[1].min(c[1])];
+        hi = [hi[0].max(c[0]), hi[1].max(c[1])];
+    }
+    let loop_area = (hi[0] - lo[0]) * (hi[1] - lo[1]);
+    let text_area = (b[2] - b[0]) * (b[3] - b[1]);
+    if loop_area > 4.0 * text_area {
+        return false;
+    }
+    // The text's centre inside the loop (even-odd).
+    let q = [(b[0] + b[2]) / 2.0, (b[1] + b[3]) / 2.0];
+    let mut odd = false;
+    for i in 0..n - 1 {
+        let (a, c) = ([pts[2 * i], pts[2 * i + 1]], [pts[2 * i + 2], pts[2 * i + 3]]);
+        if (a[1] > q[1]) != (c[1] > q[1]) && q[0] < a[0] + (q[1] - a[1]) / (c[1] - a[1]) * (c[0] - a[0]) {
+            odd = !odd;
+        }
+    }
+    odd
+}
+
 /// Whether the segment a→b runs inside box `g` (Liang–Barsky clipping).
 fn crosses_box(a: [f64; 2], b: [f64; 2], g: &Bx) -> bool {
     if g[0] >= g[2] || g[1] >= g[3] {
@@ -259,7 +293,8 @@ fn overlaps(sheet: &str, layout: &Value, out: &mut Vec<Finding>) {
                 .chunks_exact(2)
                 .collect::<Vec<_>>()
                 .windows(2)
-                .any(|w| crosses_box([w[0][0], w[0][1]], [w[1][0], w[1][1]], &g));
+                .any(|w| crosses_box([w[0][0], w[0][1]], [w[1][0], w[1][1]], &g))
+                || in_small_loop(pts, ba);
             if crosses {
                 said.push(view);
                 out.push(Finding {
