@@ -3971,7 +3971,10 @@ mod positioned_axes_tests {
         let short = Rect::from_min_size(pos2(0.0, 100.0), vec2(400.0, 30.0));
         let center = PlotOverlay::x_label_center_in(short, tick_h, scale);
         let label_top = center - PlotOverlay::x_label_half_height(scale);
-        assert!(label_top >= 100.0 + tick_bottom, "label top {label_top} over ticks");
+        assert!(
+            label_top >= 100.0 + tick_bottom,
+            "label top {label_top} over ticks"
+        );
 
         // A roomy band keeps the label where it always sat, low in the band.
         let tall = Rect::from_min_size(pos2(0.0, 100.0), vec2(400.0, 60.0));
