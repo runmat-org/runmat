@@ -341,7 +341,7 @@ pub fn assembly_mass(
             continue;
         }
         if node.definition.kind == DefinitionKind::Circuit {
-            let file = node.definition.file.0.clone();
+            let file = node.source_key();
             let occurrence = resolved.path(id as u32);
             match board_mass(&file, files) {
                 Err(e) => report.problems.push(format!("{occurrence}: {e}")),
@@ -367,7 +367,7 @@ pub fn assembly_mass(
         if node.definition.kind != DefinitionKind::Part {
             continue;
         }
-        let file = node.definition.file.0.clone();
+        let file = node.source_key();
         let occurrence = resolved.path(id as u32);
         let key = (file.clone(), node.configuration.digest());
         let content = crate::evaluate::content_key(&file, &key.1, files);

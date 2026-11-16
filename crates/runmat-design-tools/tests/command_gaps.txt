@@ -1,5 +1,3 @@
-assembly.document-settings assembly
-assembly.update-pins assembly
 board.align circuit
 board.align circuit.layout
 board.place circuit

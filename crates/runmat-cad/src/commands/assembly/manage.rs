@@ -73,14 +73,28 @@ pub(super) fn manage() -> Vec<CommandDescriptor> {
         )])
         .edit(edit(EditOp::Set, Section::Settings).item("document")),
         asm(
+            "assembly.release",
+            "Release",
+            "release",
+            "Save the selected components' files, or this assembly, as their next released revision.",
+        )
+        .kw(&["revision", "release", "freeze", "version"])
+        .inputs(vec![picks("components", "Components", &[K::Occurrence])
+            .optional()
+            .help("Leave empty to release this assembly.")])
+        .on(&[K::Occurrence])
+        .edit(edit(EditOp::Set, Section::Occurrences).item("release")),
+        asm(
             "assembly.update-pins",
             "References and pins",
             "pin",
-            "Review pinned revisions of components and update them.",
+            "Pin components to their file's latest released revision, or set them to follow the file live.",
         )
         .kw(&["revision", "update", "version"])
         .inputs(vec![
-            picks("components", "Components", &[K::Occurrence]).optional(),
+            picks("components", "Components", &[K::Occurrence])
+                .optional()
+                .help("Leave empty to update every component."),
             radio(
                 "to",
                 "Update to",

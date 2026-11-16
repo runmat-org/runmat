@@ -22,6 +22,11 @@
 //!   bonded, and Delete on its row ([`contacts`]).
 //! - `assembly.options-effectivity`, `assembly.options`: option axes, the serial range their
 //!   values apply in and the values shown, and Delete on an option's row ([`product_options`]).
+//! - `assembly.set-property`: Fixed, Flexible, Reference, Representation or Configuration of
+//!   the selected components, from Properties ([`properties`]).
+//! - `assembly.document-settings`: the units its readouts use ([`settings`]).
+//! - `assembly.release`, `assembly.update-pins`: the components' files released as revisions,
+//!   and the components pinned to their latest release or set to follow the live file ([`pins`]).
 //! - `assembly.representation`: the components' representation (full, or envelope: drawn and
 //!   checked as their box).
 //! - `assembly.mate-connector`: a named connector on a pick, and Delete on its row
@@ -52,9 +57,12 @@ mod mate_edits;
 mod mirror;
 mod operation;
 mod path_picks;
+mod pins;
 mod place;
 mod product_options;
+mod properties;
 mod publishes;
+mod settings;
 mod sketch;
 mod structure;
 mod use_edges;
@@ -70,6 +78,8 @@ mod connector_tests;
 mod contacts_tests;
 #[cfg(test)]
 mod copy_tests;
+#[cfg(test)]
+mod pins_tests;
 #[cfg(test)]
 mod product_options_tests;
 #[cfg(test)]
@@ -511,6 +521,12 @@ pub(super) fn edit(
         }
         "assembly.options-effectivity" => product_options::define(&mut document, &request.values)?,
         "assembly.options" => product_options::show(&mut document, &request.values)?,
+        "assembly.set-property" => properties::set(&mut document, &compiled, files, request)?,
+        "assembly.document-settings" => settings::apply(&mut document, &request.values)?,
+        "assembly.update-pins" => pins::update(&mut document, path, files, &compiled, request)?,
+        "assembly.release" => {
+            pins::release(&document, path, text, files, &compiled, request, &mut others)?
+        }
         "assembly.delete" if contacts::selected(request).next().is_some() => {
             contacts::delete(&mut document, request)?
         }

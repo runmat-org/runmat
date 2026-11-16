@@ -121,6 +121,23 @@ pub struct OccNode {
     pub failed: bool,
 }
 
+impl OccNode {
+    /// The key its definition's regenerated document and display are held under: the file,
+    /// or `<file>@<revision>` for an occurrence pinned to a released revision (whose text and
+    /// geometry can differ from the live file's).
+    pub fn source_key(&self) -> String {
+        source_key(self.definition.file.as_str(), self.revision.as_ref())
+    }
+}
+
+/// [`OccNode::source_key`] for `file` at `revision`.
+pub fn source_key(file: &str, revision: Option<&RevisionId>) -> String {
+    match revision {
+        Some(r) => format!("{file}@{r}"),
+        None => file.to_owned(),
+    }
+}
+
 /// One shared definition at one configuration and representation.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Prototype {

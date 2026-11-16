@@ -722,7 +722,7 @@ pub fn assembly_display(
 /// `configured` map: the file and the resolved configuration as JSON.
 pub fn configuration_key(node: &crate::assembly::resolve::OccNode) -> (String, String) {
     (
-        node.definition.file.as_str().to_string(),
+        node.source_key(),
         serde_json::to_string(&node.configuration).unwrap_or_default(),
     )
 }
@@ -839,7 +839,7 @@ pub fn assembly_display_operated(
                 let shape = match operated
                     .get(&(id as u32))
                     .or_else(|| configured.get(&configuration_key(node)))
-                    .or_else(|| parts.get(&file))
+                    .or_else(|| parts.get(&node.source_key()))
                 {
                     // An occurrence is the folded part: a sheet metal flat pattern stays out.
                     Some(part) => PrototypeShape::Mesh {

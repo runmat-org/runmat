@@ -939,6 +939,9 @@ pub struct AssemblyDocument {
     pub inputs: Vec<InputDecl>,
     #[serde(default)]
     pub lets: Vec<LetDecl>,
+    /// Document settings: the units readouts use ([`crate::assembly::settings`]).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub settings: Option<crate::assembly::settings::DocumentSettings>,
     /// Option and effectivity axes: meaningful on the top assembly of a product.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub options: Option<OptionsBlock>,
@@ -998,6 +1001,7 @@ impl AssemblyDocument {
             part_number: None,
             inputs: Vec::new(),
             lets: Vec::new(),
+            settings: None,
             options: None,
             occurrences: Vec::new(),
             connectors: Vec::new(),

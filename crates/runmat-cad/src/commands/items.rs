@@ -319,6 +319,13 @@ pub(super) fn add(catalog: &mut Catalog) {
                             Section::Occurrences,
                             "flexible",
                         ),
+                        prop(
+                            flag("reference", "Reference", false).help(
+                                "Drawn and mated to, but left out of the parts list, mass and interference.",
+                            ),
+                            Section::Occurrences,
+                            "reference",
+                        ),
                         shown(text("pin", "Pinned revision", None), "revision"),
                         shown(count("dof", "Degrees of freedom", 0, 0), "dof"),
                     ],

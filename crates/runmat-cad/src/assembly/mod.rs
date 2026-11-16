@@ -37,6 +37,7 @@ pub mod envelope_rows;
 pub mod option_rows;
 pub mod representation;
 pub mod resolve;
+pub mod settings;
 pub mod sketches;
 pub mod source;
 pub mod synth;

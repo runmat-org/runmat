@@ -8,8 +8,8 @@
 //! - add-publish and publish-anchor add the publish entry to the other file, so the name can be
 //!   used from here.
 //!
-//! Releasing a file makes a project revision, which no source edit can do; that repair says
-//! where to release.
+//! - release-file saves the other file as its next released revision in the project's release
+//!   store ([`crate::edit::release`]), so a reference can then pin to it.
 
 use crate::edit::model;
 use crate::runtime::Files;
@@ -264,10 +264,14 @@ pub fn apply(
             (vec![(key, old, change)], format!("Pinned {occurrence} to revision {revision}"))
         }
         Repair::ReleaseFile { file } => {
-            return Err(model(format!(
-                "release `{}` to make a revision (a project action, from the file's history), then pin to it",
-                file.0
-            )))
+            let (key, content) = if file.0 == path {
+                (path.to_owned(), text.to_owned())
+            } else {
+                let (k, t) = find(files, file).ok_or_else(|| model(format!("`{}` isn't in the project", file.0)))?;
+                (k.clone(), t.clone())
+            };
+            let (edit, revision) = crate::edit::release::release(&key, &content, files)?;
+            (vec![edit], format!("Released {} as {revision}", file.0))
         }
         _ => return Ok(None),
     }))

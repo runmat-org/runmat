@@ -90,4 +90,14 @@ fn a_sub_assembly_at_envelope_draws_one_box_around_its_parts_and_weighs_them() {
     let mut weighed: Vec<&str> = report.parts.iter().map(|p| p.path.as_str()).collect();
     weighed.sort();
     assert_eq!(weighed, vec!["plate", "s/a", "s/b"], "{report:?}");
+    // An export writes the parts the envelope stands for, not its box.
+    let meshes =
+        crate::exchange::meshes::assembly_meshes("/p/rig.assembly", top, &all, None).unwrap();
+    let mut exported: Vec<&str> = meshes
+        .occurrences
+        .iter()
+        .map(|o| o.path.as_str())
+        .collect();
+    exported.sort();
+    assert_eq!(exported, vec!["plate", "s/a", "s/b"]);
 }

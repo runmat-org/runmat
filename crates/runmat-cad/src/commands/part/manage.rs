@@ -71,6 +71,10 @@ pub(super) fn manage() -> Vec<CommandDescriptor> {
             count("decimals", "Decimals", 2, 0),
         ])
         .edit(edit(EditOp::Set, Section::Settings).item("document")),
+        cmd("manage.release", "Release", "release", P)
+            .desc("Save this part as its next released revision, for assemblies to pin to.")
+            .kw(&["revision", "release", "freeze", "version"])
+            .edit(edit(EditOp::Set, Section::Settings).item("release")),
         cmd("manage.find-references", "Find references", "references", P)
             .desc("List the assemblies, drawings and studies that use this part.")
             .kw(&["where used", "where-used"])
