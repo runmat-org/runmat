@@ -53,8 +53,11 @@ impl runmat_meshing_core::MeshingCancellationSignal for Cancellation {
         false
     }
 }
-pub(super) fn execute(
+/// Runs one exact execution request. While a request meshes, its live work counts go to
+/// `progress` (see [`crate::progress`]).
+pub fn execute(
     json: &str,
+    progress: Option<runmat_analysis_fea::progress::FeaProgressHandler>,
 ) -> Result<String, runmat_analysis_execution::SerialGeometryMeshingError> {
     if json.len() > MAX_REQUEST_BYTES {
         return Err("Geometry preparation exceeds this host's input allowance.".into());
@@ -65,6 +68,7 @@ pub(super) fn execute(
     match request {
         Request::Profile => serde_json::to_string(&profile).map_err(|e| e.to_string().into()),
         Request::MeshImportedSource { request } => {
+            let _progress = progress.map(crate::progress::MeshingProgressBridge::install);
             // The surrounding owned-worker JS host validates the original
             // parent delegation before this call and before returning bytes.
             let ceilings = runmat_meshing_core::MeshingExecutionCeilings::for_host(
@@ -122,6 +126,7 @@ pub(super) fn execute(
             settings,
         } => {
             settings.validate().map_err(|e| e.to_string())?;
+            let _progress = progress.map(crate::progress::MeshingProgressBridge::install);
             // The browser host admits at most MAX_GEOMETRY_MEMORY_BYTES; a mesh that needs more
             // stops at this ceiling with a typed meshing resource failure.
             let ceilings = runmat_meshing_core::MeshingExecutionCeilings::for_host(

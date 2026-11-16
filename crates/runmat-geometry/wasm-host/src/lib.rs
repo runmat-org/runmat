@@ -98,7 +98,8 @@ pub unsafe extern "C" fn runmat_occt_exact_free(value: *mut c_char) {
 }
 
 pub mod cad;
-mod execution;
+pub mod execution;
+pub mod progress;
 /// Caller supplies bounded NUL-terminated UTF-8 JSON. The response is freed with
 /// runmat_occt_exact_free, just like the import ABI.
 ///
@@ -115,7 +116,7 @@ pub unsafe extern "C" fn runmat_occt_exact_execute(request: *const c_char) -> *m
         CStr::from_ptr(request)
             .to_str()
             .map_err(|e| runmat_analysis_execution::SerialGeometryMeshingError::from(e.to_string()))
-            .and_then(execution::execute)
+            .and_then(|request| execution::execute(request, progress::page_handler()))
     };
     let response = match result {
         Ok(value) => serde_json::json!({"result":value}),
