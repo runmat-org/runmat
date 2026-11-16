@@ -42,8 +42,12 @@ use runmat_cad::refs::name::EntityName;
 use runmat_cad::refs::reference::Reference;
 use runmat_cad::syntax::parse_drawing_in;
 use serde_json::{json, Value};
+use std::collections::btree_map::Entry;
 use std::collections::{BTreeMap, BTreeSet};
 use std::rc::Rc;
+
+/// A grid line's plane as the sheet draws it: its anchor and the box it spans (mm).
+type GridPlane = ([f64; 3], [[f64; 3]; 2]);
 
 /// A part's PMI names: tolerances, sizes and locations (what a dimension's `pmi` may name), and datums.
 type PmiNames = (BTreeSet<String>, BTreeSet<String>, BTreeSet<String>);
@@ -508,24 +512,23 @@ pub fn compile_json_in(
             }
             | K::Grids { occurrence, .. } => {
                 let key = values::scoped_key(file, &occurrence.to_string());
-                if !models.published.contains_key(&key) {
-                    let datums = occurrences::file_of(display, &occurrence.to_string())
+                models.published.entry(key).or_insert_with(|| {
+                    occurrences::file_of(display, &occurrence.to_string())
                         .map(|part| {
                             let assembly = resolve_path(path, file, files);
                             published_datums(&resolve_path(&assembly, &part, files), files)
                         })
-                        .unwrap_or_default();
-                    models.published.insert(key, datums);
-                }
+                        .unwrap_or_default()
+                });
                 Vec::new()
             }
             _ => Vec::new(),
         };
         for occurrence in paths {
             let key = values::scoped_key(file, &occurrence.to_string());
-            if !models.scoped.contains_key(&key) {
+            if let Entry::Vacant(slot) = models.scoped.entry(key) {
                 if let Some(s) = occurrences::scoped(display, &occurrence.to_string()) {
-                    models.scoped.insert(key, s);
+                    slot.insert(s);
                 }
             }
         }
@@ -822,7 +825,7 @@ pub fn compile_json_in(
     let mut cylinders = serde_json::Map::new();
     // Door swings by annotation id (leaf and arc, mm in the assembly), and grids' planes.
     let mut swings = serde_json::Map::new();
-    let mut grid_texts: BTreeMap<String, Vec<([f64; 3], [[f64; 3]; 2])>> = BTreeMap::new();
+    let mut grid_texts: BTreeMap<String, Vec<GridPlane>> = BTreeMap::new();
     // Level marks on datums: their height (mm), which the compile prints as the mark's text.
     let mut level_texts: BTreeMap<String, f64> = BTreeMap::new();
     for a in &document.annotations {

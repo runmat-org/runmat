@@ -45,13 +45,16 @@ fn rename_target(id: &str) -> Result<(RenameKind, &str), EditFailure> {
     Err(model(format!("`{id}` can't be renamed")))
 }
 
+/// A file that follows a rename: its path, its source before the change, and the change.
+type FollowingChange = (String, String, SourceChange);
+
 /// `part.rename`: the part's own change, then each drawing that follows it.
 pub(super) fn rename(
     path: &str,
     text: &str,
     files: &Files,
     request: &EditRequest,
-) -> Result<(SourceChange, String, Vec<(String, String, SourceChange)>), EditFailure> {
+) -> Result<(SourceChange, String, Vec<FollowingChange>), EditFailure> {
     let [selected] = request.selection.as_slice() else {
         return Err(model("select one item to rename"));
     };
