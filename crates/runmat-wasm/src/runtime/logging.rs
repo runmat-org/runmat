@@ -46,7 +46,8 @@ use crate::wire::payloads::ConsoleStreamPayload;
 pub(crate) fn ensure_runtime_log_forwarder_installed() {
     RUNTIME_LOG_FORWARDER.get_or_init(|| {
         let forwarder = Arc::new(|record: &runmat_logging::RuntimeLogRecord| {
-            let js_value = serde_wasm_bindgen::to_value(record).unwrap_or(JsValue::NULL);
+            // Fields are a JSON object; plain to_value would send a Map, which the host reads as {}.
+            let js_value = crate::wire::json_contract_to_js(record).unwrap_or(JsValue::NULL);
             RUNTIME_LOG_SUBSCRIBERS.with(|cell| {
                 for cb in cell.borrow().values() {
                     let _ = cb.call1(&JsValue::NULL, &js_value);
@@ -66,7 +67,8 @@ pub(crate) fn ensure_trace_forwarder_installed() {
 
     TRACE_FORWARDER.get_or_init(|| {
         let forwarder = Arc::new(|events: &[TraceEvent]| {
-            let js_value = serde_wasm_bindgen::to_value(events).unwrap_or(JsValue::NULL);
+            // Span args are a JSON object; plain to_value would send a Map, which the host reads as {}.
+            let js_value = crate::wire::json_contract_to_js(events).unwrap_or(JsValue::NULL);
             TRACE_SUBSCRIBERS.with(|cell| {
                 for cb in cell.borrow().values() {
                     let _ = cb.call1(&JsValue::NULL, &js_value);

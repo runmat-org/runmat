@@ -520,11 +520,7 @@ impl<S> Layer<S> for TraceBridgeLayer
 where
     S: Subscriber + for<'a> tracing_subscriber::registry::LookupSpan<'a>,
 {
-    fn on_event(
-        &self,
-        event: &tracing::Event<'_>,
-        _ctx: tracing_subscriber::layer::Context<'_, S>,
-    ) {
+    fn on_event(&self, event: &tracing::Event<'_>, ctx: tracing_subscriber::layer::Context<'_, S>) {
         // Only emit trace events if a hook is set
         let hook = match TRACE_HOOK.get() {
             Some(h) => h,
@@ -535,7 +531,9 @@ where
         let ts = now_timestamp_micros();
 
         let trace_id = current_trace_id();
-        let parent_span_id = current_span_id();
+        let parent_span_id = ctx
+            .event_span(event)
+            .and_then(|span| feed_span_id(&span));
         let span_id = Some(next_event_span_id());
 
         let mut visitor = JsonVisitor::default();
@@ -565,64 +563,110 @@ where
         hook(&[ev]);
     }
 
-    fn on_enter(&self, id: &tracing::span::Id, ctx: tracing_subscriber::layer::Context<'_, S>) {
-        if TRACE_HOOK.get().is_none() {
+    // A span begins when it is created and ends when it closes. Async spans are
+    // entered and exited at every poll, so enter/exit would split one span into
+    // many pairs.
+    fn on_new_span(
+        &self,
+        attrs: &tracing::span::Attributes<'_>,
+        id: &tracing::span::Id,
+        ctx: tracing_subscriber::layer::Context<'_, S>,
+    ) {
+        let Some(hook) = TRACE_HOOK.get() else {
             return;
-        }
+        };
+        let Some(span) = ctx.span(id) else {
+            return;
+        };
+        let mut visitor = JsonVisitor::default();
+        attrs.record(&mut visitor);
+        let feed = FeedSpan {
+            id: format!("s-{}", FEED_SPAN_COUNTER.fetch_add(1, Ordering::Relaxed)),
+            parent: span.parent().and_then(|parent| feed_span_id(&parent)),
+            fields: visitor,
+        };
+        hook(&[feed.event(span.metadata(), "B", self.pid)]);
+        span.extensions_mut().insert(feed);
+    }
+
+    fn on_record(
+        &self,
+        id: &tracing::span::Id,
+        values: &tracing::span::Record<'_>,
+        ctx: tracing_subscriber::layer::Context<'_, S>,
+    ) {
         if let Some(span) = ctx.span(id) {
-            emit_span_event(span, "B", self.pid);
+            if let Some(feed) = span.extensions_mut().get_mut::<FeedSpan>() {
+                values.record(&mut feed.fields);
+            }
         }
     }
 
-    fn on_exit(&self, id: &tracing::span::Id, ctx: tracing_subscriber::layer::Context<'_, S>) {
-        if TRACE_HOOK.get().is_none() {
+    fn on_close(&self, id: tracing::span::Id, ctx: tracing_subscriber::layer::Context<'_, S>) {
+        let Some(hook) = TRACE_HOOK.get() else {
             return;
-        }
-        if let Some(span) = ctx.span(id) {
-            emit_span_event(span, "E", self.pid);
+        };
+        let Some(span) = ctx.span(&id) else {
+            return;
+        };
+        let event = span
+            .extensions()
+            .get::<FeedSpan>()
+            .map(|feed| feed.event(span.metadata(), "E", self.pid));
+        if let Some(event) = event {
+            hook(&[event]);
         }
     }
 }
 
-fn emit_span_event<S>(span: tracing_subscriber::registry::SpanRef<'_, S>, phase: &str, pid: i64)
+/// The trace feed's identity for one span. The registry reuses a span's id once
+/// the span closes, so the feed numbers spans itself; otherwise a later span
+/// would join an earlier, unrelated one.
+struct FeedSpan {
+    id: String,
+    parent: Option<String>,
+    fields: JsonVisitor,
+}
+
+static FEED_SPAN_COUNTER: AtomicUsize = AtomicUsize::new(1);
+
+impl FeedSpan {
+    fn event(&self, meta: &tracing::Metadata<'_>, phase: &str, pid: i64) -> TraceEvent {
+        let mut args = self
+            .fields
+            .fields
+            .as_ref()
+            .and_then(|v| v.as_object())
+            .cloned()
+            .unwrap_or_default();
+        if let Some(message) = &self.fields.message {
+            args.insert("message".to_owned(), JsonValue::String(message.clone()));
+        }
+        TraceEvent {
+            name: meta.name().to_string(),
+            cat: meta.target().to_string(),
+            ph: phase.to_string(),
+            ts: now_timestamp_micros(),
+            dur: None,
+            pid: Some(pid),
+            tid: None,
+            trace_id: current_trace_id(),
+            span_id: Some(self.id.clone()),
+            parent_span_id: self.parent.clone(),
+            args: (!args.is_empty()).then_some(JsonValue::Object(args)),
+        }
+    }
+}
+
+fn feed_span_id<S>(span: &tracing_subscriber::registry::SpanRef<'_, S>) -> Option<String>
 where
     S: Subscriber + for<'a> tracing_subscriber::registry::LookupSpan<'a>,
 {
-    let hook = match TRACE_HOOK.get() {
-        Some(h) => h,
-        None => return,
-    };
-    let meta = span.metadata();
-    let ts = now_timestamp_micros();
-
-    let trace_id = current_trace_id();
-    let span_id = Some(span.id().clone().into_u64().to_string());
-    let parent_span_id = span
-        .parent()
-        .map(|parent| parent.id().clone().into_u64().to_string());
-
-    let ev = TraceEvent {
-        name: meta.name().to_string(),
-        cat: meta.target().to_string(),
-        ph: phase.to_string(),
-        ts,
-        dur: None,
-        pid: Some(pid),
-        tid: None,
-        trace_id,
-        span_id,
-        parent_span_id,
-        args: None,
-    };
-    hook(&[ev]);
+    span.extensions().get::<FeedSpan>().map(|feed| feed.id.clone())
 }
 
 fn current_trace_id() -> Option<String> {
     current_trace_span_ids().0
-}
-
-fn current_span_id() -> Option<String> {
-    current_trace_span_ids().1
 }
 
 #[cfg(any(feature = "otlp", feature = "browser-otlp"))]
