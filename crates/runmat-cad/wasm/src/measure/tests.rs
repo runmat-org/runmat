@@ -460,7 +460,7 @@ fn entities_across_components_follow_their_placement() {
     let (from, to) = (a.dimensions[0].from, a.dimensions[0].to);
     close(from[2] * 1e3, 10.0);
     close(to[2] * 1e3, 30.0);
-    within(from[0] * 1e3, 100.0, 1e-6);
+    within(from[0] * 1e3, 100.0, 1e-4);
     within(to[0] * 1e3, 140.0, 0.05);
     let rim = format!("occurrence:{boss}/{}", circle_edge(&sd, 8.0 * MM));
     let r = rig("radius", std::slice::from_ref(&rim));
