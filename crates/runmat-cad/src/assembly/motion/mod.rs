@@ -19,6 +19,7 @@
 //! them.
 
 pub mod drag;
+pub mod dynamics;
 pub mod kinematics;
 
 use crate::value::ValueExpr;
@@ -65,12 +66,57 @@ pub struct MotionDrive {
     pub to: ValueExpr,
 }
 
+/// Whether a study drives its mates through set values (kinematics) or integrates the
+/// mechanism's equations of motion under its loads (dynamics, [`dynamics`]).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum MotionKind {
+    #[default]
+    Kinematic,
+    Dynamic,
+}
+
+/// A spring and damper acting along a mate's own value (`{ mate = hinge, stiffness = 0.5
+/// N*m/rad, damping = 0.01 N*m*s/rad, free = 0 deg }`): on a revolute (or a cylindrical's
+/// angle) a torque `−k (θ − θ₀) − c θ̇`, on a slider a force `−k (d − d₀) − c ḋ`.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct MotionSpring {
+    pub mate: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub stiffness: Option<ValueExpr>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub damping: Option<ValueExpr>,
+    /// The value at which the spring is unloaded (default 0).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub free: Option<ValueExpr>,
+}
+
+/// A motor on a mate: a constant torque about a revolute's axis or a force along a slider's.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct MotionMotor {
+    pub mate: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub torque: Option<ValueExpr>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub force: Option<ValueExpr>,
+}
+
 /// A motion study of the assembly (`motion <name> = { … }`).
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct MotionStudy {
     pub name: String,
+    #[serde(default, skip_serializing_if = "is_kinematic")]
+    pub kind: MotionKind,
     pub duration: ValueExpr,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub drives: Vec<MotionDrive>,
+    /// A dynamic study's gravity, three accelerations (default `[0, 0, −9.80665] m/s²`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub gravity: Option<Vec<ValueExpr>>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub springs: Vec<MotionSpring>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub motors: Vec<MotionMotor>,
     /// Solved frames per second (default [`DEFAULT_RATE`]).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub rate: Option<f64>,
@@ -80,6 +126,10 @@ pub struct MotionStudy {
     /// The occurrence whose motion is plotted (its box centre's path, speed and acceleration).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub track: Option<String>,
+}
+
+fn is_kinematic(k: &MotionKind) -> bool {
+    *k == MotionKind::Kinematic
 }
 
 fn is_linear(p: &MotionProfile) -> bool {

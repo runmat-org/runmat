@@ -37,6 +37,7 @@ mod mate;
 mod mate_edits;
 mod mirror;
 mod motion;
+pub(super) mod to_fea;
 mod operation;
 mod path_picks;
 mod place;
@@ -58,6 +59,8 @@ mod explode_tests;
 mod drag_tests;
 #[cfg(test)]
 mod motion_tests;
+#[cfg(test)]
+mod to_fea_tests;
 #[cfg(test)]
 mod sketch_tests;
 #[cfg(test)]
@@ -452,6 +455,9 @@ pub(super) fn edit(
         }
         "motion.animation" => {
             motion::animation(&mut document, &compiled, &request.values, &request.selection)?
+        }
+        "motion.basic" => {
+            motion::basic(&mut document, &compiled, &request.values, &request.selection)?
         }
         "assembly.delete" if connector::selected(request).next().is_some() => {
             connector::delete(&mut document, request)?

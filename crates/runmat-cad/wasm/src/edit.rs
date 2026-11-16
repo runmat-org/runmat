@@ -430,6 +430,10 @@ pub fn edit(
     if request.command == "study.new" && (path.ends_with(".part") || path.ends_with(".assembly")) {
         return Ok(study_handoff(path));
     }
+    // Results to .fea writes nothing either: it hands a dynamic study's joint loads to the same guide.
+    if request.command == "motion.to-fea" && path.ends_with(".assembly") {
+        return assembly::to_fea::handoff(path, text, files, &request.values, &request.selection);
+    }
     let (change, summary) = if path.ends_with(".drawing") {
         match request.command.as_str() {
             "drawing.auto" => crate::drawing::auto::auto(path, text, files, &request.values)?,

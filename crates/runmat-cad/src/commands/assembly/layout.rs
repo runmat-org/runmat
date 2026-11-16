@@ -301,24 +301,56 @@ pub(super) fn layout() -> Vec<CommandDescriptor> {
             "Simulate gravity, springs and motors on the mechanism.",
         )
         .inputs(vec![
-            flag("gravity", "Gravity", true),
-            picks("motors", "Motor mates", &[K::Mate]).optional(),
-            qty("speed", "Motor speed", "angular_speed", Some(30.0)),
-            qty("duration", "Duration", "time", Some(5.0)),
+            text("name", "Name", Some("swing"))
+                .help("An existing study's name changes that study."),
+            qty("duration", "Duration", "time", Some(2.0)),
+            choice(
+                "gravity",
+                "Gravity",
+                &[
+                    ("-z", "Down (−Z)"),
+                    ("-y", "Down (−Y)"),
+                    ("-x", "Down (−X)"),
+                    ("+z", "Up (+Z)"),
+                    ("none", "None"),
+                ],
+            )
+            .help("Standard gravity, 9.80665 m/s², along the direction picked."),
+            pick("mate", "Spring and motor on", &[K::Mate])
+                .optional()
+                .help("A revolute, slider or cylindrical mate. Leave empty for gravity alone."),
+            choice("quantity", "Acts on", &[("angle", "Angle"), ("distance", "Distance")]),
+            qty("stiffness", "Spring", "rotational_stiffness", Some(0.0)).shown("quantity", &["angle"]),
+            qty("damping", "Damping", "torsional_damping", Some(0.0)).shown("quantity", &["angle"]),
+            qty("torque", "Motor torque", "torque", Some(0.0)).shown("quantity", &["angle"]),
+            qty("stiffness_linear", "Spring", "stiffness", Some(0.0)).shown("quantity", &["distance"]),
+            qty("damping_linear", "Damping", "damping", Some(0.0)).shown("quantity", &["distance"]),
+            qty("force", "Motor force", "force", Some(0.0)).shown("quantity", &["distance"]),
+            pick("track", "Plot", &[K::Occurrence])
+                .optional()
+                .help("The component whose speed and acceleration are plotted; the first moving one when empty."),
         ])
         .when(has(Facet::Mates))
+        .on(&[K::MotionStudy])
         .edit(edit(EditOp::Add, Section::Motion).item("basic")),
         asm(
             "motion.to-fea",
             "Results to .fea",
             "study",
-            "Send motion loads at an instant to a new study.",
+            "Send a dynamic study's joint loads on one part, at one instant, to a new simulation.",
         )
         .inputs(vec![
-            qty("time", "At time", "time", Some(0.0)),
-            text("name", "Study", Some("loads.fea")),
+            text("study", "Motion study", None)
+                .optional()
+                .help("A Basic motion study. Start from its row, or leave empty when there is one."),
+            qty("time", "At time", "time", Some(0.0))
+                .help("The loads at the solved frame nearest this time."),
+            pick("component", "Part", &[K::Occurrence])
+                .optional()
+                .help("The part to simulate; the first one a mate loads when empty."),
         ])
         .when(has(Facet::Mates))
+        .on(&[K::MotionStudy])
         .edit(edit(EditOp::CreateFile, Section::Studies).item("fea")),
     ]
 }

@@ -406,6 +406,10 @@ This file is generated from the command catalog.
   - Required: `name` (text); `mate` (pick: mate); `quantity` (one of `angle`, `distance`, default `angle`); `from_angle` (number in deg, default 0) when `quantity` is angle; `to_angle` (number in deg, default 90) when `quantity` is angle; `from_distance` (number in mm, default 0) when `quantity` is distance; `to_distance` (number in mm, default 50) when `quantity` is distance; `duration` (number in s, default 4); `profile` (one of `linear`, `cycloidal`, default `linear`)
   - Optional: `track` (pick: component)
   - Runs on the `selection`: `motion_study`
+- `motion.basic`: Simulate gravity, springs and motors on the mechanism.
+  - Required: `name` (text); `duration` (number in s, default 2); `gravity` (one of `-z`, `-y`, `-x`, `+z`, `none`, default `-z`); `quantity` (one of `angle`, `distance`, default `angle`); `stiffness` (number in N*m/rad, default 0) when `quantity` is angle; `damping` (number in N*m*s/rad, default 0) when `quantity` is angle; `torque` (number in N*m, default 0) when `quantity` is angle; `stiffness_linear` (number in N/mm, default 0) when `quantity` is distance; `damping_linear` (number in N*s/m, default 0) when `quantity` is distance; `force` (number in N, default 0) when `quantity` is distance
+  - Optional: `mate` (pick: mate); `track` (pick: component)
+  - Runs on the `selection`: `motion_study`
 - `motion.collision`: Check a motion study for components that meet as they move.
   - Required: `mode` (one of `stop`, `highlight`, default `stop`)
   - Optional: `study` (pick: motion study); `components` (picks: component)
@@ -417,6 +421,10 @@ This file is generated from the command catalog.
   - Required: `name` (text); `action` (one of `save`, `move`, default `save`)
   - Optional: `mates` (picks: mate) when `action` is save
   - Runs on the `selection`: `mate_position`
+- `motion.to-fea`: Send a dynamic study's joint loads on one part, at one instant, to a new simulation.
+  - Required: `time` (number in s, default 0)
+  - Optional: `study` (text); `component` (pick: component)
+  - Runs on the `selection`: `motion_study`
 
 ## `part.` commands (`.part`)
 

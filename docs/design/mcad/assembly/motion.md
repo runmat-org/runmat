@@ -1,6 +1,6 @@
 ---
-description: Reference for motion studies in a RunMat assembly. Drive a revolute, slider, cylindrical, distance or angle mate through a range over time, play the solved motion, plot speed and acceleration, check the motion for collisions, and save named mate positions.
-keywords: [motion study, animation, mechanism, drive a mate, kinematics, collision detection, speed plot, acceleration, cycloidal motion]
+description: Reference for motion studies in a RunMat assembly. Drive a revolute, slider, cylindrical, distance or angle mate through a range over time, simulate the mechanism under gravity, springs and motors, send joint loads to a simulation, play the solved motion, plot speed and acceleration, check the motion for collisions, and save named mate positions.
+keywords: [motion study, animation, mechanism, drive a mate, kinematics, dynamics, gravity, spring, motor, joint reaction, motion loads, collision detection, speed plot, acceleration, cycloidal motion]
 ---
 # Motion studies
 
@@ -108,6 +108,41 @@ position closed = { values = [{ mate = hinge, value = 0 deg }] }
 - **Move to position** sets each of the position's mates to its saved value. The mate solve then moves the mechanism there, and Undo moves it back.
 
 The Outline lists positions under **Mate positions**. Start Mate controller from a position's row to move to it, and use Delete to remove it.
+
+## Simulate the mechanism under its loads
+
+A dynamic study lets the mechanism move under gravity, springs and motors instead of driving a mate through set values. RunMat integrates the mechanism's equations of motion over the study's duration: the mates are the joints, and each moving component carries the mass and inertia of its parts, computed from their bodies and materials. Every part that moves needs a material.
+
+This study releases the arm and lets it swing under gravity along −Y for 2 seconds, with a torsion spring and damper on the hinge:
+
+```text
+motion fall = { kind = dynamic, duration = 2 s, gravity = [0 m/s^2, -9.80665 m/s^2, 0 m/s^2],
+                springs = [{ mate = hinge, stiffness = 0.05 N*m/rad, damping = 0.0005 N*m*s/rad, free = 0 deg }] }
+```
+
+| Field | Meaning |
+| --- | --- |
+| `kind = dynamic` | Integrates the motion under the loads. A dynamic study has no drives. |
+| `gravity` | Three accelerations, `[x, y, z]`. The default is `[0, 0, -9.80665] m/s^2`. |
+| `springs` | Springs and dampers on revolute, slider or cylindrical mates. Each names a `mate`, a `stiffness`, a `damping` and the `free` value where the spring is unloaded (0 by default). On a revolute mate they act as a torque about its axis; on a slider, as a force along it. |
+| `motors` | A constant `torque` about a revolute mate's axis, or a constant `force` along a slider's. |
+| `rate` | Solved frames per second, 30 by default. |
+
+The integration uses a fixed step of at most 2 ms and holds the joints with constraint stabilization and projection, so an undamped mechanism keeps its energy: over ten periods of a pendulum check, the energy drifts by less than one millionth of m·g·d, where m is the mass, g gravity and d the distance from the hinge to the center of mass. Joint limits are not enforced during a dynamic study, and components pass through each other: contact is not modeled. A study on a mechanism with joint limits lists that as a problem.
+
+In the Desktop, **Basic motion** on the Motion tab adds a dynamic study: enter the name and duration, pick the gravity direction, and optionally pick a mate for a spring, damper and motor. The study plays like any other, and its plot adds the first mate's reaction force on the component it moves.
+
+## Send loads to a simulation
+
+Each frame of a dynamic study records every mate's reaction on the components it joins: a force and a moment about the mate's connector. **Results to .fea** hands those loads on one part, at one instant, to a new structural simulation:
+
+1. Start Results to .fea from a dynamic study's row (or name the study).
+2. Enter the time. The loads come from the solved frame nearest that time.
+3. Pick the part to simulate, or leave it empty for the first part a mate loads.
+
+RunMat turns the loads into the part's own axes at that frame and starts the Simulation setup guide with them, as **New study** does. The guide asks for the supports, material and acceptance limit, and writes the `.fea` file. The request lists, for each mate, the connector's position in millimeters, the force in newtons and the moment in newton-meters, and gravity in the part's axes.
+
+The joint loads hold the part in balance with its weight and its inertia at that instant. A static study of the part under the joint loads alone is out of balance unless it also carries the part's weight and the acceleration loads at that time.
 
 ## Next
 

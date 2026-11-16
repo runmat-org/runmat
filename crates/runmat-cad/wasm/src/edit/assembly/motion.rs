@@ -7,6 +7,9 @@
 //! - `motion.mate-controller` saves a named mate position (`position:<name>`): `save` keeps the
 //!   picked mates' current values under the name; `move` holds each of the position's mates at
 //!   its saved value, so the mate solve moves the mechanism there.
+//! - `motion.basic` adds a dynamic study, or changes the one named: the mechanism moves under
+//!   `gravity` (a direction, or none) for `duration`, with an optional spring, damper and motor
+//!   on the picked `mate` (`quantity` angle: N·m/rad, N·m·s/rad, N·m; distance: N/m, N·s/m, N).
 //! - `assembly.delete` on `motion:<name>` and `position:<name>` rows removes those studies and
 //!   positions.
 
@@ -16,8 +19,10 @@ use crate::features::picks_of;
 use runmat_cad::assembly::model::AssemblyDocument;
 use runmat_cad::assembly::motion::kinematics::{drivable, mate_value, set_mate_value};
 use runmat_cad::assembly::motion::{
-    MatePosition, MateValue, MotionDrive, MotionProfile, MotionStudy,
+    MatePosition, MateValue, MotionDrive, MotionKind, MotionMotor, MotionProfile, MotionSpring,
+    MotionStudy,
 };
+use runmat_cad::value::ValueExpr;
 use runmat_cad::units::{Dimension, Units};
 use runmat_cad::value::{Evaluator, NoDynamicValues};
 use runmat_cad::syntax::edit::EditFailure;
@@ -145,6 +150,10 @@ pub(super) fn animation(
         rate: existing.and_then(|i| document.motions[i].rate),
         profile,
         track,
+        kind: MotionKind::Kinematic,
+        gravity: None,
+        springs: Vec::new(),
+        motors: Vec::new(),
     };
     Ok(match existing {
         Some(i) => {
@@ -159,6 +168,103 @@ pub(super) fn animation(
 }
 
 /// The positions the selection names (`position:<name>`).
+/// Whether a typed value is zero (an unused spring or motor field).
+fn is_zero(e: &ValueExpr) -> bool {
+    matches!(e, ValueExpr::Quantity { value, .. } if *value == 0.0)
+        || matches!(e, ValueExpr::Number { value } if *value == 0.0)
+}
+
+/// `motion.basic`: adds or changes a dynamic study.
+pub(super) fn basic(
+    document: &mut AssemblyDocument,
+    compiled: &Compiled,
+    values: &Values,
+    selection: &[String],
+) -> Result<String, EditFailure> {
+    let editing = selected(selection).next().map(str::to_owned);
+    let typed = values
+        .get("name")
+        .and_then(Value::as_str)
+        .filter(|s| !s.trim().is_empty())
+        .map(identifier);
+    let name = typed.clone().or_else(|| editing.clone()).unwrap_or_else(|| "swing".into());
+    let existing = editing
+        .as_deref()
+        .or(Some(name.as_str()))
+        .and_then(|n| document.motions.iter().position(|s| s.name == n));
+    if let (Some(i), Some(t)) = (existing, &typed) {
+        if document.motions.iter().enumerate().any(|(k, s)| k != i && &s.name == t) {
+            return Err(model(format!("there is already a motion study `{t}`")));
+        }
+    }
+    let duration = field(values, "duration", "s")?;
+    let g = |x: f64, y: f64, z: f64| Some([x, y, z].map(|v| ValueExpr::Quantity { value: v, unit: "m/s^2".into() }).to_vec());
+    const G: f64 = 9.80665;
+    let gravity = match values.get("gravity").and_then(Value::as_str).unwrap_or("-z") {
+        "-z" => None,
+        "-y" => g(0.0, -G, 0.0),
+        "-x" => g(-G, 0.0, 0.0),
+        "+z" => g(0.0, 0.0, G),
+        "none" => g(0.0, 0.0, 0.0),
+        other => return Err(model(format!("gravity `{other}`: pick a direction or none"))),
+    };
+    let mut springs = Vec::new();
+    let mut motors = Vec::new();
+    if let Some(pick) = picks_of(values, "mate").first() {
+        let mate = mate_name(document, pick)?;
+        let angle = values.get("quantity").and_then(Value::as_str) != Some("distance");
+        let (k, c, load) = if angle {
+            (field(values, "stiffness", "N*m/rad")?, field(values, "damping", "N*m*s/rad")?, field(values, "torque", "N*m")?)
+        } else {
+            (field(values, "stiffness_linear", "N/mm")?, field(values, "damping_linear", "N*s/m")?, field(values, "force", "N")?)
+        };
+        if !is_zero(&k) || !is_zero(&c) {
+            springs.push(MotionSpring {
+                mate: mate.clone(),
+                stiffness: (!is_zero(&k)).then_some(k),
+                damping: (!is_zero(&c)).then_some(c),
+                free: None,
+            });
+        }
+        if !is_zero(&load) {
+            motors.push(MotionMotor {
+                mate,
+                torque: angle.then(|| load.clone()),
+                force: (!angle).then_some(load),
+            });
+        }
+    }
+    let track = match picks_of(values, "track").first() {
+        Some(pick) => match pick.strip_prefix("occurrence:") {
+            Some(uuid) => Some(compiled.occurrence_name(uuid)?),
+            None => Some(pick.clone()),
+        },
+        None => None,
+    };
+    let study = MotionStudy {
+        name: name.clone(),
+        kind: MotionKind::Dynamic,
+        duration,
+        drives: Vec::new(),
+        gravity,
+        springs,
+        motors,
+        rate: existing.and_then(|i| document.motions[i].rate),
+        profile: MotionProfile::Linear,
+        track,
+    };
+    Ok(match existing {
+        Some(i) => {
+            document.motions[i] = study;
+            format!("Changed motion study {name}")
+        }
+        None => {
+            document.motions.push(study);
+            format!("Added motion study {name}")
+        }
+    })
+}
+
 pub(super) fn selected_positions(selection: &[String]) -> impl Iterator<Item = &str> {
     selection.iter().filter_map(|s| s.strip_prefix("position:"))
 }

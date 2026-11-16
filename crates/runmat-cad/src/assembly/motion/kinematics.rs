@@ -77,6 +77,15 @@ pub struct MotionRun {
     pub stopped: Option<(f64, String)>,
     /// What is wrong with the study itself (an unknown mate, a value of the wrong kind).
     pub problems: Vec<String>,
+    /// A dynamic study's total energy at each frame (J): kinetic, gravitational and spring.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub energy: Vec<f64>,
+    /// A dynamic study's gravity, evaluated (m/s², top assembly axes).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub gravity: Option<[f64; 3]>,
+    /// A dynamic study's mate reactions at each frame.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub reactions: Vec<super::dynamics::MateReaction>,
 }
 
 /// The top assembly as a study frame sees it: `top` in place of the source's copy.
@@ -390,6 +399,10 @@ pub fn run_study(
         }
     };
     run.duration = duration;
+    if study.kind == super::MotionKind::Dynamic {
+        super::dynamics::run_dynamic(doc, base, study, ctx, &ev, &env, &mut run);
+        return run;
+    }
     if study.drives.is_empty() {
         run.problems.push("the study drives no mate".into());
         return run;
@@ -469,7 +482,13 @@ pub fn run_study(
         run.times.push(t);
         run.frames.push(tree.nodes.iter().map(|n| n.world).collect());
     }
-    // What moves: nodes whose world pose differs from the first frame's, top-most only.
+    set_moving(&mut run, base);
+    run.track = track(study, base, &run, ctx, h);
+    run
+}
+
+/// What moves: nodes whose world pose differs from the first frame's, top-most only.
+pub(super) fn set_moving(run: &mut MotionRun, base: &ResolvedAssembly) {
     if let Some(first) = run.frames.first() {
         let moved: Vec<bool> = (0..first.len())
             .map(|i| {
@@ -488,13 +507,10 @@ pub fn run_study(
             .map(|i| i as NodeId)
             .collect();
     }
-    run.track = track(doc, study, base, &run, ctx, h);
-    run
 }
 
 /// The tracked occurrence: the study's `track`, else the first moving top-level occurrence.
-fn track(
-    _doc: &AssemblyDocument,
+pub(super) fn track(
     study: &MotionStudy,
     base: &ResolvedAssembly,
     run: &MotionRun,

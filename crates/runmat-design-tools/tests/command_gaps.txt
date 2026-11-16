@@ -34,8 +34,6 @@ explode.auto assembly
 manage.document-settings part
 manage.recognize-features part
 manage.replace-reference part
-motion.basic assembly
-motion.to-fea assembly
 part.edit-sketch-plane part
 part.library part
 sheet-metal.bend-table part

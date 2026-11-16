@@ -191,3 +191,44 @@ fn a_mate_position_is_saved_moved_to_and_deleted() {
     assert!(!gone.contains("position open"), "{gone}");
     assert_eq!(index(&gone)["positions"], json!([]));
 }
+
+/// A dynamic study: the arm (aluminium, its mass and inertia integrated from its body) swings
+/// on the hinge under gravity along −Y; frames move it, the energy stays put, and the hinge's
+/// reaction on the arm is projected per frame.
+#[test]
+fn a_dynamic_study_swings_the_arm_under_gravity() {
+    let solid = BLOCK.replace("output block = { body = feature.body.body }", "output block = { body = feature.body.body, material = \"aluminum_6061\" }");
+    let files: Files = [("/p/block.part", solid.as_str())].map(|(p, t)| (p.to_owned(), t.to_owned())).into();
+    let text = HINGE.replace(
+        "    mate hinge",
+        "    motion fall = { kind = dynamic, duration = 0.5 s, gravity = [0 m/s^2, -9.80665 m/s^2, 0 m/s^2] }\n    mate hinge",
+    );
+    let (index, _, problems) = compile_assembly(PATH, &text, &files).unwrap_or_else(|d| panic!("{d:?}"));
+    assert!(problems.iter().all(|d| d.severity != "error"), "{problems:?}");
+    let study = &index["motion"][0];
+    assert_eq!(study["kind"], "dynamic", "{study}");
+    assert_eq!(study["problems"], json!([]), "{study}");
+    assert!(study["stopped"].is_null(), "{study}");
+    let frames = study["frames"].as_array().unwrap();
+    assert!(frames.len() > 10);
+    // The arm turns: its transform at the end differs from the start.
+    let first = numbers(&frames[0][0]["transform"]);
+    let last = numbers(&frames[frames.len() - 1][0]["transform"]);
+    assert!(first.iter().zip(&last).any(|(a, b)| (a - b).abs() > 1e-3), "{first:?} {last:?}");
+    let energy = numbers(&study["energy"]);
+    let spread = energy.iter().fold(0.0_f64, |m, e| m.max((e - energy[0]).abs()));
+    assert!(spread < 1e-5, "energy {energy:?}");
+    let hinge = &study["reactions"][0];
+    assert_eq!(hinge["mate"], "hinge");
+    let at_release = &hinge["frames"][0][0];
+    assert_eq!(at_release["occurrence"], "arm");
+    // At release the hinge carries part of the weight, upward.
+    assert!(numbers(&at_release["force"])[1] > 0.0, "{at_release}");
+}
+
+#[test]
+fn a_dynamic_study_names_a_part_without_a_material() {
+    let text = HINGE.replace("    mate hinge", "    motion fall = { kind = dynamic, duration = 0.5 s }\n    mate hinge");
+    let problems = index(&text)["motion"][0]["problems"].to_string();
+    assert!(problems.contains("has no mass: give its part a material"), "{problems}");
+}

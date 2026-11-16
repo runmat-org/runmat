@@ -22,6 +22,7 @@ use runmat_cad::assembly::motion::drag::{top_node, Dragged};
 use runmat_cad::assembly::motion::kinematics::{
     run_study, DriveQuantity, MotionContext, MotionRun,
 };
+use runmat_cad::assembly::motion::MotionKind;
 use runmat_cad::assembly::resolve::{ResolveContext, ResolveRequest, ResolvedAssembly};
 use runmat_cad::assembly::source::{DesignSource, MemorySource};
 use runmat_cad::regen::kernel::Transform;
@@ -177,20 +178,86 @@ fn study_json(resolved: &ResolvedAssembly, run: &MotionRun, profile: &str, track
     })
 }
 
-/// The top assembly's motion studies, solved; an empty array when it has none.
-pub fn motion_studies(resolved: &ResolvedAssembly, source: &MemorySource) -> Value {
+/// The top assembly's motion studies, solved; an empty array when it has none. A dynamic
+/// study first has every placed part's mass properties written into `source`.
+pub fn motion_studies(
+    resolved: &ResolvedAssembly,
+    source: &mut MemorySource,
+    documents: &std::collections::BTreeMap<String, runmat_cad::model::PartDocument>,
+    files: &crate::runtime::Files,
+) -> Value {
     let Ok(doc) = source.assembly(&resolved.top, None) else {
         return json!([]);
     };
+    if doc.motions.iter().any(|s| s.kind == MotionKind::Dynamic) {
+        crate::mass::fill_part_masses(resolved, documents, source, files);
+    }
+    let source = &*source;
     Value::Array(
         doc.motions
             .iter()
             .filter_map(|s| {
                 let run = run(resolved, source, &s.name)?;
-                Some(study_json(resolved, &run, s.profile.key(), s.track.as_deref()))
+                let mut row = study_json(resolved, &run, s.profile.key(), s.track.as_deref());
+                if s.kind == MotionKind::Dynamic {
+                    dynamic_rows(&mut row, &run, s);
+                }
+                Some(row)
             })
             .collect(),
     )
+}
+
+/// A dynamic study's `kind`, its energy (J) and its mate reactions per frame: for each mate,
+/// each frame's loads on the components it joins, at the mate's connector (point in mm, force
+/// in N, moment in N·m, world axes).
+fn dynamic_rows(row: &mut Value, run: &MotionRun, study: &runmat_cad::assembly::motion::MotionStudy) {
+    let Some(o) = row.as_object_mut() else { return };
+    o.insert("kind".into(), json!("dynamic"));
+    // What the study loads the mechanism with, as written, for the command that edits it.
+    // As the run evaluated it (a written `-9.80665 m/s^2` is a negation, not a plain quantity).
+    let gravity: Vec<f64> = run
+        .gravity
+        .unwrap_or([0.0, 0.0, -runmat_cad::assembly::motion::dynamics::STANDARD_GRAVITY])
+        .to_vec();
+    let spring = study.springs.first();
+    let motor = study.motors.first();
+    let angle = spring
+        .map(|s| [&s.stiffness, &s.damping].iter().any(|e| e.as_ref().is_some_and(|e| shown(e).contains("rad"))))
+        .or(motor.map(|m| m.torque.is_some()))
+        .unwrap_or(true);
+    o.insert(
+        "setup".into(),
+        json!({
+            "gravity": gravity,
+            "mate": spring.map(|s| &s.mate).or(motor.map(|m| &m.mate)),
+            "quantity": if angle { "angle" } else { "distance" },
+            "stiffness": spring.and_then(|s| s.stiffness.as_ref()).map(shown),
+            "damping": spring.and_then(|s| s.damping.as_ref()).map(shown),
+            "load": motor.and_then(|m| m.torque.as_ref().or(m.force.as_ref())).map(shown),
+        }),
+    );
+    o.insert("energy".into(), json!(run.energy.iter().map(|e| round(*e, 6)).collect::<Vec<_>>()));
+    let r3 = |v: [f64; 3], places: i32| v.map(|c| round(c, places));
+    o.insert(
+        "reactions".into(),
+        Value::Array(
+            run.reactions
+                .iter()
+                .map(|m| {
+                    json!({
+                        "mate": m.mate,
+                        "frames": m.frames.iter().map(|loads| loads.iter().map(|l| json!({
+                            "occurrence": l.occurrence,
+                            "point": r3(l.point.map(|c| c * 1000.0), 4),
+                            "force": r3(l.force, 6),
+                            "moment": r3(l.moment, 6),
+                        })).collect::<Vec<_>>()).collect::<Vec<_>>(),
+                    })
+                })
+                .collect(),
+        ),
+    );
 }
 
 /// A value as the Outline shows it (`90 deg`, `25 mm`), from its expression.
