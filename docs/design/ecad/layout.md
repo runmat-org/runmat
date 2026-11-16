@@ -84,7 +84,7 @@ stackup main {
 outline = [[0, 0], [100, 0], [100, 80], [0, 80]]
 cutout = [[40, 30], [40, 50], [60, 50], [60, 30]]
 net_class power = { track_width = 0.5 mm, clearance = 0.2 mm }
-rule hv = { select = ":net-class(hv)", clearance = 0.8 mm, priority = 2 }
+rule hv = { between = [":net-class(hv)", "*"], clearance = 0.8 mm, priority = 2 }
 rule hv_lv = { between = [":net-class(hv)", ":net-class(lv)"], clearance = 1.5 mm }
 net GND : power
 net SW
@@ -114,7 +114,7 @@ package R0402 = {
 | `limits = { clearance, track, via_diameter, drill, annular, hole_to_hole, copper_to_edge, silk_to_pad, microvia_drill }` | the fabricator's minimums |
 | `fabrication = { … }` | fabrication settings |
 | `net_class <name> = { track_width, clearance, … }` | class rules; the circuit's classes come across |
-| `rule <name> = { select or between, clearance, …, priority }` | a scoped rule; selectors such as `":net-class(hv)"` pick nets, and `between` sets a rule for a pair of sets |
+| `rule <name> = { select or between, …, priority }` | a scoped rule; selectors such as `":net-class(hv)"` pick nets. `select` sets single-item properties such as `track_width` and `mask_expansion`. Clearances (`clearance`, `hole_to_hole`, `silk_clearance`, `courtyard_clearance`, `edge_clearance`) are between two items, so they are written with `between`: `between = [<selector>, "*"]` sets a clearance from the selection to everything |
 | `net <name> [: <class>]` | a net of the board |
 | `diff_pair`, `component_class` | pairs and classes from the circuit, with board rules |
 | `room <name> = { outline, members }` | a placement area for a group, such as one channel |
@@ -148,6 +148,28 @@ Compare the set with your fabricator's published capabilities before you order, 
 The `sync` section links each footprint to its component and records the schematic version the board last took. When the circuit changes (a component added, a net renamed, a part swapped), the check lists the changes the board has not taken, and taking them updates footprints and nets in one edit. `renamed_from` in the circuit keeps a renamed component's placement.
 
 ## Design rules
+
+In the Desktop, Rules (Board ▸ Rules) writes one `rule` statement. Pick the kind, write the selector it applies to and the value, and Apply. Each kind sets one property:
+
+| Kind | Writes | Value |
+|---|---|---|
+| Clearance | `between = [<selector>, "*"]`, `clearance` | a length |
+| Width | `track_width` | a length |
+| Via | `via_diameter`, or `via_drill` and `via_diameter` | a length, or `drill/diameter` such as `0.3 mm/0.6 mm` |
+| Differential pair | `diff_gap` | a length |
+| Length | `length_max` | a length |
+| Impedance | `impedance` | ohms, such as `50 ohm` |
+| Plane | `thermal_gap` (the relief gap of pads in a pour) | a length |
+| Solder mask | `mask_expansion` (how far a pad's mask opening grows; negative shrinks it) | a length |
+| Silkscreen | `between = [<selector>, "*"]`, `silk_clearance` | a length |
+
+The selector is checked as the reader checks it, so a mistyped selector is refused before anything is written. An empty name takes the kind and a number (`width_1`). Right-click a row under Rules to edit that rule (the panel opens on what it writes, and Apply replaces it) or to delete it. A footprint's own mask margin wins over `mask_expansion`; with neither, a mask opening is 0.05 mm larger than its pad.
+
+```circuit.layout fragment
+rule width_1 = { select = ":net-class(power)", priority = 2, track_width = 0.5 mm }
+rule clearance_1 = { between = [":net-class(analog)", "*"], priority = 1, clearance = 0.3 mm }
+rule mask_1 = { select = "pad", priority = 1, mask_expansion = 0.1 mm }
+```
 
 DRC runs incrementally as the board is edited, and in full in a check:
 

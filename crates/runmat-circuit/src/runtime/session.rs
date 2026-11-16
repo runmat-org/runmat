@@ -764,6 +764,7 @@ impl Session {
             let change = board_command_parsed(&state.path, &state.text, &state.parsed, &edit)
                 .map_err(failure)?;
             Ok(EditOutput {
+                report: None,
                 summary: format!("{} on {}", edit.command(), state.path),
                 files: vec![file_change(&state.path, &state.text, change)],
             })

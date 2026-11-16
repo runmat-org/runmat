@@ -61,6 +61,7 @@ pub(super) fn run(project: &Project, request: &EditRequest) -> Result<EditOutput
         format!("Annotated {total} component(s)")
     };
     Ok(EditOutput {
+        report: None,
         summary,
         files: lock_change(project, &lock, true).into_iter().collect(),
     })
@@ -203,6 +204,7 @@ pub(super) fn move_items(
     let mut lock = project.lock.clone();
     lock.places = places;
     Ok(EditOutput {
+        report: None,
         summary: format!("Moved {} symbol(s)", keys.len()),
         files: lock_change(project, &lock, true).into_iter().collect(),
     })

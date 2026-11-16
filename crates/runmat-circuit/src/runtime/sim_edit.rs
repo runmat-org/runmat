@@ -212,6 +212,7 @@ pub(super) fn run(project: &Project, request: &EditRequest) -> Result<EditOutput
         reprinted: false,
     };
     Ok(EditOutput {
+        report: None,
         summary: format!("{summary} in simulation {}", def.name),
         files: vec![file_change(&project.circuit_path, text, change)],
     })
