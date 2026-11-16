@@ -599,15 +599,25 @@ pub fn draw(ctx: &mut Ctx<'_>, views: &[ViewPlan], plans: Plans) {
                         .unwrap_or(st.first + d.row as f64 * st.step)
             }
         };
-        let (prims, text_at) = st.linear_dimension(&id, a, b, d.axis, at, &d.text);
+        // The figure at its usual spot unless that puts it over the view's lines (a dimension
+        // placed across the view): then at the nearest spot along its line that is clear of
+        // them, or past an arrow (ISO 129-1, ASME Y14.5: a dimension's figure is not crossed by
+        // a line of the drawing).
+        let draw_at =
+            |spot: Option<f64>| st.linear_dimension_with(&id, a, b, d.axis, at, &d.text, spot);
+        let (mut prims, mut text_at) = draw_at(None);
+        if figure_box(&prims).is_some_and(|f| over_lines(&f, views)) {
+            for spot in st.figure_spots(a, b, d.axis, &d.text) {
+                let (p, t) = draw_at(Some(spot));
+                if figure_box(&p).is_some_and(|f| !over_lines(&f, views)) {
+                    (prims, text_at) = (p, t);
+                    break;
+                }
+            }
+        }
         // Another dimension's extension or dimension line breaks around this figure, as at an
         // ordinate figure (a figure set outside short extension lines can land on one).
-        if let Some(b) = prims
-            .iter()
-            .rev()
-            .find(|p| p.style == "dimtext")
-            .and_then(text_box)
-        {
+        if let Some(b) = figure_box(&prims) {
             figures.push((id.clone(), b));
         }
         ctx.occ.add_prims(&prims, &id);
@@ -633,6 +643,36 @@ pub fn draw(ctx: &mut Ctx<'_>, views: &[ViewPlan], plans: Plans) {
         });
     }
     break_lines_at_figures(&mut ctx.out.primitives, &figures);
+}
+
+/// A dimension's figure box (its `dimtext`).
+fn figure_box(prims: &[Prim]) -> Option<BoxR> {
+    prims
+        .iter()
+        .rev()
+        .find(|p| p.style == "dimtext")
+        .and_then(text_box)
+}
+
+/// Whether a figure box lies over any view's drawn lines (visible, tangent, and hidden where
+/// the view draws them), on the sheet.
+pub fn over_lines(f: &BoxR, views: &[ViewPlan]) -> bool {
+    // A hair inside the box: a line that only touches its edge doesn't cross the figure.
+    let g = BoxR::new(f.x0 + 0.2, f.y0 + 0.2, f.x1 - 0.2, f.y1 - 0.2);
+    views.iter().any(|v| {
+        let b = v.geom_box();
+        if b.x1 < g.x0 || b.x0 > g.x1 || b.y1 < g.y0 || b.y0 > g.y1 {
+            return false;
+        }
+        let hidden: &[Vec<f64>] = if v.show_hidden { &v.hidden } else { &[] };
+        v.edges.iter().chain(&v.tangent).chain(hidden).any(|e| {
+            e.chunks_exact(2)
+                .map(|p| v.to_sheet([p[0], p[1]]))
+                .collect::<Vec<_>>()
+                .windows(2)
+                .any(|w| clip_segment(w[0], w[1], &g).is_some())
+        })
+    })
 }
 
 /// Every other dimension's straight line that runs through an ordinate figure is broken around

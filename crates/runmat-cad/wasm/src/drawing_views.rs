@@ -5,8 +5,8 @@
 //! - `drawing.view-display` sets how the view draws: hidden lines removed, hidden lines shown
 //!   dashed, or shaded;
 //! - `drawing.edit-view` edits one view's properties together: scale, orientation (a standard
-//!   view's; a projected, section or detail view follows its parent), display style, label and
-//!   place on the sheet. A projected view that drew at its parent's scale keeps drawing at it,
+//!   view's; a projected, section or detail view follows its parent), display style, tangent
+//!   edges (thin, visible or hidden; `TangentEdges`), label and place on the sheet. A projected view that drew at its parent's scale keeps drawing at it,
 //!   so the views in projection stay at one scale (ISO 5456-2). The view's dimensions and
 //!   annotations name it, so they move and scale with it.
 //!
@@ -14,7 +14,9 @@
 
 use crate::edit::model;
 use crate::runtime::Files;
-use runmat_cad::drawing::{Display, DrawingDocument, Orientation, ProjectDirection, ViewKind};
+use runmat_cad::drawing::{
+    Display, DrawingDocument, Orientation, ProjectDirection, TangentEdges, ViewKind,
+};
 use runmat_cad::syntax::edit::{diff_source_in, EditFailure, SourceChange};
 use runmat_cad::syntax::{parse_drawing_in, DRAWING};
 use serde_json::{Map, Value};
@@ -148,6 +150,20 @@ pub(crate) fn seen(document: &DrawingDocument, name: &str) -> Option<Orientation
     None
 }
 
+/// The tangent edges the view `name` draws when it doesn't say: its orientation's default.
+fn tangent_default(document: &DrawingDocument, name: &str) -> TangentEdges {
+    let views = serde_json::to_value(&document.views).unwrap_or(Value::Null);
+    let mut unset = views.clone();
+    if let Some(v) = unset
+        .as_array_mut()
+        .and_then(|vs| vs.iter_mut().find(|v| v["name"] == name))
+        .and_then(Value::as_object_mut)
+    {
+        v.remove("tangent_edges");
+    }
+    crate::hlr::tangent_edges(&unset, name)
+}
+
 /// `drawing.edit-view`: the selected view's scale, orientation, display style, label and place.
 /// A field left empty keeps what the view has.
 fn edit_view(
@@ -208,6 +224,23 @@ fn edit_view(
         view.display = display(word("display"))?;
         if view.display != before.display {
             changed.push("display style");
+        }
+    }
+    if !word("tangent_edges").is_empty() {
+        let wanted = serde_json::from_value::<TangentEdges>(Value::from(word("tangent_edges")))
+            .map_err(|_| {
+                model(format!(
+                    "there is no `{}` tangent edge style (thin, show or hide)",
+                    word("tangent_edges")
+                ))
+            })?;
+        if view
+            .tangent_edges
+            .unwrap_or_else(|| tangent_default(&document, name))
+            != wanted
+        {
+            view.tangent_edges = Some(wanted);
+            changed.push("tangent edges");
         }
     }
     if let Some(label) = values.get("label").and_then(Value::as_str) {

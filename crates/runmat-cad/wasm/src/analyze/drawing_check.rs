@@ -8,7 +8,7 @@
 //! | Reference | an annotation whose model references no longer resolve (a dimension to a face the model lost), and the drawing's own reference errors | ISO 129-1: a dimension refers to a feature of the part |
 //! | Model | a view whose model file is missing, doesn't compile or builds no solid, so the sheet draws no model lines for it | |
 //! | Title block | an empty title-block field, and a block without a title or an identification number | ISO 7200 identification fields |
-//! | Overlap | views that overlap, a table over a view, annotation texts drawn over each other, and what the layout reports (no room, crowded, not aligned) | ISO 128-1 legibility; ISO 129-1 values not crossed |
+//! | Overlap | views that overlap, a table over a view, annotation texts drawn over each other or over a view's lines, and what the layout reports (no room, crowded, not aligned) | ISO 128-1 legibility; ISO 129-1 values not crossed |
 //! | Scale | a sheet or view scale outside the preferred scales, a projected view at another scale than its parent, a detail view that doesn't enlarge | ISO 5455 (ASME Y14.1 inch scales on inch ASME sheets), ISO 5456-2 |
 
 use super::{Analysis, Row};
@@ -124,7 +124,32 @@ fn overlap(a: &Bx, b: &Bx) -> (f64, f64) {
     )
 }
 
-/// A text primitive's box: its figures are about 0.6 of their height wide.
+/// Whether the segment a→b runs inside box `g` (Liang–Barsky clipping).
+fn crosses_box(a: [f64; 2], b: [f64; 2], g: &Bx) -> bool {
+    if g[0] >= g[2] || g[1] >= g[3] {
+        return false;
+    }
+    let (mut t0, mut t1) = (0.0_f64, 1.0_f64);
+    for (p, d, lo, hi) in [
+        (a[0], b[0] - a[0], g[0], g[2]),
+        (a[1], b[1] - a[1], g[1], g[3]),
+    ] {
+        if d.abs() < 1e-12 {
+            if p < lo || p > hi {
+                return false;
+            }
+        } else {
+            let (u, v) = ((lo - p) / d, (hi - p) / d);
+            t0 = t0.max(u.min(v));
+            t1 = t1.min(u.max(v));
+        }
+    }
+    t1 - t0 > 1e-9
+}
+
+/// A text primitive's box, as the layout measures it (`drawing::layout::solver::text_box`):
+/// each figure 0.6 of the height wide, from just below the baseline to just above the cap
+/// height, turned with the text.
 fn text_box(shape: &Value) -> Option<Bx> {
     let (x, y, size) = (
         shape["x"].as_f64()?,
@@ -132,18 +157,19 @@ fn text_box(shape: &Value) -> Option<Bx> {
         shape["size"].as_f64()?,
     );
     let w = shape["text"].as_str()?.chars().count() as f64 * size * 0.6;
-    let x0 = match shape["anchor"].as_str() {
-        Some("middle") => x - w / 2.0,
-        Some("end") => x - w,
-        _ => x,
+    let start = match shape["anchor"].as_str() {
+        Some("middle") => -w / 2.0,
+        Some("end") => -w,
+        _ => 0.0,
     };
+    let (lo, hi) = (-size * 0.2, size * 1.05);
     let quarter = shape["rotation"]
         .as_f64()
         .is_some_and(|r| ((r.abs() % 180.0) - 90.0).abs() < 1.0);
     Some(if quarter {
-        [x - size / 2.0, x0 - x + y, x + size / 2.0, x0 - x + y + w]
+        [x - hi, y + start, x - lo, y + start + w]
     } else {
-        [x0, y - size / 2.0, x0 + w, y + size / 2.0]
+        [x + start, y + lo, x + start + w, y + hi]
     })
 }
 
@@ -151,6 +177,8 @@ fn text_box(shape: &Value) -> Option<Bx> {
 fn overlaps(sheet: &str, layout: &Value, out: &mut Vec<Finding>) {
     let mut geometry: BTreeMap<String, Option<Bx>> = BTreeMap::new();
     let mut texts: Vec<(String, Bx)> = Vec::new();
+    // Each view's model lines (visible, hidden, tangent), as polylines on the sheet.
+    let mut lines: Vec<(String, Vec<f64>)> = Vec::new();
     for p in layout["primitives"].as_array().into_iter().flatten() {
         let (Some(id), Some(kind)) = (p["id"].as_str(), p["kind"].as_str()) else {
             continue;
@@ -171,6 +199,14 @@ fn overlaps(sheet: &str, layout: &Value, out: &mut Vec<Finding>) {
         } else {
             continue;
         };
+        if kind == "view"
+            && ty == "polyline"
+            && matches!(p["style"].as_str(), Some("visible" | "hidden" | "tangent"))
+        {
+            if let Some(a) = shape["points"].as_array() {
+                lines.push((owner.clone(), a.iter().filter_map(Value::as_f64).collect()));
+            }
+        }
         let b = geometry.entry(owner).or_default();
         let nums: Vec<f64> = match ty {
             "polyline" => shape["points"]
@@ -206,6 +242,35 @@ fn overlaps(sheet: &str, layout: &Value, out: &mut Vec<Finding>) {
                         "On sheet {sheet}, the {both} overlap by {dx:.1} × {dy:.1} mm; move one clear"
                     ),
                     severity: "error",
+                });
+            }
+        }
+    }
+    // Annotation texts drawn over a view's model lines (a dimension figure on a hole).
+    for (a, ba) in &texts {
+        // A hair inside the box: a line that only touches its edge doesn't cross the text.
+        let g = [ba[0] + 0.2, ba[1] + 0.2, ba[2] - 0.2, ba[3] - 0.2];
+        let mut said: Vec<&String> = Vec::new();
+        for (view, pts) in &lines {
+            if said.contains(&view) {
+                continue;
+            }
+            let crosses = pts
+                .chunks_exact(2)
+                .collect::<Vec<_>>()
+                .windows(2)
+                .any(|w| crosses_box([w[0][0], w[0][1]], [w[1][0], w[1][1]], &g));
+            if crosses {
+                said.push(view);
+                out.push(Finding {
+                    rule: "Overlap",
+                    item: a.clone(),
+                    message: format!(
+                        "The text of the {} is drawn over the {}'s lines; move it clear of the model",
+                        label_of(a),
+                        label_of(view)
+                    ),
+                    severity: "warning",
                 });
             }
         }
@@ -840,6 +905,40 @@ mod tests {
                 .contains("front view and top view overlap by 10.0 × 10.0 mm"),
             "{}",
             out[1].message
+        );
+    }
+
+    /// A figure set on a view's model lines (a dimension's 50 on a hole) is an overlap finding;
+    /// one beside the lines, or over a centerline only, isn't.
+    #[test]
+    fn annotation_text_over_a_views_model_lines_is_found() {
+        let line = |style: &str, pts: Vec<f64>| json!({ "id": "view:side", "kind": "view", "style": style, "shape": { "type": "polyline", "points": pts } });
+        let text = |id: &str, x: f64, y: f64| json!({ "id": id, "kind": "annotation", "style": "dimtext", "shape": { "type": "text", "x": x, "y": y, "text": "50", "size": 3.5, "anchor": "middle" } });
+        // A hole of radius 3.25 at (100, 100), as a polygon, and the view's outline.
+        let hole: Vec<f64> = (0..=36)
+            .flat_map(|i| {
+                let a = i as f64 / 36.0 * std::f64::consts::TAU;
+                [100.0 + 3.25 * a.cos(), 100.0 + 3.25 * a.sin()]
+            })
+            .collect();
+        let layout = json!({ "primitives": [
+            line("visible", hole),
+            line("visible", vec![75.0, 70.0, 125.0, 70.0, 125.0, 130.0, 75.0, 130.0, 75.0, 70.0]),
+            line("center", vec![90.0, 110.0, 110.0, 110.0]),
+            text("annotation:height", 100.0, 99.0),
+            text("annotation:clear", 100.0, 85.0),
+            text("annotation:on_center", 100.0, 109.0),
+        ] });
+        let mut out = Vec::new();
+        overlaps("1", &layout, &mut out);
+        let said: Vec<(&str, &str)> = out.iter().map(|f| (f.item.as_str(), f.severity)).collect();
+        assert_eq!(said, vec![("annotation:height", "warning")], "{out:#?}");
+        assert!(
+            out[0]
+                .message
+                .contains("height annotation is drawn over the side view's lines"),
+            "{}",
+            out[0].message
         );
     }
 }

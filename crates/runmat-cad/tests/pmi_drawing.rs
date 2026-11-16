@@ -210,6 +210,7 @@ fn drawing() -> DrawingDocument {
         exploded: None,
         title: None,
         centerlines: true,
+        tangent_edges: None,
     };
     DrawingDocument {
         path: FilePath::new("rig.drawing"),
@@ -449,6 +450,7 @@ fn d02_broken_references_are_reported_with_view_and_annotation() {
         exploded: None,
         title: None,
         centerlines: true,
+        tangent_edges: None,
     });
     let rep = check_drawing(&d, &Model);
     let refs: Vec<&str> = rep

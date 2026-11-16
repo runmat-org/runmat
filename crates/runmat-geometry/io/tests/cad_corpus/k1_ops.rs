@@ -793,6 +793,7 @@ fn k1_hole_table_reads_the_regenerated_part() {
         exploded: None,
         title: None,
         centerlines: true,
+        tangent_edges: None,
     };
     let t = hole_table("holes", &HoleTableSpec::default(), &view, &corner, &g);
     let rows: Vec<(String, String)> = t

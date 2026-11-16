@@ -265,6 +265,7 @@ pub const DRAWING: DocumentGrammar = DocumentGrammar {
                     "exploded",
                     "title",
                     "centerlines",
+                    "tangent_edges",
                 ],
             }),
             ..named("view", "views", "view")
