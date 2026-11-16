@@ -156,7 +156,8 @@ runtime_strip_variable="CARGO_PROFILE_$(printf '%s' "$profile" | tr '[:lower:]-'
 # The native link line is machine-readable input to the packer. Keep this
 # command's diagnostics unstyled even when the caller requests colored Cargo
 # output so parsing never depends on terminal escape sequences.
-"${deployment_command[@]}" "$runtime_strip_variable=none" CARGO_TERM_COLOR=never "${runtime_build[@]}" 2>&1 | tee "$rustc_log"
+"${deployment_command[@]}" env -u RUNMAT_AOT_RUNTIME_ARCHIVE -u RUNMAT_AOT_RUNTIME_MANIFEST \
+  "$runtime_strip_variable=none" CARGO_TERM_COLOR=never "${runtime_build[@]}" 2>&1 | tee "$rustc_log"
 
 # Static-library naming belongs to the deployment target, not the build host.
 archive_name_command=("${RUSTC:-rustc}" --crate-name runmat_aot_runtime --crate-type staticlib --print file-names)
@@ -179,13 +180,19 @@ pack_args=(
   --payload-out "$build_root/runtime-archive.payload"
   --manifest-out "$build_root/runtime-archive.json"
   --notices-out "$build_root/THIRD_PARTY_NOTICES.txt"
+  --pack-out "$build_root/runtime-pack.zip"
+  --pack-manifest-out "$build_root/runtime-pack.json"
+  --license "$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/LICENSE.md"
+  --free-use "$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/FREE-USE.md"
 )
 read -r -a native_tokens <<< "$native_line"
 for token in "${native_tokens[@]}"; do
   pack_args+=(--native-link-token "$token")
 done
 pack_command+=(-p runmat-aot --bin runmat-aot-pack --)
-"${pack_deployment_command[@]}" "${pack_command[@]}" "${pack_args[@]}"
+# Host tools must not embed a previous build's runtime or descriptor.
+"${pack_deployment_command[@]}" env -u RUNMAT_AOT_RUNTIME_ARCHIVE -u RUNMAT_AOT_RUNTIME_MANIFEST \
+  "${pack_command[@]}" "${pack_args[@]}"
 
 final_build=(cargo build -p runmat --profile "$profile")
 if [[ -n "$target" ]]; then
@@ -195,10 +202,28 @@ for build_argument in "${build_args[@]-}"; do
   [[ -n "$build_argument" ]] || continue
   final_build+=("$build_argument")
 done
-"${deployment_command[@]}" \
-  RUNMAT_AOT_RUNTIME_ARCHIVE="$build_root/runtime-archive.payload" \
-  RUNMAT_AOT_RUNTIME_MANIFEST="$build_root/runtime-archive.json" \
+# The normal CLI pins the distribution manifest without embedding the archive.
+# Explicitly clear an inherited payload variable so it cannot select old bytes.
+"${deployment_command[@]}" env -u RUNMAT_AOT_RUNTIME_ARCHIVE \
+  RUNMAT_AOT_RUNTIME_MANIFEST="$build_root/runtime-pack.json" \
   "${final_build[@]}"
+
+# Retain the separate distribution after the temporary build root is removed.
+# Each file is staged alongside its destination before atomic replacement.
+publish_distribution_file() {
+  local source="$1" destination="$2" staged
+  if [[ -L "$destination" || ( -e "$destination" && ! -f "$destination" ) ]]; then
+    echo "refusing non-regular AOT distribution destination $destination" >&2
+    return 1
+  fi
+  staged="$(mktemp "$target_directory/.runmat-aot-distribution.XXXXXX")"
+  if ! cp "$source" "$staged" || ! mv -f "$staged" "$destination"; then
+    rm -f "$staged"
+    return 1
+  fi
+}
+publish_distribution_file "$build_root/runtime-pack.zip" "$target_directory/runmat-aot-runtime.zip"
+publish_distribution_file "$build_root/runtime-pack.json" "$target_directory/runmat-aot-runtime.json"
 
 notice_destination="$target_directory/THIRD_PARTY_NOTICES.txt"
 if [[ -L "$notice_destination" ]]; then

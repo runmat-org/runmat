@@ -189,7 +189,7 @@ impl GraphicsPropertySelection {
                 self.receiver.shares_lease(&self.figure_receiver)
             }
             (GraphicsReceiverKind::Axes { index, .. }, PropertyBinding::Axes) => {
-                index < axes_count(state)
+                state.figure.axes_is_live(index)
                     && state
                         .axes_receivers
                         .get(&index)

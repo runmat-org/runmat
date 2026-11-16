@@ -61,6 +61,21 @@ need their receipt; the meshing recipe does not repeat those three solves.
 Use the workspace runner's `--include-extended` option to execute all test groups,
 including the deferred refinement tests.
 
+### Manual GitHub meshing checks
+
+The `offline-meshing.yml` workflow runs the small governed corpus and smoke
+performance checks on a paid runner. Prefer the existing build machines when
+they have capacity. This workflow does not replace the full `meshing-release`
+recipe or its required receipt.
+
+To run it, review a branch or tag's tip, select that same ref in the workflow
+dispatch, and supply its full commit SHA as `source_ref`. The workflow refuses
+a mismatched SHA before checkout. It checks out the immutable dispatch commit,
+so the workflow, executed source and cache branch agree. Its cache uses a
+separate namespace from ordinary CI and from the earlier manual workflow.
+The GPU `offline-qualification.yml` workflow uses the same source check and
+its own cache namespace.
+
 ## Commit the measured evidence
 
 Store one compact receipt per required cohort under `receipts/<cohort>.json`.

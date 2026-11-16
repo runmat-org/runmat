@@ -862,25 +862,31 @@ mod tests {
         let second = RuntimeContext::new(Rc::new(RuntimeExecutionService::new()));
         let first_scope = first.execution().scope_id();
         let second_scope = second.execution().scope_id();
+        let owner = super::super::legacy::active_local_identity;
+        assert_eq!(owner(), None);
         {
             let _first = first.enter();
+            assert_eq!(owner(), Some(first.local_identity()));
             assert_eq!(
                 active_runtime_context().unwrap().execution().scope_id(),
                 first_scope
             );
             {
                 let _second = second.enter();
+                assert_eq!(owner(), Some(second.local_identity()));
                 assert_eq!(
                     active_runtime_context().unwrap().execution().scope_id(),
                     second_scope
                 );
             }
+            assert_eq!(owner(), Some(first.local_identity()));
             assert_eq!(
                 active_runtime_context().unwrap().execution().scope_id(),
                 first_scope
             );
         }
         assert!(active_runtime_context().is_none());
+        assert_eq!(owner(), None);
     }
 
     #[test]
@@ -906,8 +912,12 @@ mod tests {
         let second = RuntimeContext::new(Rc::new(RuntimeExecutionService::new()));
         let first_scope = first.execution().scope_id();
         let second_scope = second.execution().scope_id();
+        let first_owner = first.local_identity();
+        let second_owner = second.local_identity();
+        let owner = super::super::legacy::active_local_identity;
 
         let mut first_future = Box::pin(first.scope(std::future::poll_fn(move |_| {
+            assert_eq!(owner(), Some(first_owner));
             assert_eq!(
                 active_runtime_context()
                     .expect("first context active")
@@ -918,6 +928,7 @@ mod tests {
             Poll::<()>::Pending
         })));
         let mut second_future = Box::pin(second.scope(std::future::poll_fn(move |_| {
+            assert_eq!(owner(), Some(second_owner));
             assert_eq!(
                 active_runtime_context()
                     .expect("second context active")
@@ -932,8 +943,10 @@ mod tests {
 
         assert!(first_future.as_mut().poll(&mut cx).is_pending());
         assert!(active_runtime_context().is_none());
+        assert_eq!(owner(), None);
         assert!(second_future.as_mut().poll(&mut cx).is_pending());
         assert!(active_runtime_context().is_none());
+        assert_eq!(owner(), None);
     }
 
     #[test]

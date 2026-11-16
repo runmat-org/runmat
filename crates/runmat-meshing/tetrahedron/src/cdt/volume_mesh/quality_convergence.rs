@@ -128,6 +128,7 @@ pub(super) fn converge_volume_quality(
                 .map_err(refinement_error)?
             {
                 WorkingRefinementProgress::Accepted(inserted) => {
+                    runmat_meshing_core::work_count::add_volume_points(inserted.len() as u64);
                     remaining_refinement =
                         remaining_refinement.saturating_sub(inserted.len() as u64);
                     quality_mutations.extend(

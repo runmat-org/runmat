@@ -1,6 +1,5 @@
 use lsp_types::{
-    CompletionList, Diagnostic, DocumentSymbol, Position, SemanticTokens, SymbolInformation,
-    TextEdit, Url,
+    CompletionList, Diagnostic, DocumentSymbol, Position, SemanticTokens, TextEdit, Url,
 };
 use runmat_thread_local::runmat_thread_local;
 use serde::Serialize;
@@ -23,6 +22,11 @@ use crate::core::design::{
 };
 use crate::core::fea::{is_fea_uri, resolve_project_facts, FeaDocumentAnalysis};
 use crate::core::workspace::workspace_symbols_with_project_async;
+
+mod source_workspace;
+use source_workspace::SourceWorkspace;
+#[cfg(test)]
+mod source_workspace_tests;
 
 #[derive(Default)]
 struct DocStore {
@@ -88,6 +92,34 @@ runmat_thread_local! {
 
 static BUILTIN_REGISTRY: Once = Once::new();
 
+/// Install the host's filesystem callbacks for project discovery and navigation.
+#[wasm_bindgen(js_name = "setFsProvider")]
+pub fn set_fs_provider(bindings: JsValue) -> Result<(), JsValue> {
+    let provider = runmat_filesystem::js::JsFsProvider::new(&bindings)?;
+    if !runmat_filesystem::FsProvider::supports_read(&provider) {
+        return Err(JsValue::from_str("LSP fsProvider requires readFile"));
+    }
+    runmat_filesystem::set_provider(std::sync::Arc::new(provider));
+    workspace_changed();
+    Ok(())
+}
+
+/// Notify the language server after workspace files are added, removed or renamed.
+#[wasm_bindgen(js_name = "workspaceChanged")]
+pub fn workspace_changed() {
+    WORKSPACE_REVISION.with(|revision| revision.set(revision.get().saturating_add(1)));
+    crate::core::project::ProjectContext::clear_installed_handoff();
+    invalidate_source_analyses();
+}
+
+fn invalidate_source_analyses() {
+    DOCS.with(|store| {
+        for entry in store.borrow_mut().docs.values_mut() {
+            entry.analysis = None;
+        }
+    });
+}
+
 fn to_js<T: Serialize>(value: &T) -> Result<JsValue, JsValue> {
     serde_wasm_bindgen::to_value(value).map_err(|e| JsValue::from_str(&e.to_string()))
 }
@@ -103,15 +135,7 @@ fn ensure_builtins_registered() {
 
 fn source_name_from_uri(uri: &str) -> Option<String> {
     let parsed = Url::parse(uri).ok()?;
-    if parsed.scheme() != "file" {
-        return None;
-    }
-    let path = parsed.path();
-    if path.is_empty() {
-        None
-    } else {
-        Some(path.to_string())
-    }
+    wasm_file_path(&parsed)?.to_str().map(str::to_owned)
 }
 
 #[wasm_bindgen]
@@ -126,12 +150,17 @@ pub fn builtin_inventory_counts() -> JsValue {
 
 #[wasm_bindgen(js_name = "projectHandoff")]
 pub async fn project_handoff(source_path: String) -> Result<JsValue, JsValue> {
-    let frozen = runmat_package::discover_frozen_project_from_async(
-        Path::new(&source_path),
-        Default::default(),
-    )
-    .await
-    .map_err(|error| JsValue::from_str(&error.to_string()))?;
+    let workspace = SourceWorkspace::capture()?;
+    let Some(frozen) = workspace
+        .run(runmat_package::discover_frozen_project_from_async(
+            Path::new(&source_path),
+            Default::default(),
+        ))
+        .await?
+    else {
+        return Ok(JsValue::NULL);
+    };
+    let frozen = frozen.map_err(|error| JsValue::from_str(&error.to_string()))?;
     let Some(frozen) = frozen else {
         return Ok(JsValue::NULL);
     };
@@ -144,12 +173,17 @@ pub async fn project_handoff(source_path: String) -> Result<JsValue, JsValue> {
 
 #[wasm_bindgen(js_name = "projectRevision")]
 pub async fn project_revision(source_path: String) -> Result<JsValue, JsValue> {
-    let frozen = runmat_package::discover_frozen_project_from_async(
-        Path::new(&source_path),
-        Default::default(),
-    )
-    .await
-    .map_err(|error| JsValue::from_str(&error.to_string()))?;
+    let workspace = SourceWorkspace::capture()?;
+    let Some(frozen) = workspace
+        .run(runmat_package::discover_frozen_project_from_async(
+            Path::new(&source_path),
+            Default::default(),
+        ))
+        .await?
+    else {
+        return Ok(JsValue::NULL);
+    };
+    let frozen = frozen.map_err(|error| JsValue::from_str(&error.to_string()))?;
     let Some(frozen) = frozen else {
         return Ok(JsValue::NULL);
     };
@@ -176,12 +210,16 @@ pub fn install_project_handoff(value: JsValue) -> Result<JsValue, JsValue> {
         .map_err(|error| JsValue::from_str(&error.to_string()))?;
     let revision = crate::core::project::ProjectContext::install_handoff(handoff)
         .map_err(|error| JsValue::from_str(&error.to_string()))?;
+    WORKSPACE_REVISION.with(|workspace| workspace.set(workspace.get().saturating_add(1)));
+    invalidate_source_analyses();
     to_js(&revision)
 }
 
 #[wasm_bindgen(js_name = "clearProjectHandoff")]
 pub fn clear_project_handoff() {
     crate::core::project::ProjectContext::clear_installed_handoff();
+    WORKSPACE_REVISION.with(|workspace| workspace.set(workspace.get().saturating_add(1)));
+    invalidate_source_analyses();
 }
 
 /// Discover tests from the exact frozen run snapshot supplied by the browser
@@ -234,6 +272,8 @@ pub fn update_document_lexical(
         revision
     });
     WORKSPACE_REVISION.with(|workspace| workspace.set(workspace.get().saturating_add(1)));
+    invalidate_source_analyses();
+    crate::core::project::ProjectContext::clear_installed_handoff();
     let parsed_uri = Url::parse(&uri).ok();
     let is_fea = parsed_uri.as_ref().is_some_and(is_fea_uri);
     let design = parsed_uri.as_ref().and_then(design_dialect);
@@ -294,7 +334,11 @@ pub async fn analyze_document(uri: String, version: u64) -> Result<JsValue, JsVa
         .with_pending(&DESIGN_PENDING.with(|p| p.borrow().get(&uri).cloned().unwrap_or_default()))
         .with_entities(
             DESIGN_ENTITIES
-                .with(|e| e.borrow().get(parsed_uri.as_ref().expect("a parsed design uri").path()).cloned())
+                .with(|e| {
+                    e.borrow()
+                        .get(parsed_uri.as_ref().expect("a parsed design uri").path())
+                        .cloned()
+                })
                 .as_ref(),
         );
         let tokens = analysis.semantic_tokens();
@@ -327,12 +371,17 @@ pub async fn analyze_document(uri: String, version: u64) -> Result<JsValue, JsVa
         }
     } else {
         let source_name = source_name_from_uri(&uri);
-        let analysis = analyze_document_with_compat_and_source_async(
-            &entry.text,
-            entry.compat,
-            source_name.as_deref(),
-        )
-        .await;
+        let workspace = SourceWorkspace::capture()?;
+        let Some(analysis) = workspace
+            .run(analyze_document_with_compat_and_source_async(
+                &entry.text,
+                entry.compat,
+                source_name.as_deref(),
+            ))
+            .await?
+        else {
+            return Ok(JsValue::NULL);
+        };
         let tokens = semantic_tokens_full(&entry.text, &analysis)
             .unwrap_or_else(|| entry.lexical_tokens.clone());
         (Some(analysis), None, None, tokens)
@@ -345,7 +394,7 @@ pub async fn analyze_document(uri: String, version: u64) -> Result<JsValue, JsVa
         if current.version != version || current.revision != entry.revision {
             return false;
         }
-        if is_fea && WORKSPACE_REVISION.with(Cell::get) != workspace_revision {
+        if WORKSPACE_REVISION.with(Cell::get) != workspace_revision {
             return false;
         }
         current.analysis = analysis;
@@ -546,7 +595,8 @@ fn wasm_file_path(uri: &Url) -> Option<PathBuf> {
             index += 1;
         }
     }
-    String::from_utf8(decoded).ok().map(PathBuf::from)
+    let path = PathBuf::from(String::from_utf8(decoded).ok()?);
+    runmat_filesystem::normalize_virtual_path(&path).ok()
 }
 
 fn hex_value(value: u8) -> Option<u8> {
@@ -564,6 +614,8 @@ pub fn close_document(uri: String) {
         d.borrow_mut().docs.remove(&uri);
     });
     WORKSPACE_REVISION.with(|workspace| workspace.set(workspace.get().saturating_add(1)));
+    invalidate_source_analyses();
+    crate::core::project::ProjectContext::clear_installed_handoff();
 }
 
 #[wasm_bindgen]
@@ -649,7 +701,9 @@ pub fn code_actions(
     );
     let actions = if let Some(analysis) = doc.design_analysis.as_ref() {
         analysis.code_actions(range)
-    } else if let (Some(analysis), Ok(url)) = (doc.fea_analysis.as_ref(), lsp_types::Url::parse(&uri)) {
+    } else if let (Some(analysis), Ok(url)) =
+        (doc.fea_analysis.as_ref(), lsp_types::Url::parse(&uri))
+    {
         analysis.code_actions(&url, &doc.text, range)
     } else {
         Vec::new()
@@ -723,7 +777,15 @@ pub async fn definition(_uri: String, _line: u32, _character: u32) -> Result<JsV
     let Some(analysis) = doc.analysis.as_ref() else {
         return Ok(JsValue::NULL);
     };
-    let locations = definition_locations_at_async(&doc.text, analysis, &position, &uri).await;
+    let workspace = SourceWorkspace::capture()?;
+    let Some(locations) = workspace
+        .run(definition_locations_at_async(
+            &doc.text, analysis, &position, &uri,
+        ))
+        .await?
+    else {
+        return Ok(JsValue::NULL);
+    };
     to_js(&locations)
 }
 
@@ -745,7 +807,15 @@ pub async fn references(_uri: String, _line: u32, _character: u32) -> Result<JsV
     let Some(analysis) = doc.analysis.as_ref() else {
         return Ok(JsValue::NULL);
     };
-    let locations = references_locations_at_async(&doc.text, analysis, &position, &uri).await;
+    let workspace = SourceWorkspace::capture()?;
+    let Some(locations) = workspace
+        .run(references_locations_at_async(
+            &doc.text, analysis, &position, &uri,
+        ))
+        .await?
+    else {
+        return Ok(JsValue::NULL);
+    };
     to_js(&locations)
 }
 
@@ -854,8 +924,13 @@ pub async fn workspace_symbols_all() -> Result<JsValue, JsValue> {
         (docs, (fea_analyses, design_symbols))
     });
     let (fea_analyses, design_symbols) = fea_analyses;
-    let mut syms: Vec<SymbolInformation> =
-        workspace_symbols_with_project_async(&docs, compat, None).await;
+    let workspace = SourceWorkspace::capture()?;
+    let Some(mut syms) = workspace
+        .run(workspace_symbols_with_project_async(&docs, compat, None))
+        .await?
+    else {
+        return Ok(JsValue::NULL);
+    };
     syms.extend(
         fea_analyses
             .iter()
@@ -1092,10 +1167,12 @@ mod tests {
                     function: runmat_types::ProgramFunctionId(1),
                     ordinal: 2,
                 },
-                owner: runmat_types::ParallelRegionId(runmat_types::RegionId {
-                    function: runmat_types::ProgramFunctionId(1),
-                    ordinal: 3,
-                }),
+                owner: runmat_types::DistributedOwner::Region(runmat_types::ParallelRegionId(
+                    runmat_types::RegionId {
+                        function: runmat_types::ProgramFunctionId(1),
+                        ordinal: 3,
+                    },
+                )),
                 scheme: Some(runmat_types::DistributionScheme::Replicated),
                 value: Box::new(unknown()),
                 materializable: true,
@@ -1111,9 +1188,18 @@ mod tests {
         ];
         let facts = kinds.into_iter().map(ValueFact::scalar).collect::<Vec<_>>();
 
+        // Compare the browser boundary with the shared wire contract. Struct
+        // position facts are analysis-local precision and intentionally omitted
+        // by serde (see runmat-types/tests/lattice_laws.rs). The native wire
+        // projection preserves every public kind without exporting that state.
+        let wire_facts: Vec<ValueFact> = serde_json::from_slice(
+            &serde_json::to_vec(&facts).expect("serialize native fact wire contract"),
+        )
+        .expect("deserialize native fact wire contract");
+
         let javascript = serde_wasm_bindgen::to_value(&facts).expect("serialize taxonomy");
         let round_trip: Vec<ValueFact> =
             serde_wasm_bindgen::from_value(javascript).expect("deserialize taxonomy");
-        assert_eq!(round_trip, facts);
+        assert_eq!(round_trip, wire_facts);
     }
 }

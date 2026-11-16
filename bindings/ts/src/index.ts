@@ -535,6 +535,8 @@ export interface AxesGridCell {
   rows: number;
   columns: number;
   index: number;
+  rowSpan?: number;
+  columnSpan?: number;
 }
 
 export interface FigureMetadata {

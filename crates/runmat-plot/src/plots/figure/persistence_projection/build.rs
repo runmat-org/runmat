@@ -169,6 +169,7 @@ fn project_axes_metadata(
     }
 
     let projected = AxesMetadata {
+        retired: source.retired,
         colormap_length: source.colormap_length,
         y_direction: source.y_direction,
         axes_kind: source.axes_kind,
@@ -315,6 +316,8 @@ fn source_grid_cell(
                 columns: figure.axes_cols,
             }
         })?,
+        row_span: 1,
+        column_span: 1,
     })
 }
 

@@ -10,6 +10,124 @@ fn analyze(source: &str) -> (crate::MirAssembly, crate::analysis::AnalysisStore)
 }
 
 #[test]
+fn loop_indexed_writes_retain_proven_preallocation_dimensions() {
+    for keyword in ["for", "parfor"] {
+        let source = format!(
+            "n=1000; h=zeros(6,n); {keyword} k=1:n; h(:,k)=ones(6,1); end; bad=h*ones(999,1);"
+        );
+        let (_, analysis) = analyze(&source);
+        assert!(
+            analysis
+                .diagnostics
+                .iter()
+                .any(|item| item.code == "RM-TYPE-MATMUL"),
+            "bounded {keyword} writes must retain the 1000-column extent: {:?}",
+            analysis.diagnostics
+        );
+    }
+}
+
+#[test]
+fn named_descending_ranges_and_copied_indices_keep_their_bounds() {
+    let (_, analysis) = analyze("h=zeros(6,1000); columns=1000:-2:1; for k=columns; j=k; h(:,j)=ones(6,1); end; bad=h*ones(999,1);");
+    assert!(
+        analysis
+            .diagnostics
+            .iter()
+            .any(|item| item.code == "RM-TYPE-MATMUL"),
+        "range values and copied scalar selectors must keep the enclosing bounds: {:?}",
+        analysis.diagnostics
+    );
+}
+
+#[test]
+fn stores_and_reassigned_indices_invalidate_value_proofs() {
+    for source in [
+        "n=2; n(1)=3; A=zeros(n,n); valid=A*ones(3,1);",
+        "h=zeros(6,10); for k=1:10; k=11; h(:,k)=ones(6,1); end; valid=h*ones(11,1);",
+    ] {
+        let (_, analysis) = analyze(source);
+        assert!(
+            analysis
+                .diagnostics
+                .iter()
+                .all(|item| item.code != "RM-TYPE-MATMUL"),
+            "a store must not retain stale literal/bound evidence: {:?}",
+            analysis.diagnostics
+        );
+    }
+}
+
+#[test]
+fn index_read_bounds_follow_branch_joins_without_claiming_ambiguous_failures() {
+    for (first, expected) in [(11, true), (5, false)] {
+        let source = format!("function result=driver(flag); A=zeros(1,10); if flag; k={first}; else; k=12; end; result=A(k); end");
+        let (_, analysis) = analyze(&source);
+        assert_eq!(
+            analysis
+                .diagnostics
+                .iter()
+                .any(|item| item.code == "RM-TYPE-INDEX-BOUNDS"),
+            expected,
+            "only wholly out-of-bounds enclosures prove a failure: {:?}",
+            analysis.diagnostics
+        );
+    }
+}
+
+#[test]
+fn ordinary_array_loops_iterate_columns_rather_than_scalars() {
+    let (_, analysis) = analyze("for column=ones(6,2); bad=ones(1,3)*column; end;");
+    assert!(
+        analysis
+            .diagnostics
+            .iter()
+            .any(|item| item.code == "RM-TYPE-MATMUL"),
+        "each iteration contains a six-row column: {:?}",
+        analysis.diagnostics
+    );
+}
+
+#[test]
+fn potentially_growing_loop_writes_do_not_certify_the_old_extent() {
+    let (_, analysis) = analyze("function result=driver(n); h=zeros(6,10); for k=1:n; h(:,k)=ones(6,1); end; result=h*ones(11,1); end");
+    assert!(
+        analysis
+            .diagnostics
+            .iter()
+            .all(|item| item.code != "RM-TYPE-MATMUL"),
+        "unknown bounds can grow the array to eleven columns: {:?}",
+        analysis.diagnostics
+    );
+}
+
+#[test]
+fn loop_carried_slices_and_concatenation_preserve_vector_shapes() {
+    let (_, analysis) = analyze("state=[7000;0;0;0;7.5;0]; for k=1:100; r=norm(state(1:3)); state=state+[state(4:6);-398600*state(1:3)/r^3]; end; gain=[0.2 0.5 0.1]; bad=gain*state;");
+    assert!(
+        analysis
+            .diagnostics
+            .iter()
+            .any(|item| item.code == "RM-TYPE-MATMUL"),
+        "the loop must retain its six-row state: {:?}",
+        analysis.diagnostics
+    );
+}
+
+#[test]
+fn constant_dimension_arithmetic_reaches_shape_contracts() {
+    let (_, analysis) = analyze("n=50; A=zeros(n,n); b=ones(n-1,1); bad=A*b;");
+    assert!(
+        analysis
+            .diagnostics
+            .iter()
+            .any(|item| item.code == "RM-TYPE-MATMUL"),
+        "constant-valued dimensions must expose 50 versus 49: {:?}",
+        analysis.diagnostics
+    );
+}
+
+#[test]
 fn indexed_array_shape_survives_source_calls_and_structural_transforms() {
     use crate::{MirCallee, MirPlace, MirRvalue, MirStmtKind};
     use runmat_types::{ProgramPointId, RegionValueId, ShapeFact};

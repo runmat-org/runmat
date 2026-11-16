@@ -64,8 +64,17 @@ function authoringWords(source, role) {
     for (const [, variant, word] of section(/pub const fn as_source\(/, /pub fn from_source\(/).matchAll(/Self::(\w+)(?:\([^)]*\))?\s*=>\s*\{?\s*"([a-z_]+)"/g))
         spelled.set(variant, [...(spelled.get(variant) ?? []), word]);
     const names = [];
-    for (const [, variants, assigned] of section(/pub const fn role\(/, /^    \}/m).matchAll(/((?:\|?\s*Self::\w+(?:\([^)]*\))?\s*)+)=>\s*FeaAuthoringWordRole::(\w+)/g))
-        if (assigned === role) for (const [, variant] of variants.matchAll(/Self::(\w+)/g)) names.push(...(spelled.get(variant) ?? []));
+    const arms = section(/pub const fn role\(/, /^    \}/m);
+    let cursor = 0;
+    for (const assignment of arms.matchAll(/=>\s*FeaAuthoringWordRole::(\w+)/g)) {
+        // Each disjoint arm prefix is visited once, including alternatives
+        // that span lines and variants carrying an argument.
+        if (assignment[1] === role) {
+            const variants = arms.slice(cursor, assignment.index);
+            for (const [, variant] of variants.matchAll(/Self::(\w+)/g)) names.push(...(spelled.get(variant) ?? []));
+        }
+        cursor = assignment.index + assignment[0].length;
+    }
     return [...new Set(names)].sort();
 }
 

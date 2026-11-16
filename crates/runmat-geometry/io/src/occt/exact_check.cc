@@ -31,11 +31,13 @@
 #include <BRepTools.hxx>
 #include <BRep_Tool.hxx>
 #include <GCPnts_AbscissaPoint.hxx>
+#include <NCollection_List.hxx>
 #include <TopExp.hxx>
 #include <TopExp_Explorer.hxx>
 #include <TopTools_IndexedDataMapOfShapeListOfShape.hxx>
 #include <TopoDS.hxx>
 
+#include <algorithm>
 #include <cmath>
 #include <limits>
 
@@ -104,9 +106,9 @@ rust::Vec<double> check_body(const Body& b, double short_edge, double gap, bool 
     self.Perform();
     if (self.HasFaulty()) {
       std::vector<bool> seen(b.faces.size(), false);
-      for (BOPAlgo_ListIteratorOfListOfCheckResult it(self.GetCheckResult()); it.More(); it.Next()) {
+      for (NCollection_List<BOPAlgo_CheckResult>::Iterator it(self.GetCheckResult()); it.More(); it.Next()) {
         if (it.Value().GetCheckStatus() != BOPAlgo_SelfIntersect) continue;
-        for (TopTools_ListIteratorOfListOfShape s(it.Value().GetFaultyShapes1()); s.More(); s.Next()) {
+        for (NCollection_List<TopoDS_Shape>::Iterator s(it.Value().GetFaultyShapes1()); s.More(); s.Next()) {
           for (TopExp_Explorer ex(s.Value(), TopAbs_FACE); ex.More(); ex.Next()) {
             const long k = index_of(b.faces, ex.Current());
             if (k >= 0 && !seen[k]) { seen[k] = true; push(out, 4, 1, k, nan); }

@@ -57,3 +57,7 @@ wasm-bindgen-test = "0.3"
 name = "folded_reduction_placement"
 harness = false
 required-features = ["wgpu"]
+
+[[bench]]
+name = "interpreter_small_calls"
+harness = false

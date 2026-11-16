@@ -14,6 +14,14 @@ pub(super) fn infer(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallI
         ));
     }
     for (index, argument) in request.arguments.iter().enumerate() {
+        let invalid_shape = if index < 2 {
+            argument.shape.is_definitely_nonscalar()
+        } else {
+            matches!(&argument.shape, ShapeFact::Shaped { dims }
+                if dims.iter().any(|dim| matches!(dim, DimensionFact::Known(0)))
+                || dims.iter().filter(|dim| matches!(dim, DimensionFact::Known(size) if *size > 1)).count() > 1
+                || dims.iter().skip(2).any(|dim| matches!(dim, DimensionFact::Known(size) if *size != 1)))
+        };
         if !matches!(
             argument.kind,
             ValueKindFact::Unknown
@@ -21,10 +29,7 @@ pub(super) fn infer(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallI
                     domain: NumericDomain::Real,
                     ..
                 })
-        ) || argument
-            .shape
-            .element_count()
-            .is_some_and(|count| count != 1)
+        ) || invalid_shape
             || matches!(
                 argument.residency,
                 ResidencyFact::Device { .. } | ResidencyFact::Remote { .. }
@@ -32,7 +37,11 @@ pub(super) fn infer(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallI
         {
             diagnostics.push(argument_error(
                 "RM-CATALOG-SUBPLOT-GRID",
-                "subplot controls must be host real numeric scalars",
+                if index < 2 {
+                    "subplot rows and columns must be host real numeric scalars"
+                } else {
+                    "subplot position must be a nonempty host real numeric scalar or vector"
+                },
                 index,
             ));
         }

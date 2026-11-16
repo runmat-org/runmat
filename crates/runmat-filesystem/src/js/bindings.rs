@@ -1,8 +1,8 @@
-use js_sys::{Array, Function, Promise, Reflect};
-use runmat_filesystem::{
+use crate::{
     DirEntry, FsMetadata, OpenFileDialogRequest, OpenFileDialogSelection, ReadManyEntry,
     SaveFileDialogRequest, SaveFileDialogSelection,
 };
+use js_sys::{Array, Function, Promise, Reflect};
 use std::io::{self, ErrorKind};
 use std::path::{Path, PathBuf};
 use wasm_bindgen::prelude::*;
@@ -156,7 +156,7 @@ impl JsFsFuncs {
         &self,
         path: &Path,
         data: &[u8],
-    ) -> io::Result<runmat_filesystem::AtomicCreateResult> {
+    ) -> io::Result<crate::AtomicCreateResult> {
         let func = self.require_fn(&self.atomic_create_new, "atomicCreateNew")?;
         let bytes = js_sys::Uint8Array::from(data);
         let value = func
@@ -456,16 +456,16 @@ impl JsFsFuncs {
 
     pub(super) async fn capture_workspace(
         &self,
-        request: &runmat_filesystem::workspace::WorkspaceCaptureRequest,
-    ) -> io::Result<runmat_filesystem::workspace::WorkspaceSnapshot> {
+        request: &crate::workspace::WorkspaceCaptureRequest,
+    ) -> io::Result<crate::workspace::WorkspaceSnapshot> {
         self.call_contract(&self.capture_workspace, "captureWorkspace", request)
             .await
     }
 
     pub(super) async fn lookup_workspace_publication(
         &self,
-        request: &runmat_filesystem::workspace::WorkspacePublicationRequest,
-    ) -> io::Result<Option<runmat_filesystem::workspace::WorkspacePublicationOutcome>> {
+        request: &crate::workspace::WorkspacePublicationRequest,
+    ) -> io::Result<Option<crate::workspace::WorkspacePublicationOutcome>> {
         self.call_contract(
             &self.lookup_workspace_publication,
             "lookupWorkspacePublication",
@@ -476,8 +476,8 @@ impl JsFsFuncs {
 
     pub(super) async fn publish_workspace(
         &self,
-        request: &runmat_filesystem::workspace::WorkspacePublicationRequest,
-    ) -> io::Result<runmat_filesystem::workspace::WorkspacePublicationOutcome> {
+        request: &crate::workspace::WorkspacePublicationRequest,
+    ) -> io::Result<crate::workspace::WorkspacePublicationOutcome> {
         self.call_contract(&self.publish_workspace, "publishWorkspace", request)
             .await
     }

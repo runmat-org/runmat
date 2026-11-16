@@ -1,6 +1,6 @@
 use crate::core::docs;
 use crate::core::position::{offset_to_position, position_to_offset};
-use crate::core::project::ProjectContext;
+use crate::core::project::SourceContext;
 use crate::core::semantic::model::{
     AnalysisModel, FunctionSemantic, TextRange, VariableKind, VariableSymbol,
 };
@@ -17,7 +17,6 @@ use runmat_lexer::{tokenize_detailed, SpannedToken, Token};
 pub use runmat_parser::CompatMode;
 use runmat_vm::CompileError;
 use std::fmt::Write;
-use std::path::PathBuf;
 
 #[derive(Clone)]
 pub struct DocumentAnalysis {
@@ -178,37 +177,13 @@ fn discover_source_context(
     Option<runmat_package::DiscoveredSourceSymbols>,
     Option<HirDiagnostic>,
 ) {
-    let cwd = source_name
-        .and_then(|name| {
-            let path = PathBuf::from(name);
-            if path.is_absolute() {
-                path.parent().map(|p| p.to_path_buf())
-            } else {
-                None
-            }
-        })
-        .or_else(|| runmat_filesystem::current_dir().ok());
-
-    let Some(cwd) = cwd else {
-        return (None, None);
-    };
     #[cfg(not(target_arch = "wasm32"))]
     {
-        let Some(source_name) = source_name else {
-            return (None, None);
-        };
-        match futures::executor::block_on(
-            runmat_package::discover_source_symbols_from_source_name_async(source_name, &cwd),
-        ) {
-            Ok(Some(discovered)) => (Some(discovered), None),
-            Ok(None) => (None, None),
-            Err(error) => (None, Some(source_catalog_diagnostic(error.to_string()))),
-        }
+        futures::executor::block_on(discover_source_context_async(source_name))
     }
     #[cfg(target_arch = "wasm32")]
     {
         let _ = source_name;
-        let _ = cwd;
         (None, None)
     }
 }
@@ -219,25 +194,11 @@ async fn discover_source_context_async(
     Option<runmat_package::DiscoveredSourceSymbols>,
     Option<HirDiagnostic>,
 ) {
-    let cwd = source_name
-        .and_then(|name| {
-            let path = PathBuf::from(name);
-            if path.is_absolute() {
-                path.parent().map(|p| p.to_path_buf())
-            } else {
-                None
-            }
-        })
-        .or_else(|| runmat_filesystem::current_dir().ok());
-
-    let Some(cwd) = cwd else {
+    if source_name.is_none() {
         return (None, None);
-    };
-    let Some(source_name) = source_name else {
-        return (None, None);
-    };
-    match runmat_package::discover_source_symbols_from_source_name_async(source_name, &cwd).await {
-        Ok(Some(discovered)) => (Some(discovered), None),
+    }
+    match SourceContext::try_discover_from_source_name_async(source_name).await {
+        Ok(Some(context)) => (Some(context.into_catalog()), None),
         Ok(None) => (None, None),
         Err(error) => (None, Some(source_catalog_diagnostic(error.to_string()))),
     }
@@ -557,7 +518,7 @@ pub fn definition_locations_at(
     if let Some(symbol) = symbol_name_at(text, analysis, position) {
         if !symbol.is_local {
             if let Some(source_name) = uri_file_source_name(uri) {
-                if let Some(project) = ProjectContext::discover_from_source_name(Some(&source_name))
+                if let Some(project) = SourceContext::discover_from_source_name(Some(&source_name))
                 {
                     locations.extend(project_function_definitions(
                         &project,
@@ -590,7 +551,7 @@ pub async fn definition_locations_at_async(
         if !symbol.is_local {
             if let Some(source_name) = uri_file_source_name(uri) {
                 if let Some(project) =
-                    ProjectContext::discover_from_source_name_async(Some(&source_name)).await
+                    SourceContext::discover_from_source_name_async(Some(&source_name)).await
                 {
                     locations.extend(
                         project_function_definitions_async(
@@ -636,7 +597,7 @@ pub fn references_locations_at(
             }),
     );
     if let Some(source_name) = uri_file_source_name(uri) {
-        if let Some(project) = ProjectContext::discover_from_source_name(Some(&source_name)) {
+        if let Some(project) = SourceContext::discover_from_source_name(Some(&source_name)) {
             locations.extend(project_function_references(
                 &project,
                 &symbol.name,
@@ -744,7 +705,7 @@ pub async fn references_locations_at_async(
     );
     if let Some(source_name) = uri_file_source_name(uri) {
         if let Some(project) =
-            ProjectContext::discover_from_source_name_async(Some(&source_name)).await
+            SourceContext::discover_from_source_name_async(Some(&source_name)).await
         {
             locations.extend(
                 project_function_references_async(&project, &symbol.name, CompatMode::RunMat).await,
@@ -1181,7 +1142,7 @@ fn local_symbol_references(
 }
 
 fn project_function_definitions(
-    project: &ProjectContext,
+    project: &SourceContext,
     symbol_name: &str,
     compat: CompatMode,
 ) -> Vec<Location> {
@@ -1206,7 +1167,7 @@ fn project_function_definitions(
 }
 
 fn project_function_references(
-    project: &ProjectContext,
+    project: &SourceContext,
     symbol_name: &str,
     compat: CompatMode,
 ) -> Vec<Location> {
@@ -1229,7 +1190,7 @@ fn project_function_references(
 }
 
 async fn project_function_definitions_async(
-    project: &ProjectContext,
+    project: &SourceContext,
     symbol_name: &str,
     compat: CompatMode,
 ) -> Vec<Location> {
@@ -1255,7 +1216,7 @@ async fn project_function_definitions_async(
 }
 
 async fn project_function_references_async(
-    project: &ProjectContext,
+    project: &SourceContext,
     symbol_name: &str,
     compat: CompatMode,
 ) -> Vec<Location> {
@@ -5118,6 +5079,7 @@ end
     }
 
     #[test]
+    #[cfg(not(target_arch = "wasm32"))]
     fn rename_subject_retains_parameter_owner() {
         let source = "function y = impactPulse(t, scale)\n    y = t * scale;\nend\n";
         let analysis = analyze_document_with_compat(source, CompatMode::RunMat);
@@ -5130,6 +5092,7 @@ end
     }
 
     #[test]
+    #[cfg(not(target_arch = "wasm32"))]
     fn rename_subject_rejects_a_name_already_bound_in_its_scope() {
         let source =
             "function y = impactPulse(t, scale)\n    gain = 2;\n    y = t * scale * gain;\nend\n";

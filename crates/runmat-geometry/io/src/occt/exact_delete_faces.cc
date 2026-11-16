@@ -13,12 +13,11 @@
 #include <BRepAdaptor_Surface.hxx>
 #include <BRepAlgoAPI_Defeaturing.hxx>
 #include <GeomAbs_SurfaceType.hxx>
+#include <NCollection_List.hxx>
 #include <TopExp.hxx>
 #include <TopExp_Explorer.hxx>
 #include <TopTools_IndexedDataMapOfShapeListOfShape.hxx>
 #include <TopTools_IndexedMapOfShape.hxx>
-#include <TopTools_ListIteratorOfListOfShape.hxx>
-#include <TopTools_ListOfShape.hxx>
 #include <TopoDS.hxx>
 #include <gp_Ax1.hxx>
 #include <gp_Cone.hxx>
@@ -96,7 +95,7 @@ std::vector<TopoDS_Face> whole_surfaces(const TopoDS_Shape& body, const std::vec
     for (TopExp_Explorer e(f, TopAbs_EDGE); e.More(); e.Next()) {
       const int i = faces_of_edge.FindIndex(e.Current());
       if (i == 0) continue;
-      for (TopTools_ListIteratorOfListOfShape it(faces_of_edge.FindFromIndex(i)); it.More(); it.Next()) {
+      for (NCollection_List<TopoDS_Shape>::Iterator it(faces_of_edge.FindFromIndex(i)); it.More(); it.Next()) {
         const TopoDS_Face g = TopoDS::Face(it.Value());
         if (taken.Contains(g) || !same_curved_surface(f, g)) continue;
         taken.Add(g);

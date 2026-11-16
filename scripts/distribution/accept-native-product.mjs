@@ -5,7 +5,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync
 import { tmpdir } from "node:os";
 import { delimiter, join, resolve } from "node:path";
 import { resolveArtifactPath, validateArtifactManifest } from "../runtime/builtin-example-verifier/artifacts.mjs";
-import { runNativeEmbeddedAotProbe } from "../runtime/builtin-example-verifier/product-probe.mjs";
+import { runNativeAotProbe } from "../runtime/builtin-example-verifier/product-probe.mjs";
 import { nativeFirstLaunch } from "./native-first-launch.mjs";
 
 const manifestPath = resolve(process.argv[2]);
@@ -73,7 +73,7 @@ try {
       assert.match(execution.stdout, /accepted/);
     }
   }
-  const probe = runNativeEmbeddedAotProbe({ artifactManifest: manifest,
+  const probe = runNativeAotProbe({ artifactManifest: manifest,
     artifactManifestPath: manifestPath, sourceRevision: manifest.sourceRevision,
     environment, onProcessFailure: diagnostic => processDiagnostics.push(diagnostic) });
   results.push(probe);

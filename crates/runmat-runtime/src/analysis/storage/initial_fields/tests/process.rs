@@ -43,6 +43,7 @@ fn spawn(entrypoint: &str, directory: &Path) {
 
 #[test]
 fn original_source_survives_terminated_producer_and_fresh_consumer() {
+    let _filesystem = runmat_filesystem::provider_override_lock();
     let directory = tempfile::tempdir().unwrap();
     spawn("original_source_producer_process", directory.path());
     // output() waits for terminal exit before the separate consumer can start.

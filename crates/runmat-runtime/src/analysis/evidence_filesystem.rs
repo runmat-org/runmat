@@ -123,7 +123,6 @@ mod tests {
     #[test]
     fn evidence_publication_uses_the_provider_and_cleans_refused_staging() {
         let _guard = crate::analysis::tests::analysis_test_guard();
-        let _provider_lock = runmat_filesystem::provider_override_lock();
         let _provider = runmat_filesystem::replace_provider(std::sync::Arc::new(
             runmat_filesystem::MemoryFsProvider::new(),
         ));

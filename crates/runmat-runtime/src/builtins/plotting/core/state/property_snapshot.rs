@@ -74,10 +74,7 @@ fn axes_snapshot_from_registry(
         .get_mut(&handle)
         .ok_or(FigureError::InvalidAxesHandle)?;
     validate_axes_index(state, index)?;
-    let meta = state
-        .figure
-        .axes_metadata(index)
-        .cloned()
+    let meta = super::axes_metadata_for_read(&state.figure, index)
         .ok_or(FigureError::InvalidAxesHandle)?;
     let display_bounds = display_bounds_for_state_axes(state, index);
     let x_limits = displayed_xy_limit(display_bounds, LinkAxesAxis::X).or(meta.x_limits);

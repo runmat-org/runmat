@@ -26,12 +26,12 @@ pub(super) fn assign_sequence_target(
         Some(payload),
     ) = (target, output)
     {
-        let facts = state.value_facts();
-        let selectors = crate::analysis::dataflow::index_selectors(indexing, &facts);
+        let selectors = crate::analysis::inference::index_selectors(indexing, state);
         let scalar_selection = !selectors.is_empty()
-            && selectors
-                .iter()
-                .all(|selector| matches!(selector, IndexSelectorFact::KnownOneBasedIndex(index) if *index > 0));
+            && selectors.iter().all(|selector| {
+                matches!(selector, IndexSelectorFact::KnownOneBasedIndex(index) if *index > 0)
+                    || matches!(selector, IndexSelectorFact::BoundedScalar(_))
+            });
         if scalar_selection {
             let prior = &state.locals[base_local.0];
             let base = state

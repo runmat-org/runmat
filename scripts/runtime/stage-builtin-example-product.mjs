@@ -8,6 +8,7 @@ const result = stageNativeProduct({
     binary: required(options.binary, "--binary"),
     destination: required(options.destination, "--destination"),
     executableName: options["executable-name"],
+    aotRuntimePack: options["aot-runtime-pack"],
     dependencyDirectories: array(options["dependency-dir"]),
     dependencyNoticeDirectories: array(options["dependency-notice-dir"])
 });

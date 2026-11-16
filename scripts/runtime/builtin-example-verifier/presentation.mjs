@@ -177,7 +177,7 @@ export function buildReportHtml(allRows, reportRows, reportMode) {
         const actual = escapeHtml(row.normalizedActual);
         const imageCell = row.testCase.isPlotExample
             ? row.imageRelPath
-                ? `<a href="${escapeHtml(row.imageRelPath)}" target="_blank" rel="noopener"><img src="${escapeHtml(row.imageRelPath)}" alt="${escapeHtml(row.testCase.builtin)} plot image" class="plot-preview" /></a>`
+                ? `<a href="${escapeHtml(reportImagePath(row.imageRelPath))}" target="_blank" rel="noopener"><img src="${escapeHtml(reportImagePath(row.imageRelPath))}" alt="${escapeHtml(row.testCase.builtin)} plot image" class="plot-preview" /></a>`
                 : `<div class="meta">No image captured</div>${row.imageError ? `<pre>${escapeHtml(row.imageError)}</pre>` : ""}`
             : `<div class="meta">N/A</div>`;
         return `<tr>
@@ -304,22 +304,21 @@ export function buildReportMarkdown(allRows, reportRows, reportMode) {
     const tableHeader = "| Status | Description / Input | Expected | Actual | Plot Image |\n| :--- | :--- | :--- | :--- | :--- |\n";
     const tableRows = reportRows.map((row) => {
         const status = row.matches ? "✅" : "❌";
-        const description = row.testCase.description;
-        const sourceInfo = `${row.testCase.file} (example ${row.testCase.exampleIndex + 1})`;
-        // Escape pipe characters in markdown cells and use <br> for newlines in table cells
-        const input = (row.testCase.input ?? "").replace(/\|/g, "\\|").replace(/\n/g, "<br>");
+        const description = markdownCellText(row.testCase.description);
+        const sourceInfo = markdownCellText(`${row.testCase.file} (example ${row.testCase.exampleIndex + 1})`);
+        const input = markdownCellText(row.testCase.input ?? "");
         const expectedRaw = row.testCase.hasExpectedOutput ? row.testCase.expectedOutput : "(execution-only: no expected output)";
-        const expected = expectedRaw.replace(/\|/g, "\\|").replace(/\n/g, "<br>");
-        const actual = row.normalizedActual.replace(/\|/g, "\\|").replace(/\n/g, "<br>");
+        const expected = markdownCellText(expectedRaw);
+        const actual = markdownCellText(row.normalizedActual);
         const imageCell = row.testCase.isPlotExample
             ? row.imageRelPath
-                ? `[image](${row.imageRelPath.replace(/\|/g, "\\|")})`
+                ? `[image](${reportImagePath(row.imageRelPath)})`
                 : row.imageError
-                    ? `(no image captured: ${row.imageError.replace(/\|/g, "\\|")})`
+                    ? `(no image captured: ${markdownCellText(row.imageError)})`
                     : "(no image captured)"
             : "N/A";
 
-        return `| ${status} | **${description}**<br>${sourceInfo}<br>\`${input}\` | \`${expected}\` | \`${actual}\` | ${imageCell} |`;
+        return `| ${status} | **${description}**<br>${sourceInfo}<br><code>${input}</code> | <code>${expected}</code> | <code>${actual}</code> | ${imageCell} |`;
     }).join("\n");
 
     const header = `Results: ${successCount}/${totalCount} succeeded (${successPercent}%).\n${summary}\n\n`;
@@ -327,6 +326,34 @@ export function buildReportMarkdown(allRows, reportRows, reportMode) {
         return `${header}No mismatches detected.\n`;
     }
     return header + tableHeader + tableRows;
+}
+
+/**
+ * Render literal text inside this report's Markdown table cells.
+ * @param {string} value
+ */
+function markdownCellText(value) {
+    const parts = [];
+    for (const character of String(value).replace(/\r\n?/g, "\n")) {
+        const code = character.charCodeAt(0);
+        // CommonMark's ASCII punctuation can introduce markup, escapes or HTML.
+        // Character references display it literally without changing table cells.
+        const punctuation = (code >= 33 && code <= 47) || (code >= 58 && code <= 64)
+            || (code >= 91 && code <= 96) || (code >= 123 && code <= 126);
+        parts.push(character === "\n" ? "<br>" : punctuation ? `&#${code};` : character);
+    }
+    return parts.join("");
+}
+
+/**
+ * Report links refer only to PNG files produced by writePlotImageArtifact.
+ * @param {string} value
+ */
+function reportImagePath(value) {
+    if (!/^plot-example-images\/[A-Za-z0-9._-]+\.png$/.test(value)) {
+        throw new Error("Report image must be a PNG in plot-example-images");
+    }
+    return value;
 }
 
 /**

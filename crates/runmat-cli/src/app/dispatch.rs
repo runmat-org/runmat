@@ -173,10 +173,14 @@ async fn execute_command(
             })
             .await
         }
+        Commands::Aot {
+            command: crate::cli::AotCommand::Install { from },
+        } => crate::commands::aot::install(from, cli.offline || cli.frozen).await,
         Commands::Compile {
             file,
             output,
             optimization,
+            install_aot_runtime,
             policy,
             explain_link,
             link_plan_json,
@@ -193,6 +197,7 @@ async fn execute_command(
                         file,
                         output,
                         optimization,
+                        install_aot_runtime,
                         policy,
                         explain_link,
                         link_plan_json,

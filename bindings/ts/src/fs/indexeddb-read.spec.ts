@@ -32,3 +32,27 @@ it("atomic journal creation owns its bytes before yielding to IndexedDB", async 
     expect(new TextDecoder().decode(await handle.provider.readFile("/decision"))).toBe("accepted decision");
   } finally { handle.close(); }
 });
+
+it("relative reads use the same absolute keys as writes and terminate at the root", async () => {
+  const handle = await createIndexedDbFsHandle({ dbName: crypto.randomUUID() });
+  try {
+    await handle.provider.createDir!("src");
+    const bytes = new TextEncoder().encode("function y=helper(x); y=2*x; end");
+    await handle.provider.writeFile("src/helper.m", bytes);
+    const getAll = vi.spyOn(IDBObjectStore.prototype, "getAll");
+    const get = vi.spyOn(IDBObjectStore.prototype, "get");
+    try {
+      expect(await handle.provider.readFile("src/helper.m")).toEqual(bytes);
+      expect(await handle.provider.readMany!(["./src/helper.m", "/src/helper.m", "missing.m"])).toEqual([bytes, bytes, null]);
+      expect(await handle.provider.metadata("src/helper.m")).toMatchObject({ len: bytes.length });
+      expect(await handle.provider.canonicalize("./src/../src/helper.m")).toBe("/src/helper.m");
+      expect(await handle.provider.readDir("src")).toMatchObject([{ fileName: "helper.m" }]);
+      for (const root of [".", "./", "..", "/./"]) {
+        expect(await handle.provider.canonicalize(root)).toBe("/");
+        expect(await handle.provider.readDir(root)).toMatchObject([{ fileName: "src" }]);
+      }
+      expect(getAll).not.toHaveBeenCalled();
+      expect(get.mock.calls.every(([key]) => typeof key === "string" && key.startsWith("/") && !key.includes("/./"))).toBe(true);
+    } finally { getAll.mockRestore(); get.mockRestore(); }
+  } finally { handle.close(); }
+});

@@ -63,8 +63,10 @@ function withEvidence(callback) {
     fs.mkdirSync(nativeRoot);
     const nativeBinary = path.join(nativeRoot, "runmat");
     fs.writeFileSync(nativeBinary, "native");
+    // Artifact-identity fixtures; native pack admission is qualified separately.
+    fs.writeFileSync(path.join(nativeRoot, "runmat-aot-runtime.zip"), "compile-runtime-pack fixture");
     const nativeManifestPath = path.join(root, "native-artifact.json");
-    const native = buildArtifactManifestFromTree({ product: "native-cli", artifactProfile: "embedded-aot", sourceRevision: SOURCE, manifestPath: nativeManifestPath, root: nativeRoot, entrypoints: { "runmat-binary": "runmat" } });
+    const native = buildArtifactManifestFromTree({ product: "native-cli", artifactProfile: "distributed-aot", sourceRevision: SOURCE, manifestPath: nativeManifestPath, root: nativeRoot, entrypoints: { "runmat-binary": "runmat", "compile-runtime-pack": "runmat-aot-runtime.zip" } });
     const browserJs = path.join(root, "runmat.js");
     const browserWasm = path.join(root, "runmat.wasm");
     fs.writeFileSync(browserJs, "js");

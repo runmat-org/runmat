@@ -325,7 +325,7 @@ impl RunMatWasm {
         }
         let _progress = runmat_analysis_fea::replace_fea_progress_context(
             runmat_analysis_fea::FeaProgressContext {
-                handler: Some(std::sync::Arc::new(forward_progress)),
+                handler: Some(browser_progress_handler()),
                 cancellation: runmat_analysis_fea::FeaCancellationToken::from_token(
                     cancellation.token(),
                 ),
@@ -507,6 +507,12 @@ fn checked_study_identity(
     .map_err(|error| js_error(&error.to_string()))
 }
 
+/// Rate-limited forwarding to the page. A browser host draws heartbeats from its own timer.
+fn browser_progress_handler() -> runmat_analysis_fea::progress::FeaProgressHandler {
+    runmat_analysis_fea::progress::ProgressRelay::new(std::sync::Arc::new(forward_progress))
+        .handler()
+}
+
 fn forward_progress(event: runmat_analysis_fea::FeaProgressEvent) {
     if let Ok(callback) =
         js_sys::Reflect::get(&js_sys::global(), &JsValue::from_str("__runmatFeaProgress"))
@@ -618,7 +624,7 @@ async fn execute_prepared_fea_study_local(
     capacity: &dyn runmat_analysis_execution::AsyncCapacityOwner,
 ) -> Result<String, JsValue> {
     let progress = runmat_analysis_fea::FeaProgressContext {
-        handler: Some(std::sync::Arc::new(forward_progress)),
+        handler: Some(browser_progress_handler()),
         cancellation: runmat_runtime::interrupt::current_interrupt()
             .map(runmat_analysis_fea::FeaCancellationToken::from_token)
             .unwrap_or_default(),

@@ -2,6 +2,7 @@ use crate::indexing::selectors::SliceSelector;
 use crate::indexing::EndExpr;
 use crate::runtime_error::semantic_error as mex;
 use crate::{builtins::common::shape::is_scalar_shape, RuntimeError};
+use runmat_types::geometry::{logical_linear_source_is_row, numeric_linear_shape};
 use runmat_value::{ExactArrayStorage, SharedShape, Value};
 use std::future::Future;
 
@@ -378,9 +379,7 @@ pub(crate) fn logical_linear_output_shape_in_context(
     mask_shape: &[usize],
     selected_len: usize,
 ) -> VmResult<SharedShape> {
-    let source_row = is_vector_shape(source_shape)
-        && is_vector_shape(mask_shape)
-        && source_shape.first().copied().unwrap_or(1) == 1;
+    let source_row = logical_linear_source_is_row(source_shape, mask_shape);
     let shape = if source_row {
         [1, selected_len]
     } else {
@@ -430,41 +429,6 @@ fn numeric_linear_output_shape(
     numeric_linear_shape(source_shape, selector_shape, selected_len)
         .as_slice()
         .to_vec()
-}
-
-enum NumericLinearShape<'a> {
-    Borrowed(&'a [usize]),
-    Vector([usize; 2]),
-}
-impl NumericLinearShape<'_> {
-    fn as_slice(&self) -> &[usize] {
-        match self {
-            Self::Borrowed(shape) => shape,
-            Self::Vector(shape) => shape,
-        }
-    }
-}
-fn numeric_linear_shape<'a>(
-    source_shape: &[usize],
-    selector_shape: &'a [usize],
-    selected_len: usize,
-) -> NumericLinearShape<'a> {
-    let source_is_non_scalar = source_shape.iter().any(|&extent| extent != 1);
-    if is_vector_shape(source_shape) && source_is_non_scalar && is_vector_shape(selector_shape) {
-        if source_shape.first().copied().unwrap_or(1) == 1 {
-            NumericLinearShape::Vector([1, selected_len])
-        } else {
-            NumericLinearShape::Vector([selected_len, 1])
-        }
-    } else {
-        NumericLinearShape::Borrowed(selector_shape)
-    }
-}
-
-fn is_vector_shape(shape: &[usize]) -> bool {
-    let rows = shape.first().copied().unwrap_or(1);
-    let cols = shape.get(1).copied().unwrap_or(1);
-    shape.iter().skip(2).all(|&extent| extent == 1) && (rows == 1 || cols == 1)
 }
 
 fn exact_index_from_f64(value: f64) -> Option<i64> {
