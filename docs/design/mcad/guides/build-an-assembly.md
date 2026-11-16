@@ -123,6 +123,7 @@ A component's representation sets what the assembly draws and checks for it. Rig
 
 - **Full** draws and checks the part's exact solid. It is the default and writes nothing.
 - **Envelope** draws the component as its bounding box, shaded translucent, and interference and clearance checks use that box. A sub-assembly at envelope draws one box around all its parts.
+- **Defeatured**, **Mid-surface** and **Beam** draw the part's own analysis representation of that kind, which the part declares (see [Analysis representations](/docs/mcad/part/regions-and-publish#analysis-representations)). A part that declares none of that kind is refused with its file named. When the part declares several of one kind, the component draws the first.
 
 ```assembly fragment
 use part base as base {

@@ -132,6 +132,14 @@ fn set_property(
     text: &str,
     request: &EditRequest,
 ) -> Result<(SourceChange, String), EditFailure> {
+    let representations: Vec<&str> = request
+        .selection
+        .iter()
+        .filter_map(|s| s.strip_prefix("representation:"))
+        .collect();
+    if let [name] = representations.as_slice() {
+        return super::simulate::set_representation(path, text, name, &request.values);
+    }
     let inputs: Vec<&str> = request
         .selection
         .iter()

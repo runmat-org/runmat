@@ -11,7 +11,8 @@
 //! cut, intersect or a new body, sketch-plane or offset start, draft and thin walls),
 //! `part.delete`, `part.suppress`, `part.unsuppress` (in the active configuration when
 //! `values.configuration` names one), `part.move-up` and `part.move-down`; Properties and
-//! configuration commands ([`configuration`]); `simulate.publish` ([`publish`]); Rename and the
+//! configuration commands ([`configuration`]); `simulate.publish` ([`publish`]); `simulate.region`
+//! ([`simulate`]); Rename and the
 //! rollback bar ([`history`]). While the model is rolled back, an added feature goes in at the
 //! bar.
 //! Sketches: `part.sketch` and the sketch tools ([`sketch`]).
@@ -25,6 +26,7 @@ mod history;
 mod manage;
 mod publish;
 pub(crate) mod release;
+mod simulate;
 pub(crate) mod sketch;
 
 use crate::runtime::Files;
@@ -177,6 +179,43 @@ fn part_edit(
             })?;
             Ok((change, format!("Deleted {}", summary.join(", "))))
         }
+        "part.delete"
+            if selected.is_empty()
+                && request
+                    .selection
+                    .iter()
+                    .any(|id| id.starts_with("region:") || id.starts_with("representation:")) =>
+        {
+            // Regions and analysis representations, from their Outline rows.
+            let ids = request.selection.clone();
+            let change = edit_part(text, path, |document| {
+                for id in &ids {
+                    if let Some(name) = id.strip_prefix("region:") {
+                        let at = document
+                            .regions
+                            .iter()
+                            .position(|r| r.name.as_str() == name)
+                            .ok_or_else(|| model(format!("the part has no region `{name}`")))?;
+                        document.regions.remove(at);
+                    } else if let Some(name) = id.strip_prefix("representation:") {
+                        let at = document
+                            .representations
+                            .iter()
+                            .position(|r| r.name == name)
+                            .ok_or_else(|| {
+                                model(format!("the part has no representation `{name}`"))
+                            })?;
+                        document.representations.remove(at);
+                    }
+                }
+                Ok(())
+            })?;
+            let names: Vec<&str> = ids
+                .iter()
+                .filter_map(|id| id.split_once(':').map(|(_, n)| n))
+                .collect();
+            Ok((change, format!("Deleted {}", names.join(", "))))
+        }
         "part.delete" => {
             need_one()?;
             let change = edit_part(text, path, |document| {
@@ -281,6 +320,48 @@ fn part_edit(
         }
         "part.rollback-here" | "part.rollback-end" => history::rollback(path, text, request),
         "repair.repair" => crate::repairs::repair_part(path, text, &request.values),
+        "simulate.region" => {
+            let parsed = parse_part(path, text);
+            let document = parsed
+                .document
+                .ok_or(EditFailure::Invalid(parsed.diagnostics))?;
+            simulate::region(
+                path,
+                text,
+                &request.values,
+                &request.selection,
+                &crate::picks::Picks::new(&document, path, text),
+            )
+        }
+        "simulate.defeature" | "simulate.representation" => {
+            let kind = if request.command == "simulate.defeature" {
+                "defeatured"
+            } else {
+                text_value(&request.values, "kind")
+            };
+            if kind == "full" {
+                // The design itself: nothing to write; the Desktop draws it again.
+                return Ok((
+                    SourceChange {
+                        source: text.to_owned(),
+                        edits: Vec::new(),
+                        reprinted: false,
+                    },
+                    "Showing the full design".to_owned(),
+                ));
+            }
+            let parsed = parse_part(path, text);
+            let document = parsed
+                .document
+                .ok_or(EditFailure::Invalid(parsed.diagnostics))?;
+            simulate::representation(
+                path,
+                text,
+                &request.values,
+                &crate::picks::Picks::new(&document, path, text),
+                kind,
+            )
+        }
         "simulate.publish" => {
             let parsed = parse_part(path, text);
             let document = parsed
@@ -543,10 +624,13 @@ pub fn edit(
         let (change, summary) = part_edit(path, text, request)?;
         (history::insert_at_bar(path, text, change)?, summary)
     };
-    Ok(EditOutput {
-        files: vec![file_change(path, text, change)],
-        summary,
-    })
+    // A command that writes nothing (Representation › Full) returns no file.
+    let files = if change.edits.is_empty() && !change.reprinted && change.source == text {
+        Vec::new()
+    } else {
+        vec![file_change(path, text, change)]
+    };
+    Ok(EditOutput { files, summary })
 }
 
 /// `edit` as JSON.

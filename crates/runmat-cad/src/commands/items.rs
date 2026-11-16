@@ -288,6 +288,41 @@ pub(super) fn add(catalog: &mut Catalog) {
                 ],
             )],
         ),
+        // A part's analysis representation: a defeatured one's thresholds are edited here and
+        // rebuilt at once; a mid-surface or beam shows its kind only.
+        item(
+            K::Representation,
+            &[Part],
+            "Representation",
+            vec![section(
+                "Representation",
+                vec![
+                    shown(text("name", "Name", None), "name"),
+                    shown(text("kind", "Kind", None), "kind"),
+                    prop(
+                        length("max_fillet", "Fillets up to", 2.0).shown("kind", &["defeatured"]),
+                        Section::Configurations,
+                        "max_fillet",
+                    ),
+                    prop(
+                        length("max_hole", "Holes up to", 3.0).shown("kind", &["defeatured"]),
+                        Section::Configurations,
+                        "max_hole",
+                    ),
+                    prop(
+                        length("max_chamfer", "Chamfers up to", 1.0).shown("kind", &["defeatured"]),
+                        Section::Configurations,
+                        "max_chamfer",
+                    ),
+                    prop(
+                        flag("keep_regions", "Keep named regions", true)
+                            .shown("kind", &["defeatured"]),
+                        Section::Configurations,
+                        "keep_regions",
+                    ),
+                ],
+            )],
+        ),
         item(
             K::Occurrence,
             &[Assembly],

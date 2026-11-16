@@ -339,8 +339,15 @@ impl Representation {
     /// The representations a component can be set to from its menu, its Properties and
     /// `assembly.representation`: each changes what the assembly draws or checks. `full` is the
     /// exact model; `envelope` draws and checks the component (a sub-assembly, everything under
-    /// it) as its box. `defeatured`, `midsurface` and `beam` join when an engine fills them.
-    pub const OFFERED: [Representation; 2] = [Representation::Full, Representation::Envelope];
+    /// it) as its box. `defeatured`, `midsurface` and `beam` draw the part's own analysis
+    /// representation of that kind (`representation simple : defeatured = { … }` in the part).
+    pub const OFFERED: [Representation; 5] = [
+        Representation::Full,
+        Representation::Envelope,
+        Representation::Defeatured,
+        Representation::Midsurface,
+        Representation::Beam,
+    ];
 
     /// Its word in the source and in command values (`envelope`, `midsurface`): the one key
     /// every surface uses.

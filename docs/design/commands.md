@@ -49,12 +49,29 @@ This file is generated from the command catalog.
 - `assembly.component-configuration`: Use another configuration of the component's file.
   - Required: `configuration` (text)
   - Runs on the `selection`: `occurrence`
-- `assembly.delete`: Delete components, mates, mate connectors, publishes, sketches, assembly features, sketch curves, exploded views or explode steps.
-  - Runs on the `selection`: `occurrence`, `mate`, `mate_connector`, `publish`, `sketch`, `feature`, `sketch_entity`, `sketch_point`, `exploded_view`, `explode_step`
+- `assembly.configurations`: Add or change a configuration (input values and suppressed components) or a display state (hidden components).
+  - Required: `kind` (one of `configuration`, `display_state`, default `configuration`); `name` (text)
+  - Optional: `values` (text) when `kind` is configuration; `suppress` (picks: component) when `kind` is configuration; `hidden` (picks: component) when `kind` is display_state
+  - Runs on the `selection`: `configuration`, `display_state`
+- `assembly.contacts`: Find touching faces between components and name them as contact regions; on a region's row, change whether it is bonded.
+  - Required: `tolerance` (number in mm, default 0.05)
+  - Optional: `bonded` (true or false, default true)
+  - Runs on the `selection`: `contact`
+- `assembly.copy-with-mates`: Copy components with their connectors and mates; each mate to an outside reference takes the next picked new reference.
+  - Required: `components` (picks: component)
+  - Optional: `references` (picks: mate connector or face or edge or vertex or plane or axis or point or component or sketch entity or sketch point)
+- `assembly.delete`: Delete components, mates, mate connectors, publishes, configurations, display states, envelopes, contact regions, options, sketches, assembly features or sketch curves.
+  - Runs on the `selection`: `occurrence`, `mate`, `mate_connector`, `publish`, `configuration`, `display_state`, `envelope`, `contact`, `product_option`, `sketch`, `feature`, `sketch_entity`, `sketch_point`
+- `assembly.document-settings`: Units, standard and default tolerances.
+  - Required: `units` (one of `mmgs`, `mks`, `ips`, default `mmgs`)
 - `assembly.edit-mate`: Change the mate's type, distance, angle, limits or alignment.
   - Required: `type` (one of `fasten`, `revolute`, `slider`, `cylindrical`, `planar`, `ball`, `parallel`, `distance`, `angle`, `tangent`, `pin_slot`, `gear`, `rack_pinion`, `screw`, `cam`, `width`, `symmetric`, `path`, `linear_coupler`, `hinge`, `universal_joint`, default `fasten`); `offset` (number in mm, default 0) when `type` is distance; `angle` (number in deg, default 0) when `type` is angle; `min` (number in deg, default -30) when `angle_limits` is true; `max` (number in deg, default 45) when `angle_limits` is true; `near` (number in mm, default 0) when `distance_limits` is true; `far` (number in mm, default 10) when `distance_limits` is true; `ratio` (number, default 1) when `type` is gear or linear_coupler; `pitch` (number in mm, default 1) when `type` is screw or rack_pinion; `radius` (number in mm, default 5) when `type` is tangent; `profile` (text) when `type` is cam
   - Optional: `angle_limits` (true or false, default false) when `type` is revolute or cylindrical or hinge; `distance_limits` (true or false, default false) when `type` is slider or cylindrical; `flip` (true or false, default false); `first2` (pick: mate connector or face or edge or vertex or plane or axis or point or component or sketch entity or sketch point) when `type` is width; `second2` (pick: mate connector or face or edge or vertex or plane or axis or point or component or sketch entity or sketch point) when `type` is width; `plane` (pick: mate connector or face or edge or vertex or plane or axis or point or component or sketch entity or sketch point) when `type` is symmetric; `path` (picks: edge) when `type` is path; `joint_point` (true or false, default true) when `type` is universal_joint
   - Runs on the `selection`: `mate`
+- `assembly.envelope`: Reserve a box of space that interference checks keep other components out of.
+  - Required: `name` (text); `margin` (number in mm, default 0)
+  - Optional: `around` (picks: component); `keep_out` (true or false, default true); `owner` (pick: component)
+  - Runs on the `selection`: `envelope`
 - `assembly.export`: Export as a STEP assembly, glTF or USD.
   - Required: `format` (one of `step`, `gltf`, `usd`, default `step`)
   - Optional: `hidden` (true or false, default false)
@@ -97,6 +114,12 @@ This file is generated from the command catalog.
 - `assembly.new-part`: Create a part inside the assembly, referencing its neighbors.
   - Required: `name` (text)
   - Optional: `plane` (pick: plane or face)
+- `assembly.options`: Pick the product options and effectivity the assembly shows.
+  - Optional: `options` (text); `effectivity` (text)
+- `assembly.options-effectivity`: Define product options and the serial ranges they apply to.
+  - Required: `option` (text); `values` (text)
+  - Optional: `effectivity` (text)
+  - Runs on the `selection`: `product_option`
 - `assembly.pack-and-share`: Collect the assembly and every file it references.
   - Required: `folder` (text)
 - `assembly.pattern`: Repeat components in a line, a circle, or by a part's feature pattern.
@@ -105,10 +128,18 @@ This file is generated from the command catalog.
 - `assembly.publish`: Publish an interface, frame or value for parent assemblies.
   - Required: `name` (text); `item` (pick: mate connector or component)
   - Runs on the `selection`: `publish`
+- `assembly.release`: Save the selected components' files, or this assembly, as their next released revision.
+  - Optional: `components` (picks: component)
+  - Runs on the `selection`: `occurrence`
 - `assembly.replace`: Replace components with another file; mates follow where they can.
   - Required: `components` (picks: component); `with` (text)
   - Optional: `remate` (true or false, default true)
   - Runs on the `selection`: `occurrence`
+- `assembly.representation`: Draw and check components as their full model or as their envelope box.
+  - Required: `components` (picks: component); `representation` (one of `full`, `envelope`, `defeatured`, `midsurface`, `beam`, default `full`)
+  - Runs on the `selection`: `occurrence`
+- `assembly.skeleton`: Add a skeleton part that drives the layout: a reference component left out of the parts list, mass and interference.
+  - Required: `name` (text)
 - `assembly.sketch`: Start a sketch in the assembly on an origin plane or a component's planar face.
   - Required: `plane` (pick: plane or face)
 - `assembly.smart-mate`: Drag a component onto another and accept the suggested mate.
@@ -118,6 +149,11 @@ This file is generated from the command catalog.
   - Runs on the `selection`: `occurrence`
 - `assembly.suppress`: Leave components out of this configuration, or turn a sketch or assembly feature off.
   - Runs on the `selection`: `occurrence`, `mate`, `sketch`, `feature`
+- `assembly.update-pins`: Pin components to their file's latest released revision, or set them to follow the file live.
+  - Required: `to` (one of `latest`, `released`, default `latest`)
+  - Optional: `components` (picks: component)
+- `assembly.visualization`: Sort and color components by mass, volume, cost or count.
+  - Required: `by` (one of `mass`, `volume`, `cost`, `count`, default `mass`)
 - `assembly.where-used`: List where a component's file is used.
   - Runs on the `selection`: `occurrence`
 
@@ -245,8 +281,6 @@ This file is generated from the command catalog.
 - `drawing.chain`: Dimension features end to end.
   - Required: `items` (picks: edge)
   - Optional: `at` (pick: point)
-- `drawing.check`: Check the drawing against its models and drafting rules, and list the findings.
-  - Required: `standard` (one of `sheet`, `iso`, `asme`, default `sheet`)
 - `drawing.datum`: Add a datum feature symbol.
   - Required: `label` (text); `attach` (pick: edge or annotation)
   - Optional: `at` (pick: point)
@@ -258,10 +292,6 @@ This file is generated from the command catalog.
 - `drawing.detail`: Enlarge a circled area of a view.
   - Required: `parent` (pick: view); `center` (pick: edge); `radius` (number in mm, default 5); `label` (text); `scale` (text)
   - Optional: `at` (pick: point)
-  - Runs on the `selection`: `view`
-- `drawing.edit-view`: Edit the view's scale, orientation, display style, label and place.
-  - Required: `scale` (text); `orientation` (one of `front`, `back`, `top`, `bottom`, `left`, `right`, `isometric`, `dimetric`, `trimetric`, default `front`); `display` (one of `hidden_removed`, `hidden_visible`, `shaded`, default `hidden_removed`)
-  - Optional: `label` (text); `at` (pick: point)
   - Runs on the `selection`: `view`
 - `drawing.export`: Export as PDF, DXF, DWG or SVG.
   - Required: `format` (one of `pdf`, `dxf`, `dwg`, `svg`, default `pdf`); `sheets` (one of `all`, `current`, default `all`)
@@ -356,9 +386,6 @@ This file is generated from the command catalog.
 
 ## `explode.` commands (`.assembly`)
 
-- `explode.auto`: A new exploded view pulled apart along the mates, outermost component first.
-  - Required: `spacing` (number in mm, default 20)
-  - Optional: `name` (text); `lines` (true or false, default true)
 - `explode.lines`: Draw lines showing how components move.
   - Optional: `steps` (picks: explode step)
 - `explode.new`: Create an exploded view.
@@ -383,8 +410,6 @@ This file is generated from the command catalog.
 - `manage.configurations`: Add configurations and edit the design table.
   - Required: `name` (text)
   - Optional: `based_on` (text)
-- `manage.document-settings`: Units and decimals for readouts, the drafting standard and the general tolerance.
-  - Required: `units` (one of `mmgs`, `mks`, `ips`, default `mmgs`); `decimals` (whole number, default 2); `standard` (one of `iso`, `asme`, default `iso`); `tolerance` (one of `none`, `fine`, `medium`, `coarse`, `very_coarse`, default `none`)
 - `manage.equations`: Set an input's value, or add or change a named value or equation.
   - Required: `name` (text); `value` (text)
 - `manage.export`: Export the part as STEP AP242, IGES, STL, 3MF, glTF or a face as DXF.
@@ -394,6 +419,7 @@ This file is generated from the command catalog.
   - Required: `material` (one of `material.aluminum_6061_t6`, `material.aluminum_7075_t6`, `material.aluminum_2024_t3`, `material.steel_1018`, `material.steel_4140`, `material.stainless_304`, `material.stainless_316`, `material.titanium_ti_6al_4v`, `material.copper_c110`, `material.brass_c360`, `material.abs`, `material.nylon_pa12`, `material.glass_filled_nylon`, `material.pom_acetal`, `material.peek`, `material.polycarbonate`, `material.acrylic`, `material.carbon_fiber`, `material.fr4`, `material.silicone_rubber`, `material.oak`, `material.concrete`, `material.douglas_fir_lumber`, `material.osb`, `material.gypsum_board`, `material.xps_foam`, default `material.aluminum_6061_t6`)
   - Optional: `bodies` (picks: body or part)
   - Runs on the `selection`: `body`, `part`
+- `manage.release`: Save this part as its next released revision, for assemblies to pin to.
 - `manage.split-to-files`: Save bodies as separate parts and an assembly.
   - Optional: `bodies` (picks: body); `assembly` (true or false, default true)
 
@@ -456,7 +482,7 @@ This file is generated from the command catalog.
   - Required: `points` (picks: vertex or point or sketch point)
   - Optional: `closed` (true or false, default false)
 - `part.delete`: Delete the item, after showing what depends on it.
-  - Runs on the `selection`: `feature`, `sketch`, `sketch_entity`, `sketch_point`, `region`, `input`, `plane`, `mate_connector`, `annotation`, `view`
+  - Runs on the `selection`: `feature`, `sketch`, `sketch_entity`, `sketch_point`, `region`, `representation`, `input`, `plane`, `mate_connector`, `annotation`, `view`
 - `part.draft`: Taper faces for molding by neutral plane, parting line or step.
   - Required: `type` (one of `neutral_plane`, `parting_line`, `step`, default `neutral_plane`); `faces` (picks: face); `neutral` (pick: plane or face) when `type` is neutral_plane; `parting` (picks: edge or curve) when `type` is parting_line or step; `angle` (number in deg, default 1)
   - Optional: `pull` (pick: plane or face) when `type` is parting_line or step; `flip` (true or false, default false)
@@ -601,8 +627,6 @@ This file is generated from the command catalog.
 - `sheet-metal.base-flange`: Start a sheet metal part from a sketch.
   - Required: `profile` (pick: sketch); `thickness` (number in mm, default 1.5); `radius` (number in mm, default 1); `depth` (number in mm, default 20); `bend_rule` (one of `k_factor`, `table`, `allowance`, `deduction`, default `k_factor`); `k` (number, default 0.44) when `bend_rule` is k_factor; `allowance` (number in mm, default 2) when `bend_rule` is allowance; `deduction` (number in mm, default 2) when `bend_rule` is deduction
   - Optional: `bend_table` (text) when `bend_rule` is table; `gauge` (text)
-- `sheet-metal.bend-table`: Choose the bend rule every sheet body of this part follows: a K-factor, DIN 6935 or a bend table in the project.
-  - Required: `rule` (one of `k_factor`, `din6935`, `table`, `feature`, default `k_factor`); `k` (number, default 0.44) when `rule` is k_factor; `table` (text) when `rule` is table
 - `sheet-metal.break-corner`: Chamfer or round a flat corner.
   - Required: `edges` (picks: edge); `break` (one of `chamfer`, `fillet`, default `chamfer`); `distance` (number in mm, default 2)
 - `sheet-metal.closed-corner`: Close the gap between flanges at a corner.
@@ -617,9 +641,6 @@ This file is generated from the command catalog.
   - Optional: `bends` (picks: face)
 - `sheet-metal.form-tool`: Stamp a form (louver, dimple, bead) into a face.
   - Required: `tool` (one of `louver`, `dimple`, `bead`, default `louver`); `face` (pick: face); `position` (pick: sketch point or point or vertex); `rotation` (number in deg, default 0)
-- `sheet-metal.gauge`: Pick the material gauge, which sets every sheet body's thickness, bend radius and K-factor.
-  - Required: `gauges` (one of `steel`, `aluminum`, `file`, default `steel`); `file` (text) when `gauges` is file
-  - Optional: `gauge` (text)
 - `sheet-metal.hem`: Fold an edge back on itself.
   - Required: `edges` (picks: edge); `hem` (one of `closed`, `open`, `teardrop`, `rolled`, default `closed`); `length` (number in mm, default 5); `gap` (number in mm, default 0.5) when `hem` is open
 - `sheet-metal.jog`: Add two bends that offset a flat.
@@ -648,6 +669,9 @@ This file is generated from the command catalog.
 - `simulate.dc-sweep`: Add a DC sweep of a source to the simulation section.
   - Required: `source` (text); `start` (number in V, default 0); `stop` (number in V, default 5); `step` (number in V, default 0.1)
   - Optional: `name` (text)
+- `simulate.defeature`: Add a defeatured representation for meshing: small fillets, holes and chamfers removed. The design stays as it is.
+  - Required: `name` (text); `max_fillet` (number in mm, default 2); `max_hole` (number in mm, default 3); `max_chamfer` (number in mm, default 1)
+  - Optional: `keep_regions` (true or false, default true)
 - `simulate.monte-carlo`: Add a Monte Carlo over the section's tolerances that reruns another analysis of the section.
   - Required: `kind` (one of `monte_carlo`, default `monte_carlo`); `of` (text); `runs` (whole number, default 1000); `seed` (whole number, default 1)
   - Optional: `name` (text)
@@ -664,6 +688,11 @@ This file is generated from the command catalog.
   - Runs on the `selection`: `pin`
 - `simulate.publish`: Publish a region, frame, value or path for assemblies and studies to use.
   - Required: `name` (text); `target` (one of `region`, `frame`, `value`, `path`, default `region`); `item` (pick: region or mate connector or input) when `target` is region or frame or value; `edges` (picks: edge) when `target` is path
+- `simulate.region`: Name faces, edges or bodies so studies can load and fix them.
+  - Required: `name` (text); `kind` (one of `face`, `edge`, `body`, `vertex`, default `face`); `select` (picks: face or edge or body or vertex); `expect` (one of `at_least_one`, `exactly_one`, `any`, default `at_least_one`)
+- `simulate.representation`: Add an analysis representation for meshing: defeatured, mid-surface or beam. Full draws the design itself.
+  - Required: `kind` (one of `full`, `defeatured`, `midsurface`, `beam`, default `full`); `name` (text) when `kind` is defeatured or midsurface or beam; `max_fillet` (number in mm, default 2) when `kind` is defeatured; `max_hole` (number in mm, default 3) when `kind` is defeatured; `max_chamfer` (number in mm, default 1) when `kind` is defeatured
+  - Optional: `body` (pick: body) when `kind` is midsurface or beam; `keep_regions` (true or false, default true) when `kind` is defeatured
 - `simulate.set-tolerance`: Set the tolerance a Monte Carlo varies parts by (it replaces the parts' own bands).
   - Required: `match` (text); `percent` (number, default 1)
   - Optional: `name` (text)

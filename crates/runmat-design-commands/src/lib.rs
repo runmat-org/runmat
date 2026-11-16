@@ -150,6 +150,8 @@ pub enum SelectKind {
     Curve,
     Region,
     Input,
+    /// An analysis representation of a part (`representation:<name>`).
+    Representation,
     // Assembly.
     Occurrence,
     Mate,
@@ -225,6 +227,7 @@ impl SelectKind {
             Curve => "curve",
             Region => "region",
             Input => "input",
+            Representation => "representation",
             Occurrence => "component",
             Mate => "mate",
             Part => "part",

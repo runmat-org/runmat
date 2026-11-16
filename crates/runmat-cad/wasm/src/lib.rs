@@ -56,6 +56,7 @@ pub mod motion;
 pub mod parents;
 pub mod picks;
 pub mod probe;
+pub mod representation;
 mod repairs;
 mod xref_repairs;
 pub mod runtime;
@@ -86,7 +87,9 @@ pub fn compile(path: &str, text: &str, files: &str, options: &str) -> String {
         Err(message) => return runtime::error_json(path, &message),
     };
     let configuration = runtime::compile_options(options);
-    runtime::compile_json_in(path, text, &files, configuration.as_deref())
+    representation::with_requested(representation::requested_in(options), || {
+        runtime::compile_json_in(path, text, &files, configuration.as_deref())
+    })
 }
 
 /// Runs an Evaluate command (mass properties, interference) on the part or assembly `path`.

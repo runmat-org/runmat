@@ -351,7 +351,9 @@ fn representation(
         .ok_or_else(|| {
             model(format!(
                 "`{key}` isn't a representation a component can take; choose {}",
-                Representation::OFFERED.map(|r| format!("`{}`", r.key())).join(" or ")
+                Representation::OFFERED
+                    .map(|r| format!("`{}`", r.key()))
+                    .join(" or ")
             ))
         })?;
     for name in names {
@@ -359,7 +361,59 @@ fn representation(
         document.occurrences[at].representation =
             (chosen != Representation::Full).then_some(chosen);
     }
-    Ok(format!("Representation of {}: {}", names.join(", "), chosen.label()))
+    Ok(format!(
+        "Representation of {}: {}",
+        names.join(", "),
+        chosen.label()
+    ))
+}
+
+/// A part analysis representation (`defeatured`, `midsurface`, `beam`) needs the component's
+/// part to declare one of that kind; anything else passes.
+fn declared_representations(
+    compiled: &Compiled,
+    files: &Files,
+    names: &[String],
+    key: &str,
+) -> Result<(), EditFailure> {
+    use runmat_cad::assembly::model::Representation;
+    use runmat_cad::model::PartRepresentation;
+    let Some(kind) =
+        Representation::from_key(key).filter(|r| PartRepresentation::KINDS.contains(r))
+    else {
+        return Ok(());
+    };
+    for name in names {
+        let Some(file) = compiled
+            .rows
+            .iter()
+            .find(|r| r["path"].as_str() == Some(name.as_str()))
+            .and_then(|r| r["definition"]["file"].as_str())
+        else {
+            continue;
+        };
+        let Some((path, text)) = files.iter().find(|(p, _)| {
+            p.as_str() == file || p.ends_with(&format!("/{}", file.trim_start_matches("./")))
+        }) else {
+            continue;
+        };
+        if !path.ends_with(".part") {
+            return Err(model(format!(
+                "`{name}` isn't a part: a {} representation is a part's",
+                kind.label().to_lowercase()
+            )));
+        }
+        let declared = runmat_cad::syntax::parse_part(path, text)
+            .document
+            .is_some_and(|d| d.representations.iter().any(|r| r.kind == kind));
+        if !declared {
+            return Err(model(format!(
+                "`{path}` declares no {} representation: add one in the part with Simulate › Representation",
+                kind.key()
+            )));
+        }
+    }
+    Ok(())
 }
 
 fn find(document: &AssemblyDocument, name: &str) -> Result<usize, EditFailure> {
@@ -381,10 +435,17 @@ fn drop_dangling(document: &mut AssemblyDocument, names: &[String]) -> String {
     let connectors: Vec<String> = document
         .connectors
         .iter()
-        .filter(|c| c.occurrence.0.first().is_some_and(|s| gone.contains(&&s.name)))
+        .filter(|c| {
+            c.occurrence
+                .0
+                .first()
+                .is_some_and(|s| gone.contains(&&s.name))
+        })
         .map(|c| c.name.clone())
         .collect();
-    document.connectors.retain(|c| !connectors.contains(&c.name));
+    document
+        .connectors
+        .retain(|c| !connectors.contains(&c.name));
     let mates: Vec<String> = document
         .mates
         .iter()
@@ -534,7 +595,9 @@ pub(super) fn edit(
     let compiled = Compiled::new(path, text, files)?;
     let mut publisher = anchors::Publisher::new(files);
     let summary = match request.command.as_str() {
-        "assembly.delete" if !crate::edit::sketch::selected_entities(&request.selection).is_empty() => {
+        "assembly.delete"
+            if !crate::edit::sketch::selected_entities(&request.selection).is_empty() =>
+        {
             sketch::delete_entities(&mut document, request)?
         }
         "assembly.delete" | "assembly.suppress"
@@ -580,9 +643,15 @@ pub(super) fn edit(
         "assembly.set-property" => properties::set(&mut document, &compiled, files, request)?,
         "assembly.document-settings" => settings::apply(&mut document, &request.values)?,
         "assembly.update-pins" => pins::update(&mut document, path, files, &compiled, request)?,
-        "assembly.release" => {
-            pins::release(&document, path, text, files, &compiled, request, &mut others)?
-        }
+        "assembly.release" => pins::release(
+            &document,
+            path,
+            text,
+            files,
+            &compiled,
+            request,
+            &mut others,
+        )?,
         "assembly.delete" if contacts::selected(request).next().is_some() => {
             contacts::delete(&mut document, request)?
         }
@@ -636,7 +705,9 @@ pub(super) fn edit(
         }
         "assembly.representation" => {
             let names = selected_names(&compiled, request)?;
-            representation(&mut document, &names, text_value(&request.values, "representation"))?
+            let key = text_value(&request.values, "representation");
+            declared_representations(&compiled, files, &names, key)?;
+            representation(&mut document, &names, key)?
         }
         "assembly.insert" => place::insert(&mut document, files, &request.values)?,
         "assembly.component-configuration" => {
@@ -757,13 +828,11 @@ pub(super) fn edit(
         {
             use_edges::offset(&mut document, &compiled, &mut publisher, &request.values)?
         }
-        command if command.starts_with("sketch.") => {
-            sketch::tool(
-                &mut document,
-                command,
-                &crate::edit::sketch::with_selection(&request.values, &request.selection),
-            )?
-        }
+        command if command.starts_with("sketch.") => sketch::tool(
+            &mut document,
+            command,
+            &crate::edit::sketch::with_selection(&request.values, &request.selection),
+        )?,
         other => return Err(super::unhandled(other)),
     };
     publisher.finish(&mut others)?;

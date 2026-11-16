@@ -122,6 +122,10 @@ pub const PART: DocumentGrammar = DocumentGrammar {
             ..named("region", "regions", "region")
         },
         Collection {
+            type_field: Some("kind"),
+            ..named("representation", "representations", "representation")
+        },
+        Collection {
             tagged: Some(Tagged {
                 field: "target",
                 tag: "publishes",
@@ -252,7 +256,14 @@ pub const DRAWING: DocumentGrammar = DocumentGrammar {
                 field: "kind",
                 tag: "view",
                 extras: &[
-                    "sheet", "model", "at", "scale", "display", "exclude", "exploded", "title",
+                    "sheet",
+                    "model",
+                    "at",
+                    "scale",
+                    "display",
+                    "exclude",
+                    "exploded",
+                    "title",
                     "centerlines",
                 ],
             }),

@@ -125,6 +125,16 @@ pub(super) fn add(catalog: &mut Catalog) {
         )])
         .edit(view_action("representation")),
         cmd(
+            "view.part-representation",
+            "Representation",
+            "representation",
+            &[Part],
+        )
+        .desc("Draw one of the part's analysis representations (defeatured, mid-surface, beam), or the full design.")
+        .kw(&["rep", "defeatured", "midsurface", "beam", "idealization"])
+        .inputs(vec![text("representation", "Representation", Some("full"))])
+        .edit(view_action("representation")),
+        cmd(
             "view.working-set",
             "Working set",
             "working-set",
