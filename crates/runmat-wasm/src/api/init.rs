@@ -15,7 +15,7 @@ use crate::runtime::gpu::{
     capture_gpu_adapter_info, initialize_gpu_provider, install_cpu_provider,
     validate_webgpu_runtime, GpuStatus,
 };
-use crate::runtime::logging::{init_logging_once, set_log_filter_override};
+use crate::runtime::logging::{apply_session_log_level, init_logging_once};
 use crate::runtime::package_cache::JsPackageCacheBackend;
 use crate::wire::errors::{init_error, init_error_with_details, js_value_to_string, InitErrorCode};
 
@@ -50,7 +50,7 @@ pub async fn init_runmat(options: JsValue) -> Result<RunMatWasm, JsValue> {
     } else {
         format!("{:?}", config.runtime.logging.level).to_ascii_lowercase()
     };
-    set_log_filter_override(&effective_log_level);
+    apply_session_log_level(&effective_log_level, parsed_opts.log_level.is_some());
     init_logging_once();
     crate::runtime::settings::apply_resources(&config.runtime)
         .map_err(|error| init_error(InitErrorCode::InvalidOptions, error))?;
