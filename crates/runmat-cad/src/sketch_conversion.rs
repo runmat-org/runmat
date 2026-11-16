@@ -299,7 +299,17 @@ fn ordered(mut chains: Vec<Vec<[f64; 3]>>, frame: &Frame) -> Vec<Vec<[f64; 3]>> 
 }
 
 /// The zero set of `values` (one per mesh position) over a face's triangles, as chains.
-fn contour(mesh: &FaceMesh, values: &[f64]) -> Vec<Vec<[f64; 3]>> {
+///
+/// A value within `tol` of zero counts as zero, on the non-negative side. Where the zero set runs
+/// along a closed face's seam (a cylinder's outline on the line where its tessellation starts
+/// and ends), the seam's two copies of each vertex then agree; left as rounding noise, one copy
+/// read 0 and the other -2e-16, the sign changed only across the seam, which no triangle spans,
+/// and the outline lost that line.
+fn contour(mesh: &FaceMesh, values: &[f64], tol: f64) -> Vec<Vec<[f64; 3]>> {
+    let values: Vec<f64> = values
+        .iter()
+        .map(|v| if v.abs() <= tol { 0.0 } else { *v })
+        .collect();
     let mut segments = Vec::new();
     for t in &mesh.triangles {
         let mut cut = Vec::with_capacity(2);
@@ -355,7 +365,8 @@ pub fn plane_section(face: &FaceSurface<'_>, frame: &Frame) -> Result<Vec<Vec<[f
     if values.iter().all(|v| v.abs() < 1e-9) {
         return Err("the face lies in the sketch plane; use Project on its edges".into());
     }
-    let mut chains = contour(face.mesh, &values);
+    // Distances in metres: a nanometre is on the plane.
+    let mut chains = contour(face.mesh, &values, 1e-9);
     if let Some(SurfaceKind::Cylinder {
         axis_point,
         axis_direction,
@@ -415,7 +426,8 @@ pub fn silhouette(face: &FaceSurface<'_>, frame: &Frame) -> Result<Vec<Vec<[f64;
         .iter()
         .map(|n| dot(*n, z))
         .collect();
-    let mut chains = contour(face.mesh, &values);
+    // Cosines: a normal within 1e-9 of square to z is edge-on.
+    let mut chains = contour(face.mesh, &values, 1e-9);
     if let Some(SurfaceKind::Cylinder {
         axis_point,
         axis_direction,
@@ -673,6 +685,27 @@ mod tests {
         mesh
     }
 
+    /// The same cylinder as a kernel tessellates it: open at its seam (angle 0), with a second
+    /// copy of the seam's vertices at 2 pi and normals evaluated at each vertex's own angle.
+    fn seamed_cylinder() -> FaceMesh {
+        let n = 72;
+        let mut mesh = FaceMesh::default();
+        for i in 0..=n {
+            let t = i as f64 / n as f64 * std::f64::consts::TAU;
+            let (c, s) = (t.cos(), t.sin());
+            mesh.positions.push([0.005 * c, 0.005 * s, 0.0]);
+            mesh.positions.push([0.005 * c, 0.005 * s, 0.02]);
+            mesh.normals.push([c, s, 0.0]);
+            mesh.normals.push([c, s, 0.0]);
+        }
+        for i in 0..n as u32 {
+            let (a, b) = (2 * i, 2 * (i + 1));
+            mesh.triangles.push([a, b, b + 1]);
+            mesh.triangles.push([a, b + 1, a + 1]);
+        }
+        mesh
+    }
+
     fn cylinder_surface() -> Option<SurfaceKind> {
         Some(SurfaceKind::Cylinder {
             axis_point: [0.0; 3],
@@ -728,6 +761,20 @@ mod tests {
                 other => panic!("{other:?}"),
             }
         }
+        // A kernel's tessellation of a closed face starts and ends on its seam with two copies
+        // of the seam's vertices. With the seam on the outline at x = +5 mm, one copy's normal
+        // reads sin(0) = 0 and the other's sin(2 pi) = -2.4e-16: the outline keeps both lines.
+        let seamed = seamed_cylinder();
+        let seamed_face = FaceSurface {
+            mesh: &seamed,
+            surface: cylinder_surface(),
+        };
+        let outline = silhouette(&seamed_face, &side).unwrap();
+        let sides: Vec<f64> = outline
+            .iter()
+            .map(|chain| in_plane(&side, chain[0])[1].round())
+            .collect();
+        assert_eq!(sides, [-5.0, 5.0], "{outline:?}");
         let flat = FaceSurface {
             mesh: &mesh,
             surface: Some(SurfaceKind::Plane {

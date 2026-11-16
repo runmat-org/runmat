@@ -65,7 +65,9 @@ fn find<'d>(display: &'d PartDisplay, text: &str) -> Option<Picked<'d>> {
         // The same reference written another way (argument order, spacing): compare the
         // lowered references.
         let wanted = reference(text).ok()?;
-        let same = |r: &Option<String>| r.as_deref().and_then(|t| reference(t).ok()) == Some(wanted.clone());
+        let same = |r: &Option<String>| {
+            r.as_deref().and_then(|t| reference(t).ok()) == Some(wanted.clone())
+        };
         for body in &display.bodies {
             if same(&body.reference) {
                 return Some(Picked::Body(body));
@@ -303,7 +305,11 @@ pub(super) fn use_edges(
             if crate::picks::lower_text(p).is_ok_and(|r| crate::picks::topo(&r) == "edge") {
                 return Err(model(format!(
                     "{} reads faces; pick faces or a body, not an edge",
-                    if kind == "silhouette" { "Silhouette" } else { "Intersection" }
+                    if kind == "silhouette" {
+                        "Silhouette"
+                    } else {
+                        "Intersection"
+                    }
                 )));
             }
         }
