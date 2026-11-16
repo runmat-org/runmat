@@ -72,3 +72,33 @@ fn without_a_new_reference_the_copy_keeps_the_original_one() {
     .unwrap();
     assert_eq!(refused["ok"], false, "{refused}");
 }
+
+#[test]
+fn deleting_a_copy_takes_its_connectors_and_mates_with_it() {
+    let text = block_on_plate();
+    let c = compile(&text);
+    let out = run(
+        &text,
+        json!({ "command": "assembly.copy-with-mates", "values": {
+            "components": [format!("occurrence:{}", c.uuid("block"))],
+        } }),
+    );
+    assert!(out.contains("connector block2_c"), "{out}");
+    let after = compile(&out);
+    let deleted = run(
+        &out,
+        json!({ "command": "assembly.delete", "values": {},
+            "selection": [format!("occurrence:{}", after.uuid("block2"))] }),
+    );
+    assert!(!deleted.contains("block2"), "{deleted}");
+    // The block's own mate stays, and the assembly compiles without errors.
+    assert_eq!(
+        deleted
+            .lines()
+            .filter(|l| l.trim_start().starts_with("mate "))
+            .count(),
+        1,
+        "{deleted}"
+    );
+    compile(&deleted);
+}

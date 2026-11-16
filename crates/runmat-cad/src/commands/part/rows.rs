@@ -593,6 +593,7 @@ pub(super) fn rows(catalog: &Catalog) -> EditorRows {
                         "References",
                         vec![
                             c("manage.find-references"),
+                            c("manage.release"),
                             c("manage.replace-reference"),
                             c("manage.freeze-bar"),
                         ],

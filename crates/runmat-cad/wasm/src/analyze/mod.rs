@@ -268,22 +268,66 @@ fn mm(m: f64) -> String {
     format!("{:.2}", m * 1000.0)
 }
 
-fn mass_analysis(report: &MassReport) -> Analysis {
+/// The unit system an assembly's settings name ([`runmat_cad::assembly::settings`]); `None`
+/// for a part or an assembly without settings.
+pub fn document_units(
+    path: &str,
+    text: &str,
+    files: &Files,
+) -> Option<runmat_cad::assembly::settings::UnitSystem> {
+    if !path.ends_with(".assembly") {
+        return None;
+    }
+    let scope = crate::runtime::module_scope(path, text, files);
+    runmat_cad::syntax::parse_assembly_in(path, text, &scope)
+        .document?
+        .settings
+        .map(|s| s.units)
+}
+
+fn mass_analysis(
+    report: &MassReport,
+    units: Option<runmat_cad::assembly::settings::UnitSystem>,
+) -> Analysis {
     let t = &report.total;
     let c = t.center;
     // kg·mm², the unit drawings and data sheets quote.
     let i = |r: usize, k: usize| format!("{:.1}", t.inertia[r][k] * 1e6);
-    let mut summary = format!(
-        "{} · {:.1} cm³ · CG ({}, {}, {}) mm · Ixx {} Iyy {} Izz {} kg·mm² about the CG",
-        g(t.mass),
-        t.volume * 1e6,
-        mm(c[0]),
-        mm(c[1]),
-        mm(c[2]),
-        i(0, 0),
-        i(1, 1),
-        i(2, 2)
-    );
+    let mut summary = match units {
+        // In the assembly's document units.
+        Some(u) => {
+            let l = |v: f64| runmat_cad::assembly::settings::significant(u.length_value(v), 6);
+            let mi = |r: usize, k: usize| {
+                let s = u.inertia(t.inertia[r][k]);
+                s.split(' ').next().unwrap_or_default().to_owned()
+            };
+            format!(
+                "{} · {} · CG ({}, {}, {}) {} · Ixx {} Iyy {} Izz {} {}·{}² about the CG",
+                u.mass(t.mass),
+                u.volume(t.volume),
+                l(c[0]),
+                l(c[1]),
+                l(c[2]),
+                u.length_unit(),
+                mi(0, 0),
+                mi(1, 1),
+                mi(2, 2),
+                u.mass_unit(),
+                u.length_unit()
+            )
+        }
+        None => format!(
+            "{} · {:.1} cm³ · CG ({}, {}, {}) mm · Ixx {} Iyy {} Izz {} kg·mm² about the CG",
+            g(t.mass),
+            t.volume * 1e6,
+            mm(c[0]),
+            mm(c[1]),
+            mm(c[2]),
+            i(0, 0),
+            i(1, 1),
+            i(2, 2)
+        ),
+    };
     if !report.complete() {
         summary += &format!(" · incomplete: {} without mass", report.problems.len());
     }
@@ -299,10 +343,21 @@ fn mass_analysis(report: &MassReport) -> Analysis {
                     .map(runmat_cad::drawing::bom_table::material_name)
                     .unwrap_or_else(|| "—".into()),
                 p.density
-                    .map(|d| format!("{d:.0} kg/m³"))
+                    .map(|d| match units {
+                        Some(u) => u.density(d),
+                        None => format!("{d:.0} kg/m³"),
+                    })
                     .unwrap_or_else(|| "—".into()),
-                format!("{:.2} cm³", p.volume * 1e6),
-                p.mass.map(g).unwrap_or_else(|| "—".into()),
+                match units {
+                    Some(u) => u.volume(p.volume),
+                    None => format!("{:.2} cm³", p.volume * 1e6),
+                },
+                p.mass
+                    .map(|m| match units {
+                        Some(u) => u.mass(m),
+                        None => g(m),
+                    })
+                    .unwrap_or_else(|| "—".into()),
             ],
             items: p.item.iter().cloned().collect(),
             severity: p.mass.is_none().then_some("warning"),
@@ -354,7 +409,7 @@ pub fn analyze(
             } else {
                 part_mass(path, text, configuration)?
             };
-            Ok(mass_analysis(&report))
+            Ok(mass_analysis(&report, document_units(path, text, files)))
         }
         "evaluate.interference"
         | "evaluate.clearance"

@@ -259,7 +259,11 @@ pub(super) fn add_rows(catalog: &mut Catalog) {
                             c("assembly.document-settings"),
                         ],
                     ),
-                    group("references", "References", vec![c("assembly.update-pins")]),
+                    group(
+                        "references",
+                        "References",
+                        vec![c("assembly.release"), c("assembly.update-pins")],
+                    ),
                     group(
                         "display",
                         "Display",

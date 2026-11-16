@@ -182,6 +182,33 @@ options = { axes = [{ name = engine, domain = { domain = enum, values = [a, b] }
 
 A component written with `when` appears only in the configurations its condition allows. **Options** in the document bar picks the values the assembly shows, such as `engine=b` and `MSN 42`, and checks each against its option. The Outline lists each option under Options with its values, the value shown and its effectivity. Delete removes an option once no component or rule reads it.
 
+## 11. Release parts and pin components
+
+A component follows its part file live: every edit to the part shows in the assembly. To freeze a component at a released version, release the part and pin the component to it.
+
+**Release** on the Manage tab of a part saves the part's text as its next released revision, `R1`, then `R2`. In an assembly, **Release** releases the files of the components you select, or the assembly itself when nothing is selected. The project keeps each file's revisions beside it in `.runmat/releases/`, for example `.runmat/releases/turntable.part.json`. Releasing a file that has not changed since its latest release is refused.
+
+**References and pins** on the assembly's Manage tab updates the components you pick, or every component when you pick none:
+
+- **Latest released** pins each one to its file's latest released revision.
+- **Latest** sets each one to follow its file live again.
+
+```assembly fragment
+use part turntable @ "R1" as turntable
+```
+
+A pinned component regenerates from the released text, so it keeps its shape, mass and connectors while the part file changes. A pin to a revision the project does not hold is reported on the component.
+
+## 12. Choose the units
+
+**Document settings** on the Manage tab sets the units the assembly reads in: millimeter, gram, second (`mmgs`); meter, kilogram, second (`mks`); or inch, pound, second (`ips`).
+
+```assembly fragment
+settings = { units = ips }
+```
+
+Mass properties, Measure and the BOM read in these units. With units set, the BOM adds a **Mass each** column: the mass of one of each line, such as one standoff. Without settings, the assembly reads in millimeters, with masses in grams and kilograms. The units change only how values read: the model is the same.
+
 ## Next
 
 - [Make a drawing](/docs/mcad/guides/make-a-drawing) of the assembly with its BOM.

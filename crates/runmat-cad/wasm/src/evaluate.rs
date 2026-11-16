@@ -275,7 +275,7 @@ pub fn assembly_clearance_of(
         {
             continue;
         }
-        let file = node.definition.file.0.clone();
+        let file = node.source_key();
         let source = match node.definition.kind {
             _ if envelope => match runmat_cad::assembly::representation::envelope_box(
                 resolved,

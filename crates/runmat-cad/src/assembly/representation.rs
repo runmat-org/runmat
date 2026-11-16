@@ -369,6 +369,24 @@ pub fn is_envelope(tree: &ResolvedAssembly, id: NodeId) -> bool {
         && node.representation == Representation::Envelope
 }
 
+/// Whether an export (STEP, meshes) writes node `id`'s own geometry. An ancestor at the
+/// `interface` representation stands in for what is under it, which the export leaves out. An
+/// envelope stands in only for display and checks: the export writes the parts under it, as mass
+/// properties adds them.
+pub fn exported(tree: &ResolvedAssembly, id: NodeId) -> bool {
+    let mut at = tree.node(id);
+    while at.represented_by_ancestor {
+        let Some(parent) = at.parent else {
+            return true;
+        };
+        at = tree.node(parent);
+        if !at.represented_by_ancestor && at.parent.is_some() {
+            return at.representation == Representation::Envelope;
+        }
+    }
+    true
+}
+
 /// The envelope box of node `id` in its own frame: a part's or board's configured box, or for a
 /// sub-assembly the box around every part and board under it. `None` when nothing has a box.
 pub fn envelope_box(tree: &ResolvedAssembly, source: &dyn DesignSource, id: NodeId) -> Option<Aabb> {
