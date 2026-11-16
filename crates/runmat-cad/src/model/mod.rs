@@ -21,6 +21,7 @@ pub mod sheet_metal;
 pub mod sketch;
 pub mod surface;
 pub mod visit;
+pub mod library;
 pub mod weldment;
 
 use crate::ids::{ConfigurationName, FeatureId, FilePath, PublishName};
@@ -208,8 +209,19 @@ impl PartDocument {
         let mut features = Vec::new();
         for f in &self.features {
             if let FeatureKind::Library(inst) = &f.kind {
+                // A library file's definition is held under its full `def`; this file's under
+                // its own name.
                 let name = inst.def.rsplit("feature_def.").next().unwrap_or(&inst.def);
-                if let Some(def) = self.feature_defs.iter().find(|d| d.name == name) {
+                let def = self
+                    .feature_defs
+                    .iter()
+                    .find(|d| d.name == inst.def)
+                    .or_else(|| {
+                        (!inst.def.contains('#'))
+                            .then(|| self.feature_defs.iter().find(|d| d.name == name))
+                            .flatten()
+                    });
+                if let Some(def) = def {
                     match def.expand(&f.id, inst) {
                         Ok(fs) => {
                             features.extend(fs);

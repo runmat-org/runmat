@@ -1,8 +1,89 @@
 //! Weldments: structural members along sketch segments, their end cuts and the cut list.
 
 use super::*;
+use crate::model::weldment::{MemberProfile, ProfileSizes};
 
 impl<'a, 'b> Run<'a, 'b> {
+    /// A member profile's loops in the member frame (x across, y up, the path through the
+    /// origin) and its area. A table size must be in the library; a sketch region is every
+    /// closed loop of the sketch, its origin on the path.
+    fn member_section(
+        &mut self,
+        i: usize,
+        id: &FeatureId,
+        gi: usize,
+        profile: &ProfileSizes,
+    ) -> Result<(Vec<Vec<ProfileSegment>>, f64), Halt> {
+        let as_loops = |outline: &crate::model::weldment::ProfileOutline| {
+            outline
+                .iter()
+                .map(|lp| {
+                    let n = lp.len();
+                    (0..n)
+                        .map(|k| line_seg(&lp[k].0 .0, lp[k].1, lp[(k + 1) % n].1))
+                        .collect::<Vec<_>>()
+                })
+                .collect::<Vec<_>>()
+        };
+        let site = format!("groups[{gi}].profile");
+        let site = site.as_str();
+        match profile {
+            MemberProfile::Standard { designation } => {
+                if crate::model::weldment::standard::lookup(designation).is_none() {
+                    return Err(self.error(
+                        id,
+                        Some(site),
+                        DiagCode::RegenInvalid,
+                        format!(
+                            "`{designation}` isn't in the profile library (IPE, HEA, HEB per EN \
+                             10365; NPS Sch 40 pipe per ASME B36.10M)"
+                        ),
+                        Vec::new(),
+                    ));
+                }
+                Ok((as_loops(&profile.outline(48)), profile.area()))
+            }
+            MemberProfile::SketchRegion { sketch } => {
+                self.gate_feature(i, id, sketch, site)?;
+                let found = self.st.sketches.get(sketch).cloned();
+                let sketch_def = match self.doc.feature(sketch).map(|f| &f.kind) {
+                    Some(FeatureKind::Sketch(s)) => Some(s.clone()),
+                    _ => None,
+                };
+                let (Some((solved, frame)), Some(def)) = (found, sketch_def) else {
+                    return Err(self.error(
+                        id,
+                        Some(site),
+                        DiagCode::RefKindMismatch,
+                        format!("`{sketch}` is not a sketch"),
+                        Vec::new(),
+                    ));
+                };
+                let loops = super::profiles::profile_loops(&def, &solved).map_err(|e| {
+                    self.error(
+                        id,
+                        Some(site),
+                        DiagCode::RegenInvalid,
+                        format!("profile sketch `{sketch}`: {e}"),
+                        Vec::new(),
+                    )
+                })?;
+                let section = crate::evaluate::section::sketch_section(&def, &solved, &frame);
+                let Some(section) = section.filter(|_| !loops.is_empty()) else {
+                    return Err(self.error(
+                        id,
+                        Some(site),
+                        DiagCode::RegenInvalid,
+                        format!("profile sketch `{sketch}` has no closed region"),
+                        Vec::new(),
+                    ));
+                };
+                Ok((loops, section.area))
+            }
+            other => Ok((as_loops(&other.outline(24)), other.area())),
+        }
+    }
+
     pub(super) fn weldment(
         &mut self,
         i: usize,
@@ -51,15 +132,17 @@ impl<'a, 'b> Run<'a, 'b> {
                             Dimension::LENGTH,
                         )
                     })?;
-                    let outline = profile.outline(24);
-                    let depth = outline[0]
+                    // The section's loops in the member frame, the area the cut list weighs by,
+                    // and the depth a mitre extends across.
+                    let (loops, area) = self.member_section(i, id, gi, &profile)?;
+                    let ys = loops
                         .iter()
-                        .map(|(_, p)| p[1])
-                        .fold(f64::NEG_INFINITY, f64::max)
-                        - outline[0]
-                            .iter()
-                            .map(|(_, p)| p[1])
-                            .fold(f64::INFINITY, f64::min);
+                        .flatten()
+                        .flat_map(|seg| [seg.start[1], seg.end[1]]);
+                    let (lo, hi) = ys.fold((f64::INFINITY, f64::NEG_INFINITY), |(lo, hi), y| {
+                        (lo.min(y), hi.max(y))
+                    });
+                    let depth = hi - lo;
                     let cuts = member_cuts(&segs, g.corner, depth);
                     for (s, a, b) in &segs {
                         let z = normalize(sub(*b, *a));
@@ -78,15 +161,6 @@ impl<'a, 'b> Run<'a, 'b> {
                             z,
                         };
                         let l = dot(sub(*b, *a), z);
-                        let loops: Vec<Vec<ProfileSegment>> = outline
-                            .iter()
-                            .map(|lp| {
-                                let n = lp.len();
-                                (0..n)
-                                    .map(|k| line_seg(&lp[k].0 .0, lp[k].1, lp[(k + 1) % n].1))
-                                    .collect()
-                            })
-                            .collect();
                         // Ends: extended past the sketch point for a mitre and clipped on the
                         // bisector plane; butt joints trim or extend square.
                         let mut ext = [0.0f64; 2];
@@ -130,20 +204,19 @@ impl<'a, 'b> Run<'a, 'b> {
                         let mut tool = LabeledTool::new(ToolShape::prism(
                             CanonicalProfile {
                                 frame: mf,
-                                loops,
+                                loops: loops.clone(),
                                 merge_collinear: false,
                             },
                             -ext[0],
                             l + ext[1],
                         ));
-                        for lp in &outline {
-                            for (cid, _) in lp {
-                                if !tool.sides.iter().any(|(c, _)| c == cid) {
-                                    tool.sides.push((
-                                        cid.clone(),
-                                        FaceLabel::key(Role::MemberSide, format!("{}/{}", s, cid)),
-                                    ));
-                                }
+                        for seg in loops.iter().flatten() {
+                            let cid = &seg.curve;
+                            if !tool.sides.iter().any(|(c, _)| c == cid) {
+                                tool.sides.push((
+                                    cid.clone(),
+                                    FaceLabel::key(Role::MemberSide, format!("{}/{}", s, cid)),
+                                ));
                             }
                         }
                         tool.start =
@@ -159,9 +232,14 @@ impl<'a, 'b> Run<'a, 'b> {
                         .material
                         .as_deref()
                         .and_then(crate::model::materials::material_density)
-                        .map(|density| density * profile.area());
+                        .map(|density| density * area);
                     rows_in.push((
-                        profile.description(),
+                        match &profile {
+                            MemberProfile::SketchRegion { sketch } => {
+                                format!("Profile {sketch} ({:.2} cm²)", area * 1e4)
+                            }
+                            p => p.description(),
+                        },
                         g.material.clone(),
                         per_metre,
                         cuts.clone(),

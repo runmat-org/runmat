@@ -289,6 +289,11 @@ pub struct ChoiceOption {
 pub enum Suggest {
     /// The circuit's global nets (power and ground rails), with their pin counts.
     Rails,
+    /// Structural profiles: the standard sizes and the project's custom profiles
+    /// (`library/profiles/`).
+    Profiles,
+    /// Library features and parts in the project's `library/` folder.
+    Library,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]

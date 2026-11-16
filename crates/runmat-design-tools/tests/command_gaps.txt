@@ -20,7 +20,6 @@ direct.instant-3d part
 drawing.check drawing
 drawing.edit-view drawing
 explode.auto assembly
-manage.document-settings part
 manage.recognize-features part
 manage.replace-reference part
 motion.animation assembly
@@ -30,12 +29,11 @@ motion.drag assembly
 motion.mate-controller assembly
 motion.to-fea assembly
 part.edit-sketch-plane part
-part.library part
-sheet-metal.bend-table part
-sheet-metal.gauge part
+simulate.defeature part
+simulate.region part
+simulate.representation part
 sketch.use-edges part
 sketch.use-edges part type=intersection
 sketch.use-edges part type=offset_on_surface
 sketch.use-edges part type=project
 sketch.use-edges part type=silhouette
-weldment.profile-library part
