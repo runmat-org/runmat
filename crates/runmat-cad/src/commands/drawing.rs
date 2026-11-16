@@ -745,10 +745,18 @@ pub(super) fn add(catalog: &mut Catalog) {
             "drawing.check",
             "Check drawing",
             "check",
-            "Check the drawing against a standards pack.",
+            "Check the drawing against its models and drafting rules, and list the findings.",
         )
-        .inputs(vec![text("pack", "Standard", Some("ISO 128"))])
-        .edit(check("drawing")),
+        .inputs(vec![choice(
+            "standard",
+            "Standard",
+            &[
+                ("sheet", "The sheets' standard"),
+                ("iso", "ISO"),
+                ("asme", "ASME"),
+            ],
+        )])
+        .edit(analyze("drawing_check")),
         drw(
             "drawing.document-settings",
             "Document settings",
@@ -860,10 +868,40 @@ pub(super) fn add(catalog: &mut Catalog) {
             "drawing.edit-view",
             "Edit view",
             "edit",
-            "Open the view's properties.",
+            "Edit the view's scale, orientation, display style, label and place.",
         )
+        .inputs(vec![
+            text("scale", "Scale", Some("sheet")),
+            choice(
+                "orientation",
+                "Orientation",
+                &[
+                    ("front", "Front"),
+                    ("back", "Back"),
+                    ("top", "Top"),
+                    ("bottom", "Bottom"),
+                    ("left", "Left"),
+                    ("right", "Right"),
+                    ("isometric", "Isometric"),
+                    ("dimetric", "Dimetric"),
+                    ("trimetric", "Trimetric"),
+                ],
+            ),
+            choice(
+                "display",
+                "Display",
+                &[
+                    ("hidden_removed", "Hidden lines removed"),
+                    ("hidden_visible", "Hidden lines visible"),
+                    ("shaded", "Shaded"),
+                ],
+            ),
+            text("label", "Label", Some("FRONT VIEW")).optional(),
+            pick("at", "Place at", &[K::Point]).optional(),
+        ])
         .when(selected_one(&[K::View]))
         .on(&[K::View])
+        .preview()
         .edit(edit(EditOp::Edit, Section::Views)),
         drw(
             "drawing.delete",

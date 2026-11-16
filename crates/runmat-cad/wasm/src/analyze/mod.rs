@@ -27,6 +27,8 @@
 //! - `evaluate.dfm`: the part checked by a process's rule pack, and a company pack
 //!   ([`dfm`]).
 //! - `evaluate.cost`: the part's cost from the shop's rates you enter ([`cost`]).
+//! - `drawing.check`: a drawing against its models and drafting rules: references, models,
+//!   title block, overlaps and scales ([`drawing_check`]).
 //! - `sketch.check`: a part's or an assembly's sketch checked for the feature it will make
 //!   ([`sketch_check`]).
 //! - `view.measure`: distances, angles, radii, lengths and areas between picks, with dimensions
@@ -52,6 +54,7 @@ mod cost;
 mod curvature;
 mod deviation;
 mod dfm;
+pub mod drawing_check;
 mod field;
 mod holes;
 mod interfaces;
@@ -768,6 +771,9 @@ pub fn analyze(
         }
         "evaluate.cost" if !assembly => cost::cost(path, text, configuration, &request.values),
         "evaluate.dfm" if !assembly => dfm::dfm(path, text, files, configuration, &request.values),
+        "drawing.check" if path.ends_with(".drawing") => {
+            drawing_check::analysis(path, text, files, &request.values)
+        }
         "sketch.check" => sketch_check::sketch_check(
             path,
             text,

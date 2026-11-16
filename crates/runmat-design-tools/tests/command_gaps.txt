@@ -28,9 +28,6 @@ circuit.net-length circuit.layout
 circuit.swap-pins circuit
 circuit.swap-pins circuit.layout
 direct.instant-3d part
-drawing.check drawing
-drawing.edit-view drawing
-explode.auto assembly
 manage.document-settings part
 manage.recognize-features part
 manage.replace-reference part

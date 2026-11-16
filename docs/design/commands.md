@@ -49,8 +49,8 @@ This file is generated from the command catalog.
 - `assembly.component-configuration`: Use another configuration of the component's file.
   - Required: `configuration` (text)
   - Runs on the `selection`: `occurrence`
-- `assembly.delete`: Delete components, mates, mate connectors, publishes, sketches, assembly features or sketch curves.
-  - Runs on the `selection`: `occurrence`, `mate`, `mate_connector`, `publish`, `sketch`, `feature`, `sketch_entity`, `sketch_point`
+- `assembly.delete`: Delete components, mates, mate connectors, publishes, sketches, assembly features, sketch curves, exploded views or explode steps.
+  - Runs on the `selection`: `occurrence`, `mate`, `mate_connector`, `publish`, `sketch`, `feature`, `sketch_entity`, `sketch_point`, `exploded_view`, `explode_step`
 - `assembly.edit-mate`: Change the mate's type, distance, angle, limits or alignment.
   - Required: `type` (one of `fasten`, `revolute`, `slider`, `cylindrical`, `planar`, `ball`, `parallel`, `distance`, `angle`, `tangent`, `pin_slot`, `gear`, `rack_pinion`, `screw`, `cam`, `width`, `symmetric`, `path`, `linear_coupler`, `hinge`, `universal_joint`, default `fasten`); `offset` (number in mm, default 0) when `type` is distance; `angle` (number in deg, default 0) when `type` is angle; `min` (number in deg, default -30) when `angle_limits` is true; `max` (number in deg, default 45) when `angle_limits` is true; `near` (number in mm, default 0) when `distance_limits` is true; `far` (number in mm, default 10) when `distance_limits` is true; `ratio` (number, default 1) when `type` is gear or linear_coupler; `pitch` (number in mm, default 1) when `type` is screw or rack_pinion; `radius` (number in mm, default 5) when `type` is tangent; `profile` (text) when `type` is cam
   - Optional: `angle_limits` (true or false, default false) when `type` is revolute or cylindrical or hinge; `distance_limits` (true or false, default false) when `type` is slider or cylindrical; `flip` (true or false, default false); `first2` (pick: mate connector or face or edge or vertex or plane or axis or point or component or sketch entity or sketch point) when `type` is width; `second2` (pick: mate connector or face or edge or vertex or plane or axis or point or component or sketch entity or sketch point) when `type` is width; `plane` (pick: mate connector or face or edge or vertex or plane or axis or point or component or sketch entity or sketch point) when `type` is symmetric; `path` (picks: edge) when `type` is path; `joint_point` (true or false, default true) when `type` is universal_joint
@@ -245,6 +245,8 @@ This file is generated from the command catalog.
 - `drawing.chain`: Dimension features end to end.
   - Required: `items` (picks: edge)
   - Optional: `at` (pick: point)
+- `drawing.check`: Check the drawing against its models and drafting rules, and list the findings.
+  - Required: `standard` (one of `sheet`, `iso`, `asme`, default `sheet`)
 - `drawing.datum`: Add a datum feature symbol.
   - Required: `label` (text); `attach` (pick: edge or annotation)
   - Optional: `at` (pick: point)
@@ -256,6 +258,10 @@ This file is generated from the command catalog.
 - `drawing.detail`: Enlarge a circled area of a view.
   - Required: `parent` (pick: view); `center` (pick: edge); `radius` (number in mm, default 5); `label` (text); `scale` (text)
   - Optional: `at` (pick: point)
+  - Runs on the `selection`: `view`
+- `drawing.edit-view`: Edit the view's scale, orientation, display style, label and place.
+  - Required: `scale` (text); `orientation` (one of `front`, `back`, `top`, `bottom`, `left`, `right`, `isometric`, `dimetric`, `trimetric`, default `front`); `display` (one of `hidden_removed`, `hidden_visible`, `shaded`, default `hidden_removed`)
+  - Optional: `label` (text); `at` (pick: point)
   - Runs on the `selection`: `view`
 - `drawing.export`: Export as PDF, DXF, DWG or SVG.
   - Required: `format` (one of `pdf`, `dxf`, `dwg`, `svg`, default `pdf`); `sheets` (one of `all`, `current`, default `all`)
@@ -350,6 +356,9 @@ This file is generated from the command catalog.
 
 ## `explode.` commands (`.assembly`)
 
+- `explode.auto`: A new exploded view pulled apart along the mates, outermost component first.
+  - Required: `spacing` (number in mm, default 20)
+  - Optional: `name` (text); `lines` (true or false, default true)
 - `explode.lines`: Draw lines showing how components move.
   - Optional: `steps` (picks: explode step)
 - `explode.new`: Create an exploded view.

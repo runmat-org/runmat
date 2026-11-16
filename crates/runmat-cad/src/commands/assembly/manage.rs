@@ -132,7 +132,7 @@ pub(super) fn manage() -> Vec<CommandDescriptor> {
             "assembly.delete",
             "Delete",
             "delete",
-            "Delete components, mates, mate connectors, publishes, sketches, assembly features or sketch curves.",
+            "Delete components, mates, mate connectors, publishes, sketches, assembly features, sketch curves, exploded views or explode steps.",
         )
         .when(selected(&[
             K::Occurrence,
@@ -143,6 +143,8 @@ pub(super) fn manage() -> Vec<CommandDescriptor> {
             K::Feature,
             K::SketchEntity,
             K::SketchPoint,
+            K::ExplodedView,
+            K::ExplodeStep,
         ]))
         .on(&[
             K::Occurrence,
@@ -153,6 +155,8 @@ pub(super) fn manage() -> Vec<CommandDescriptor> {
             K::Feature,
             K::SketchEntity,
             K::SketchPoint,
+            K::ExplodedView,
+            K::ExplodeStep,
         ])
         .edit(edit(EditOp::Remove, Section::Occurrences)),
         asm(
