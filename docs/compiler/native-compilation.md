@@ -341,7 +341,8 @@ See [Supported Architectures](/docs/runtime/development/supported-architectures)
 | Entry file is rejected | `runmat compile` currently accepts `.m` entrypoints |
 | A project function cannot be resolved | Add its stable directory to `[sources].roots` or its package to the project lock |
 | `closed-world` reports an unknown or unbounded target | Remove the dynamic call, provide a statically resolvable target, or select `native-specialized` explicitly |
-| The RunMat build has no native compile runtime | Build with the two-phase AOT runtime helper or install an official native package |
+| The matching compile-time pack is missing | Run `runmat aot install`, or provision the exact pack with `runmat aot install --offline --from PATH` |
+| The RunMat build has no distribution manifest | Install an official native CLI or build the CLI and pack with the native build helper |
 | No supported linker is found | Install a platform C/C++ toolchain or set `--linker` or `RUNMAT_LINKER` |
 | The linker cannot find a native library | Install the development library used by the RunMat build and expose its standard search path |
 | The output or JSON link plan already exists | Choose another path or pass `--force` |

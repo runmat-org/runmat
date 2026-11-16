@@ -107,7 +107,7 @@ Linux release builds use the first form. Windows and macOS release builds use th
 
 ### Native standalone runtime
 
-Build the CLI and its matching compile-time runtime pack with the two-phase helper. For a CPU-only development build on macOS or Linux:
+Build the CLI and its matching compile-time runtime pack with the native build helper. For a CPU-only development build on macOS or Linux:
 
 ```bash
 scripts/build-runmat-with-aot-runtime.sh --no-default-features --features jit
