@@ -208,11 +208,18 @@ pub(super) fn manage() -> Vec<CommandDescriptor> {
             "recognize",
             P,
         )
-        .desc("Turn an imported body into editable features.")
-        .kw(&["feature recognition", "convert"])
+        .desc("Turn an imported body into a sketch, extrude, cuts, holes, rounds and chamfers.")
+        .kw(&[
+            "feature recognition",
+            "convert",
+            "step to features",
+            "defeature",
+        ])
         .inputs(vec![
-            pick("body", "Body", &[K::Body]),
-            flag("interactive", "Pick features one at a time", false),
+            pick("body", "Body", &[K::Body])
+                .help("A body a STEP import made; it is converted whole or left as it is"),
+            length("tolerance", "Match tolerance", 0.01)
+                .help("How far the rebuilt faces may lie from the imported ones"),
         ])
         .when(bodies_exist())
         .edit(edit(EditOp::Edit, Section::Features).item("recognize")),

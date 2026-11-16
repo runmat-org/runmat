@@ -20,7 +20,6 @@ direct.instant-3d part
 drawing.check drawing
 drawing.edit-view drawing
 explode.auto assembly
-manage.recognize-features part
 motion.animation assembly
 motion.basic assembly
 motion.collision assembly

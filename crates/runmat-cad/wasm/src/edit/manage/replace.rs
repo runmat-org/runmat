@@ -20,7 +20,7 @@ use runmat_cad::syntax::edit::{edit_part, EditFailure, SourceChange};
 use serde_json::Value;
 
 /// What the old and new picks are, as the model stores them.
-enum Target {
+pub(super) enum Target {
     /// A face, edge, vertex or body reference (`{"ref": …}`).
     Reference(Value, Value),
     /// A datum or origin plane (`{"on": "datum", …}`).
@@ -67,7 +67,7 @@ fn target(picks: &Picks, old: &str, new: &str) -> Result<Target, EditFailure> {
 /// Replaces each use of the target in `value` (a feature's parameters as JSON), recording the
 /// parameter path of each use. Sketch names are not looked for inside topological references:
 /// a generated face name's source tag names its sketch, and that tag is the name's identity.
-fn replace(value: &mut Value, target: &Target, at: &str, uses: &mut Vec<String>) {
+pub(super) fn replace(value: &mut Value, target: &Target, at: &str, uses: &mut Vec<String>) {
     match target {
         Target::Reference(was, with) | Target::Plane(was, with) => {
             let fallback_of = value["ref"] == "with_fallback" && value["primary"] == *was;
