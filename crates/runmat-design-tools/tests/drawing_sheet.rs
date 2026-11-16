@@ -135,7 +135,18 @@ fn design_render_draws_a_drawings_sheet_and_a_framed_view() {
     assert_eq!(err.code, "invalid_arguments");
     assert!(err.message.contains("front"), "{}", err.message);
 
+    // The PDF export draws the same layout (written beside the pictures for review).
+    let pdf = ok(
+        "design.export",
+        json!({ "path": "/p/bracket.drawing", "format": "pdf" }),
+        &files,
+    );
+    let bytes = base64::engine::general_purpose::STANDARD
+        .decode(pdf["files"][0]["content"].as_str().unwrap())
+        .unwrap();
+    assert_eq!(&bytes[..4], b"%PDF");
     if let Ok(dir) = std::env::var("RUNMAT_DESIGN_RENDER_OUT") {
+        std::fs::write(format!("{dir}/bracket-1.pdf"), &bytes).unwrap();
         for theme in ["light", "dark"] {
             for frame in [None, Some("iso"), Some("side")] {
                 let mut input = json!({ "path": "/p/bracket.drawing", "theme": theme });
