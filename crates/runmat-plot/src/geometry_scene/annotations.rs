@@ -102,6 +102,37 @@ impl GeometryScene {
         )]
     }
 
+    /// Measure's dimensions: each a haloed line between its two points with a dot at each end,
+    /// drawn over the model so a dimension behind a wall still reads. The value draws at the
+    /// line's middle in the overlay (`PlotRenderer::geometry_screen_dimensions`).
+    pub(super) fn dimension_nodes(&self, presentation: &GeometryScenePresentation) -> Vec<SceneNode> {
+        if presentation.dimensions.is_empty() {
+            return Vec::new();
+        }
+        let mut strokes = Vec::new();
+        for dimension in &presentation.dimensions {
+            let color = dimension.color.unwrap_or(GEOMETRY_DIMENSION_COLOR);
+            let (from, to) = (Vec3::from_array(dimension.from), Vec3::from_array(dimension.to));
+            if !from.is_finite() || !to.is_finite() {
+                continue;
+            }
+            // Touching items measure zero: the dots alone mark where.
+            append_selection_edge(&mut strokes, from, to, color);
+            append_selection_point(&mut strokes, from, color);
+            append_selection_point(&mut strokes, to, color);
+        }
+        if strokes.is_empty() {
+            return Vec::new();
+        }
+        vec![self.annotation_node(
+            "Measure dimensions",
+            "__geometry_measure:dimensions",
+            self.chunks.len() + 3,
+            PipelineType::AnnotationStroke,
+            strokes,
+        )]
+    }
+
     pub(super) fn annotation_nodes(
         &self,
         presentation: &GeometryScenePresentation,
