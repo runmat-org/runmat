@@ -1,20 +1,30 @@
-//! `motion.to-fea`: the joint loads a dynamic motion study puts on one component at one instant,
+//! `motion.to-fea`: the loads a dynamic motion study puts on one component at one instant,
 //! handed to the study-authoring path that `study.new` uses (FEA's Simulation setup guide).
 //!
-//! The compile already solves every study and projects each mate's reaction on the bodies it
-//! joins, frame by frame (`index.motion[].reactions`: point in mm, force in N, moment in N·m
-//! about the connector, all in world axes). This handler picks the frame nearest the asked time,
-//! takes the reactions on the chosen component, and turns them into the component's own part
-//! axes with that frame's pose: `R^T (p − t)` for the point, `R^T f` and `R^T m` for the force
-//! and moment. Gravity goes the same way. Nothing is written: the reply is the request the
-//! Desktop sends to the guide, which writes the `.fea` (supports, material and acceptance with
-//! the user, as `study.new` does).
+//! The compile already solves every study and records, frame by frame, each mate's load on the
+//! bodies it joins (`index.motion[].reactions`: point in mm, force in N, moment in N·m about the
+//! connector, world axes; the joint's reaction plus any spring, damper or motor on the mate) and
+//! each body's motion (`index.motion[].bodies`: centre-of-mass acceleration, angular velocity and
+//! angular acceleration, from the same solve). This handler picks the frame nearest the asked
+//! time and turns the chosen component's loads and motion into its own part axes with that
+//! frame's pose: `R^T (p − t)` for a point, `R^T v` for a vector.
 //!
-//! The joint loads hold the component in dynamic balance with its weight and its inertia at that
-//! instant (d'Alembert's principle; Haug 1989, ch. 11), and the reply says so: a static study of
-//! the part under the joint loads alone is not in balance unless it carries those too.
+//! The mate loads hold the part in dynamic balance with its weight and its inertia (d'Alembert's
+//! principle; Haug 1989, §11.2): `Σ f + m g − m a = 0`, and about the centre of mass
+//! `Σ (m_j + r_j × f_j) − (J α + ω × J ω) = 0`. A static study under the mate loads alone is not
+//! in balance, so the request also hands over the inertia, in the forms `.fea` has:
+//!
+//! - weight and the linear inertia together as one uniform `body_force`, `ρ (g − a)` (N/m³), from
+//!   the part's density;
+//! - the rotation (`ω`, `α` about the centre of mass) as data, with the moment it leaves
+//!   unbalanced. `.fea` has no rotational body load (centrifugal `ρ ω × (ω × r)` or
+//!   `ρ α × r`, which vary over the part), and the request says so.
+//!
+//! Nothing is written: the reply is the request the Desktop sends to the guide, which writes the
+//! `.fea` (supports, material and acceptance with the user, as `study.new` does).
 
 use super::model;
+use runmat_cad::assembly::motion::dynamics::BodyState;
 use crate::edit::EditOutput;
 use crate::runtime::{assembly_index, Files};
 use runmat_cad::syntax::edit::EditFailure;
@@ -83,13 +93,99 @@ fn shown(v: [f64; 3], places: i32) -> String {
     format!("[{}, {}, {}]", c(v[0]), c(v[1]), c(v[2]))
 }
 
-pub(crate) fn handoff(
+/// The loads on one part at one frame of a dynamic study, in the part's own axes: what Results
+/// to .fea hands over. Points in mm; everything else SI.
+#[derive(Clone, Debug)]
+pub(crate) struct Handoff {
+    pub file: String,
+    pub assembly: String,
+    pub study: String,
+    /// The frame's time (s).
+    pub time: f64,
+    /// Each mate's load: the mate, the point, the force and the moment about the point.
+    pub joints: Vec<(String, [f64; 3], [f64; 3], [f64; 3])>,
+    pub gravity: [f64; 3],
+    pub mass: f64,
+    /// The centre of mass (mm).
+    pub center: [f64; 3],
+    /// The inertia tensor about the centre of mass (kg·m²).
+    pub inertia: [[f64; 3]; 3],
+    pub acceleration: [f64; 3],
+    pub angular_velocity: [f64; 3],
+    pub angular_acceleration: [f64; 3],
+    /// kg/m³, when the part has one.
+    pub density: Option<f64>,
+}
+
+fn add(a: [f64; 3], b: [f64; 3]) -> [f64; 3] {
+    [a[0] + b[0], a[1] + b[1], a[2] + b[2]]
+}
+
+#[cfg(test)]
+fn cross(a: [f64; 3], b: [f64; 3]) -> [f64; 3] {
+    [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]]
+}
+
+impl Handoff {
+    /// `m g` (N).
+    pub fn weight(&self) -> [f64; 3] {
+        self.gravity.map(|g| g * self.mass)
+    }
+
+    /// The inertia load (d'Alembert), as the dynamics states it: the force `−m a` (N) at the
+    /// centre of mass and the moment `−(J α + ω × J ω)` about it (N·m).
+    fn inertia(&self) -> ([f64; 3], [f64; 3]) {
+        let state = BodyState {
+            center: self.center.map(|c| c / 1000.0),
+            acceleration: self.acceleration,
+            angular_velocity: self.angular_velocity,
+            angular_acceleration: self.angular_acceleration,
+        };
+        // Already in the part's axes.
+        let identity = [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]];
+        state.inertia_load(self.mass, &self.inertia, &identity)
+    }
+
+    /// The linear inertia load `−m a` (N), at the centre of mass.
+    pub fn inertia_force(&self) -> [f64; 3] {
+        self.inertia().0
+    }
+
+    /// The rotational inertia load's resultant about the centre of mass, `−(J α + ω × J ω)`
+    /// (N·m).
+    pub fn inertia_moment(&self) -> [f64; 3] {
+        self.inertia().1
+    }
+
+    /// Weight and linear inertia as one uniform body-force density, `ρ (g − a)` (N/m³).
+    pub fn body_force(&self) -> Option<[f64; 3]> {
+        self.density.map(|rho| [0, 1, 2].map(|k| rho * (self.gravity[k] - self.acceleration[k])))
+    }
+
+    /// Whether the part turns or spins up at this instant.
+    pub fn turns(&self) -> bool {
+        self.angular_velocity.iter().chain(&self.angular_acceleration).any(|v| v.abs() > 1e-9)
+    }
+
+    /// The mate loads' resultant: the force, and the moment about the centre of mass (the
+    /// balance check's side of it).
+    #[cfg(test)]
+    pub fn joint_resultant(&self) -> ([f64; 3], [f64; 3]) {
+        self.joints.iter().fold(([0.0; 3], [0.0; 3]), |(f, m), (_, p, jf, jm)| {
+            let arm = [0, 1, 2].map(|k| (p[k] - self.center[k]) / 1000.0);
+            (add(f, *jf), add(m, add(*jm, cross(arm, *jf))))
+        })
+    }
+}
+
+/// The loads on the picked part at the frame nearest the asked time.
+pub(crate) fn loads(
     path: &str,
     text: &str,
     files: &Files,
     values: &Map<String, Value>,
     selection: &[String],
-) -> Result<EditOutput, EditFailure> {
+) -> Result<Handoff, EditFailure> {
     let (index, _) = assembly_index(path, text, files).map_err(|_| model("the assembly doesn't compile"))?;
     let studies = index["motion"].as_array().cloned().unwrap_or_default();
     let dynamic: Vec<&Value> = studies.iter().filter(|s| s["kind"] == "dynamic").collect();
@@ -118,14 +214,13 @@ pub(crate) fn handoff(
     let k = (0..times.len())
         .min_by(|&a, &b| (times[a] - asked).abs().total_cmp(&(times[b] - asked).abs()))
         .unwrap_or(0);
-    let at = times[k];
 
     let rows = index["occurrences"].as_array().cloned().unwrap_or_default();
     let row_by_uuid = |uuid: &str| rows.iter().find(|r| r["uuid"].as_str() == Some(uuid));
     let row_by_path = |p: &str| rows.iter().find(|r| r["path"].as_str() == Some(p));
     let reactions = study["reactions"].as_array().cloned().unwrap_or_default();
     // Every (mate, load) at frame k.
-    let loads: Vec<(String, Value)> = reactions
+    let all: Vec<(String, Value)> = reactions
         .iter()
         .flat_map(|m| {
             let mate = m["mate"].as_str().unwrap_or_default().to_owned();
@@ -140,13 +235,13 @@ pub(crate) fn handoff(
                 .to_owned(),
             None => pick.trim().to_owned(),
         },
-        None => loads
+        None => all
             .first()
             .and_then(|(_, l)| l["occurrence"].as_str())
             .ok_or_else(|| model(format!("`{name}` has no joint loads")))?
             .to_owned(),
     };
-    let mine: Vec<&(String, Value)> = loads.iter().filter(|(_, l)| l["occurrence"].as_str() == Some(component.as_str())).collect();
+    let mine: Vec<&(String, Value)> = all.iter().filter(|(_, l)| l["occurrence"].as_str() == Some(component.as_str())).collect();
     if mine.is_empty() {
         return Err(model(format!(
             "no mate loads `{component}` in `{name}`: pick a moving component joined by a mate"
@@ -157,6 +252,10 @@ pub(crate) fn handoff(
     if !part.ends_with(".part") {
         return Err(model(format!("`{component}` is not a part: pick the part to study")));
     }
+    let body = study["bodies"]
+        .as_array()
+        .and_then(|b| b.iter().find(|b| b["occurrence"].as_str() == Some(component.as_str())))
+        .ok_or_else(|| model(format!("`{component}` doesn't move on its own in `{name}`: pick the part a mate carries")))?;
     // The component's pose at frame k (a moving one), else where it is placed.
     let uuid = row["uuid"].as_str().unwrap_or_default();
     let pose: Vec<f64> = study["frames"][k]
@@ -166,31 +265,106 @@ pub(crate) fn handoff(
         .map(|t| t.iter().filter_map(Value::as_f64).collect())
         .unwrap_or_else(|| world_transform(&row["world"]));
     let origin = [pose.get(9), pose.get(10), pose.get(11)].map(|v| v.copied().unwrap_or(0.0) * 1000.0);
-
-    let file = part.rsplit('/').next().unwrap_or(&part);
-    let assembly = path.rsplit('/').next().unwrap_or(path);
-    let mut lines = vec![format!(
-        "Set up a structural simulation of {file} under the joint loads it carries at {at} s of motion study {name} in {assembly}."
-    )];
-    lines.push(format!("In {file}'s own axes (points in mm, forces in N, moments in N*m about the point):"));
-    for (mate, l) in &mine {
-        let p = vec3(&l["point"]);
-        let point = into_part(&pose, [p[0] - origin[0], p[1] - origin[1], p[2] - origin[2]]);
-        lines.push(format!(
-            "- mate {mate} at {}: force {}, moment {}",
-            shown(point, 3),
-            shown(into_part(&pose, vec3(&l["force"])), 6),
-            shown(into_part(&pose, vec3(&l["moment"])), 6),
-        ));
-    }
-    // Gravity is its own paragraph: the agent panel renders the request as Markdown.
-    lines.push(String::new());
+    let joints = mine
+        .iter()
+        .map(|(mate, l)| {
+            let p = vec3(&l["point"]);
+            (
+                mate.clone(),
+                into_part(&pose, [p[0] - origin[0], p[1] - origin[1], p[2] - origin[2]]),
+                into_part(&pose, vec3(&l["force"])),
+                into_part(&pose, vec3(&l["moment"])),
+            )
+        })
+        .collect();
+    let state = &body["frames"][k];
     let gravity = study["setup"]["gravity"].as_array().map(|_| vec3(&study["setup"]["gravity"])).unwrap_or([0.0, 0.0, -9.80665]);
-    lines.push(format!(
-        "Gravity in {file}'s axes: {} m/s^2. These joint loads balance the part's weight and its inertia at that instant.",
-        shown(into_part(&pose, gravity), 6)
-    ));
-    Ok(EditOutput { files: Vec::new(), summary: lines.join("\n") })
+    let inertia = body["inertia"].as_array().map(|r| [0, 1, 2].map(|i| vec3(r.get(i).unwrap_or(&Value::Null)))).unwrap_or_default();
+    let configuration = row["configuration"].as_str().filter(|c| !c.is_empty() && *c != "default");
+    let density = files
+        .get(&part)
+        .and_then(|t| crate::mass::part_mass(&part, t, configuration).ok())
+        .and_then(|r| r.parts.first().and_then(|p| p.density));
+    Ok(Handoff {
+        file: part.rsplit('/').next().unwrap_or(&part).to_owned(),
+        assembly: path.rsplit('/').next().unwrap_or(path).to_owned(),
+        study: name,
+        time: times[k],
+        joints,
+        gravity: into_part(&pose, gravity),
+        mass: body["mass"].as_f64().unwrap_or(0.0),
+        center: vec3(&body["center"]),
+        inertia,
+        acceleration: into_part(&pose, vec3(&state["acceleration"])),
+        angular_velocity: into_part(&pose, vec3(&state["angular_velocity"])),
+        angular_acceleration: into_part(&pose, vec3(&state["angular_acceleration"])),
+        density,
+    })
+}
+
+/// The request for the Simulation setup guide; the agent panel renders it as Markdown, so each
+/// load family is its own paragraph.
+pub(crate) fn request(h: &Handoff) -> String {
+    let Handoff { file, .. } = h;
+    let mut lines = vec![format!(
+        "Set up a structural simulation of {file} under the loads it carries at {} s of motion study {} in {}.",
+        h.time, h.study, h.assembly
+    )];
+    lines.push(String::new());
+    lines.push(format!("Mate loads, in {file}'s own axes (points in mm, forces in N, moments in N*m about the point):"));
+    lines.push(String::new());
+    for (mate, p, f, m) in &h.joints {
+        lines.push(format!("- mate {mate} at {}: force {}, moment {}", shown(*p, 3), shown(*f, 6), shown(*m, 6)));
+    }
+    lines.push(String::new());
+    let g = shown(h.gravity, 6);
+    let a = shown(h.acceleration, 6);
+    let total = add(h.weight(), h.inertia_force());
+    match (h.body_force(), h.density) {
+        (Some(b), Some(rho)) => lines.push(format!(
+            "Weight and linear inertia as one body_force on {file}'s solid: {} N/m^3. This is rho (g - a), with density rho = {} kg/m^3, gravity g = {g} m/s^2 and the centre of mass's acceleration a = {a} m/s^2. Over the part's {} kg it totals {} N: weight {} N plus inertia force -m a = {} N.",
+            shown(b, 3),
+            round(rho, 6),
+            round(h.mass, 9),
+            shown(total, 6),
+            shown(h.weight(), 6),
+            shown(h.inertia_force(), 6),
+        )),
+        _ => lines.push(format!(
+            "{file} has no density, so the weight and linear inertia can't be written as a body_force (N/m^3). Gravity g = {g} m/s^2 and the centre of mass's acceleration a = {a} m/s^2; over the part's {} kg they total {} N.",
+            round(h.mass, 9),
+            shown(total, 6),
+        )),
+    }
+    lines.push(String::new());
+    if h.turns() {
+        lines.push(format!(
+            "Rotation: {file} turns at omega = {} rad/s with angular acceleration alpha = {} rad/s^2, about its centre of mass at {} mm. The .fea language has no rotational body load yet (the centrifugal density rho omega x (omega x r) or rho alpha x r, which vary over the part), so the study can't apply this part of the inertia. Its resultant about the centre of mass is the moment -(J alpha + omega x J omega) = {} N*m; without it, the loads above leave that moment unbalanced, and the stress the spin itself causes is not in the study.",
+            shown(h.angular_velocity, 6),
+            shown(h.angular_acceleration, 6),
+            shown(h.center, 3),
+            shown(h.inertia_moment(), 6),
+        ));
+    } else {
+        lines.push(format!("{file} doesn't turn at this instant, so the mate loads and the body force balance on their own."));
+    }
+    lines.join("\n")
+}
+
+fn round(v: f64, places: i32) -> f64 {
+    let scale = 10f64.powi(places);
+    (v * scale).round() / scale
+}
+
+pub(crate) fn handoff(
+    path: &str,
+    text: &str,
+    files: &Files,
+    values: &Map<String, Value>,
+    selection: &[String],
+) -> Result<EditOutput, EditFailure> {
+    let h = loads(path, text, files, values, selection)?;
+    Ok(EditOutput { files: Vec::new(), summary: request(&h) })
 }
 
 /// An index row's `world` transform as the display's 12 numbers (rotation rows, translation m).

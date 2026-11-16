@@ -69,6 +69,7 @@ fn with_context<T>(
     f(&MotionContext {
         resolve: &ctx,
         request: &request,
+        frame_bytes: STUDY_FRAME_BYTES,
     })
 }
 
@@ -178,6 +179,11 @@ fn study_json(resolved: &ResolvedAssembly, run: &MotionRun, profile: &str, track
     })
 }
 
+/// The bytes one study's solved frames may take in the index: a sixteenth of the runtime's
+/// display-mesh budget ([`crate::runtime::part_cache::BUDGET_BYTES`]), the memory a compile's
+/// display data is held to.
+const STUDY_FRAME_BYTES: usize = crate::runtime::part_cache::BUDGET_BYTES / 16;
+
 /// The top assembly's motion studies, solved; an empty array when it has none. A dynamic
 /// study first has every placed part's mass properties written into `source`.
 pub fn motion_studies(
@@ -208,9 +214,12 @@ pub fn motion_studies(
     )
 }
 
-/// A dynamic study's `kind`, its energy (J) and its mate reactions per frame: for each mate,
-/// each frame's loads on the components it joins, at the mate's connector (point in mm, force
-/// in N, moment in N·m, world axes).
+/// A dynamic study's `kind`, its energy (J), its mate reactions per frame (for each mate, each
+/// frame's loads on the components it joins, at the mate's connector: point in mm, force in N,
+/// moment in N·m, world axes) and its bodies (mass in kg, centre of mass in mm in the body's own
+/// axes, inertia in kg·m² about it; per frame the centre in mm, its acceleration in m/s², the
+/// angular velocity in rad/s and angular acceleration in rad/s², world axes). The loads and the
+/// body motion keep full precision: Results to .fea balances them against each other.
 fn dynamic_rows(row: &mut Value, run: &MotionRun, study: &runmat_cad::assembly::motion::MotionStudy) {
     let Some(o) = row.as_object_mut() else { return };
     o.insert("kind".into(), json!("dynamic"));
@@ -238,7 +247,6 @@ fn dynamic_rows(row: &mut Value, run: &MotionRun, study: &runmat_cad::assembly::
         }),
     );
     o.insert("energy".into(), json!(run.energy.iter().map(|e| round(*e, 6)).collect::<Vec<_>>()));
-    let r3 = |v: [f64; 3], places: i32| v.map(|c| round(c, places));
     o.insert(
         "reactions".into(),
         Value::Array(
@@ -249,10 +257,32 @@ fn dynamic_rows(row: &mut Value, run: &MotionRun, study: &runmat_cad::assembly::
                         "mate": m.mate,
                         "frames": m.frames.iter().map(|loads| loads.iter().map(|l| json!({
                             "occurrence": l.occurrence,
-                            "point": r3(l.point.map(|c| c * 1000.0), 4),
-                            "force": r3(l.force, 6),
-                            "moment": r3(l.moment, 6),
+                            "point": l.point.map(|c| c * 1000.0),
+                            "force": l.force,
+                            "moment": l.moment,
                         })).collect::<Vec<_>>()).collect::<Vec<_>>(),
+                    })
+                })
+                .collect(),
+        ),
+    );
+    o.insert(
+        "bodies".into(),
+        Value::Array(
+            run.bodies
+                .iter()
+                .map(|b| {
+                    json!({
+                        "occurrence": b.occurrence,
+                        "mass": b.mass,
+                        "center": b.center.map(|c| c * 1000.0),
+                        "inertia": b.inertia,
+                        "frames": b.frames.iter().map(|f| json!({
+                            "center": f.center.map(|c| c * 1000.0),
+                            "acceleration": f.acceleration,
+                            "angular_velocity": f.angular_velocity,
+                            "angular_acceleration": f.angular_acceleration,
+                        })).collect::<Vec<_>>(),
                     })
                 })
                 .collect(),

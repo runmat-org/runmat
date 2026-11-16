@@ -1,5 +1,6 @@
 //! Results to .fea: a dynamic study's joint loads on the arm at a chosen time, turned into the
 //! arm's own axes and handed to the Simulation setup guide; nothing is written.
+use super::to_fea::loads;
 use crate::edit::edit_json;
 use crate::runtime::{compile_assembly, Files};
 use serde_json::{json, Value};
@@ -42,7 +43,7 @@ fn the_hinge_loads_on_the_arm_go_to_the_guide_in_the_arms_axes() {
     assert_eq!(out["ok"], true, "{out}");
     assert_eq!(out["files"], json!([]), "nothing is written: {out}");
     let summary = out["summary"].as_str().unwrap();
-    assert!(summary.starts_with("Set up a structural simulation of block.part under the joint loads it carries at 0 s of motion study fall in hinge.assembly."), "{summary}");
+    assert!(summary.starts_with("Set up a structural simulation of block.part under the loads it carries at 0 s of motion study fall in hinge.assembly."), "{summary}");
     let line = summary.lines().find(|l| l.starts_with("- mate hinge")).unwrap();
     let world = &study["reactions"][0]["frames"][0][0];
     let f0: Vec<f64> = world["force"].as_array().unwrap().iter().map(|v| v.as_f64().unwrap()).collect();
@@ -51,7 +52,10 @@ fn the_hinge_loads_on_the_arm_go_to_the_guide_in_the_arms_axes() {
         assert!((force[a] - f0[a]).abs() < 1e-6, "{line} vs {world}");
     }
     assert!(norm(triple(line, " at ")) < 1e-3, "the hinge sits at the arm's origin: {line}");
-    assert!(summary.contains("Gravity in block.part's axes: [0, -9.80665, 0] m/s^2"), "{summary}");
+    assert!(summary.contains("gravity g = [0, -9.80665, 0] m/s^2"), "{summary}");
+    // Released at rest: no spin yet, but the arm starts to turn, so the rotation is stated as missing.
+    assert!(summary.contains("body_force on block.part's solid: ["), "{summary}");
+    assert!(summary.contains("has no rotational body load yet"), "{summary}");
 
     // Later the arm has turned about Z: the same load, in its turned axes.
     let asked = 0.3;
@@ -70,7 +74,7 @@ fn the_hinge_loads_on_the_arm_go_to_the_guide_in_the_arms_axes() {
         let back: f64 = (0..3).map(|j| t[i * 3 + j] * local[j]).sum();
         assert!((back - fw[i]).abs() < 1e-5, "{line} vs {world}");
     }
-    let g = triple(summary.lines().find(|l| l.starts_with("Gravity")).unwrap(), "axes: ");
+    let g = triple(summary.lines().find(|l| l.contains("gravity g = ")).unwrap(), "gravity g = ");
     assert!((norm(g) - 9.80665).abs() < 1e-5 && g[0].abs() > 1e-3, "gravity turns with the arm: {g:?}");
     assert!(norm(triple(line, " at ")) < 1e-3, "{line}");
 }
@@ -86,4 +90,33 @@ fn a_driven_study_or_a_fixed_component_is_refused() {
     // With one dynamic study, it is the one taken.
     let out = edit(json!({ "command": "motion.to-fea", "values": { "time": 0.1 } }));
     assert_eq!(out["ok"], true, "{out}");
+}
+
+/// What is handed over balances (d'Alembert; Haug 1989, §11.2): the mate loads, the weight and
+/// the inertia force sum to zero, and the mate moments about the centre of mass with the inertia
+/// moment `−(J α + ω × J ω)`, within 1e-6 of the largest term, at several frames of the swing.
+#[test]
+fn the_handed_over_loads_balance_at_every_asked_time() {
+    let norm3 = |v: [f64; 3]| norm(v);
+    let add = |a: [f64; 3], b: [f64; 3]| [a[0] + b[0], a[1] + b[1], a[2] + b[2]];
+    for time in [0.0, 0.05, 0.1, 0.2, 0.3, 0.45] {
+        let values = json!({ "study": "fall", "time": time, "component": "arm" });
+        let h = loads(PATH, HINGE, &files(), values.as_object().unwrap(), &[]).unwrap();
+        assert!(h.mass > 0.0 && h.density.is_some_and(|d| (2600.0..2800.0).contains(&d)), "{h:?}");
+        let (jf, jm) = h.joint_resultant();
+        let force = add(add(jf, h.weight()), h.inertia_force());
+        let scale_f = norm3(jf).max(norm3(h.weight())).max(norm3(h.inertia_force()));
+        assert!(norm3(force) <= 1e-6 * scale_f, "t = {time}: force residual {force:?} of {scale_f}");
+        let moment = add(jm, h.inertia_moment());
+        let scale_m = norm3(jm).max(norm3(h.inertia_moment()));
+        assert!(norm3(moment) <= 1e-6 * scale_m.max(1e-12), "t = {time}: moment residual {moment:?} of {scale_m}");
+        // The body force is weight and linear inertia per volume: times the volume m / rho, the same force.
+        let b = h.body_force().unwrap();
+        let total = b.map(|v| v * h.mass / h.density.unwrap());
+        let both = add(h.weight(), h.inertia_force());
+        assert!(norm3(add(total, both.map(|v| -v))) <= 1e-9 * norm3(both).max(1.0), "{b:?}");
+        if time > 0.0 {
+            assert!(h.turns(), "t = {time}: the arm swings");
+        }
+    }
 }

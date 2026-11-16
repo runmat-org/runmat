@@ -1,6 +1,6 @@
 ---
 description: Reference for motion studies in a RunMat assembly. Drive a revolute, slider, cylindrical, distance or angle mate through a range over time, simulate the mechanism under gravity, springs and motors, send joint loads to a simulation, play the solved motion, plot speed and acceleration, check the motion for collisions, and save named mate positions.
-keywords: [motion study, animation, mechanism, drive a mate, kinematics, dynamics, gravity, spring, motor, joint reaction, motion loads, collision detection, speed plot, acceleration, cycloidal motion]
+keywords: [motion study, animation, mechanism, drive a mate, kinematics, dynamics, gravity, spring, motor, joint reaction, motion loads, inertia load, body force, collision detection, speed plot, acceleration, cycloidal motion]
 ---
 # Motion studies
 
@@ -126,23 +126,31 @@ motion fall = { kind = dynamic, duration = 2 s, gravity = [0 m/s^2, -9.80665 m/s
 | `gravity` | Three accelerations, `[x, y, z]`. The default is `[0, 0, -9.80665] m/s^2`. |
 | `springs` | Springs and dampers on revolute, slider or cylindrical mates. Each names a `mate`, a `stiffness`, a `damping` and the `free` value where the spring is unloaded (0 by default). On a revolute mate they act as a torque about its axis; on a slider, as a force along it. |
 | `motors` | A constant `torque` about a revolute mate's axis, or a constant `force` along a slider's. |
-| `rate` | Solved frames per second, 30 by default. |
+| `rate` | Solved frames per second. Without it, the study picks the rate from the motion: frames close enough that no moving component turns more than 5° or moves its center of mass more than 5% of its size between frames, and at least 30 a second. |
 
 The integration uses a fixed step of at most 2 ms and holds the joints with constraint stabilization and projection, so an undamped mechanism keeps its energy: over ten periods of a pendulum check, the energy drifts by less than one millionth of m·g·d, where m is the mass, g gravity and d the distance from the hinge to the center of mass. Joint limits are not enforced during a dynamic study, and components pass through each other: contact is not modeled. A study on a mechanism with joint limits lists that as a problem.
+
+A component's size here is the diagonal of the box with the same inertia, √(6 tr J / m). With frames that close, the trail of a fast swing follows its arc: the straight segment between two frames strays from the arc by less than 0.1% of the radius. The frames stay evenly spaced and end at the study's end. The number of frames a study can hold depends on the memory the Desktop sets aside for a study's frames and on how many components and mates move. A long or fast study on a large mechanism gets fewer frames than the 5° rule asks for. Its row shows the frame count.
 
 In the Desktop, **Basic motion** on the Motion tab adds a dynamic study: enter the name and duration, pick the gravity direction, and optionally pick a mate for a spring, damper and motor. The study plays like any other, and its plot adds the first mate's reaction force on the component it moves.
 
 ## Send loads to a simulation
 
-Each frame of a dynamic study records every mate's reaction on the components it joins: a force and a moment about the mate's connector. **Results to .fea** hands those loads on one part, at one instant, to a new structural simulation:
+Each frame of a dynamic study records every mate's load on the components it joins: a force and a moment about the mate's connector, made of the joint's reaction and any spring, damper or motor on the mate. Each frame also records how every moving component moves: its center of mass's acceleration, its angular velocity and its angular acceleration. These values come from the same solve as the loads. **Results to .fea** hands one part's loads at one instant to a new structural simulation:
 
 1. Start Results to .fea from a dynamic study's row (or name the study).
 2. Enter the time. The loads come from the solved frame nearest that time.
 3. Pick the part to simulate, or leave it empty for the first part a mate loads.
 
-RunMat turns the loads into the part's own axes at that frame and starts the Simulation setup guide with them, as **New study** does. The guide asks for the supports, material and acceptance limit, and writes the `.fea` file. The request lists, for each mate, the connector's position in millimeters, the force in newtons and the moment in newton-meters, and gravity in the part's axes.
+RunMat turns the loads and the motion into the part's own axes at that frame and starts the Simulation setup guide with them, as **New study** does. The guide asks for the supports, material and acceptance limit, and writes the `.fea` file. The request lists:
 
-The joint loads hold the part in balance with its weight and its inertia at that instant. A static study of the part under the joint loads alone is out of balance unless it also carries the part's weight and the acceleration loads at that time.
+- for each mate, the connector's position in millimeters, the force in newtons and the moment in newton-meters about the connector;
+- the weight and the linear inertia together, as one `body_force` on the part's solid: ρ(**g** − **a**) in N/m³, from the part's density ρ, gravity **g** and the center of mass's acceleration **a**;
+- the rotation: the angular velocity **ω** and angular acceleration **α** about the center of mass, and the moment −(J**α** + **ω** × J**ω**) they produce about it, where J is the part's inertia about its center of mass.
+
+The mate loads, the weight and the part's inertia balance at that instant (d'Alembert's principle). The loads in the request satisfy Σ**f** + m**g** − m**a** = 0, and about the center of mass the mate moments balance −(J**α** + **ω** × J**ω**), within one millionth of the largest term.
+
+The `.fea` language has no rotational body load yet. It cannot apply the centrifugal load ρ **ω** × (**ω** × **r**) or the load ρ **α** × **r** that the angular acceleration causes; both vary over the part. The request says so. A study written from it carries the mate loads and the body force but not the rotation. That study leaves the moment J**α** + **ω** × J**ω** about the center of mass unbalanced, and it misses the stress that the spin itself causes. When the part doesn't turn at that instant (**ω** and **α** are zero), the mate loads and the body force balance on their own.
 
 ## Next
 

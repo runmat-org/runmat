@@ -185,11 +185,12 @@ fn a_torsion_spring_sets_the_period_without_gravity() {
     assert!((measured - expected).abs() / expected < 1e-4, "{measured} vs {expected}");
 }
 
-/// The same check end to end: an assembly with a hinged arm whose part carries its mass,
-/// centre of mass and inertia, studied with `kind = dynamic`.
-#[test]
-fn an_assembly_study_swings_the_arm_at_the_pendulum_period() {
-    let text = "runmat 0.7\nstd 1\n\nassembly hinge {\n    use part block as base\n    use part arm as arm {\n        fixed = false\n    }\n    connector pivot = { occurrence = [{ name = base }], anchor = { anchor = origin } }\n    connector root = { occurrence = [{ name = arm }], anchor = { anchor = origin } }\n    mate hinge = { kind = { mate = revolute }, a = pivot, b = root }\n    motion swing = { kind = dynamic, duration = 3 s, rate = 200, gravity = [0 m/s^2, -9.80665 m/s^2, 0 m/s^2] }\n}\n";
+/// The arm: 0.4 m long along X from its origin, its centre of mass 0.2 m out.
+const ARM: (f64, f64) = (1.2, 0.2);
+
+/// Runs study `name` of the hinge assembly `text` (a base and an arm, both parts), with the
+/// arm's mass properties as [`ARM`] and a heavy base; the run and the resolved assembly.
+fn hinge_run(text: &str, name: &str) -> (crate::assembly::motion::kinematics::MotionRun, crate::assembly::resolve::ResolvedAssembly) {
     let scope = crate::modules::ModuleScope::from_files(
         [("hinge.assembly", text), ("block.part", "part block {\n}\n"), ("arm.part", "part arm {\n}\n")]
             .iter()
@@ -197,9 +198,7 @@ fn an_assembly_study_swings_the_arm_at_the_pendulum_period() {
     );
     let parsed = crate::syntax::parse_assembly_in("hinge.assembly", text, &scope);
     let doc = parsed.document.unwrap_or_else(|| panic!("{:?}", parsed.diagnostics));
-    assert_eq!(doc.motions[0].kind, crate::assembly::motion::MotionKind::Dynamic);
-    // The arm: 0.4 m long along X from its origin, its centre of mass 0.2 m out.
-    let (m, d) = (1.2, 0.2);
+    let (m, d) = ARM;
     let inertia = box_inertia(m, [0.4, 0.04, 0.02]);
     // The definitions the occurrences name, as resolution reads them (a first pass with no parts).
     let mut probe = MemorySource::default();
@@ -239,8 +238,20 @@ fn an_assembly_study_swings_the_arm_at_the_pendulum_period() {
     };
     let request = ResolveRequest::default();
     let base = resolve(&FilePath::new("hinge.assembly"), &request, &ctx);
-    let run = run_study(&doc, &base, "swing", &MotionContext { resolve: &ctx, request: &request });
+    let run = run_study(&doc, &base, name, &MotionContext { resolve: &ctx, request: &request, frame_bytes: 8 << 20 });
     assert!(run.problems.is_empty() && run.stopped.is_none(), "{:?} {:?}", run.problems, run.stopped);
+    (run, base)
+}
+
+const HINGE: &str = "runmat 0.7\nstd 1\n\nassembly hinge {\n    use part block as base\n    use part arm as arm {\n        fixed = false\n    }\n    connector pivot = { occurrence = [{ name = base }], anchor = { anchor = origin } }\n    connector root = { occurrence = [{ name = arm }], anchor = { anchor = origin } }\n    mate hinge = { kind = { mate = revolute }, a = pivot, b = root }\n    motion swing = { kind = dynamic, duration = 3 s, rate = 200, gravity = [0 m/s^2, -9.80665 m/s^2, 0 m/s^2] }\n    motion wound = { kind = dynamic, duration = 1 s, gravity = [0 m/s^2, -9.80665 m/s^2, 0 m/s^2], springs = [{ mate = hinge, stiffness = 2 N*m/rad, damping = 0.01 N*m*s/rad, free = 30 deg }], motors = [{ mate = hinge, torque = 0.3 N*m }] }\n}\n";
+
+/// The same check end to end: an assembly with a hinged arm whose part carries its mass,
+/// centre of mass and inertia, studied with `kind = dynamic`.
+#[test]
+fn an_assembly_study_swings_the_arm_at_the_pendulum_period() {
+    let (run, base) = hinge_run(HINGE, "swing");
+    let (m, d) = ARM;
+    let inertia = box_inertia(m, [0.4, 0.04, 0.02]);
     // Released along +X with gravity −Y: a quarter turn from hanging (θ₀ = 90°).
     let arm = (0..base.nodes.len() as u32).find(|&n| base.path(n) == "arm").unwrap();
     let angle: Vec<f64> = run
@@ -260,4 +271,74 @@ fn an_assembly_study_swings_the_arm_at_the_pendulum_period() {
     assert_eq!(hinge.frames.len(), run.times.len());
     assert_eq!(hinge.frames[0][0].occurrence, "arm");
     assert!(!run.moving.is_empty() && run.energy.len() == run.times.len());
+}
+
+/// d'Alembert's principle at every frame (Haug 1989, §11.2): the loads the mates put on the arm,
+/// its weight and its inertia load (`−m a` and `−(J α + ω × J ω)` about the centre of mass)
+/// sum to zero, forces and moments about the centre of mass, within 1e-6 of the largest term.
+/// The free swing, and a wound spring with a damper and a motor on the hinge (their torque is
+/// part of what the mate passes to the arm).
+#[test]
+fn the_mate_loads_weight_and_inertia_of_the_arm_balance_at_every_frame() {
+    let norm = |v: [f64; 3]| v.iter().map(|x| x * x).sum::<f64>().sqrt();
+    let add = |a: [f64; 3], b: [f64; 3]| [a[0] + b[0], a[1] + b[1], a[2] + b[2]];
+    let cross = |a: [f64; 3], b: [f64; 3]| [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]];
+    for name in ["swing", "wound"] {
+        let (run, base) = hinge_run(HINGE, name);
+        let g = run.gravity.unwrap();
+        let body = run.bodies.iter().find(|b| b.occurrence == "arm").unwrap();
+        assert_eq!(body.frames.len(), run.times.len());
+        let arm = (0..base.nodes.len()).find(|&n| base.path(n as u32) == "arm").unwrap();
+        let frames: Vec<usize> = (0..run.times.len()).step_by((run.times.len() / 7).max(1)).collect();
+        assert!(frames.len() >= 5, "{name}: {} frames", run.times.len());
+        for k in frames {
+            let state = &body.frames[k];
+            let rotation = run.frames[k][arm].rotation;
+            let (inertia_force, inertia_moment) = state.inertia_load(body.mass, &body.inertia, &rotation);
+            let weight = g.map(|c| c * body.mass);
+            let mut force = add(weight, inertia_force);
+            let mut moment = inertia_moment;
+            let mut scale_f = norm(weight).max(norm(inertia_force));
+            let mut scale_m = norm(inertia_moment);
+            for mate in &run.reactions {
+                for l in mate.frames[k].iter().filter(|l| l.occurrence == "arm") {
+                    let about = add(l.moment, cross([0, 1, 2].map(|a| l.point[a] - state.center[a]), l.force));
+                    force = add(force, l.force);
+                    moment = add(moment, about);
+                    scale_f = scale_f.max(norm(l.force));
+                    scale_m = scale_m.max(norm(about));
+                }
+            }
+            assert!(norm(force) <= 1e-6 * scale_f, "{name} frame {k}: force residual {force:?} of {scale_f}");
+            assert!(norm(moment) <= 1e-6 * scale_m, "{name} frame {k}: moment residual {moment:?} of {scale_m}");
+            if k > 0 {
+                assert!(norm(state.angular_velocity) > 0.0, "{name} frame {k}: the arm turns");
+            }
+        }
+    }
+}
+
+/// A study that doesn't set its rate takes frames close enough that the arm turns at most 5°
+/// between them at its fastest, evenly spaced to the study's end; a slow one keeps 30 a second.
+#[test]
+fn a_fast_swing_gets_frames_close_enough_for_a_smooth_trail() {
+    let fast = HINGE.replace("duration = 3 s, rate = 200,", "duration = 1 s,");
+    let (run, base) = hinge_run(&fast, "swing");
+    let arm = (0..base.nodes.len()).find(|&n| base.path(n as u32) == "arm").unwrap();
+    let n = run.times.len();
+    assert!(n > 31, "faster than 30 frames a second: {n}");
+    assert!((run.times[n - 1] - 1.0).abs() < 1e-12, "ends at the study's end: {:?}", run.times.last());
+    let dt = run.times[1] - run.times[0];
+    assert!(run.times.windows(2).all(|w| ((w[1] - w[0]) - dt).abs() < 1e-12), "evenly spaced");
+    for k in 1..n {
+        let turn = super::super::kinematics::rotation_between(&run.frames[k - 1][arm], &run.frames[k][arm]);
+        assert!(turn <= super::FRAME_TURN * 1.05, "frame {k} turns {} deg", turn.to_degrees());
+    }
+    // Slow: a stiff damper barely lets it move; 30 frames a second hold.
+    let slow = HINGE.replace(
+        "springs = [{ mate = hinge, stiffness = 2 N*m/rad, damping = 0.01 N*m*s/rad, free = 30 deg }], motors = [{ mate = hinge, torque = 0.3 N*m }]",
+        "springs = [{ mate = hinge, damping = 100 N*m*s/rad }]",
+    );
+    let (run, _) = hinge_run(&slow, "wound");
+    assert_eq!(run.times.len(), 31, "{:?}", run.times.len());
 }

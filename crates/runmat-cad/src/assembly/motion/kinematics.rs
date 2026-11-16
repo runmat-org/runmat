@@ -86,6 +86,9 @@ pub struct MotionRun {
     /// A dynamic study's mate reactions at each frame.
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub reactions: Vec<super::dynamics::MateReaction>,
+    /// A dynamic study's free bodies: mass properties and each frame's motion.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub bodies: Vec<super::dynamics::BodyMotion>,
 }
 
 /// The top assembly as a study frame sees it: `top` in place of the source's copy.
@@ -350,7 +353,7 @@ fn derivatives(x: &[f64], h: f64) -> (Vec<f64>, Vec<f64>) {
 }
 
 /// The rotation angle between two rotations (rad).
-fn rotation_between(a: &Transform, b: &Transform) -> f64 {
+pub(crate) fn rotation_between(a: &Transform, b: &Transform) -> f64 {
     // trace(Aᵀ B) = 1 + 2 cos θ.
     let mut tr = 0.0;
     for i in 0..3 {
@@ -365,6 +368,9 @@ fn rotation_between(a: &Transform, b: &Transform) -> f64 {
 pub struct MotionContext<'a> {
     pub resolve: &'a ResolveContext<'a>,
     pub request: &'a ResolveRequest,
+    /// The bytes one study's solved frames may take as the index carries them: the host's share
+    /// of its memory budget for a compile. A dynamic study's most frames derive from it.
+    pub frame_bytes: usize,
 }
 
 /// Solves study `name` of `doc` (the top assembly of `base`).

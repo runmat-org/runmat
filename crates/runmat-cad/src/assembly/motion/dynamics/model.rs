@@ -89,16 +89,27 @@ pub struct Model<'a> {
     norm_rows: Vec<bool>,
 }
 
+/// An integrated state: the time, every variable's value and the velocities.
+#[derive(Clone, Debug)]
+pub struct State {
+    pub time: f64,
+    pub q: Vec<f64>,
+    pub u: Vec<f64>,
+}
+
 /// `u̇`, the reaction multipliers, and the constraint each multiplier belongs to.
 type Accelerations = (Vec<f64>, Vec<f64>, Vec<rc::ConstraintId>);
 
-/// A solved instant: every variable's value, the velocities, and the reaction multiplier of
-/// every constraint row.
+/// A solved instant: every variable's value, the velocities, their rates, and the reaction
+/// multiplier of every constraint row.
 #[derive(Clone, Debug)]
 pub struct Sample {
     pub time: f64,
     pub q: Vec<f64>,
     pub u: Vec<f64>,
+    /// `u̇` from the same solve as `lambda`: each body's centre-of-mass acceleration (world) and
+    /// angular acceleration (body axes), so the instant's loads and its inertia balance exactly.
+    pub udot: Vec<f64>,
     pub lambda: Vec<f64>,
     /// The constraint each multiplier belongs to.
     pub owners: Vec<rc::ConstraintId>,
@@ -371,21 +382,9 @@ impl<'a> Model<'a> {
             }
         }
         for load in &self.loads {
-            let (x, xd) = self.measure(q, u, load);
-            let value = -load.stiffness * (x - load.free) - load.damping * xd + load.constant;
-            let (fa, fb) = (self.connector(q, load.a), self.connector(q, load.b));
-            let za = [fa.rotation[0][2], fa.rotation[1][2], fa.rotation[2][2]];
-            let at = fb.translation;
-            let (f, t) = match load.measure {
-                MateMeasure::Angle => ([0.0; 3], scale(za, value)),
-                MateMeasure::Length => (scale(za, value), [0.0; 3]),
-            };
-            for (c, sign) in [(load.b, 1.0), (load.a, -1.0)] {
-                let rc::EntityKind::Connector { body, .. } = &self.sys.entity(c).kind else {
-                    continue;
-                };
-                if let Some(i) = self.body_of_entity(*body) {
-                    self.apply(q, &mut gen, i, at, scale(f, sign), scale(t, sign));
+            for i in 0..self.bodies.len() {
+                if let Some((at, f, t)) = self.mate_load_on(q, u, load, i) {
+                    self.apply(q, &mut gen, i, at, f, t);
                 }
             }
         }
@@ -537,14 +536,36 @@ impl<'a> Model<'a> {
 
     /// The instant `(q, u)` with its reactions.
     pub fn sample(&self, time: f64, q: &[f64], u: &[f64]) -> Result<Sample, String> {
-        let (_, lambda, owners) = self.accelerations(q, u)?;
+        let (udot, lambda, owners) = self.accelerations(q, u)?;
         Ok(Sample {
             time,
             q: q.to_vec(),
             u: u.to_vec(),
+            udot,
             lambda,
             owners,
         })
+    }
+
+    /// Integrates from `(q, u)` at rest or moving over `steps` equal steps of `h`, and returns
+    /// the state `(t, q, u)` after every step (the first at time 0). On a failure the states so
+    /// far stand and the error says when and why.
+    pub fn integrate(&self, q0: &[f64], u0: &[f64], steps: usize, h: f64) -> (Vec<State>, Option<(f64, String)>) {
+        let mut q = q0.to_vec();
+        let mut u = u0.to_vec();
+        self.normalize(&mut q);
+        if let Err(e) = self.project_positions(&mut q).and_then(|_| self.project_velocities(&q, &mut u)) {
+            return (Vec::new(), Some((0.0, e)));
+        }
+        let mut out = Vec::with_capacity(steps + 1);
+        out.push(State { time: 0.0, q: q.clone(), u: u.clone() });
+        for s in 0..steps {
+            if let Err(e) = self.step(&mut q, &mut u, h) {
+                return (out, Some((s as f64 * h, e)));
+            }
+            out.push(State { time: (s + 1) as f64 * h, q: q.clone(), u: u.clone() });
+        }
+        (out, None)
     }
 
     /// Integrates from `(q, u)` at rest or moving, reporting `frames` samples `frame_dt` apart
@@ -559,24 +580,46 @@ impl<'a> Model<'a> {
         max_step: f64,
         mut on_frame: impl FnMut(&Sample),
     ) -> Result<(), (f64, String)> {
-        let mut q = q0.to_vec();
-        let mut u = u0.to_vec();
-        self.normalize(&mut q);
-        self.project_positions(&mut q).map_err(|e| (0.0, e))?;
-        self.project_velocities(&q, &mut u).map_err(|e| (0.0, e))?;
-        let steps = (frame_dt / max_step).ceil().max(1.0) as usize;
-        let h = frame_dt / steps as f64;
-        for k in 0..frames {
+        let per = (frame_dt / max_step).ceil().max(1.0) as usize;
+        let (states, failed) = self.integrate(q0, u0, per * frames.saturating_sub(1), frame_dt / per as f64);
+        for (k, s) in states.iter().step_by(per).enumerate() {
             let t = k as f64 * frame_dt;
-            on_frame(&self.sample(t, &q, &u).map_err(|e| (t, e))?);
-            if k + 1 == frames {
-                break;
-            }
-            for s in 0..steps {
-                self.step(&mut q, &mut u, h).map_err(|e| (t + s as f64 * h, e))?;
+            on_frame(&self.sample(t, &s.q, &s.u).map_err(|e| (t, e))?);
+        }
+        failed.map_or(Ok(()), Err)
+    }
+
+    /// Body `i`'s angular velocity at `u` (body axes, rad/s).
+    pub fn body_rate(&self, u: &[f64], i: usize) -> [f64; 3] {
+        [u[6 * i + 3], u[6 * i + 4], u[6 * i + 5]]
+    }
+
+    /// Body `i`'s centre-of-mass velocity at `u` (world, m/s).
+    pub fn center_velocity(&self, u: &[f64], i: usize) -> [f64; 3] {
+        [u[6 * i], u[6 * i + 1], u[6 * i + 2]]
+    }
+
+    /// The load `load` puts on body `i` at `(q, u)` (none when neither of its connectors is on
+    /// that body): a world force acting at a world point and a world torque, the terms
+    /// [`Model::forces`] applies.
+    pub fn mate_load_on(&self, q: &[f64], u: &[f64], load: &MateLoad, i: usize) -> Option<([f64; 3], [f64; 3], [f64; 3])> {
+        let (x, xd) = self.measure(q, u, load);
+        let value = -load.stiffness * (x - load.free) - load.damping * xd + load.constant;
+        let (fa, fb) = (self.connector(q, load.a), self.connector(q, load.b));
+        let za = [fa.rotation[0][2], fa.rotation[1][2], fa.rotation[2][2]];
+        let (f, t) = match load.measure {
+            MateMeasure::Angle => ([0.0; 3], scale(za, value)),
+            MateMeasure::Length => (scale(za, value), [0.0; 3]),
+        };
+        let mut out: Option<([f64; 3], [f64; 3], [f64; 3])> = None;
+        for (c, sign) in [(load.b, 1.0), (load.a, -1.0)] {
+            let rc::EntityKind::Connector { body, .. } = &self.sys.entity(c).kind else { continue };
+            if self.body_of_entity(*body) == Some(i) {
+                let (pf, pt) = out.map_or(([0.0; 3], [0.0; 3]), |o| (o.1, o.2));
+                out = Some((fb.translation, add(pf, scale(f, sign)), add(pt, scale(t, sign))));
             }
         }
-        Ok(())
+        out
     }
 
     /// The reaction a set of constraint rows puts on body `i`: a world force at its centre of

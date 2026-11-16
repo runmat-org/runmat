@@ -26,25 +26,42 @@ pub mod model;
 mod tests;
 
 use super::kinematics::{drivable, set_moving, track, MotionContext, MotionRun};
-use super::{MotionStudy, MAX_FRAMES};
+use super::MotionStudy;
 use crate::assembly::model::{AssemblyDocument, DefinitionKind, MateKind};
 use crate::assembly::resolve::{resolve, MateSystem, NodeId, ResolveRequest, ResolvedAssembly};
 use crate::regen::kernel::Transform;
 use crate::units::Dimension;
 use crate::value::{Evaluator, ValueEnv, ValueExpr};
-use model::{BodyMass, MateLoad, MateMeasure, Model, Sample};
+use model::{BodyMass, MateLoad, MateMeasure, Model, Sample, State};
 use runmat_types::physical::QuantityKind;
 use serde::Serialize;
 
-/// Frames per second of a dynamic study that doesn't say.
+/// The fewest frames per second a dynamic study that doesn't say shows (smooth playback); a
+/// faster motion gets more ([`frame_stride`]).
 pub const DYNAMIC_RATE: f64 = 30.0;
+/// The most a body turns between frames that the study picks (rad, 5°). The straight trail
+/// segment between frames then strays from the arc by `r (1 − cos 2.5°)`, under 0.1 % of the
+/// radius, so a fast swing's trail reads as a curve rather than crossing chords.
+pub const FRAME_TURN: f64 = 5.0 * std::f64::consts::PI / 180.0;
+/// The most a body's centre of mass travels between frames, as a fraction of its size (the
+/// diagonal of the box with its inertia, `√(6 tr J / m)`): the same 5° step for a body turning
+/// about a point half its size away.
+pub const FRAME_TRAVEL: f64 = 0.05;
+/// The integration steps of a study that picks its own rate come in multiples of this, so the
+/// frames can be every `s`-th step for many `s` (its divisors: 1, 2, 3, 4, 5, 6, 8, 10, 12, ...).
+const STEP_GRID: usize = 120;
+/// Bytes one frame number takes in the index (a full-precision number as JSON text, with its
+/// separator).
+pub const BYTES_PER_NUMBER: usize = 24;
 /// The longest integration step (s); each frame interval is split into equal steps no longer.
 pub const MAX_STEP: f64 = 2e-3;
 /// Standard gravity (m/s²), ISO 80000-3.
 pub const STANDARD_GRAVITY: f64 = 9.80665;
 
 /// A mate's load on one of the components it joins, at one instant: a force and a moment
-/// about the mate's connector on that component (world axes, N and N·m).
+/// about the mate's connector on that component (world axes, N and N·m). It is everything the
+/// mate passes to the component: the joint's reaction and any spring, damper or motor acting
+/// along the mate.
 #[derive(Clone, Debug, PartialEq, Serialize)]
 pub struct JointLoad {
     pub occurrence: String,
@@ -53,6 +70,47 @@ pub struct JointLoad {
     pub point: [f64; 3],
     pub force: [f64; 3],
     pub moment: [f64; 3],
+}
+
+/// A free body's motion at one frame, world axes: the centre of mass (m), its acceleration
+/// (m/s²), the angular velocity (rad/s) and the angular acceleration (rad/s²), from the same
+/// solve as the frame's reactions.
+#[derive(Clone, Copy, Debug, PartialEq, Serialize)]
+pub struct BodyState {
+    pub center: [f64; 3],
+    pub acceleration: [f64; 3],
+    pub angular_velocity: [f64; 3],
+    pub angular_acceleration: [f64; 3],
+}
+
+/// A free body of a dynamic study: its mass properties in its own frame (the occurrence's
+/// axes) and its motion frame by frame.
+#[derive(Clone, Debug, PartialEq, Serialize)]
+pub struct BodyMotion {
+    pub occurrence: String,
+    pub node: NodeId,
+    /// kg.
+    pub mass: f64,
+    /// The centre of mass in the body's own frame (m).
+    pub center: [f64; 3],
+    /// The inertia tensor about the centre of mass, body axes (kg·m²).
+    pub inertia: [[f64; 3]; 3],
+    pub frames: Vec<BodyState>,
+}
+
+impl BodyState {
+    /// The inertia load on a body in this state (d'Alembert): the force `−m a` and the moment
+    /// about the centre of mass `−(J α + ω × J ω)`, world axes, with `J` the body's inertia
+    /// turned into world axes by `rotation` (body to world).
+    pub fn inertia_load(&self, mass: f64, inertia: &[[f64; 3]; 3], rotation: &[[f64; 3]; 3]) -> ([f64; 3], [f64; 3]) {
+        // J_world = R J Rᵀ.
+        let j: [[f64; 3]; 3] = std::array::from_fn(|a| {
+            std::array::from_fn(|b| (0..3).map(|k| (0..3).map(|l| rotation[a][k] * inertia[k][l] * rotation[b][l]).sum::<f64>()).sum())
+        });
+        let (w, al) = (self.angular_velocity, self.angular_acceleration);
+        let m = dense::add(dense::mat3_vec(&j, al), dense::cross(w, dense::mat3_vec(&j, w)));
+        (dense::scale(self.acceleration, -mass), dense::scale(m, -1.0))
+    }
 }
 
 /// One mate's reaction loads, frame by frame.
@@ -297,9 +355,6 @@ pub(super) fn run_dynamic(
     if !limits.is_empty() {
         run.problems.push("joint limits are not enforced in a dynamic study; the run ignores them".into());
     }
-    let rate = study.rate.filter(|r| *r > 0.0 && r.is_finite()).unwrap_or(DYNAMIC_RATE);
-    let count = ((run.duration * rate).ceil() as usize + 1).clamp(2, MAX_FRAMES);
-    let dt = run.duration / (count - 1) as f64;
     // Each node rides on its nearest body (itself, or the body above it).
     let carried: Vec<Option<(usize, Transform)>> = (0..tree.nodes.len() as NodeId)
         .map(|n| {
@@ -314,14 +369,54 @@ pub(super) fn run_dynamic(
             None
         })
         .collect();
+    // The frames the index can carry: each holds a pose per carried node, three vectors per
+    // mate end and four per body, its time and its energy.
+    let numbers = 12 * carried.iter().flatten().count() + 18 * system.mates.len() + 12 * free.len() + 2;
+    let most = (ctx.frame_bytes / (numbers * BYTES_PER_NUMBER)).max(2) - 1;
+    let duration = run.duration;
+    let rate = study.rate.filter(|r| *r > 0.0 && r.is_finite());
+    // A set rate fixes the frames, each split into equal steps; else the steps come first and
+    // the motion picks every how many of them is a frame.
+    let (steps, per) = match rate {
+        Some(rate) => {
+            let intervals = ((duration * rate).ceil() as usize).clamp(1, most);
+            let per = (duration / intervals as f64 / MAX_STEP).ceil().max(1.0) as usize;
+            (intervals * per, Some(per))
+        }
+        None => (STEP_GRID * (duration / (MAX_STEP * STEP_GRID as f64)).ceil().max(1.0) as usize, None),
+    };
+    let h = duration / steps as f64;
     let u0 = vec![0.0; 6 * free.len()];
+    let (states, failed) = model.integrate(&system.values, &u0, steps, h);
+    let stride = per.unwrap_or_else(|| frame_stride(&model, &states, steps, h, most));
+    let dt = stride as f64 * h;
     let mut reactions: Vec<MateReaction> = system
         .mates
         .iter()
         .map(|m| MateReaction { mate: m.name.clone(), frames: Vec::new() })
         .collect();
+    let mut bodies: Vec<BodyMotion> = free
+        .iter()
+        .zip(&model.bodies)
+        .map(|(&n, b)| BodyMotion {
+            occurrence: tree.path(n),
+            node: n,
+            mass: b.mass.mass,
+            center: b.mass.center,
+            inertia: b.mass.inertia,
+            frames: Vec::new(),
+        })
+        .collect();
     let mut energy = Vec::new();
-    let result = model.simulate(&system.values, &u0, count, dt, MAX_STEP, |s: &Sample| {
+    for (k, state) in states.iter().step_by(stride).enumerate() {
+        let t = k as f64 * dt;
+        let s = match model.sample(t, &state.q, &state.u) {
+            Ok(s) => s,
+            Err(e) => {
+                run.stopped = Some((t, e));
+                break;
+            }
+        };
         run.times.push(s.time);
         let poses: Vec<Transform> = (0..free.len()).map(|i| model.pose(&s.q, i)).collect();
         run.frames.push(
@@ -336,16 +431,57 @@ pub(super) fn run_dynamic(
         );
         energy.push(model.energy(&s.q, &s.u));
         for (mate, out) in system.mates.iter().zip(reactions.iter_mut()) {
-            out.frames.push(joint_loads(&model, &tree, &free, s, mate));
+            out.frames.push(joint_loads(&model, &tree, &free, &s, mate));
         }
-    });
-    if let Err((t, why)) = result {
-        run.stopped = Some((t, why));
+        for (i, body) in bodies.iter_mut().enumerate() {
+            let a = poses[i].rotation;
+            let turn = |v: [f64; 3]| dense::mat3_vec(&a, v);
+            body.frames.push(BodyState {
+                center: model.center(&s.q, i),
+                acceleration: [s.udot[6 * i], s.udot[6 * i + 1], s.udot[6 * i + 2]],
+                angular_velocity: turn(model.body_rate(&s.u, i)),
+                angular_acceleration: turn([s.udot[6 * i + 3], s.udot[6 * i + 4], s.udot[6 * i + 5]]),
+            });
+        }
     }
+    if run.stopped.is_none() {
+        run.stopped = failed;
+    }
+    run.bodies = bodies;
     run.energy = energy;
     run.reactions = reactions;
     set_moving(run, base);
     run.track = track(study, base, run, ctx, dt);
+}
+
+/// Every how many of `states` (steps of `h`) a study that doesn't set its rate takes a frame:
+/// enough frames that no body turns more than [`FRAME_TURN`] or moves its centre more than
+/// [`FRAME_TRAVEL`] of its size between frames at its fastest, and at least [`DYNAMIC_RATE`] a
+/// second, up to `most` frame intervals. The stride divides `steps`, so the frames stay evenly
+/// spaced and end at the study's end.
+fn frame_stride(model: &Model<'_>, states: &[State], steps: usize, h: f64, most: usize) -> usize {
+    let duration = steps as f64 * h;
+    let norm = |v: [f64; 3]| dense::dot(v, v).sqrt();
+    let mut need = (duration * DYNAMIC_RATE).ceil();
+    for (i, b) in model.bodies.iter().enumerate() {
+        let j = b.mass.inertia;
+        let size = (6.0 * (j[0][0] + j[1][1] + j[2][2]) / b.mass.mass).sqrt();
+        for s in states {
+            need = need.max((duration * norm(model.body_rate(&s.u, i)) / FRAME_TURN).ceil());
+            if size > 0.0 {
+                need = need.max((duration * norm(model.center_velocity(&s.u, i)) / (FRAME_TRAVEL * size)).ceil());
+            }
+        }
+    }
+    let need = (need.min(usize::MAX as f64) as usize).clamp(1, most);
+    let divisors: Vec<usize> = (1..=steps).filter(|&d| steps.is_multiple_of(d)).collect();
+    // The longest stride giving `need` intervals, unless that is more than the index can carry.
+    let fine = divisors.iter().rev().copied().find(|&d| steps / d >= need).unwrap_or(1);
+    if steps / fine <= most {
+        fine
+    } else {
+        divisors.iter().copied().find(|&d| steps / d <= most).unwrap_or(steps)
+    }
 }
 
 /// Mate `mate`'s load on each free component it joins at sample `s`.
@@ -357,9 +493,18 @@ fn joint_loads(model: &Model<'_>, tree: &ResolvedAssembly, free: &[NodeId], s: &
             continue;
         };
         let Some(i) = model.body_index(*body) else { continue };
-        let (force, moment) = model.reaction_on(s, &rows, i);
+        // The joint's reaction, then the mate's springs, dampers and motors: a force at the
+        // centre of mass and a moment about it.
+        let (mut force, mut moment) = model.reaction_on(s, &rows, i);
+        let center = model.center(&s.q, i);
+        for load in model.loads.iter().filter(|l| (l.a, l.b) == (mate.a, mate.b)) {
+            if let Some((at, f, t)) = model.mate_load_on(&s.q, &s.u, load, i) {
+                force = dense::add(force, f);
+                moment = dense::add(moment, dense::add(t, dense::cross(dense::sub(at, center), f)));
+            }
+        }
         let point = model.connector(&s.q, connector).translation;
-        let arm = dense::sub(point, model.center(&s.q, i));
+        let arm = dense::sub(point, center);
         out.push(JointLoad {
             occurrence: tree.path(free[i]),
             node: free[i],
