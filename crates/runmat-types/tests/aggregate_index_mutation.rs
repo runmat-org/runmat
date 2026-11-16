@@ -118,6 +118,40 @@ fn numeric_linear_selection_shares_runtime_vector_orientation() {
 }
 
 #[test]
+fn partial_vector_selection_preserves_only_unambiguous_orientation() {
+    for (source, selector, expected) in [
+        (
+            vec![Some(1), None],
+            vec![Some(1), Some(22)],
+            Some(vec![Some(1), Some(22)]),
+        ),
+        (
+            vec![None, Some(1)],
+            vec![Some(22), Some(1)],
+            Some(vec![Some(22), Some(1)]),
+        ),
+        (vec![None, Some(1)], vec![Some(1), Some(22)], None),
+        (vec![Some(1), None], vec![Some(22), Some(1)], None),
+        (vec![None, None], vec![Some(1), Some(22)], None),
+    ] {
+        let result = infer_index(
+            &numeric(NumericClass::Double, ShapeFact::from(source)),
+            IndexKind::Paren,
+            &[IndexSelectorFact::Numeric(numeric(
+                NumericClass::Double,
+                ShapeFact::from(selector),
+            ))],
+            IndexResultContext::ReadSingle,
+        );
+        assert!(result.diagnostics.is_empty());
+        assert_eq!(
+            result.fact.shape,
+            expected.map_or(ShapeFact::Unknown, ShapeFact::from)
+        );
+    }
+}
+
+#[test]
 fn sequence_inference_keeps_zero_one_and_many_outputs_outside_value_facts() {
     let empty = infer_cell_aggregate(&[]).fact;
     let empty_sequence = infer_index_sequence(

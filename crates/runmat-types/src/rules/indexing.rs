@@ -334,6 +334,17 @@ fn numeric_selector_shape(base: &ShapeFact, selector: &ShapeFact) -> ShapeFact {
     if selector.element_count() == Some(1) {
         return ShapeFact::Scalar;
     }
+    if let (Some(source), Some(indices)) = (base.known_dims(), selector.known_dims()) {
+        // Equal vector orientations give the same result whether the source
+        // turns out to be scalar or non-scalar. Its length need not be known.
+        if source.len() == 2
+            && indices.len() == 2
+            && ((source[0] == Some(1) && indices[0] == Some(1))
+                || (source[1] == Some(1) && indices[1] == Some(1)))
+        {
+            return selector.clone();
+        }
+    }
     let exact = |shape: &ShapeFact| shape.known_dims()?.into_iter().collect::<Option<Vec<_>>>();
     let (Some(source), Some(indices)) = (exact(base), exact(selector)) else {
         // An unknown source can still be a row or column vector. The
