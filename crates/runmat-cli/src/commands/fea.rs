@@ -17,6 +17,7 @@ pub(crate) mod command;
 mod input_materialization;
 mod plan;
 mod preparation;
+mod progress;
 pub(crate) mod remote;
 pub(crate) mod result_presentation;
 mod run;

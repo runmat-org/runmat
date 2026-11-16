@@ -458,6 +458,19 @@ FEA runtime config is preferred. These environment variables are supported as fa
 - `RUNMAT_FEA_ARTIFACT_MAX_RUNS_PER_KIND`
 - `RUNMAT_FEA_STUDY_ARTIFACT_ROOT`
 
+Set `RUNMAT_FEA_PROGRESS=json` to follow a local `runmat run` of a `.fea` study. The CLI writes each progress event to standard error as one JSON line, `{"t_ms":<milliseconds since start>,"event":{...}}`, and leaves standard output unchanged. Each event names its `phase` (`geometry_load`, `mesh_prep`, `model_assembly`, `solve`, ...) and `status`. `advanced` events carry live counts in `current` and `total` and name the counted quantity in `metadata.unit`:
+
+| Phase | `metadata.unit` | Count |
+| --- | --- | --- |
+| `mesh_prep` | `surface_faces` | faces meshed of all faces in the model |
+| `mesh_prep` | `volume_points` | points inserted into the volume mesh (no total) |
+| `mesh_prep` | `quadratic_edges` | edges that received a quadratic midside node |
+| `model_assembly` | `elements` | elements assembled |
+| `solve` | `iterations` | iterative solver iterations; `metadata.residual` holds the relative residual |
+| `solve` | `factorization` | `0` of `1` when a direct factorization starts, `1` of `1` when it finishes |
+
+Element assembly and the solver run in a worker process after the run's `solve` phase starts, so `model_assembly` counts can arrive while `solve` is the open phase. Counts arrive at most about ten times per second per quantity. When a phase reports no new count for 2 seconds, the run sends a heartbeat: the last count again, with `metadata.heartbeat` set to `true` and `metadata.elapsedMs` set to the time since that phase began reporting (for counts from the solver worker, since its first count of that phase).
+
 ## Full Reference Example
 
 ```toml
