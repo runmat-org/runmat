@@ -24,6 +24,7 @@ mod captured_read;
 mod resource;
 mod selected_provider;
 mod staged_output;
+mod sync_access;
 mod unavailable;
 #[cfg(not(target_arch = "wasm32"))]
 pub use file_lock::ExclusiveFileLock;
@@ -70,6 +71,7 @@ pub use resource::{
 pub use sandbox::{CapturedIo, SandboxFsProvider};
 pub use selected_provider::SelectedFsProvider;
 pub use staged_output::{FsPublicationDisposition, FsPublicationFailure, FsStagedOutput};
+pub use sync_access::{is_synchronous_access_unavailable, SynchronousAccessUnavailable};
 pub use unavailable::UnavailableFsProvider;
 #[cfg(target_arch = "wasm32")]
 pub use wasm::PlaceholderFsProvider;
@@ -1062,7 +1064,14 @@ pub fn current_dir() -> io::Result<PathBuf> {
 }
 
 pub fn set_current_dir(path: impl AsRef<Path>) -> io::Result<()> {
-    futures::executor::block_on(set_current_dir_async(path.as_ref()))
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        futures::executor::block_on(set_current_dir_async(path.as_ref()))
+    }
+    #[cfg(target_arch = "wasm32")]
+    {
+        sync_access::poll_once("set_current_dir", set_current_dir_async(path.as_ref()))
+    }
 }
 
 pub async fn set_current_dir_async(path: impl AsRef<Path>) -> io::Result<()> {
@@ -1187,7 +1196,7 @@ pub async fn read_async(path: impl AsRef<Path>) -> io::Result<Vec<u8>> {
 
 pub fn read(path: impl AsRef<Path>) -> io::Result<Vec<u8>> {
     let path = path.as_ref().to_path_buf();
-    wait_for_fs(move || async move { read_async(path).await })
+    wait_for_fs("read", move || async move { read_async(path).await })
 }
 
 pub async fn atomic_create_new_async(
@@ -1204,7 +1213,9 @@ pub fn atomic_create_new(
 ) -> io::Result<AtomicCreateResult> {
     let path = path.as_ref().to_path_buf();
     let bytes = bytes.as_ref().to_vec();
-    wait_for_fs(move || async move { atomic_create_new_async(path, bytes).await })
+    wait_for_fs("atomic_create_new", move || async move {
+        atomic_create_new_async(path, bytes).await
+    })
 }
 
 pub async fn read_to_string_async(path: impl AsRef<Path>) -> io::Result<String> {
@@ -1214,7 +1225,9 @@ pub async fn read_to_string_async(path: impl AsRef<Path>) -> io::Result<String> 
 
 pub fn read_to_string(path: impl AsRef<Path>) -> io::Result<String> {
     let path = path.as_ref().to_path_buf();
-    wait_for_fs(move || async move { read_to_string_async(path).await })
+    wait_for_fs("read_to_string", move || async move {
+        read_to_string_async(path).await
+    })
 }
 
 pub async fn write_async(path: impl AsRef<Path>, data: impl AsRef<[u8]>) -> io::Result<()> {
@@ -1225,7 +1238,10 @@ pub async fn write_async(path: impl AsRef<Path>, data: impl AsRef<[u8]>) -> io::
 pub fn write(path: impl AsRef<Path>, data: impl AsRef<[u8]>) -> io::Result<()> {
     let path = path.as_ref().to_path_buf();
     let data = data.as_ref().to_vec();
-    wait_for_fs(move || async move { write_async(path, data).await })
+    wait_for_fs(
+        "write",
+        move || async move { write_async(path, data).await },
+    )
 }
 
 pub async fn remove_file_async(path: impl AsRef<Path>) -> io::Result<()> {
@@ -1235,7 +1251,9 @@ pub async fn remove_file_async(path: impl AsRef<Path>) -> io::Result<()> {
 
 pub fn remove_file(path: impl AsRef<Path>) -> io::Result<()> {
     let path = path.as_ref().to_path_buf();
-    wait_for_fs(move || async move { remove_file_async(path).await })
+    wait_for_fs("remove_file", move || async move {
+        remove_file_async(path).await
+    })
 }
 
 /// Remove through a retained provider without consulting process-global
@@ -1247,7 +1265,9 @@ pub fn remove_file_in_provider(
     path: impl AsRef<Path>,
 ) -> io::Result<()> {
     let path = path.as_ref().to_path_buf();
-    wait_for_fs(move || async move { provider.remove_file(&path).await })
+    wait_for_fs("remove_file_in_provider", move || async move {
+        provider.remove_file(&path).await
+    })
 }
 
 pub async fn metadata_async(path: impl AsRef<Path>) -> io::Result<FsMetadata> {
@@ -1257,7 +1277,10 @@ pub async fn metadata_async(path: impl AsRef<Path>) -> io::Result<FsMetadata> {
 
 pub fn metadata(path: impl AsRef<Path>) -> io::Result<FsMetadata> {
     let path = path.as_ref().to_path_buf();
-    wait_for_fs(move || async move { metadata_async(path).await })
+    wait_for_fs(
+        "metadata",
+        move || async move { metadata_async(path).await },
+    )
 }
 
 pub async fn symlink_metadata_async(path: impl AsRef<Path>) -> io::Result<FsMetadata> {
@@ -1267,7 +1290,9 @@ pub async fn symlink_metadata_async(path: impl AsRef<Path>) -> io::Result<FsMeta
 
 pub fn symlink_metadata(path: impl AsRef<Path>) -> io::Result<FsMetadata> {
     let path = path.as_ref().to_path_buf();
-    wait_for_fs(move || async move { symlink_metadata_async(path).await })
+    wait_for_fs("symlink_metadata", move || async move {
+        symlink_metadata_async(path).await
+    })
 }
 
 pub async fn read_dir_async(path: impl AsRef<Path>) -> io::Result<Vec<DirEntry>> {
@@ -1277,7 +1302,10 @@ pub async fn read_dir_async(path: impl AsRef<Path>) -> io::Result<Vec<DirEntry>>
 
 pub fn read_dir(path: impl AsRef<Path>) -> io::Result<Vec<DirEntry>> {
     let path = path.as_ref().to_path_buf();
-    wait_for_fs(move || async move { read_dir_async(path).await })
+    wait_for_fs(
+        "read_dir",
+        move || async move { read_dir_async(path).await },
+    )
 }
 
 pub async fn canonicalize_async(path: impl AsRef<Path>) -> io::Result<PathBuf> {
@@ -1297,7 +1325,9 @@ pub async fn create_dir_all_async(path: impl AsRef<Path>) -> io::Result<()> {
 
 pub fn create_dir_all(path: impl AsRef<Path>) -> io::Result<()> {
     let path = path.as_ref().to_path_buf();
-    wait_for_fs(move || async move { create_dir_all_async(path).await })
+    wait_for_fs("create_dir_all", move || async move {
+        create_dir_all_async(path).await
+    })
 }
 
 pub async fn remove_dir_async(path: impl AsRef<Path>) -> io::Result<()> {
@@ -1323,7 +1353,10 @@ pub async fn rename_replace_async(from: impl AsRef<Path>, to: impl AsRef<Path>) 
 pub fn rename(from: impl AsRef<Path>, to: impl AsRef<Path>) -> io::Result<()> {
     let from = from.as_ref().to_path_buf();
     let to = to.as_ref().to_path_buf();
-    wait_for_fs(move || async move { rename_async(from, to).await })
+    wait_for_fs(
+        "rename",
+        move || async move { rename_async(from, to).await },
+    )
 }
 
 pub async fn set_readonly_async(path: impl AsRef<Path>, readonly: bool) -> io::Result<()> {
@@ -1406,7 +1439,7 @@ pub use copy_stream::{copy_file_on_async, FsCopyCheckpoint, FsCopyError};
 mod copy_tests;
 
 #[cfg(not(target_arch = "wasm32"))]
-fn wait_for_fs<T, F, Fut>(factory: F) -> io::Result<T>
+fn wait_for_fs<T, F, Fut>(_operation: &'static str, factory: F) -> io::Result<T>
 where
     T: Send + 'static,
     F: FnOnce() -> Fut + Send + 'static,
@@ -1417,13 +1450,14 @@ where
         .map_err(|_| io::Error::other("filesystem worker thread panicked"))?
 }
 
+/// The browser cannot block on a provider operation; see [`sync_access`].
 #[cfg(target_arch = "wasm32")]
-fn wait_for_fs<T, F, Fut>(factory: F) -> io::Result<T>
+fn wait_for_fs<T, F, Fut>(operation: &'static str, factory: F) -> io::Result<T>
 where
     F: FnOnce() -> Fut,
     Fut: std::future::Future<Output = io::Result<T>>,
 {
-    futures::executor::block_on(factory())
+    sync_access::poll_once(operation, factory())
 }
 
 fn default_provider() -> Arc<dyn FsProvider> {
