@@ -92,6 +92,13 @@ fn deleting_a_copy_takes_its_connectors_and_mates_with_it() {
     );
     assert!(!deleted.contains("block2"), "{deleted}");
     // The block's own mate stays, and the assembly compiles without errors.
-    assert_eq!(deleted.matches("mate ").count(), 1, "{deleted}");
+    assert_eq!(
+        deleted
+            .lines()
+            .filter(|l| l.trim_start().starts_with("mate "))
+            .count(),
+        1,
+        "{deleted}"
+    );
     compile(&deleted);
 }
