@@ -470,8 +470,22 @@ pub(crate) fn image<S: Sink>(board: &Board, layer: GerberLayer, w: &mut S) {
         GerberLayer::Mask(side) | GerberLayer::Paste(side) => {
             let mask = matches!(layer, GerberLayer::Mask(_));
             let cl = side_layer(side);
+            // `mask_expansion` rules, when the board writes any.
+            let expansion = (mask
+                && board.rules.iter().any(|r| {
+                    r.decls
+                        .iter()
+                        .any(|(p, _)| p == crate::board_rules::props::MASK_EXPANSION)
+                }))
+            .then(|| {
+                let (mut rules, _) =
+                    crate::board_rules::BoardRules::new(&board.limits, &board.rules);
+                let graph = crate::board_rules::BoardGraph::new(board, &[]);
+                rules.rebuild(&graph);
+                (rules, graph)
+            });
             for f in board.footprints.values() {
-                for (pd, pp) in f.package.pads.iter().zip(f.pads(n)) {
+                for (k, (pd, pp)) in f.package.pads.iter().zip(f.pads(n)).enumerate() {
                     let on_side = pp.layers.contains(&cl) || (pd.kind == PadKind::Npth && mask);
                     if !on_side
                         || (mask && !pd.mask)
@@ -480,7 +494,17 @@ pub(crate) fn image<S: Sink>(board: &Board, layer: GerberLayer, w: &mut S) {
                         continue;
                     }
                     let grow = if mask {
-                        pd.mask_margin.unwrap_or(crate::geom::mm(0.05))
+                        pd.mask_margin
+                            .or_else(|| {
+                                expansion.as_ref().and_then(|(rules, graph)| {
+                                    rules.len(
+                                        graph,
+                                        crate::board_rules::BItem::Pad(f.id, k as u32),
+                                        crate::board_rules::props::MASK_EXPANSION,
+                                    )
+                                })
+                            })
+                            .unwrap_or(crate::geom::mm(0.05))
                     } else {
                         pd.paste_margin.unwrap_or(0)
                     };

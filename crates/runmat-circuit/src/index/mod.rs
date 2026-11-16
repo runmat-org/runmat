@@ -37,6 +37,10 @@ pub struct CircuitIndex {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub variant: Option<String>,
     pub variants: Vec<String>,
+    /// Each variant's fitting overrides, by designator (`C900` → `not_fitted`, `alternate
+    /// C0402-100N`), from the variant's `overrides` and the components' own `variants`.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub variant_fittings: BTreeMap<String, BTreeMap<String, String>>,
     pub hierarchy: Vec<SheetRow>,
     pub components: Vec<ComponentRow>,
     pub nets: Vec<NetRow>,
@@ -323,6 +327,49 @@ pub fn quantity_display(value: f64, dim: runmat_rules::Dim) -> String {
 }
 
 /// Builds the projection of an elaborated design and its schematic checks.
+/// [`CircuitIndex::variant_fittings`].
+fn variant_fittings(
+    design: &Design,
+    netlist: &Netlist,
+) -> BTreeMap<String, BTreeMap<String, String>> {
+    use crate::ir::{Fitting, PartRef};
+    let word = |f: &Fitting| match f {
+        Fitting::Fitted => "fitted".to_owned(),
+        Fitting::NotFitted => "not_fitted".to_owned(),
+        Fitting::Alternate {
+            part: Some(PartRef::Part(mpn)),
+            ..
+        } => format!("alternate {mpn}"),
+        Fitting::Alternate { .. } => "alternate".to_owned(),
+    };
+    let mut out: BTreeMap<String, BTreeMap<String, String>> = BTreeMap::new();
+    for (name, variant) in &design.variants {
+        let rows = out.entry(name.clone()).or_default();
+        for (key, f) in &variant.overrides {
+            for c in netlist
+                .components
+                .iter()
+                .filter(|c| c.path.to_string() == *key || c.designator == *key)
+            {
+                rows.insert(c.designator.clone(), word(f));
+            }
+        }
+    }
+    for c in &netlist.components {
+        let sheet = design.sheets.get(&c.sheet);
+        let Some(decl) = sheet.and_then(|s| s.components.iter().find(|d| d.name == c.path.leaf()))
+        else {
+            continue;
+        };
+        for (name, f) in &decl.variants {
+            out.entry(name.clone())
+                .or_default()
+                .insert(c.designator.clone(), word(f));
+        }
+    }
+    out
+}
+
 pub fn build_index(
     design: &Design,
     netlist: &Netlist,
@@ -538,6 +585,7 @@ pub fn build_index(
         design: design.name.clone(),
         variant: netlist.variant.clone(),
         variants: design.variants.keys().cloned().collect(),
+        variant_fittings: variant_fittings(design, netlist),
         hierarchy,
         components,
         nets,

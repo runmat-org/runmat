@@ -154,6 +154,7 @@ pub(super) fn run(project: &Project, request: &EditRequest) -> Result<EditOutput
     })
     .map_err(failure)?;
     Ok(EditOutput {
+        report: None,
         summary,
         files: vec![file_change(&layout.path, &layout.text, change)],
     })

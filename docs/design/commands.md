@@ -123,6 +123,8 @@ This file is generated from the command catalog.
 
 ## `board.` commands (`.circuit`, `.circuit.layout`)
 
+- `board.align`: Align or distribute components.
+  - Required: `align` (one of `left`, `right`, `top`, `bottom`, `center_x`, `center_y`, `distribute_x`, `distribute_y`, default `left`); `components` (picks: component)
 - `board.autoroute`: Route the unrouted connections of the picked nets, or of every net not on a plane.
   - Required: `width` (number in mm, default 0.2); `via` (text)
   - Optional: `nets` (picks: net); `layers` (text)
@@ -161,6 +163,8 @@ This file is generated from the command catalog.
   - Required: `items` (picks: component or track or via or pour); `dx` (number in mm, default 0); `dy` (number in mm, default 0); `rotation` (number in deg, default 0)
 - `board.outline`: Draw the board outline, or take it from an enclosure part.
   - Required: `source` (one of `draw`, `enclosure`, default `draw`); `points` (picks: point) when `source` is draw; `part` (text) when `source` is enclosure; `face` (pick: face) when `source` is enclosure
+- `board.place`: Place components from the schematic, all at once or one at a time.
+  - Required: `mode` (one of `from_schematic`, `single`, default `from_schematic`); `components` (picks: component) when `mode` is single; `side` (one of `top`, `bottom`, default `top`)
 - `board.place-via`: Place a via.
   - Required: `points` (picks: point); `size` (text); `span` (one of `through`, `blind`, `buried`, `micro`, default `through`)
   - Optional: `net` (pick: net)
@@ -173,6 +177,10 @@ This file is generated from the command catalog.
   - Required: `net` (pick: net or pad or track or via); `points` (picks: point); `width` (number in mm, default 0.15); `via` (text); `layer` (text); `mode` (one of `walkaround`, `ignore`, `stop`, default `walkaround`); `corner` (one of `45`, `90`, `arc45`, `any`, default `45`)
 - `board.route-net`: Route the net's open connections with the interactive router.
   - Runs on the `selection`: `net`
+- `board.rules`: Add or edit a design rule: clearance, width, via, pair, length, impedance, plane, mask or silk.
+  - Required: `kind` (one of `clearance`, `width`, `via`, `diff_pair`, `length`, `impedance`, `plane`, `mask`, `silk`, default `clearance`); `applies` (text); `value` (text); `priority` (whole number, default 1)
+  - Optional: `name` (text)
+  - Runs on the `selection`: `rule`
 - `board.stitch`: Stitch a pour with vias, or shield a net with a row of them.
   - Required: `mode` (one of `stitch`, `shield`, default `stitch`); `target` (pick: pour or net); `shield_net` (text) when `mode` is shield; `pitch` (number in mm, default 1.5); `via` (text)
 - `board.teardrops`: Add or remove teardrops at pads and vias.
@@ -191,14 +199,32 @@ This file is generated from the command catalog.
 
 ## `circuit.` commands (`.circuit`, `.circuit.layout`)
 
+- `circuit.change-part`: Replace the component's part with another from the pool; pins map by name.
+  - Required: `part` (text)
+  - Runs on the `selection`: `component`
 - `circuit.delete`: Delete the selected items.
-  - Runs on the `selection`: `component`, `wire`, `track`, `via`, `zone`, `keepout`, `room`
+  - Runs on the `selection`: `component`, `wire`, `track`, `via`, `zone`, `keepout`, `room`, `rule`
 - `circuit.edit-value`: Set the component's value with its unit and tolerance.
   - Required: `value` (text)
   - Runs on the `selection`: `component`
+- `circuit.fitted`: Fit, leave out or substitute the component in the current variant.
+  - Required: `fitting` (one of `fitted`, `not_fitted`, `alternate`, default `fitted`); `part` (text) when `fitting` is alternate
+  - Optional: `variant` (text)
+  - Runs on the `selection`: `component`
+- `circuit.footprint`: Use another of the part's footprints.
+  - Required: `footprint` (text)
+  - Runs on the `selection`: `component`
+- `circuit.net-class`: Put the nets in a net class; its rules apply on the board.
+  - Required: `class` (text)
+  - Runs on the `selection`: `net`
+- `circuit.net-length`: Report the net's routed and unrouted length.
+  - Runs on the `selection`: `net`
 - `circuit.rename-net`: Rename the net; labels and ports follow.
   - Required: `name` (text)
   - Runs on the `selection`: `net`
+- `circuit.swap-pins`: Swap equivalent pins or gates to shorten routes; the schematic follows.
+  - Required: `swap` (one of `pins`, `gates`, default `pins`); `pins` (text) when `swap` is pins; `gates` (text) when `swap` is gates
+  - Runs on the `selection`: `component`
 
 ## `direct.` commands (`.part`)
 

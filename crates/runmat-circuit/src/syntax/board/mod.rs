@@ -23,7 +23,7 @@
 //!     cutout = [[40, 30], [40, 50], [60, 50], [60, 30]]
 //!     limits = { clearance = 0.15, track = 0.15, via_diameter = 0.45, drill = 0.2, … }
 //!     net_class power = { track_width = 0.5 mm, clearance = 0.2 mm }
-//!     rule hv = { select = ":net-class(hv)", clearance = 0.8 mm, priority = 2 }
+//!     rule hv = { between = [":net-class(hv)", "*"], clearance = 0.8 mm, priority = 2 }
 //!     rule hv_lv = { between = [":net-class(hv)", ":net-class(lv)"], clearance = 1.5 mm }
 //!     net GND : power
 //!     net "+3V3" : power
