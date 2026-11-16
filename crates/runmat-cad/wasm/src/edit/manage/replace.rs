@@ -42,7 +42,7 @@ fn target(picks: &Picks, old: &str, new: &str) -> Result<Target, EditFailure> {
     if let Ok(sketch) = picks.sketch(old) {
         let with = picks.sketch(new).map_err(|_| {
             model(format!(
-                "`{old}` is a sketch, so replace it with another sketch"
+                "{sketch} is a sketch; replace it with another sketch"
             ))
         })?;
         return Ok(Target::Sketch(sketch, with));
@@ -58,7 +58,9 @@ fn target(picks: &Picks, old: &str, new: &str) -> Result<Target, EditFailure> {
     let (a, b) = (topo(&was), topo(&with));
     if a != b {
         return Err(model(format!(
-            "`{old}` is a {a} and `{new}` is a {b}; replace a {a} with another {a}"
+            "{} is a {a} and {} is a {b}; replace a {a} with another {a}",
+            shown(old),
+            shown(new)
         )));
     }
     Ok(Target::Reference(was, with))
@@ -370,7 +372,7 @@ mod tests {
         let out = run(json!({ "reference": "sketch:s2", "with": "feature.body.face.end" }));
         assert_eq!(
             out["message"],
-            "`sketch:s2` is a sketch, so replace it with another sketch"
+            "s2 is a sketch; replace it with another sketch"
         );
         let out = run(json!({ "reference": "feature.body.face.end" }));
         assert_eq!(out["message"], "pick the reference to use instead");
