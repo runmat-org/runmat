@@ -44,6 +44,11 @@ use opentelemetry::Context as OtelContext;
 
 const DEFAULT_LOG_FILTER: &str = "info";
 
+/// The trace feed records spans and events at this level and above, whatever the
+/// log level is. The runtime's spans are INFO.
+const TRACE_FEED_LEVEL: tracing_subscriber::filter::LevelFilter =
+    tracing_subscriber::filter::LevelFilter::INFO;
+
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct RuntimeLogRecord {
@@ -234,80 +239,64 @@ fn init_logging_impl(
         .unwrap_or_else(|_| EnvFilter::new(fallback_filter));
 
     let build_subscriber = || {
-        let bridge_layer = LogBridgeLayer;
-        let trace_layer = if opts.enable_traces {
-            Some(TraceBridgeLayer { pid: opts.pid })
-        } else {
-            None
-        };
-
         #[cfg(not(target_arch = "wasm32"))]
-        {
-            let (filter_layer, filter_handle) = reload::Layer::new(env_filter.clone());
-            let subscriber = tracing_subscriber::registry()
-                .with(filter_layer)
-                .with(file_sink.as_ref().map(|sink| {
-                    tracing_subscriber::fmt::layer()
-                        .with_ansi(false)
-                        .with_writer(sink.clone())
-                        .log_internal_errors(false)
-                        .with_span_events(
-                            tracing_subscriber::fmt::format::FmtSpan::NEW
-                                | tracing_subscriber::fmt::format::FmtSpan::CLOSE,
-                        )
-                }))
-                .with(bridge_layer)
-                .with(trace_layer.clone());
-            (subscriber, Some(filter_handle))
-        }
-
+        let file_layer = file_sink.as_ref().map(|sink| {
+            tracing_subscriber::fmt::layer()
+                .with_ansi(false)
+                .with_writer(sink.clone())
+                .log_internal_errors(false)
+                .with_span_events(
+                    tracing_subscriber::fmt::format::FmtSpan::NEW
+                        | tracing_subscriber::fmt::format::FmtSpan::CLOSE,
+                )
+        });
         #[cfg(target_arch = "wasm32")]
-        {
-            let (filter_layer, filter_handle) = reload::Layer::new(env_filter.clone());
-            let subscriber = tracing_subscriber::registry()
-                .with(filter_layer)
-                .with(bridge_layer)
-                .with(trace_layer.clone());
-            (subscriber, Some(filter_handle))
-        }
+        let file_layer: Option<tracing_subscriber::layer::Identity> = None;
+
+        #[cfg(all(feature = "otlp", not(target_arch = "wasm32")))]
+        let collector_layer = opts.enable_otlp.then(otel_layer).flatten();
+        #[cfg(all(feature = "browser-otlp", target_arch = "wasm32"))]
+        let collector_layer = opts
+            .enable_otlp
+            .then(browser_otel::browser_otel_layer)
+            .flatten();
+        #[cfg(not(any(
+            all(feature = "otlp", not(target_arch = "wasm32")),
+            all(feature = "browser-otlp", target_arch = "wasm32")
+        )))]
+        let collector_layer: Option<tracing_subscriber::layer::Identity> = None;
+
+        // The log level (default filter, RUST_LOG/RUNMAT_LOG, update_log_filter) selects
+        // the log feed, the file and the collector export. The trace feed has its own
+        // floor, so a quiet log level never empties a run's spans.
+        let (filter_layer, filter_handle) = reload::Layer::new(env_filter.clone());
+        let log_layers = LogBridgeLayer
+            .and_then(file_layer)
+            .and_then(collector_layer)
+            .with_filter(filter_layer);
+        let trace_layer = opts
+            .enable_traces
+            .then(|| TraceBridgeLayer { pid: opts.pid }.with_filter(TRACE_FEED_LEVEL));
+        let subscriber = tracing_subscriber::registry()
+            .with(log_layers)
+            .with(trace_layer);
+        (subscriber, filter_handle)
     };
 
     let (subscriber, filter_handle) = build_subscriber();
-
-    #[cfg(all(feature = "otlp", not(target_arch = "wasm32")))]
-    let subscriber = { subscriber.with(opts.enable_otlp.then(otel_layer).flatten()) };
-    #[cfg(all(feature = "browser-otlp", target_arch = "wasm32"))]
-    let subscriber = subscriber.with(
-        opts.enable_otlp
-            .then(browser_otel::browser_otel_layer)
-            .flatten(),
-    );
 
     let guard = match tracing::subscriber::set_global_default(subscriber) {
         Ok(()) => {
             // Only the installed subscriber's handle is live; a dropped one reports
             // "subscriber no longer exists" on every reload.
-            if let Some(handle) = filter_handle {
-                set_log_filter_reloader(move |spec| {
-                    let filter = EnvFilter::try_new(spec).map_err(|err| err.to_string())?;
-                    handle.reload(filter).map_err(|err| err.to_string())
-                });
-            }
+            set_log_filter_reloader(move |spec| {
+                let filter = EnvFilter::try_new(spec).map_err(|err| err.to_string())?;
+                filter_handle.reload(filter).map_err(|err| err.to_string())
+            });
             None
         }
         Err(_) if global_only => return Err("Another tracing subscriber is already installed; configured file logging was not activated".into()),
-        Err(_) => {
-            let subscriber = build_subscriber().0;
-            #[cfg(all(feature = "otlp", not(target_arch = "wasm32")))]
-            let subscriber = subscriber.with(opts.enable_otlp.then(otel_layer).flatten());
-            #[cfg(all(feature = "browser-otlp", target_arch = "wasm32"))]
-            let subscriber = subscriber.with(
-                opts.enable_otlp
-                    .then(browser_otel::browser_otel_layer)
-                    .flatten(),
-            );
-            Some(tracing::subscriber::set_default(subscriber))
-        }
+        Err(_) => Some(tracing::subscriber::set_default(build_subscriber().0)),
     };
 
     Ok(LoggingGuard {
