@@ -1257,6 +1257,7 @@ mod task_completion_tests {
         let driver = LocalDriver::new(
             crate::NativeExecutionConfig {
                 local_fea_organization: Default::default(),
+                progress_observer: Default::default(),
                 executable: std::env::current_exe().unwrap(),
                 worker_arguments: vec!["--execution-worker".into()],
                 max_workers: 3,

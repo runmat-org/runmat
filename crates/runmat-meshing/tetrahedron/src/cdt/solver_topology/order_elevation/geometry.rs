@@ -114,9 +114,11 @@ pub(super) fn append_midpoint_nodes<'source, 'control>(
         },
     )?;
     let mut midpoint_by_edge = MidpointMap::new(edge_inventory.groups.len(), evaluation.control)?;
+    let edge_total = edge_inventory.groups.len() as u64;
     for (work, (edge, owners)) in edge_inventory.groups.iter().enumerate() {
         let edge = *edge;
         checkpoint(work as u64, options, cancellation)?;
+        report_quadratic_edges(work as u64, edge_total);
         let left = topology
             .nodes
             .get(node_slot(&topology.nodes, edge[0])?)
@@ -151,7 +153,24 @@ pub(super) fn append_midpoint_nodes<'source, 'control>(
         });
         midpoint_by_edge.push(edge, node_id)?;
     }
+    runmat_meshing_core::work_count::report_work(
+        runmat_meshing_core::work_count::MeshingWorkUnit::QuadraticEdges,
+        edge_total,
+        Some(edge_total),
+    );
     Ok(midpoint_by_edge)
+}
+
+fn report_quadratic_edges(done: u64, total: u64) {
+    if done > 0
+        && done.is_multiple_of(runmat_meshing_core::work_count::QUADRATIC_EDGE_REPORT_INTERVAL)
+    {
+        runmat_meshing_core::work_count::report_work(
+            runmat_meshing_core::work_count::MeshingWorkUnit::QuadraticEdges,
+            done,
+            Some(total),
+        );
+    }
 }
 
 fn boundary_parameter_checkpoint(

@@ -67,6 +67,11 @@ fn multigrid_static_plan_covers_the_measured_solve() {
 }
 
 #[test]
+fn factor_static_plan_covers_the_measured_solve() {
+    elastic_static_path::factor_plan_covers_the_measured_solve();
+}
+
+#[test]
 fn solved_tet10_recovery_estimator_decreases_under_uniform_refinement() {
     cantilever_refinement::qualify();
 }

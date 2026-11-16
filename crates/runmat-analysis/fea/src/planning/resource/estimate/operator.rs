@@ -172,12 +172,14 @@ pub(super) fn build_operator_resource_plan_with_persistent_storage(
         ],
         "persistent numerical memory",
     )?;
+    let operator_preparation_bytes = demand.solve.preparation_bytes_upper_bound();
     let solve_phase = sum(
         &[
             workspace_bytes.0,
             preconditioner_bytes.0,
             factorization_bytes.0,
             demand.solve.transpose_index_bytes_upper_bound().0,
+            operator_preparation_bytes.0,
         ],
         "solve phase memory",
     )?;
@@ -352,6 +354,7 @@ pub(super) fn build_operator_resource_plan_with_persistent_storage(
         workspace_bytes,
         preconditioner_bytes,
         factorization_bytes,
+        operator_preparation_bytes,
         constraint_bytes,
         phase_resident_bytes,
         phase_scratch_bytes: demand.phase_resources.scratch_bytes,

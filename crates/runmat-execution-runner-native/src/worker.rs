@@ -52,6 +52,10 @@ async fn run_program_worker(
     // validated its launch. Meshing uses the same bootstrap without GPU setup.
     runmat_accelerate::initialize_acceleration_provider();
     let channel = bootstrap.channel.clone();
+    crate::analysis_progress::attach_worker_writer(
+        channel.writer().clone(),
+        WORKER_MAX_MESSAGE_BYTES,
+    );
     let spmd_task = match &request {
         WorkerLaunchRequest::Direct(direct) => match direct.as_ref() {
             WorkerRequest::Direct(request) => match &request.context {

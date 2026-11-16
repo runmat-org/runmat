@@ -23,6 +23,9 @@ const MESHING_PROGRESS_MEDIA_TYPE: &str = "application/vnd.runmat.meshing-progre
 const MESHING_PROGRESS_VALUE_SCHEMA: &str = "runmat.meshing.progress.v2";
 const PROGRESS_CHANNEL_CAPACITY: usize = 256;
 
+pub(crate) mod progress;
+pub(crate) use progress::decode_work_count;
+
 #[derive(Default)]
 struct ParentConnectionCancellation {
     stopped: AtomicBool,
@@ -210,10 +213,10 @@ async fn run_meshing_worker(
     // thread. Retain its owner until the blocking task physically returns.
     let mut execution = tokio::task::spawn_blocking(move || {
         let mut store = store;
-        let mut progress = ChannelProgress {
-            sender: progress_sender,
-            error: sink_error,
-        };
+        let frames = progress::ProgressFrames::new(progress_sender, sink_error);
+        let _work_counts =
+            runmat_meshing_core::work_count::install_work_observer(frames.work_observer());
+        let mut progress = progress::ChannelProgress(frames);
         let mut run = || {
             runmat_cpu_execution::with_cpu_pool_cancellable(
                 cpu_threads,
@@ -322,24 +325,6 @@ async fn run_meshing_worker(
             .map_err(|error| NativeExecutionError::Protocol(error.to_string()))?;
     }
     Ok(response)
-}
-
-struct ChannelProgress {
-    sender: tokio::sync::mpsc::Sender<ProgramProgress>,
-    error: Arc<Mutex<Option<String>>>,
-}
-
-impl MeshingProgressSink for ChannelProgress {
-    fn record(&mut self, progress: &MeshingProgress) {
-        let message = encode_meshing_progress(progress).and_then(|progress| {
-            self.sender
-                .blocking_send(progress)
-                .map_err(|_| "native progress receiver closed".to_string())
-        });
-        if let Err(error) = message {
-            *self.error.lock().expect("meshing progress error poisoned") = Some(error);
-        }
-    }
 }
 
 pub(crate) fn encode_meshing_progress(
