@@ -79,6 +79,7 @@ fn shell_driver(script: &str) -> (tempfile::TempDir, Arc<LocalDriver>) {
     let driver = LocalDriver::new(
         crate::NativeExecutionConfig {
             local_fea_organization: Default::default(),
+            progress_observer: Default::default(),
             executable: if script == "private-control-exit" {
                 std::env::current_exe().expect("test executable")
             } else {

@@ -98,6 +98,7 @@ async fn execute_study(
                     backend: execution.compute.backend,
                     accelerators: execution.compute.accelerators.clone(),
                     accelerator_placement: execution.compute.placement.clone(),
+                    progress_observer: super::progress::observer_from_env(),
                     ..Default::default()
                 },
             )
@@ -160,6 +161,7 @@ async fn execute_sweep(
                     backend: execution.compute.backend,
                     accelerators: execution.compute.accelerators.clone(),
                     accelerator_placement: execution.compute.placement.clone(),
+                    progress_observer: super::progress::observer_from_env(),
                     ..Default::default()
                 },
             )
