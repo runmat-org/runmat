@@ -25,8 +25,11 @@ Pass the effective layered configuration as `otel::OtelOptions` to
 `configure_otel(options, StartupHeaders(keychain_headers))` before installing the
 subscriber. `init_logging` with `enable_otlp: true` attaches the configured layer.
 Hosts that own their subscriber attach `otel_layer()` and
-`runtime_bridge_layer(...)` instead. The latter forwards the same runtime events
-to OTLP logs; those records carry the real OpenTelemetry trace/span context.
+`runtime_log_bridge_layer()` under their log level filter, as a per-layer filter,
+and attach `runtime_trace_bridge_layer(pid)` beside them without that filter. The
+log bridge forwards the same runtime events to OTLP logs; those records carry the
+real OpenTelemetry trace/span context. The trace bridge keeps its own
+INFO floor, so a quiet log level leaves the trace feed whole.
 Do not register a second exporter/subscriber for the same process.
 Product hosts that install their subscriber before opening the first project
 attach `retained_otel_layer()` permanently instead. It retains SDK context even
@@ -139,7 +142,8 @@ waits are bounded to 15 seconds and return an explicit timeout on a backlog.
 
 Build `runmat-logging` with `browser-otlp`, call
 `browser_otel::configure_browser_otel` before subscriber installation, and attach
-`browser_otel_layer()` plus `runtime_bridge_layer(...)` (or use `init_logging`).
+`browser_otel_layer()` and `runtime_log_bridge_layer()` under the log level
+filter, plus `runtime_trace_bridge_layer(pid)` beside them (or use `init_logging`).
 The browser uses the same SDK span model and generated OTLP protobuf messages,
 an asynchronous bounded queue, and Fetch with credentials omitted. It supports
 HTTP/protobuf only; selecting gRPC is an explicit error. Startup headers are

@@ -143,13 +143,25 @@ where
     let _ = LOG_FILTER_RELOADER.set(Box::new(reloader));
 }
 
-/// The layer that forwards events to the runtime log and trace hooks, for hosts
-/// that build their own subscriber instead of calling [`init_logging`].
-pub fn runtime_bridge_layer<S>(enable_traces: bool, pid: i64) -> impl Layer<S>
+/// The layer that forwards events to the runtime log hook, for hosts that build
+/// their own subscriber instead of calling [`init_logging`]. Put it under the
+/// host's log level filter, as a per-layer filter, so the level never reaches
+/// [`runtime_trace_bridge_layer`].
+pub fn runtime_log_bridge_layer<S>() -> impl Layer<S>
 where
     S: Subscriber + for<'a> tracing_subscriber::registry::LookupSpan<'a>,
 {
-    LogBridgeLayer.and_then(enable_traces.then_some(TraceBridgeLayer { pid }))
+    LogBridgeLayer
+}
+
+/// The layer that forwards spans and events to the runtime trace hook, with the
+/// trace feed's own INFO floor. Hosts add it beside their log layers and outside
+/// any log level filter, so a quiet log level never empties a run's trace.
+pub fn runtime_trace_bridge_layer<S>(pid: i64) -> impl Layer<S>
+where
+    S: Subscriber + for<'a> tracing_subscriber::registry::LookupSpan<'a>,
+{
+    TraceBridgeLayer { pid }.with_filter(TRACE_FEED_LEVEL)
 }
 
 #[derive(Clone, Default)]
@@ -270,13 +282,13 @@ fn init_logging_impl(
         // the log feed, the file and the collector export. The trace feed has its own
         // floor, so a quiet log level never empties a run's spans.
         let (filter_layer, filter_handle) = reload::Layer::new(env_filter.clone());
-        let log_layers = LogBridgeLayer
+        let log_layers = runtime_log_bridge_layer()
             .and_then(file_layer)
             .and_then(collector_layer)
             .with_filter(filter_layer);
         let trace_layer = opts
             .enable_traces
-            .then(|| TraceBridgeLayer { pid: opts.pid }.with_filter(TRACE_FEED_LEVEL));
+            .then(|| runtime_trace_bridge_layer(opts.pid));
         let subscriber = tracing_subscriber::registry()
             .with(log_layers)
             .with(trace_layer);
