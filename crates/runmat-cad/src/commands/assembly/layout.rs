@@ -204,50 +204,95 @@ pub(super) fn layout() -> Vec<CommandDescriptor> {
             "Drag a component through its remaining degrees of freedom.",
         )
         .inputs(vec![
-            pick("component", "Component", &[K::Occurrence]),
-            flag("collisions", "Stop at collisions", true),
+            pick("component", "Component", &[K::Occurrence])
+                .help("A floating component; the handle sits at its centre."),
+            offset("dx", "Pull X", 0.0)
+                .drag(Manipulator::Triad)
+                .help("How far the handle is pulled; the mates decide where the component goes."),
+            offset("dy", "Pull Y", 0.0),
+            offset("dz", "Pull Z", 0.0),
+            flag("collisions", "Stop at collisions", true)
+                .help("Stop at the last pose clear of the components it starts apart from."),
         ])
         .when(has(Facet::Mates))
         .preview()
-        .edit(edit(EditOp::Analyze, Section::Motion).item("drag")),
+        .edit(edit(EditOp::Set, Section::Occurrences).item("transform")),
         asm(
             "motion.collision",
             "Collision detection",
             "collision",
-            "Stop or highlight when moving components touch.",
+            "Check a motion study for components that meet as they move.",
         )
         .inputs(vec![
+            pick("study", "Study", &[K::MotionStudy])
+                .optional()
+                .help("Leave empty when the assembly has one motion study."),
             radio(
                 "mode",
                 "On contact",
                 &[("stop", "Stop"), ("highlight", "Highlight")],
-            ),
-            picks("components", "Check", &[K::Occurrence]).optional(),
+            )
+            .help("Stop reports the first contact between components that start apart; Highlight lists every contact over the whole study."),
+            picks("components", "Check", &[K::Occurrence])
+                .optional()
+                .help("Leave empty to check every moving component against the rest."),
         ])
+        .when(has(Facet::Mates))
+        .on(&[K::MotionStudy])
         .edit(edit(EditOp::Analyze, Section::Motion).item("collision")),
         asm(
             "motion.mate-controller",
             "Mate controller",
             "controller",
-            "Save named positions of mates and step between them.",
+            "Save named positions of mates and move the mechanism between them.",
         )
         .inputs(vec![
-            text("name", "Position", Some("open")),
-            picks("mates", "Mates", &[K::Mate]),
+            text("name", "Position", Some("open"))
+                .help("An existing position's name saves over that position."),
+            radio(
+                "action",
+                "Action",
+                &[("save", "Save values"), ("move", "Move to position")],
+            ),
+            picks("mates", "Mates", &[K::Mate])
+                .optional()
+                .shown("action", &["save"])
+                .help("The mates whose current values the position keeps. Leave empty to save a position's mates again."),
         ])
         .when(has(Facet::Mates))
+        .on(&[K::MatePosition])
         .edit(edit(EditOp::Add, Section::Motion).item("position")),
         asm(
             "motion.animation",
             "Animation study",
             "animation",
-            "Animate mates over time.",
+            "Drive a mate through a range over time and play the solved motion.",
         )
         .inputs(vec![
-            text("name", "Name", Some("open-close")),
-            qty("duration", "Duration", "time", Some(5.0)),
+            text("name", "Name", Some("open_close"))
+                .help("An existing study's name changes that study."),
+            pick("mate", "Mate", &[K::Mate])
+                .help("A revolute, slider, cylindrical, distance or angle mate."),
+            choice("quantity", "Drive", &[("angle", "Angle"), ("distance", "Distance")]),
+            angle("from_angle", "From", 0.0).shown("quantity", &["angle"]),
+            angle("to_angle", "To", 90.0).shown("quantity", &["angle"]),
+            offset("from_distance", "From", 0.0).shown("quantity", &["distance"]),
+            offset("to_distance", "To", 50.0).shown("quantity", &["distance"]),
+            qty("duration", "Duration", "time", Some(4.0)),
+            choice(
+                "profile",
+                "Motion",
+                &[
+                    ("linear", "Constant speed"),
+                    ("cycloidal", "Smooth start and stop"),
+                ],
+            ),
+            pick("track", "Plot", &[K::Occurrence])
+                .optional()
+                .help("The component whose speed and acceleration are plotted; the first moving one when empty."),
         ])
         .when(has(Facet::Mates))
+        .on(&[K::MotionStudy])
         .edit(edit(EditOp::Add, Section::Motion).item("animation")),
         asm(
             "motion.basic",

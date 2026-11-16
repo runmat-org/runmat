@@ -228,6 +228,20 @@ pub struct ResolveRequest {
     pub solve_mates: bool,
     pub expand_fasteners: bool,
     pub solve_options: runmat_constraint::SolveOptions,
+    /// A drag through the mechanism's remaining freedom ([`DragTarget`]).
+    pub drag: Option<DragTarget>,
+}
+
+/// A top-level component pulled toward a point by the mate solve: its point `grab` (the
+/// component's own frame, metres) goes to `to` (top assembly frame, metres) as a soft target, so
+/// every mate still holds and the point ends as near the target as the mates allow. A component
+/// with no freedom left stays where it is.
+#[derive(Clone, Debug, PartialEq)]
+pub struct DragTarget {
+    /// The top-level occurrence's name.
+    pub occurrence: String,
+    pub grab: [f64; 3],
+    pub to: [f64; 3],
 }
 
 impl Default for ResolveRequest {
@@ -241,6 +255,7 @@ impl Default for ResolveRequest {
             solve_mates: true,
             expand_fasteners: true,
             solve_options: runmat_constraint::SolveOptions::default(),
+            drag: None,
         }
     }
 }

@@ -891,6 +891,14 @@ fn compile_assembly_with(
             "exploded".into(),
             crate::exploded::exploded_views(&resolved, &source),
         );
+        row.insert(
+            "motion".into(),
+            crate::motion::motion_studies(&resolved, &source),
+        );
+        row.insert(
+            "positions".into(),
+            crate::motion::mate_positions(&resolved, &source),
+        );
     }
     Ok((index, display, problems))
 }
@@ -917,6 +925,14 @@ pub fn assembly_index(
         row.insert(
             "exploded".into(),
             crate::exploded::exploded_views(&resolved, &source),
+        );
+        row.insert(
+            "motion".into(),
+            crate::motion::motion_studies(&resolved, &source),
+        );
+        row.insert(
+            "positions".into(),
+            crate::motion::mate_positions(&resolved, &source),
         );
     }
     Ok((index, problems))

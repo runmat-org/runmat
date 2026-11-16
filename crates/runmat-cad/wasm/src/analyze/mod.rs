@@ -44,6 +44,9 @@
 //! - `assembly.hole-alignment`, `assembly.hole-check`: holes in different parts that meet and
 //!   whether they line up; the check adds each fastener's hole fit and grip ([`holes`]).
 //!
+//! - `motion.collision`: interference at every solved frame of a motion study
+//!   ([`motion_collision`]).
+//!
 //! `values.configuration` names the active configuration. Rows name occurrences by path in
 //! `items`, so selecting a row selects them.
 
@@ -55,6 +58,7 @@ mod dfm;
 mod field;
 mod holes;
 mod interfaces;
+mod motion_collision;
 mod section_properties;
 mod sketch_check;
 mod thickness;
@@ -777,6 +781,14 @@ pub fn analyze(
             &request.selection,
         ),
         "view.measure" => crate::measure::measure(path, text, files, &request.values),
+        "motion.collision" if assembly => motion_collision::collision(
+            path,
+            text,
+            files,
+            configuration,
+            &request.values,
+            &request.selection,
+        ),
         "assembly.interface-check" if assembly => {
             interfaces::interface_check(path, text, files, configuration, &request.values)
         }

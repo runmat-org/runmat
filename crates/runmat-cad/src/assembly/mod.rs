@@ -11,6 +11,8 @@
 //! - [`representation`]: representations, load levels R0–R3 and working sets.
 //! - [`bom`]: configuration-aware BOM and where-used.
 //! - [`explode`]: named exploded states (ordered and radial steps, explode lines with jogs).
+//! - [`motion`]: motion studies (mates driven over time, solved frame by frame) and named mate
+//!   positions.
 //! - [`sketches`]: sketches in the assembly, on its origin planes or its connectors.
 //! - [`interference`]: interference and clearance requests through the kernel seam.
 //! - [`index`]: the assembly JSON index and summary cards; [`interface_rows`]: its mate
@@ -26,6 +28,7 @@ mod cam;
 pub mod interface_rows;
 mod mates;
 pub mod model;
+pub mod motion;
 pub mod operations;
 pub mod options;
 mod place;

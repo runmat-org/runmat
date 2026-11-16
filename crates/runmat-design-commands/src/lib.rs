@@ -158,6 +158,10 @@ pub enum SelectKind {
     ExplodeStep,
     /// A name the assembly publishes (`publish:<name>`).
     Publish,
+    /// A motion study of the assembly (`motion:<name>`).
+    MotionStudy,
+    /// A named mate position of the assembly (`position:<name>`).
+    MatePosition,
     // Drawing.
     Sheet,
     View,
@@ -215,6 +219,8 @@ impl SelectKind {
             Hole => "hole",
             ExplodeStep => "explode step",
             Publish => "published item",
+            MotionStudy => "motion study",
+            MatePosition => "mate position",
             Sheet => "sheet",
             View => "view",
             Annotation => "annotation",

@@ -432,7 +432,39 @@ impl<'a, 'b> Resolver<'a, 'b> {
             }
         }
         let watch = Stopwatch::start(self.meter);
-        let report = rc::solve(&sys, &self.req.solve_options);
+        // A drag pulls a point of its top-level component toward the target as a soft goal: a
+        // free handle body, ball-jointed to the grabbed point, is what the drag moves.
+        let drag = self
+            .req
+            .drag
+            .as_ref()
+            .filter(|_| root == 0)
+            .and_then(|d| {
+                let m = *members.iter().find(|&&m| {
+                    let n = &self.nodes[m as usize];
+                    n.parent == Some(0)
+                        && n.segment.name == d.occurrence
+                        && !grounded.contains(&m)
+                })?;
+                let at = scope_pose[&m].apply(d.grab);
+                let grabbed = sys
+                    .connector(body[&m], to_frame(&Transform::translation(d.grab)))
+                    .ok()?;
+                let handle = sys.body(to_frame(&Transform::translation(at)));
+                let held = sys.connector(handle, rc::Frame::IDENTITY).ok()?;
+                let c = sys
+                    .constrain(rc::Constraint::Mate(rc::Mate::Ball {
+                        a: grabbed,
+                        b: held,
+                    }))
+                    .ok()?;
+                internal.insert(c);
+                Some(rc::DragRequest::body_position(&sys, handle, d.to))
+            });
+        let report = match &drag {
+            Some(request) => rc::drag(&sys, request, &self.req.solve_options),
+            None => rc::solve(&sys, &self.req.solve_options),
+        };
         self.meter.record(&UsageEvent::MateSolve {
             assembly: self
                 .asm

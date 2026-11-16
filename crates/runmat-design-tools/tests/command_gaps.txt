@@ -34,11 +34,7 @@ explode.auto assembly
 manage.document-settings part
 manage.recognize-features part
 manage.replace-reference part
-motion.animation assembly
 motion.basic assembly
-motion.collision assembly
-motion.drag assembly
-motion.mate-controller assembly
 motion.to-fea assembly
 part.edit-sketch-plane part
 part.library part
