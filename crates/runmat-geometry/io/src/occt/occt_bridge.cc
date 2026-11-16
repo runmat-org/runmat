@@ -81,6 +81,7 @@
 #include <TopoDS_Wire.hxx>
 #include <TopoDS_Shape.hxx>
 #include <TopTools_IndexedMapOfShape.hxx>
+#include <TopTools_MapOfShape.hxx>
 #include <XCAFApp_Application.hxx>
 #include <XCAFDoc.hxx>
 #include <XCAFDoc_ColorTool.hxx>
@@ -220,6 +221,20 @@ private:
     has_xcaf = false;
   }
 };
+
+// Display face ordinals join the exact import's source face ordinals (exact_topology.cc), so
+// they are enumerated the same way: a face shared by two solids (as shared interfaces make) is
+// one face, listed at its first use.
+std::vector<TopoDS_Face> source_faces(const TopoDS_Shape& shape) {
+  std::vector<TopoDS_Face> faces;
+  TopTools_MapOfShape seen;
+  for (TopExp_Explorer explorer(shape, TopAbs_FACE); explorer.More(); explorer.Next()) {
+    if (seen.Add(explorer.Current())) {
+      faces.push_back(TopoDS::Face(explorer.Current()));
+    }
+  }
+  return faces;
+}
 
 struct CadPreviewSession {
   std::string path;
@@ -1206,9 +1221,8 @@ OcctImportPayload import_cad_bytes(rust::Str path,
   append_assembly_tree(result, document, options);
 
   std::uint64_t face_id = 0;
-  for (TopExp_Explorer explorer(document.shape, TopAbs_FACE); explorer.More(); explorer.Next()) {
+  for (const TopoDS_Face& face : source_faces(document.shape)) {
     check_cancelled(options);
-    const TopoDS_Face face = TopoDS::Face(explorer.Current());
     OcctFaceSemanticPayload semantic = face_semantics(document, face, face_id);
     const std::string resolved_face_name = semantic.label_name.empty()
                                                ? face_name(face_id)
@@ -1829,12 +1843,7 @@ OcctPreviewSessionStartPayload start_cad_preview_session(
   session->mesh_parameters = mesh_parameters_from_options(options);
   check_cancelled(options);
 
-  for (TopExp_Explorer explorer(session->document.shape, TopAbs_FACE);
-       explorer.More();
-       explorer.Next()) {
-    check_cancelled(options);
-    session->faces.push_back(TopoDS::Face(explorer.Current()));
-  }
+  session->faces = source_faces(session->document.shape);
   if (session->faces.empty()) {
     throw std::runtime_error("OCCT import produced no faces");
   }
