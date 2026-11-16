@@ -66,8 +66,13 @@ if ($target) {
 
 $previousMacosMinimum = [System.Environment]::GetEnvironmentVariable('MACOSX_DEPLOYMENT_TARGET', 'Process')
 $previousCmakeMinimum = [System.Environment]::GetEnvironmentVariable('CMAKE_OSX_DEPLOYMENT_TARGET', 'Process')
+$previousPayload = $env:RUNMAT_AOT_RUNTIME_ARCHIVE
+$previousManifest = $env:RUNMAT_AOT_RUNTIME_MANIFEST
 $darwinPolicyNeeded = $false
 try {
+  # Archive and host-tool phases must not embed a previous build's runtime.
+  $env:RUNMAT_AOT_RUNTIME_ARCHIVE = $null
+  $env:RUNMAT_AOT_RUNTIME_MANIFEST = $null
   # This tool reads the deployment archive but must execute on the build host,
   # even when Cargo's environment selects a different deployment target.
   $rustcCommand = if ($env:RUSTC) { $env:RUSTC } else { 'rustc' }
@@ -148,6 +153,8 @@ try {
   $payload = Join-Path $buildRoot "runtime-archive.payload"
   $manifest = Join-Path $buildRoot "runtime-archive.json"
   $notices = Join-Path $buildRoot "THIRD_PARTY_NOTICES.txt"
+  $runtimePack = Join-Path $buildRoot "runtime-pack.zip"
+  $runtimePackManifest = Join-Path $buildRoot "runtime-pack.json"
   $packArgs = @(
     "run", "--profile", $profile
   ) + $lockedArgs + @('--target', $hostTarget) + @(
@@ -155,7 +162,11 @@ try {
     "--archive", $archive,
     "--payload-out", $payload,
     "--manifest-out", $manifest,
-    "--notices-out", $notices
+    "--notices-out", $notices,
+    "--pack-out", $runtimePack,
+    "--pack-manifest-out", $runtimePackManifest,
+    "--license", (Join-Path $PSScriptRoot '../LICENSE.md'),
+    "--free-use", (Join-Path $PSScriptRoot '../FREE-USE.md')
   )
   foreach ($token in $nativeTokens) {
     $packArgs += @("--native-link-token", $token)
@@ -203,14 +214,31 @@ try {
     throw "failed to package the RunMat AOT runtime archive"
   }
 
-  $previousPayload = $env:RUNMAT_AOT_RUNTIME_ARCHIVE
-  $previousManifest = $env:RUNMAT_AOT_RUNTIME_MANIFEST
   try {
-    $env:RUNMAT_AOT_RUNTIME_ARCHIVE = $payload
-    $env:RUNMAT_AOT_RUNTIME_MANIFEST = $manifest
+    $env:RUNMAT_AOT_RUNTIME_ARCHIVE = $null
+    $env:RUNMAT_AOT_RUNTIME_MANIFEST = $runtimePackManifest
     & cargo build -p runmat --profile $profile @targetArgs @buildArgs
     if ($LASTEXITCODE -ne 0) {
-      throw "failed to build RunMat with the embedded AOT runtime"
+      throw "failed to build RunMat with the separate AOT runtime manifest"
+    }
+    # Publish each distribution file atomically on its destination filesystem.
+    foreach ($pair in @(
+      @{ Source = $runtimePack; Name = 'runmat-aot-runtime.zip' },
+      @{ Source = $runtimePackManifest; Name = 'runmat-aot-runtime.json' }
+    )) {
+      $destination = Join-Path $targetDirectory $pair.Name
+      $existing = Get-Item -LiteralPath $destination -Force -ErrorAction SilentlyContinue
+      if ($null -ne $existing -and
+          (-not ($existing -is [System.IO.FileInfo]) -or ($existing.Attributes -band [System.IO.FileAttributes]::ReparsePoint))) {
+        throw "refusing non-regular AOT distribution destination $destination"
+      }
+      $staged = Join-Path $targetDirectory ('.runmat-aot-distribution.' + [guid]::NewGuid().ToString('N'))
+      try {
+        [System.IO.File]::Copy($pair.Source, $staged, $false)
+        [System.IO.File]::Move($staged, $destination, $true)
+      } finally {
+        if (Test-Path -LiteralPath $staged) { Remove-Item -LiteralPath $staged -Force }
+      }
     }
     $noticeDestination = Join-Path $targetDirectory "THIRD_PARTY_NOTICES.txt"
     $existing = Get-Item -LiteralPath $noticeDestination -Force -ErrorAction SilentlyContinue
@@ -223,10 +251,12 @@ try {
       [System.IO.File]::Copy($notices, $noticeDestination, $false)
     }
   } finally {
-    $env:RUNMAT_AOT_RUNTIME_ARCHIVE = $previousPayload
-    $env:RUNMAT_AOT_RUNTIME_MANIFEST = $previousManifest
+    $env:RUNMAT_AOT_RUNTIME_ARCHIVE = $null
+    $env:RUNMAT_AOT_RUNTIME_MANIFEST = $null
   }
 } finally {
+  $env:RUNMAT_AOT_RUNTIME_ARCHIVE = $previousPayload
+  $env:RUNMAT_AOT_RUNTIME_MANIFEST = $previousManifest
   if ($darwinPolicyNeeded) {
     [System.Environment]::SetEnvironmentVariable('MACOSX_DEPLOYMENT_TARGET', $previousMacosMinimum, 'Process')
     [System.Environment]::SetEnvironmentVariable('CMAKE_OSX_DEPLOYMENT_TARGET', $previousCmakeMinimum, 'Process')

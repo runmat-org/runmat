@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { buildArtifactManifest } from "../runtime/builtin-example-verifier/artifacts.mjs";
-import { PLATFORMS, latestJobs, validateFrozenProducts, validateRetirement, validateAcceptance } from "./frozen-release.mjs";
+import { PLATFORMS, latestJobs, validateFrozenProducts, validateRetirement, validateAcceptance, validateAotRuntimeAcceptance } from "./frozen-release.mjs";
 
 const source = "a".repeat(40);
 const options = { source, tag: "v0.7.1" };
@@ -107,15 +107,18 @@ test("requires macOS signing and refuses new post-product execution", () => {
   assert.throws(() => validateFrozenProducts(run(), unexpected, options));
 });
 
-function evidence() {
-  const manifest = buildArtifactManifest({ product: "native-cli", artifactProfile: "embedded-aot", sourceRevision: source,
-    layout: { kind: "recursive-tree", root: "product" }, entrypoints: [{ role: "runmat-binary", path: "runmat" }],
-    files: [{ path: "runmat", size: 0, sha256: `sha256:${"0".repeat(64)}` }] });
+function evidence(profile = "embedded-aot") {
+  const separate = profile === "distributed-aot";
+  const manifest = buildArtifactManifest({ product: "native-cli", artifactProfile: profile, sourceRevision: source,
+    layout: { kind: "recursive-tree", root: "product" }, entrypoints: [{ role: "runmat-binary", path: "runmat" },
+      ...(separate ? [{ role: "compile-runtime-pack", path: "runmat-aot-runtime.zip" }] : [])],
+    files: [{ path: "runmat", size: 0, sha256: `sha256:${"0".repeat(64)}` },
+      ...(separate ? [{ path: "runmat-aot-runtime.zip", size: 0, sha256: `sha256:${"1".repeat(64)}` }] : [])] });
   const receipt = { status: "passed", artifactManifestDigest: manifest.artifactManifestDigest, processDiagnostics: [], results: [
     ...[["first-launch", 0], ["scalar-division", 0], ["callback", 0], ["original-error", 1]]
       .map(([name, exitCode]) => ({ name, exitCode, signal: null })),
     { sourceRevision: source, artifactManifestDigest: manifest.artifactManifestDigest,
-      probeKind: "native-embedded-aot-compile-and-execute-v1", result: { kind: "compile-and-execute", status: "passed", failureKind: "none", prepareExitCode: 0, executeExitCode: 0 } },
+      probeKind: separate ? "native-distributed-aot-install-compile-and-execute-v1" : "native-embedded-aot-compile-and-execute-v1", result: { kind: "compile-and-execute", status: "passed", failureKind: "none", prepareExitCode: 0, executeExitCode: 0 } },
   ] };
   return { manifest, receipt };
 }
@@ -127,5 +130,43 @@ test("requires all five manifest-bound native acceptance checks", () => {
     r => { r.results[4].sourceRevision = "b".repeat(40); }, r => { r.processDiagnostics.push("timeout"); }]) {
     const altered = structuredClone(receipt); change(altered);
     assert.throws(() => validateAcceptance(manifest, altered, source));
+  }
+});
+
+test("separate-runtime release gates require asset staging and the matching product probe", () => {
+  const separate = jobs();
+  for (const job of separate.filter(job => job.name.startsWith("Build "))) {
+    job.steps[0].name = job.steps[0].name.replace("with embedded AOT runtime", "and separate AOT runtime");
+    job.steps.splice(1, 0, step("Stage versioned AOT runtime assets"));
+  }
+  validateFrozenProducts(run(), separate, options);
+  separate[4].steps[1].conclusion = "failure";
+  assert.throws(() => validateFrozenProducts(run(), separate, options));
+  const { manifest, receipt } = evidence("distributed-aot");
+  validateAcceptance(manifest, receipt, source);
+  receipt.results[4].probeKind = "native-embedded-aot-compile-and-execute-v1";
+  assert.throws(() => validateAcceptance(manifest, receipt, source));
+});
+
+test("separate-runtime acceptance requires the exact pair and every cache/compile outcome", () => {
+  // Receipt-validator fixture; it does not claim native product execution.
+  const { manifest } = evidence("distributed-aot");
+  const input = role => {
+    const path = manifest.entrypoints.find(entry => entry.role === role).path;
+    const file = manifest.files.find(file => file.path === path);
+    return { sha256: file.sha256, bytes: file.size };
+  };
+  const results = ["ordinary-script-without-pack", "offline-cache-miss", "unattended-missing-pack",
+    "concurrent-install-1", "concurrent-install-2", "cached-offline-compile", "standalone-execution",
+    "corrupt-pack-refused-with-valid-cache"].map(name => ({ name, signal: null, stdout: "5\n",
+      exitCode: ["offline-cache-miss", "unattended-missing-pack", "corrupt-pack-refused-with-valid-cache"].includes(name) ? 1 : 0 }));
+  const receipt = { schema: "runmat.aot-pack.acceptance.v1", status: "passed", failure: null,
+    inputs: { binary: input("runmat-binary"), pack: input("compile-runtime-pack") }, results };
+  validateAotRuntimeAcceptance(manifest, receipt);
+  for (const mutate of [r => r.results.pop(), r => { r.inputs.pack.sha256 = "wrong"; },
+    r => { r.results[0].exitCode = 1; }, r => { r.results[7].exitCode = 0; },
+    r => { r.results[6].stdout = "wrong"; }]) {
+    const changed = structuredClone(receipt); mutate(changed);
+    assert.throws(() => validateAotRuntimeAcceptance(manifest, changed));
   }
 });

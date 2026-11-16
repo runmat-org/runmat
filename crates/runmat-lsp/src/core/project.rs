@@ -18,6 +18,117 @@ pub struct ProjectContext {
     frozen: runmat_package::FrozenProject,
 }
 
+/// Requester-visible sources for language tooling, with or without a manifest.
+/// Frozen project admission remains the responsibility of `ProjectContext`.
+pub struct SourceContext {
+    catalog: runmat_package::DiscoveredSourceSymbols,
+    files: Vec<PathBuf>,
+}
+
+impl SourceContext {
+    #[cfg(not(target_arch = "wasm32"))]
+    pub fn discover_from_source_name(source_name: Option<&str>) -> Option<Self> {
+        futures::executor::block_on(Self::discover_from_source_name_async(source_name))
+    }
+
+    #[cfg(target_arch = "wasm32")]
+    pub fn discover_from_source_name(_: Option<&str>) -> Option<Self> {
+        None
+    }
+
+    pub async fn discover_from_source_name_async(source_name: Option<&str>) -> Option<Self> {
+        Self::try_discover_from_source_name_async(source_name)
+            .await
+            .ok()
+            .flatten()
+    }
+
+    pub(crate) async fn try_discover_from_source_name_async(
+        source_name: Option<&str>,
+    ) -> Result<Option<Self>, runmat_package::DiscoverSourceSymbolsError> {
+        #[cfg(target_arch = "wasm32")]
+        if let Some(project) = ProjectContext::installed_from_source_name(source_name) {
+            return Ok(Some(Self::from_catalog(project.source_catalog().clone())));
+        }
+        let Some(source_name) = source_name else {
+            let Ok(directory) = runmat_filesystem::current_dir() else {
+                return Ok(None);
+            };
+            return Ok(runmat_package::discover_frozen_project_from_async(
+                &directory,
+                Default::default(),
+            )
+            .await?
+            .map(|frozen| {
+                Self::from_catalog(runmat_package::source_symbols_from_frozen(
+                    &frozen, &directory,
+                ))
+            }));
+        };
+        let path = Path::new(source_name);
+        let directory = if path.is_absolute() {
+            path.parent().map(Path::to_path_buf)
+        } else {
+            runmat_filesystem::current_dir().ok()
+        };
+        let Some(directory) = directory else {
+            return Ok(None);
+        };
+        Ok(
+            runmat_package::discover_source_symbols_from_source_name_async(source_name, &directory)
+                .await?
+                .map(Self::from_catalog),
+        )
+    }
+
+    fn from_catalog(catalog: runmat_package::DiscoveredSourceSymbols) -> Self {
+        let mut files = catalog
+            .definitions
+            .iter()
+            .filter(|definition| catalog.symbols.contains(&definition.name))
+            .map(|definition| definition.source_path.clone())
+            .collect::<Vec<_>>();
+        files.sort();
+        files.dedup();
+        Self { catalog, files }
+    }
+
+    pub fn visible_source_files(&self) -> &[PathBuf] {
+        &self.files
+    }
+    pub(crate) fn into_catalog(self) -> runmat_package::DiscoveredSourceSymbols {
+        self.catalog
+    }
+    pub fn definition_lookup_names<'a>(
+        &'a self,
+        source_path: &Path,
+        requested_name: &'a str,
+    ) -> Vec<&'a str> {
+        definition_lookup_names(&self.catalog, source_path, requested_name)
+    }
+}
+
+fn definition_lookup_names<'a>(
+    catalog: &'a runmat_package::DiscoveredSourceSymbols,
+    source_path: &Path,
+    requested_name: &'a str,
+) -> Vec<&'a str> {
+    let mut names = vec![requested_name];
+    for definition in catalog.definitions.iter().filter(|definition| {
+        definition.name == requested_name && definition.source_path == source_path
+    }) {
+        let leaf = definition
+            .qualified_name
+            .rsplit_once('.')
+            .map(|(_, leaf)| leaf)
+            .unwrap_or(&definition.qualified_name);
+        if !names.contains(&leaf) {
+            names.push(leaf);
+        }
+    }
+    names
+}
+
 impl ProjectContext {
     #[cfg(not(target_arch = "wasm32"))]
     pub fn discover_from_source_name(source_name: Option<&str>) -> Option<Self> {
@@ -32,9 +143,8 @@ impl ProjectContext {
     pub async fn discover_from_source_name_async(source_name: Option<&str>) -> Option<Self> {
         let requester = source_name.map(PathBuf::from);
         #[cfg(target_arch = "wasm32")]
-        if let Some(handoff) = INSTALLED_HANDOFF.with(|slot| slot.borrow().clone()) {
-            let requester_path = requester.as_deref().unwrap_or(Path::new("/"));
-            return Self::from_handoff(handoff, requester_path).ok();
+        if let Some(project) = Self::installed_from_source_name(source_name) {
+            return Some(project);
         }
         let start = match requester.as_ref() {
             Some(path) if path.is_absolute() => {
@@ -77,6 +187,17 @@ impl ProjectContext {
         self.frozen.source_revision()
     }
 
+    #[cfg(target_arch = "wasm32")]
+    pub(crate) fn installed_from_source_name(source_name: Option<&str>) -> Option<Self> {
+        let handoff = INSTALLED_HANDOFF.with(|slot| slot.borrow().clone())?;
+        Self::from_handoff(handoff, Path::new(source_name.unwrap_or("/"))).ok()
+    }
+
+    #[cfg(target_arch = "wasm32")]
+    pub(crate) fn source_catalog(&self) -> &runmat_package::DiscoveredSourceSymbols {
+        &self.source_catalog
+    }
+
     pub fn from_handoff(
         handoff: runmat_package::FrozenProjectHandoff,
         requester: &Path,
@@ -109,20 +230,7 @@ impl ProjectContext {
         source_path: &Path,
         requested_name: &'a str,
     ) -> Vec<&'a str> {
-        let mut names = vec![requested_name];
-        for definition in self.source_catalog.definitions.iter().filter(|definition| {
-            definition.name == requested_name && definition.source_path == source_path
-        }) {
-            let leaf = definition
-                .qualified_name
-                .rsplit_once('.')
-                .map(|(_, leaf)| leaf)
-                .unwrap_or(&definition.qualified_name);
-            if !names.contains(&leaf) {
-                names.push(leaf);
-            }
-        }
-        names
+        definition_lookup_names(&self.source_catalog, source_path, requested_name)
     }
 
     fn from_frozen(frozen: runmat_package::FrozenProject, requester: &Path) -> Self {
@@ -169,7 +277,7 @@ fn paths_equivalent(left: &Path, right: &Path) -> bool {
 
 #[cfg(all(test, not(target_arch = "wasm32")))]
 mod tests {
-    use super::ProjectContext;
+    use super::{ProjectContext, SourceContext};
     use std::fs;
     use std::path::Path;
     use tempfile::TempDir;
@@ -283,6 +391,13 @@ roots = ["src"]
             .unwrap();
         assert_eq!(
             context.definition_lookup_names(middle_api, "middle.api"),
+            vec!["middle.api", "api"]
+        );
+        let sources = SourceContext::discover_from_source_name(source.to_str())
+            .expect("language source context");
+        assert_eq!(sources.visible_source_files(), visible);
+        assert_eq!(
+            sources.definition_lookup_names(middle_api, "middle.api"),
             vec!["middle.api", "api"]
         );
     }

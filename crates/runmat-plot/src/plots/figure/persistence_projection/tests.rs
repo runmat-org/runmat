@@ -174,6 +174,8 @@ fn stacked_axes_selection_remaps_overlay_closure() {
             rows: 1,
             columns: 2,
             index: 1,
+            row_span: 1,
+            column_span: 1,
         })
     );
     assert_eq!(
@@ -278,6 +280,8 @@ fn nonexplicit_grid_and_explicit_positions_preserve_effective_geometry() {
             rows: 2,
             columns: 2,
             index: 2,
+            row_span: 1,
+            column_span: 1,
         })
     );
     let positioned = projected.figure.axes_metadata(1).expect("positioned axes");
@@ -344,16 +348,22 @@ fn scene_grid_cells_are_revisioned_and_validated() {
             rows: 0,
             columns: 1,
             index: 0,
+            row_span: 1,
+            column_span: 1,
         },
         AxesGridCell {
             rows: u32::MAX,
             columns: 2,
             index: 0,
+            row_span: 1,
+            column_span: 1,
         },
         AxesGridCell {
             rows: 1,
             columns: 1,
             index: 1,
+            row_span: 1,
+            column_span: 1,
         },
     ] {
         base.layout.axes_grid_cells = vec![Some(invalid)];
@@ -362,4 +372,27 @@ fn scene_grid_cells_are_revisioned_and_validated() {
 
     base.layout.axes_grid_cells = vec![None, None];
     assert!(base.into_figure().is_err());
+}
+
+#[test]
+fn spanned_axes_keep_their_own_grid_through_scene_round_trip() {
+    let mut figure = Figure::new();
+    let left = AxesGridCell::from_slots(2, 3, [0, 1, 3, 4]).unwrap();
+    let upper_right = AxesGridCell::single(2, 3, 2);
+    let lower_right = AxesGridCell::single(2, 3, 5);
+    for (index, cell) in [left, upper_right, lower_right].into_iter().enumerate() {
+        figure.set_axes_grid_cell(index, cell).unwrap();
+    }
+    assert_eq!(figure.axes_count(), 3);
+    assert!(figure.axes_use_independent_layout());
+    let scene = crate::event::FigureScene::capture(&figure);
+    let decoded: crate::event::FigureScene =
+        serde_json::from_slice(&serde_json::to_vec(&scene).unwrap()).unwrap();
+    let restored = decoded.into_figure().unwrap();
+    for (index, cell) in [left, upper_right, lower_right].into_iter().enumerate() {
+        assert_eq!(restored.resolved_axes_grid_cell(index), Some(cell));
+    }
+    let mut old_scene = scene;
+    old_scene.schema_version = 7;
+    assert!(old_scene.into_figure().is_err());
 }

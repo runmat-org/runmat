@@ -28,7 +28,7 @@ A topology uses `runmat.builtin-examples.topology.v1`:
 {
   "schema": "runmat.builtin-examples.topology.v1",
   "products": {
-    "native-cli": { "artifactProfile": "embedded-aot" },
+    "native-cli": { "artifactProfile": "distributed-aot" },
     "browser-wasm": { "artifactProfile": "web" },
     "desktop-native": { "artifactProfile": "desktop-host" }
   },
@@ -74,25 +74,51 @@ Unavailable product capabilities produce explicit `unavailable` results. They ar
 
 ## 3. Run isolated shards
 
-Each tested product has a `runmat.builtin-examples.artifacts.v2` manifest beside its staged product root. The manifest identifies typed entrypoints and binds files to their relative paths, byte lengths, and SHA-256 digests. The plan freezes the artifact profile, entrypoint roles, and required product probes before workers run. The `embedded-aot` native profile requires `runmat-binary`; its manifest recursively closes the complete staged product tree, including adjacent runtime libraries installed beside the executable. The native compilation runtime is embedded in the CLI bytes by `scripts/build-runmat-with-aot-runtime.sh` or its PowerShell counterpart. RunMat does not currently ship or load a sidecar AOT runtime, so the verifier does not expose a synthetic sidecar profile. The browser `web` profile remains an exact-file contract containing the generated `wasm-js` loader and `wasm-binary` module. The `desktop-host` profile requires `runmat-desktop-binary`, recursively closes the staged Desktop product, and binds both the public Runtime source revision and the private Desktop producer revision.
+Stage the actual products, record their file identities, and run the required product probes before starting shards. A `runmat.builtin-examples.artifacts.v2` manifest binds typed entrypoints to paths, byte lengths and SHA-256 digests. The execution plan fixes the product profile, required roles and probes.
 
-Create manifests from the real staged products. The native root and every browser `--file` path must remain within the directory that contains the manifest.
+### Stage the native CLI and pack
+
+Build the native pair with the [two-phase helper](/docs/runtime/development/build-system#native-standalone-runtime), then stage it:
+
+```bash
+node scripts/runtime/stage-builtin-example-product.mjs \
+  --binary target/release/runmat \
+  --aot-runtime-pack target/release/runmat-aot-runtime.zip \
+  --destination artifacts/native/product
+```
+
+Adjust the paths for the target, profile and executable name. On Windows, include the product's DLL directories with `--dependency-dir` and publisher-notice directories with `--dependency-notice-dir`. The staged tree must contain the complete native product.
+
+The `distributed-aot` profile requires `runmat-binary` and `compile-runtime-pack`. Its identity covers the staged CLI, `runmat-aot-runtime.zip` and adjacent native dependencies. Release packaging excludes the pack from the normal CLI archive and publishes it as a separate asset.
+
+### Record product identities
+
+Keep the native product root and every browser file within the directory containing its manifest. Record the native pair:
 
 ```bash
 node scripts/runtime/verify-builtin-examples.mjs artifacts \
-  --product native-cli --profile embedded-aot \
+  --product native-cli --profile distributed-aot \
   --source-revision "$(git rev-parse HEAD)" \
   --root artifacts/native/product \
   --entrypoint runmat-binary=runmat \
+  --entrypoint compile-runtime-pack=runmat-aot-runtime.zip \
   --output artifacts/native/artifacts.json
+```
 
+The browser `web` profile binds the exact generated loader and Wasm module:
+
+```bash
 node scripts/runtime/verify-builtin-examples.mjs artifacts \
   --product browser-wasm --profile web \
   --source-revision "$(git rev-parse HEAD)" \
   --file wasm-js=artifacts/browser/runmat_wasm_web.js \
   --file wasm-binary=artifacts/browser/runmat_wasm_web_bg.wasm \
   --output artifacts/browser/artifacts.json
+```
 
+The `desktop-host` profile covers the complete Desktop tree and records both Runtime and Desktop revisions:
+
+```bash
 node scripts/runtime/verify-builtin-examples.mjs artifacts \
   --product desktop-native --profile desktop-host \
   --source-revision "$RUNMAT_REVISION" \
@@ -102,14 +128,24 @@ node scripts/runtime/verify-builtin-examples.mjs artifacts \
   --output artifacts/desktop/artifacts.json
 ```
 
-Before native shards run, probe the staged CLI itself. The probe resolves the typed `runmat-binary` entrypoint from the manifest, verifies the complete tree, compiles a fixed source vector with `runmat compile`, executes the resulting standalone program, and verifies the tree again. Its closed evidence document binds the source revision, product profile, artifact-manifest digest, fixed vector digest, process result, and stdout digest.
+Existing `embedded-aot` records retain their meaning: the archive is inside the CLI, and `runmat-binary` is their only required entrypoint. New distributed-AOT plans require the separate-pack profile and its installation probe.
+
+### Probe native compilation
+
+Run the probe against the manifested pair:
 
 ```bash
 node scripts/runtime/verify-builtin-examples.mjs probe \
-  --kind native-embedded-aot-compile-and-execute-v1 \
+  --kind native-distributed-aot-install-compile-and-execute-v1 \
   --artifact-manifest artifacts/native/artifacts.json \
-  --output artifacts/native/embedded-aot.product-probe.json
+  --output artifacts/native/distributed-aot.product-probe.json
 ```
+
+The probe verifies the complete tree, resolves the two typed entrypoints, installs the pack with `aot install --offline --from`, compiles a fixed source vector offline and runs the standalone executable. It verifies the tree again after execution. Installation failure stops compilation.
+
+The evidence binds the source revision, product profile, artifact-manifest digest, fixed-vector digest, process result and stdout digest. Use the [native pack acceptance check](/docs/runtime/development/build-system#verify-the-built-pair) for isolated cache, concurrent-installation and corrupt-pack checks against that same pair.
+
+### Probe the Desktop host
 
 Desktop uses the same product-evidence rules with a product-specific probe. The verifier starts the manifested Desktop binary in its private builtin-example host mode, sends one closed request through files named by environment variables, exercises a scripted host interaction, and validates the closed result. Each Desktop example runs in a fresh process and isolated workspace. The verifier mode is selected before telemetry, Tauri, windows, or other ordinary application services initialize; it installs deterministic input, dialog, filesystem, and figure boundaries instead.
 
@@ -146,7 +182,7 @@ node scripts/runtime/verify-builtin-examples.mjs reconcile \
   --artifact-manifest artifacts/native/artifacts.json \
   --artifact-manifest artifacts/browser/artifacts.json \
   --artifact-manifest artifacts/desktop/artifacts.json \
-  --product-probe artifacts/native/embedded-aot.product-probe.json \
+  --product-probe artifacts/native/distributed-aot.product-probe.json \
   --product-probe artifacts/desktop/desktop-host.product-probe.json \
   --closure \
   --report-dir artifacts/builtin-examples/report \

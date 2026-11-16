@@ -6,6 +6,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 import { validateArtifactManifest } from "../runtime/builtin-example-verifier/artifacts.mjs";
+import { stageAotRuntimePack } from "./stage-aot-runtime-pack.mjs";
 
 export const PLATFORMS = ["linux-x86_64", "windows-x86_64", "macos-x86_64", "macos-aarch64"];
 const REPOSITORY = "runmat-org/runmat";
@@ -62,7 +63,11 @@ export function validateFrozenProducts(run, jobs, { tag, source, completed = tru
       assert.ok(["success", "skipped"].includes(step.conclusion), `${platform}: ${step.name} did not pass`);
     }
     const system = platform.startsWith("windows") ? "Windows" : "Unix";
-    for (const name of [`Build release CLI with embedded AOT runtime (${system})`,
+    const separateBuild = `Build release CLI and separate AOT runtime (${system})`;
+    const build = job.steps.some(step => step.name === separateBuild) ? separateBuild
+      : `Build release CLI with embedded AOT runtime (${system})`;
+    for (const name of [build,
+      ...(build === separateBuild ? ["Stage versioned AOT runtime assets"] : []),
       `Stage and accept distributed product (${system})`, `Package as archive (${system})`, ARTIFACT_STEP,
       ...(platform.startsWith("macos") ? ["Sign and notarize release artifact (macOS)"] : [])]) {
       assert.equal(job.steps.find(step => step.name === name)?.conclusion, "success", `${platform}: ${name}`);
@@ -90,7 +95,7 @@ export function validateRetirement(run, jobs, options) {
 export function validateAcceptance(manifest, receipt, source) {
   validateArtifactManifest(manifest, { sourceRevision: source });
   assert.equal(manifest.product, "native-cli");
-  assert.equal(manifest.artifactProfile, "embedded-aot");
+  assert.ok(["embedded-aot", "distributed-aot"].includes(manifest.artifactProfile));
   assert.equal(receipt.status, "passed");
   assert.equal(receipt.artifactManifestDigest, manifest.artifactManifestDigest);
   assert.deepEqual(receipt.processDiagnostics, []);
@@ -101,8 +106,37 @@ export function validateAcceptance(manifest, receipt, source) {
   const probe = receipt.results[4];
   assert.equal(probe.sourceRevision, source);
   assert.equal(probe.artifactManifestDigest, manifest.artifactManifestDigest);
-  assert.equal(probe.probeKind, "native-embedded-aot-compile-and-execute-v1");
+  assert.equal(probe.probeKind, manifest.artifactProfile === "distributed-aot"
+    ? "native-distributed-aot-install-compile-and-execute-v1" : "native-embedded-aot-compile-and-execute-v1");
   assert.deepEqual(probe.result, { kind: "compile-and-execute", status: "passed", failureKind: "none", prepareExitCode: 0, executeExitCode: 0 });
+}
+
+export function validateAotRuntimeAcceptance(manifest, receipt) {
+  assert.equal(manifest.artifactProfile, "distributed-aot");
+  assert.equal(receipt.schema, "runmat.aot-pack.acceptance.v1");
+  assert.equal(receipt.status, "passed");
+  assert.equal(receipt.failure, null);
+  for (const [field, role] of [["binary", "runmat-binary"], ["pack", "compile-runtime-pack"]]) {
+    const entry = manifest.entrypoints.find(entry => entry.role === role);
+    const file = manifest.files.find(file => file.path === entry?.path);
+    assert.ok(file, `Missing accepted artifact role ${role}`);
+    assert.deepEqual(receipt.inputs[field], { sha256: file.sha256, bytes: file.size });
+  }
+  const cases = {
+    "ordinary-script-without-pack": true, "offline-cache-miss": false,
+    "unattended-missing-pack": false, "concurrent-install-1": true,
+    "concurrent-install-2": true, "cached-offline-compile": true,
+    "standalone-execution": true, "corrupt-pack-refused-with-valid-cache": false,
+  };
+  assert.equal(receipt.results.length, Object.keys(cases).length);
+  assert.deepEqual(receipt.results.map(result => result.name).toSorted(), Object.keys(cases).toSorted());
+  for (const result of receipt.results) {
+    assert.equal(result.signal, null);
+    assert.equal(result.error ?? null, null);
+    assert.ok(Number.isInteger(result.exitCode));
+    assert.equal(result.exitCode === 0, cases[result.name], result.name);
+    if (["ordinary-script-without-pack", "standalone-execution"].includes(result.name)) assert.equal(result.stdout.trim(), "5");
+  }
 }
 
 const json = filename => JSON.parse(fs.readFileSync(filename, "utf8"));
@@ -141,19 +175,46 @@ export function stageFrozenRelease({ runId, tag, source, sourceRoot, output, dow
     const acceptancePath = path.join(root, `${product.platform}.acceptance.json`);
     const manifest = json(manifestPath);
     validateAcceptance(manifest, json(acceptancePath), source);
+    const aotAcceptancePath = manifest.artifactProfile === "distributed-aot"
+      ? path.join(root, `${product.platform}.aot-runtime-acceptance.json`) : null;
+    if (aotAcceptancePath) validateAotRuntimeAcceptance(manifest, json(aotAcceptancePath));
     const zip = product.platform.startsWith("windows");
     const filename = `runmat-${tag}-${product.platform}.${zip ? "zip" : "tar.gz"}`;
     const archive = path.join(destination, filename);
+    const separate = manifest.artifactProfile === "distributed-aot";
+    let packSource = null;
+    let packManifestSource = null;
+    let packTarget = null;
+    if (separate) {
+      const targets = { "linux-x86_64": "x86_64-unknown-linux-gnu", "windows-x86_64": "x86_64-pc-windows-msvc",
+        "macos-x86_64": "x86_64-apple-darwin", "macos-aarch64": "aarch64-apple-darwin" };
+      packTarget = targets[product.platform];
+      const base = `runmat-aot-runtime-${tag.slice(1)}-${packTarget}`;
+      packSource = path.join(destination, `${base}.zip`);
+      packManifestSource = path.join(destination, `${base}.json`);
+      assert.equal(manifest.entrypoints.find(entry => entry.role === "compile-runtime-pack")?.path,
+        "runmat-aot-runtime.zip", "Release pack must have the standard staged location");
+    }
     const entries = execFileSync(zip ? "unzip" : "tar", zip ? ["-Z1", archive] : ["-tzf", archive], { encoding: "utf8", maxBuffer: 1024 * 1024 }).trim().split("\n").filter(entry => !entry.endsWith("/"));
-    assert.deepEqual(entries.toSorted(), manifest.files.map(file => file.path).toSorted());
+    assert.deepEqual(entries.toSorted(), manifest.files.filter(file => !separate || file.path !== "runmat-aot-runtime.zip").map(file => file.path).toSorted());
     const extraction = path.join(root, "product");
     fs.mkdirSync(extraction);
     execFileSync(zip ? "unzip" : "tar", zip ? ["-q", archive, "-d", extraction] : ["-xzf", archive, "-C", extraction]);
+    if (separate) {
+      fs.copyFileSync(packSource, path.join(extraction, "runmat-aot-runtime.zip"), fs.constants.COPYFILE_EXCL);
+    }
     validateArtifactManifest(manifest, { sourceRevision: source, verifyFiles: true, manifestPath });
     for (const license of ["LICENSE.md", "FREE-USE.md"]) assert.deepEqual(fs.readFileSync(path.join(extraction, license)), fs.readFileSync(path.join(sourceRoot, license)));
-    for (const file of [archive, manifestPath, acceptancePath]) {
+    for (const file of [archive, manifestPath, acceptancePath, ...(aotAcceptancePath ? [aotAcceptancePath] : [])]) {
       fs.copyFileSync(file, path.join(output, path.basename(file)), fs.constants.COPYFILE_EXCL);
       records.push({ name: path.basename(file), size: fs.statSync(file).size, sha256: hash(fs.readFileSync(file)) });
+    }
+    if (separate) {
+      const staged = stageAotRuntimePack({ pack: packSource, manifest: packManifestSource,
+        output, version: tag.slice(1), target: packTarget });
+      for (const file of [staged.pack, staged.manifest]) {
+        records.push({ name: path.basename(file), size: fs.statSync(file).size, sha256: hash(fs.readFileSync(file)) });
+      }
     }
   }
   const evidence = artifacts.filter(artifact => artifact.name === `meshing-release-evidence-${runId}` && !artifact.expired);

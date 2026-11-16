@@ -1,8 +1,8 @@
-use js_sys::{Array, ArrayBuffer, Object, Reflect, Uint8Array};
-use runmat_filesystem::{
+use crate::{
     DirEntry, FsFileType, FsMetadata, OpenFileDialogRequest, OpenFileDialogSelection,
     SaveFileDialogRequest, SaveFileDialogSelection,
 };
+use js_sys::{Array, ArrayBuffer, Object, Reflect, Uint8Array};
 use std::ffi::OsString;
 use std::io::{self, ErrorKind};
 use std::path::{Path, PathBuf};
@@ -275,10 +275,7 @@ pub(super) fn path_to_string(path: &Path) -> String {
     path.to_string_lossy().into_owned()
 }
 
-fn filters_to_js(
-    op: &'static str,
-    filters: &[runmat_filesystem::OpenFileDialogFilter],
-) -> io::Result<JsValue> {
+fn filters_to_js(op: &'static str, filters: &[crate::OpenFileDialogFilter]) -> io::Result<JsValue> {
     let js_filters = Array::new();
     for filter in filters {
         let filter_object = Object::new();

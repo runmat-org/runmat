@@ -33,7 +33,7 @@ pub(crate) use current_limits::{
 mod layout;
 pub(crate) use layout::{color_order_for_axes_for_property, color_order_for_figure_for_property};
 pub(crate) use layout::{
-    configure_subplot_for_property, configure_subplot_state_for_property,
+    configure_subplot_for_property, select_subplot_region_for_property,
     set_color_order_for_axes_for_property, set_color_order_for_figure_for_property,
 };
 #[path = "property_mutation/axes_properties.rs"]
@@ -196,6 +196,18 @@ impl PropertyMutationTarget {
             PropertyLocation::CurrentFigure => PropertyLocation::Figure(registry.current),
             location => location,
         };
+        if let PropertyLocation::Axes(figure, index)
+        | PropertyLocation::Annotation(figure, index, _) = location
+        {
+            if registry
+                .figures
+                .get(&figure)
+                .and_then(|state| state.figure.axes_metadata.get(index))
+                .is_some_and(|metadata| metadata.retired)
+            {
+                return Err(FigureError::InvalidAxesHandle);
+            }
+        }
         if let Some(selection) = self.selection()? {
             selection.validate(&registry)?;
             selection.validate_location(location)?;

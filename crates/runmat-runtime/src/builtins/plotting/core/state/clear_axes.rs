@@ -91,6 +91,32 @@ fn remap_survivors(reg: &mut PlotRegistry, handle: FigureHandle, mapping: &[Opti
     );
 }
 
+/// Retire layout axes under the same registry transaction as their owned
+/// plots, colorbars and exact object receivers. Surviving axes keep indices.
+pub(super) fn retire_registered_axes(
+    reg: &mut PlotRegistry,
+    handle: FigureHandle,
+    targets: &[usize],
+) {
+    clear_registered_axes(reg, handle, targets);
+    reg.plot_children.retain(|_, child| {
+        !matches!(child,
+        PlotChildHandleState::ColorBar(bar)
+            if bar.figure == handle && targets.contains(&bar.axes_index))
+    });
+    let state = get_state_mut(reg, handle);
+    for &index in targets {
+        state.axes_receivers.remove(&index);
+        state.hold_per_axes.remove(&index);
+        state.line_style_cycles.remove(&index);
+        state.line_color_cycles.remove(&index);
+        state.zoom_baselines.remove(&index);
+        state.zoom_axes_modes.remove(&index);
+        state.pan_axes_modes.remove(&index);
+        state.figure.retire_axes(index);
+    }
+}
+
 /// Grid expansion can reclaim former overlay axes. Compact their plot data
 /// while the original index map still exists, then replace their metadata.
 pub(super) fn configure_grid(

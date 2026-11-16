@@ -739,7 +739,7 @@ jobs:
         shell: bash
         run: node infra/scripts/native-build-cache-source.mjs restore target/.runmat-source-inputs.json
 
-      - name: Build branch CLI with embedded AOT runtime (Unix)
+      - name: Build branch CLI and separate AOT runtime (Unix)
         if: runner.os != 'Windows'
         shell: bash
         env:
@@ -761,7 +761,7 @@ jobs:
             --locked --release --target "${{ matrix.platform.target }}" \
             --bin runmat --features "$features"
 
-      - name: Build branch CLI with embedded AOT runtime (Windows)
+      - name: Build branch CLI and separate AOT runtime (Windows)
         if: runner.os == 'Windows'
         shell: pwsh
         env:
@@ -778,8 +778,17 @@ jobs:
         run: |
           $ErrorActionPreference = 'Stop'
           & ./scripts/build-runmat-with-aot-runtime.ps1 --locked --release --target "${{ matrix.platform.target }}" --bin runmat --features "blas-lapack,vendored-openssl,occt-native"
-          if ($LASTEXITCODE -ne 0) { throw "embedded-runtime branch build failed with exit code $LASTEXITCODE" }
+          if ($LASTEXITCODE -ne 0) { throw "separate-runtime branch build failed with exit code $LASTEXITCODE" }
 
+      - name: Stage versioned AOT runtime assets
+        shell: bash
+        run: |
+          set -euo pipefail
+          pack_version="$(node -p 'require("./bindings/ts/package.json").version')"
+          node scripts/distribution/stage-aot-runtime-pack.mjs \
+            "target/${{ matrix.platform.target }}/release/runmat-aot-runtime.zip" \
+            "target/${{ matrix.platform.target }}/release/runmat-aot-runtime.json" \
+            . "$pack_version" "${{ matrix.platform.target }}"
 
       - name: Stage and accept distributed product (Unix)
         if: runner.os != 'Windows'
@@ -790,14 +799,19 @@ jobs:
           source_revision="$(git rev-parse HEAD)"
           node scripts/runtime/stage-builtin-example-product.mjs \
             --binary "target/${{ matrix.platform.target }}/release/${{ matrix.platform.bin }}" \
-            --destination "$root/product" --executable-name "${{ matrix.platform.bin }}"
+            --destination "$root/product" --executable-name "${{ matrix.platform.bin }}" \
+            --aot-runtime-pack "target/${{ matrix.platform.target }}/release/runmat-aot-runtime.zip"
           node scripts/runtime/verify-builtin-examples.mjs artifacts \
-            --product native-cli --profile embedded-aot --source-revision "$source_revision" \
+            --product native-cli --profile distributed-aot --source-revision "$source_revision" \
             --root "$root/product" --entrypoint "runmat-binary=${{ matrix.platform.bin }}" \
+            --entrypoint "compile-runtime-pack=runmat-aot-runtime.zip" \
             --output "$root/${{ matrix.platform.release_for }}.artifact-manifest.json"
           node scripts/distribution/accept-native-product.mjs \
             "$root/${{ matrix.platform.release_for }}.artifact-manifest.json" \
             "$root/${{ matrix.platform.release_for }}.acceptance.json"
+          node scripts/distribution/accept-aot-runtime-pack.mjs \
+            "$root/product/${{ matrix.platform.bin }}" "$root/product/runmat-aot-runtime.zip" \
+            "$root/${{ matrix.platform.release_for }}.aot-runtime-acceptance.json"
 
       - name: Stage and accept distributed product (Windows)
         if: runner.os == 'Windows' && matrix.platform.target != 'aarch64-pc-windows-gnu'
@@ -815,7 +829,8 @@ jobs:
             "scripts/runtime/stage-builtin-example-product.mjs",
             "--binary", "target/${{ matrix.platform.target }}/release/${{ matrix.platform.bin }}",
             "--destination", "$root/product",
-            "--executable-name", "${{ matrix.platform.bin }}"
+            "--executable-name", "${{ matrix.platform.bin }}",
+            "--aot-runtime-pack", "target/${{ matrix.platform.target }}/release/runmat-aot-runtime.zip"
           )
           $arguments += @("--dependency-dir", $dxc.BinDir, "--dependency-notice-dir", $dxc.NoticeDir)
           $vcpkgBin = Join-Path $env:VCPKG_ROOT ("installed\" + $env:VCPKG_DEFAULT_TRIPLET + "\bin")
@@ -827,14 +842,19 @@ jobs:
           & node @arguments
           if ($LASTEXITCODE -ne 0) { throw "native product staging failed with exit code $LASTEXITCODE" }
           & node scripts/runtime/verify-builtin-examples.mjs artifacts `
-            --product native-cli --profile embedded-aot --source-revision $sourceRevision `
+            --product native-cli --profile distributed-aot --source-revision $sourceRevision `
             --root "$root/product" --entrypoint "runmat-binary=${{ matrix.platform.bin }}" `
+            --entrypoint "compile-runtime-pack=runmat-aot-runtime.zip" `
             --output "$root/${{ matrix.platform.release_for }}.artifact-manifest.json"
           if ($LASTEXITCODE -ne 0) { throw "native artifact manifest failed with exit code $LASTEXITCODE" }
           & node scripts/distribution/accept-native-product.mjs `
             "$root/${{ matrix.platform.release_for }}.artifact-manifest.json" `
             "$root/${{ matrix.platform.release_for }}.acceptance.json"
           if ($LASTEXITCODE -ne 0) { throw "native product probe failed with exit code $LASTEXITCODE" }
+          & node scripts/distribution/accept-aot-runtime-pack.mjs `
+            "$root/product/${{ matrix.platform.bin }}" "$root/product/runmat-aot-runtime.zip" `
+            "$root/${{ matrix.platform.release_for }}.aot-runtime-acceptance.json"
+          if ($LASTEXITCODE -ne 0) { throw "compile runtime acceptance failed with exit code $LASTEXITCODE" }
 
       - name: Retain staged product acceptance
         if: always()
@@ -854,7 +874,7 @@ jobs:
           $archive = Join-Path (Get-Location) "$artifactName.zip"
           Push-Location $outDir
           try {
-            & 7z a $archive .\*
+            & 7z a $archive .\* '-x!runmat-aot-runtime.zip'
             if ($LASTEXITCODE -ne 0) { throw "Branch archive creation failed" }
           } finally { Pop-Location }
 
@@ -864,7 +884,7 @@ jobs:
         run: |
           set -euo pipefail
           ARTIFACT_NAME="runmat-${{ steps.artifact-identity.outputs.version }}-${{ matrix.platform.release_for }}"
-          tar -C "artifacts/release-product/${{ matrix.platform.release_for }}/product" -czf "${ARTIFACT_NAME}.tar.gz" .
+          tar --exclude='./runmat-aot-runtime.zip' -C "artifacts/release-product/${{ matrix.platform.release_for }}/product" -czf "${ARTIFACT_NAME}.tar.gz" .
 
       - name: Record branch artifact provenance (Windows)
         if: github.event_name == 'push' && (github.ref == 'refs/heads/dev' || github.ref == 'refs/heads/main') && runner.os == 'Windows'
@@ -915,6 +935,7 @@ jobs:
           path: |
             runmat-*.tar.gz
             runmat-*.zip
+            runmat-aot-runtime-*.json
             runtime-artifact-provenance.json
           if-no-files-found: error
           retention-days: 30
