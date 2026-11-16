@@ -228,6 +228,55 @@ pub struct ResolveRequest {
     pub solve_mates: bool,
     pub expand_fasteners: bool,
     pub solve_options: runmat_constraint::SolveOptions,
+    /// A drag through the mechanism's remaining freedom ([`DragTarget`]).
+    pub drag: Option<DragTarget>,
+    /// Keep the top scope's solved mate system ([`ResolvedAssembly::mate_system`]) for a
+    /// dynamics study.
+    pub keep_mate_system: bool,
+}
+
+/// The top scope's mate system as the solve left it: the constraint equations a dynamics study
+/// ([`crate::assembly::motion::dynamics`]) integrates through time.
+#[derive(Clone, Debug)]
+pub struct MateSystem {
+    pub system: runmat_constraint::System,
+    /// The solved value of every variable.
+    pub values: Vec<f64>,
+    /// Each member of the scope: its node, its body entity, and whether it is ground.
+    pub bodies: Vec<MateBody>,
+    /// Each mate built into the system.
+    pub mates: Vec<MateRows>,
+    /// Mates of patterned or mirrored instances, solved in a second pass with everything else
+    /// held: they are not in `system`.
+    pub held_pass: Vec<String>,
+}
+
+#[derive(Clone, Copy, Debug)]
+pub struct MateBody {
+    pub node: NodeId,
+    pub entity: runmat_constraint::EntityId,
+    pub ground: bool,
+}
+
+/// One mate's constraints in a [`MateSystem`], and the connectors on its two sides.
+#[derive(Clone, Debug)]
+pub struct MateRows {
+    pub name: String,
+    pub constraints: Vec<runmat_constraint::ConstraintId>,
+    pub a: runmat_constraint::EntityId,
+    pub b: runmat_constraint::EntityId,
+}
+
+/// A top-level component pulled toward a point by the mate solve: its point `grab` (the
+/// component's own frame, metres) goes to `to` (top assembly frame, metres) as a soft target, so
+/// every mate still holds and the point ends as near the target as the mates allow. A component
+/// with no freedom left stays where it is.
+#[derive(Clone, Debug, PartialEq)]
+pub struct DragTarget {
+    /// The top-level occurrence's name.
+    pub occurrence: String,
+    pub grab: [f64; 3],
+    pub to: [f64; 3],
 }
 
 impl Default for ResolveRequest {
@@ -241,6 +290,8 @@ impl Default for ResolveRequest {
             solve_mates: true,
             expand_fasteners: true,
             solve_options: runmat_constraint::SolveOptions::default(),
+            drag: None,
+            keep_mate_system: false,
         }
     }
 }
@@ -273,6 +324,8 @@ pub struct ResolvedAssembly {
     pub suppressed: Vec<String>,
     pub diagnostics: DiagnosticReport,
     pub stats: ResolveStats,
+    /// The top scope's mate system, when the request kept it.
+    pub mate_system: Option<Box<MateSystem>>,
 }
 
 impl ResolvedAssembly {
@@ -478,6 +531,8 @@ pub(super) struct Resolver<'a, 'b> {
     pub deferred: BTreeMap<NodeId, Vec<InstancePlan>>,
     /// Flexible members whose fastener rules expand after the enclosing scope's solve.
     pub deferred_fasteners: BTreeSet<NodeId>,
+    /// The top scope's mate system ([`ResolveRequest::keep_mate_system`]).
+    pub mate_system: Option<Box<MateSystem>>,
 }
 
 pub fn resolve(top: &FilePath, req: &ResolveRequest, ctx: &ResolveContext<'_>) -> ResolvedAssembly {
@@ -515,6 +570,7 @@ pub fn resolve_metered(
         position_overrides: BTreeMap::new(),
         deferred: BTreeMap::new(),
         deferred_fasteners: BTreeSet::new(),
+        mate_system: None,
     };
     let mut variant = BTreeMap::new();
     let doc = match ctx.source.assembly(top, req.revision.as_ref()) {
@@ -720,6 +776,7 @@ impl<'a, 'b> Resolver<'a, 'b> {
             suppressed: self.suppressed,
             diagnostics: self.diags,
             stats: self.stats,
+            mate_system: self.mate_system,
         }
     }
 

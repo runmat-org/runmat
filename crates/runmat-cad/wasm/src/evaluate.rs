@@ -138,7 +138,18 @@ pub fn assembly_clearance_of(
 ) -> Result<Interference, String> {
     let resolution = resolve_assembly_in(path, text, files, configuration)
         .map_err(|d| d.first().map(|d| d.message.clone()).unwrap_or_default())?;
-    let resolved = &resolution.resolved;
+    clearance_in(&resolution, &resolution.resolved, files, clearance, changed)
+}
+
+/// [`assembly_clearance_of`] on an assembly already resolved, with its occurrences where
+/// `resolved` places them (the resolution's own tree, or a motion study's frame of it).
+pub fn clearance_in(
+    resolution: &crate::runtime::AssemblyResolution,
+    resolved: &runmat_cad::assembly::resolve::ResolvedAssembly,
+    files: &Files,
+    clearance: f64,
+    changed: Option<&[String]>,
+) -> Result<Interference, String> {
     let is_changed = |p: &str| {
         changed.is_none_or(|c| c.iter().any(|n| p == n || p.starts_with(&format!("{n}/"))))
     };

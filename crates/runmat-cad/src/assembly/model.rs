@@ -897,6 +897,12 @@ pub struct AssemblyDocument {
     /// Saved model views ([`crate::assembly::views`]).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub views: Vec<crate::assembly::views::ModelView>,
+    /// Motion studies: mates driven over time ([`crate::assembly::motion`]).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub motions: Vec<crate::assembly::motion::MotionStudy>,
+    /// Named mate positions, the mate controller's ([`crate::assembly::motion::MatePosition`]).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub positions: Vec<crate::assembly::motion::MatePosition>,
     #[serde(default)]
     pub closed: bool,
 }
@@ -926,6 +932,8 @@ impl AssemblyDocument {
             links: Vec::new(),
             exploded: Vec::new(),
             views: Vec::new(),
+            motions: Vec::new(),
+            positions: Vec::new(),
             closed: false,
         }
     }

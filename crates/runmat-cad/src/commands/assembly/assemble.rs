@@ -190,10 +190,10 @@ pub(super) fn assemble(conn: &[SelectKind]) -> Vec<CommandDescriptor> {
             ),
             picks("components", "Components", &[K::Occurrence]),
             offset("dx", "Delta X", 0.0)
-                .shown("mode", &["triad"])
+                .shown("mode", &["drag", "triad"])
                 .drag(Manipulator::Triad),
-            offset("dy", "Delta Y", 0.0).shown("mode", &["triad"]),
-            offset("dz", "Delta Z", 0.0).shown("mode", &["triad"]),
+            offset("dy", "Delta Y", 0.0).shown("mode", &["drag", "triad"]),
+            offset("dz", "Delta Z", 0.0).shown("mode", &["drag", "triad"]),
             angle("rx", "Rotate X", 0.0).shown("mode", &["triad"]),
             angle("ry", "Rotate Y", 0.0).shown("mode", &["triad"]),
             angle("rz", "Rotate Z", 0.0).shown("mode", &["triad"]),

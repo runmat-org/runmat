@@ -487,6 +487,8 @@ pub mod words {
         ("pattern", "Copies of occurrences on a layout."),
         ("mirror", "Mirrored copies of occurrences."),
         ("exploded", "An exploded view: steps that move occurrences apart."),
+        ("motion", "A motion study: mates driven through a range of values over time."),
+        ("position", "A named position of a mechanism: values for its driving mates."),
         ("fasteners", "Fasteners placed through matching holes."),
         ("envelope", "A space a design must stay inside."),
         ("location", "A named place in an assembly."),
