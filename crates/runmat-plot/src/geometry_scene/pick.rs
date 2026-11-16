@@ -38,6 +38,10 @@ pub struct GeometryScenePickResult {
     pub barycentric_coordinates: [f32; 3],
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub topology_selection: Option<GeometrySceneTopologySelection>,
+    /// Unit normal of the hit tessellation triangle in scene coordinates (its winding's side);
+    /// unset for a degenerate triangle. Two face picks' normals give the angle between them.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub normal: Option<[f32; 3]>,
     /// The owner nodes (bodies, assembly components) of the chunk hit, outermost first, as the
     /// scene's `hidden_owner_node_ids` names them. Empty when the scene names none.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -240,6 +244,10 @@ impl GeometryScenePickIndex {
                 position, triangle.a, triangle.b, triangle.c,
             ),
             topology_selection,
+            normal: (triangle.b - triangle.a)
+                .cross(triangle.c - triangle.a)
+                .try_normalize()
+                .map(|n| n.to_array()),
             owner_node_ids: triangle.owner_node_ids.clone(),
         })
     }

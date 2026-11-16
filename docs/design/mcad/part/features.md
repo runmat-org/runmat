@@ -19,7 +19,9 @@ A part's geometry is its feature history: `feature <name> = <operation>(…)` st
 | `emboss` | Raised or recessed text or shapes on a face. | `profile`, `face`, `height`, `wrap` |
 <!-- /arguments -->
 
-`mode` is `new` (the default for the first solid), `add`, `cut` or `intersect`. On the part's first body feature, `add` has no body to join, so it makes the first body as `new` does; `cut` and `intersect` there fail with nothing to act on. A part with a plate and a cut pocket:
+`mode` is `new` (the default for the first solid), `add`, `cut` or `intersect`. On the part's first body feature, `add` has no body to join, so it makes the first body as `new` does; `cut` and `intersect` there fail with nothing to act on.
+
+An extrude goes along its profile plane's normal. A profile on a body's face, either the face itself or a sketch drawn on it, goes out of the body for `new` and `add` and into it for `cut` and `intersect`. `reverse` turns the direction either way. A part with a plate and a pocket cut 5 mm into its top face:
 
 ```part
 runmat 0.7
@@ -39,7 +41,7 @@ part pocket_plate {
         p3 = line(start = [60 mm, 35 mm], end = [20 mm, 35 mm])
         p4 = line(start = [20 mm, 35 mm], end = [20 mm, 15 mm])
     }
-    feature pocket = extrude(profile = sketch.pocket_s, distance = 5 mm, reverse, mode = cut)
+    feature pocket = extrude(profile = sketch.pocket_s, distance = 5 mm, mode = cut)
     output pocket_plate = { body = feature.body.body }
 }
 ```

@@ -1732,6 +1732,15 @@ impl PlotOverlay {
             &annotations,
             config.font_scale,
         );
+        // Measured values sit on their dimension lines, which the renderer draws in the model.
+        let dimensions = plot_renderer
+            .geometry_screen_dimensions([centered_plot_rect.width(), centered_plot_rect.height()]);
+        self.cad_overlay.render_dimension_labels(
+            ui.ctx(),
+            centered_plot_rect,
+            &dimensions,
+            config.font_scale,
+        );
 
         // Result scenes have their own toolbar and mesh-info popover. The CAD
         // strip duplicates those controls and overlaps the scalar legend.
