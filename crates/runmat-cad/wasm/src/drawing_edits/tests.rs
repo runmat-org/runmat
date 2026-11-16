@@ -599,8 +599,16 @@ fn standard_three_view_leaves_no_layout_findings() {
         // The projected views draw at the front view's scale, as projected views do.
         let d = b.document();
         let front = d.view("front").unwrap().scale;
-        assert_eq!(d.view("top").unwrap().scale, front, "{model} {scale}: top's scale");
-        assert_eq!(d.view("right").unwrap().scale, front, "{model} {scale}: right's scale");
+        assert_eq!(
+            d.view("top").unwrap().scale,
+            front,
+            "{model} {scale}: top's scale"
+        );
+        assert_eq!(
+            d.view("right").unwrap().scale,
+            front,
+            "{model} {scale}: right's scale"
+        );
         let out = b.compiled();
         let sheet = &out["projection"]["data"]["layouts"]["1"];
         assert_eq!(

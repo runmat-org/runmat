@@ -523,9 +523,8 @@ pub fn edit(
 /// the sheet's gap, which only it knows.
 fn settle_new_views(d: &mut Drawing<'_>, before: &[String]) -> Result<(), EditFailure> {
     let text = d.change()?.source;
-    let laid: Value =
-        serde_json::from_str(&crate::drawing::compile_json(d.path, &text, d.files))
-            .unwrap_or(Value::Null);
+    let laid: Value = serde_json::from_str(&crate::drawing::compile_json(d.path, &text, d.files))
+        .unwrap_or(Value::Null);
     let layouts = &laid["projection"]["data"]["layouts"];
     for view in d.document.views.iter_mut() {
         if before.contains(&view.name) {
