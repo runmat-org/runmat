@@ -308,12 +308,7 @@ pub(super) fn add(catalog: &mut Catalog) {
                             choice(
                                 "representation",
                                 "Representation",
-                                &[
-                                    ("full", "Full"),
-                                    ("display", "Display only"),
-                                    ("envelope", "Envelope"),
-                                    ("defeatured", "Defeatured"),
-                                ],
+                                &crate::assembly::model::Representation::offered_choices(),
                             ),
                             Section::Occurrences,
                             "representation",
@@ -323,6 +318,13 @@ pub(super) fn add(catalog: &mut Catalog) {
                             flag("flexible", "Flexible", false),
                             Section::Occurrences,
                             "flexible",
+                        ),
+                        prop(
+                            flag("reference", "Reference", false).help(
+                                "Drawn and mated to, but left out of the parts list, mass and interference.",
+                            ),
+                            Section::Occurrences,
+                            "reference",
                         ),
                         shown(text("pin", "Pinned revision", None), "revision"),
                         shown(count("dof", "Degrees of freedom", 0, 0), "dof"),

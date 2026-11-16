@@ -24,6 +24,7 @@ mod configuration;
 mod history;
 mod manage;
 mod publish;
+pub(crate) mod release;
 pub(crate) mod sketch;
 
 use crate::runtime::Files;
@@ -490,6 +491,14 @@ pub fn edit(
                 .map(|(p, old, change)| file_change(&p, &old, change))
                 .collect(),
             summary,
+        });
+    } else if request.command == "manage.release" {
+        // The part's text as its next released revision, in the release store beside it.
+        let ((store, old, change), revision) = release::release(path, text, files)?;
+        let name = path.rsplit('/').next().unwrap_or(path);
+        return Ok(EditOutput {
+            files: vec![file_change(&store, &old, change)],
+            summary: format!("Released {name} as {revision}"),
         });
     } else if request.command == "repair.repair" {
         // Pins and publishes can change other files.

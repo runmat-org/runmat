@@ -104,6 +104,9 @@ pub struct OccNode {
     pub representation: Representation,
     /// An ancestor's lightweight representation stands in for this occurrence.
     pub represented_by_ancestor: bool,
+    /// A reference component, or under one: left out of the parts list, mass and interference.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub reference: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub material: Option<MaterialRef>,
     #[serde(default)]
@@ -116,6 +119,23 @@ pub struct OccNode {
     pub expanded: bool,
     /// The definition failed to load; the node stands as a placeholder.
     pub failed: bool,
+}
+
+impl OccNode {
+    /// The key its definition's regenerated document and display are held under: the file,
+    /// or `<file>@<revision>` for an occurrence pinned to a released revision (whose text and
+    /// geometry can differ from the live file's).
+    pub fn source_key(&self) -> String {
+        source_key(self.definition.file.as_str(), self.revision.as_ref())
+    }
+}
+
+/// [`OccNode::source_key`] for `file` at `revision`.
+pub fn source_key(file: &str, revision: Option<&RevisionId>) -> String {
+    match revision {
+        Some(r) => format!("{file}@{r}"),
+        None => file.to_owned(),
+    }
 }
 
 /// One shared definition at one configuration and representation.
@@ -269,6 +289,8 @@ pub struct ResolvedAssembly {
     pub sketches: Vec<crate::assembly::sketches::ResolvedSketch>,
     /// The top assembly's mate connectors where they sit after the solve, in document order.
     pub connectors: Vec<ResolvedConnector>,
+    /// The top assembly's configuration it resolved in (`None`: as written).
+    pub configuration: Option<ConfigurationName>,
     /// Display paths of occurrences suppressed in this configuration.
     pub suppressed: Vec<String>,
     pub diagnostics: DiagnosticReport,
@@ -574,6 +596,7 @@ pub fn resolve_metered(
         dof: None,
         representation: Representation::Full,
         represented_by_ancestor: false,
+        reference: false,
         material: None,
         properties: doc.properties.clone(),
         part_number: doc.part_number.clone(),
@@ -717,6 +740,7 @@ impl<'a, 'b> Resolver<'a, 'b> {
             envelopes: self.envelopes,
             sketches: self.sketches,
             connectors,
+            configuration: self.req.configuration.clone(),
             suppressed: self.suppressed,
             diagnostics: self.diags,
             stats: self.stats,

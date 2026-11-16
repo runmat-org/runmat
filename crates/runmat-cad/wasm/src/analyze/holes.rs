@@ -18,7 +18,9 @@
 //! Fastener parts themselves (a nut's bore) aren't holes to align.
 
 use super::{Analysis, ModelDimension, Row};
-use crate::edit::assembly::frames::{self, cross, dot, norm, scale, sub, unit, FrameKind, V3};
+use crate::edit::assembly::frames::{
+    self, cross, dot, indices, norm, points, scale, sub, unit, FrameKind, V3,
+};
 use crate::runtime::Files;
 use serde_json::{json, Map, Value};
 use std::collections::BTreeSet;
@@ -61,14 +63,6 @@ impl Hole {
     fn at(&self, t: f64) -> V3 {
         frames::add(self.point, scale(self.axis, t))
     }
-}
-
-fn points(values: &Value) -> Vec<V3> {
-    let flat: Vec<f64> = values
-        .as_array()
-        .map(|a| a.iter().filter_map(Value::as_f64).collect())
-        .unwrap_or_default();
-    flat.chunks_exact(3).map(|c| [c[0], c[1], c[2]]).collect()
 }
 
 fn v3(v: &Value) -> Option<V3> {
@@ -121,11 +115,7 @@ fn bore(face: &Value) -> Option<(V3, V3, f64)> {
             facing += dot(*n, unit(radial(*p)));
         }
     } else {
-        let tris: Vec<usize> = face["triangles"]
-            .as_array()?
-            .iter()
-            .filter_map(|v| v.as_u64().map(|n| n as usize))
-            .collect();
+        let tris = indices(&face["triangles"]);
         for t in tris.chunks_exact(3) {
             let (a, b, c) = (*positions.get(t[0])?, *positions.get(t[1])?, *positions.get(t[2])?);
             let n = cross(sub(b, a), sub(c, a));

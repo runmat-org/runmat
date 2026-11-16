@@ -225,6 +225,10 @@ pub fn flat_bom(
     let mut rows: BTreeMap<BomItem, (BomItem, u64, Vec<String>)> = BTreeMap::new();
     let mut parts = 0;
     for (i, n) in tree.nodes.iter().enumerate().skip(1) {
+        // A reference component (a skeleton) is no item of the product.
+        if n.reference {
+            continue;
+        }
         let is_asm = n.definition.kind == DefinitionKind::Assembly;
         // A collapsed or failed sub-assembly stands for itself.
         let leaf = !is_asm || !n.expanded;

@@ -13,6 +13,7 @@
 //! line, concentric at the offset radius for a circle. The copy follows the edge.
 
 use super::anchors::{Anchor, Publisher};
+use super::frames::points;
 use super::mate::resolve;
 use super::{model, parse_pick, Compiled, Entity};
 use crate::features::picks_of;
@@ -77,9 +78,9 @@ fn edge_points(compiled: &Compiled, uuid: &str, body: usize, edge: usize) -> Opt
         .as_array()?
         .iter()
         .find(|e| e["index"].as_u64() == Some(edge as u64))?;
-    let flat: Vec<f64> = e["points"].as_array()?.iter().filter_map(Value::as_f64).collect();
     Some(
-        flat.chunks_exact(3)
+        points(&e["points"])
+            .into_iter()
             .map(|p| {
                 if t.len() < 12 {
                     return [p[0], p[1], p[2]];

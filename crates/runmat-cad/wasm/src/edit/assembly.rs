@@ -10,9 +10,25 @@
 //!   each pick becoming a mate connector on its component ([`mate`], [`frames`]).
 //! - `assembly.flip-mate`, `assembly.edit-mate`, `assembly.smart-mate`: mates that exist and
 //!   the smart mate ([`mate_edits`]).
-//! - `assembly.replace`, `assembly.subassembly`, `assembly.new-part`: structure ([`structure`]).
+//! - `assembly.copy-with-mates`: components copied with their connectors and mates, each mate to
+//!   an outside reference taking the next picked new reference ([`copy`]).
+//! - `assembly.replace`, `assembly.subassembly`, `assembly.new-part`, `assembly.skeleton`:
+//!   structure ([`structure`]).
 //! - `assembly.sketch` and the `sketch.*` tools: sketches in the assembly ([`sketch`]).
 //! - `assembly.feature`: a cut, holes or a weld bead through components ([`operation`]).
+//! - `assembly.envelope`: a reserved box of space fitted round components, and Delete on its row
+//!   ([`envelopes`]).
+//! - `assembly.contacts`: contact regions between touching faces of components, whether each is
+//!   bonded, and Delete on its row ([`contacts`]).
+//! - `assembly.options-effectivity`, `assembly.options`: option axes, the serial range their
+//!   values apply in and the values shown, and Delete on an option's row ([`product_options`]).
+//! - `assembly.set-property`: Fixed, Flexible, Reference, Representation or Configuration of
+//!   the selected components, from Properties ([`properties`]).
+//! - `assembly.document-settings`: the units its readouts use ([`settings`]).
+//! - `assembly.release`, `assembly.update-pins`: the components' files released as revisions,
+//!   and the components pinned to their latest release or set to follow the live file ([`pins`]).
+//! - `assembly.representation`: the components' representation (full, or envelope: drawn and
+//!   checked as their box).
 //! - `assembly.mate-connector`: a named connector on a pick, and Delete on its row
 //!   ([`connector`]).
 //! - `assembly.publish`: a connector or component published by name, and Delete on its row
@@ -28,8 +44,12 @@
 //! the assembly declares.
 
 pub(crate) mod anchors;
+mod configurations;
 mod configure;
 mod connector;
+mod contacts;
+mod copy;
+mod envelopes;
 mod explode;
 pub(crate) mod frames;
 mod mate;
@@ -37,8 +57,12 @@ mod mate_edits;
 mod mirror;
 mod operation;
 mod path_picks;
+mod pins;
 mod place;
+mod product_options;
+mod properties;
 mod publishes;
+mod settings;
 mod sketch;
 mod structure;
 mod use_edges;
@@ -47,13 +71,29 @@ mod anchors_tests;
 #[cfg(test)]
 mod configure_tests;
 #[cfg(test)]
+mod configurations_tests;
+#[cfg(test)]
 mod connector_tests;
+#[cfg(test)]
+mod contacts_tests;
+#[cfg(test)]
+mod copy_tests;
+#[cfg(test)]
+mod pins_tests;
+#[cfg(test)]
+mod product_options_tests;
 #[cfg(test)]
 mod operation_tests;
 #[cfg(test)]
+mod envelopes_tests;
+#[cfg(test)]
 mod explode_tests;
 #[cfg(test)]
+mod skeleton_tests;
+#[cfg(test)]
 mod sketch_tests;
+#[cfg(test)]
+mod representation_tests;
 #[cfg(test)]
 mod structure_tests;
 #[cfg(test)]
@@ -284,12 +324,69 @@ fn selected_names(compiled: &Compiled, request: &EditRequest) -> Result<Vec<Stri
     Ok(names)
 }
 
+/// `assembly.representation`: sets the components' representation (`full` writes none, the
+/// default). Only [`Representation::OFFERED`] ones: the others have no engine yet.
+///
+/// [`Representation::OFFERED`]: runmat_cad::assembly::model::Representation::OFFERED
+fn representation(
+    document: &mut AssemblyDocument,
+    names: &[String],
+    key: &str,
+) -> Result<String, EditFailure> {
+    use runmat_cad::assembly::model::Representation;
+    let key = if key.is_empty() { "full" } else { key };
+    let chosen = Representation::from_key(key)
+        .filter(|r| Representation::OFFERED.contains(r))
+        .ok_or_else(|| {
+            model(format!(
+                "`{key}` isn't a representation a component can take; choose {}",
+                Representation::OFFERED.map(|r| format!("`{}`", r.key())).join(" or ")
+            ))
+        })?;
+    for name in names {
+        let at = find(document, name)?;
+        document.occurrences[at].representation =
+            (chosen != Representation::Full).then_some(chosen);
+    }
+    Ok(format!("Representation of {}: {}", names.join(", "), chosen.label()))
+}
+
 fn find(document: &AssemblyDocument, name: &str) -> Result<usize, EditFailure> {
     document
         .occurrences
         .iter()
         .position(|o| o.name == name)
         .ok_or_else(|| model(format!("the assembly has no component `{name}`")))
+}
+
+/// After components `names` are deleted: the connectors on them (when no alternative of that
+/// name is left) and the mates that join those connectors go too, so nothing is left pointing at
+/// a component that is gone. Returns the summary's tail naming what went with them.
+fn drop_dangling(document: &mut AssemblyDocument, names: &[String]) -> String {
+    let gone: Vec<&String> = names
+        .iter()
+        .filter(|n| !document.occurrences.iter().any(|o| &o.name == *n))
+        .collect();
+    let connectors: Vec<String> = document
+        .connectors
+        .iter()
+        .filter(|c| c.occurrence.0.first().is_some_and(|s| gone.contains(&&s.name)))
+        .map(|c| c.name.clone())
+        .collect();
+    document.connectors.retain(|c| !connectors.contains(&c.name));
+    let mates: Vec<String> = document
+        .mates
+        .iter()
+        .filter(|m| connectors.contains(&m.a) || connectors.contains(&m.b))
+        .map(|m| m.name.clone())
+        .collect();
+    document.mates.retain(|m| !mates.contains(&m.name));
+    let with: Vec<String> = mates.into_iter().chain(connectors).collect();
+    if with.is_empty() {
+        String::new()
+    } else {
+        format!(" with {}", with.join(", "))
+    }
 }
 
 /// Component `occurrence`, which must carry override `index`.
@@ -442,6 +539,36 @@ pub(super) fn edit(
             publishes::delete(&mut document, request)?
         }
         "assembly.publish" => publishes::apply(&mut document, &compiled, &request.values)?,
+        "assembly.delete" if configurations::selected(request).next().is_some() => {
+            configurations::delete(&mut document, request)?
+        }
+        "assembly.delete" if envelopes::selected(request).next().is_some() => {
+            envelopes::delete(&mut document, request)?
+        }
+        "assembly.envelope" => envelopes::apply(&mut document, &compiled, &request.values)?,
+        "assembly.delete" if product_options::selected(request).next().is_some() => {
+            product_options::delete(&mut document, request)?
+        }
+        "assembly.options-effectivity" => product_options::define(&mut document, &request.values)?,
+        "assembly.options" => product_options::show(&mut document, &request.values)?,
+        "assembly.set-property" => properties::set(&mut document, &compiled, files, request)?,
+        "assembly.document-settings" => settings::apply(&mut document, &request.values)?,
+        "assembly.update-pins" => pins::update(&mut document, path, files, &compiled, request)?,
+        "assembly.release" => {
+            pins::release(&document, path, text, files, &compiled, request, &mut others)?
+        }
+        "assembly.delete" if contacts::selected(request).next().is_some() => {
+            contacts::delete(&mut document, request)?
+        }
+        "assembly.contacts" if contacts::selected(request).next().is_some() => {
+            contacts::set_bonded(&mut document, request)?
+        }
+        "assembly.contacts" => {
+            contacts::find(&mut document, &compiled, &mut publisher, &request.values)?
+        }
+        "assembly.configurations" => {
+            configurations::apply(&mut document, &compiled, &request.values)?
+        }
         "assembly.mate-connector" => {
             connector::apply(&mut document, &compiled, &mut publisher, &request.values)?
         }
@@ -454,7 +581,8 @@ pub(super) fn edit(
                 let at = find(&document, name)?;
                 document.occurrences.remove(at);
             }
-            format!("Deleted {}", names.join(", "))
+            let dropped = drop_dangling(&mut document, &names);
+            format!("Deleted {}{dropped}", names.join(", "))
         }
         "assembly.suppress" => {
             let names = selected_names(&compiled, request)?;
@@ -477,6 +605,10 @@ pub(super) fn edit(
                 names.join(", ")
             )
         }
+        "assembly.representation" => {
+            let names = selected_names(&compiled, request)?;
+            representation(&mut document, &names, text_value(&request.values, "representation"))?
+        }
         "assembly.insert" => place::insert(&mut document, files, &request.values)?,
         "assembly.component-configuration" => {
             let names = selected_names(&compiled, request)?;
@@ -498,6 +630,16 @@ pub(super) fn edit(
         "assembly.mirror" => {
             let names = selected_names(&compiled, request)?;
             mirror::mirror(&mut document, &compiled, files, &names, &request.values)?
+        }
+        "assembly.copy-with-mates" => {
+            let names = selected_names(&compiled, request)?;
+            copy::copy_with_mates(
+                &mut document,
+                &compiled,
+                &mut publisher,
+                &names,
+                &request.values,
+            )?
         }
         "assembly.mate" => {
             let values =
@@ -527,6 +669,11 @@ pub(super) fn edit(
             let names = selected_names(&compiled, request)?;
             let (summary, created) =
                 structure::subassembly(&mut document, &compiled, files, &names, &request.values)?;
+            others.extend(created);
+            summary
+        }
+        "assembly.skeleton" => {
+            let (summary, created) = structure::skeleton(&mut document, files, &request.values)?;
             others.extend(created);
             summary
         }
