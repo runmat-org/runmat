@@ -40,9 +40,10 @@ fn identity() -> Transform {
 }
 
 thread_local! {
-    /// The document units of the assembly being measured, while [`measure`] runs: its
+    /// The document readout (units, decimals, general tolerance) of the part or assembly being
+    /// measured, while [`measure`] runs: its
     /// readouts use them ([`runmat_cad::assembly::settings`]). `None`: millimeters.
-    static UNITS: std::cell::Cell<Option<runmat_cad::assembly::settings::UnitSystem>> =
+    static UNITS: std::cell::Cell<Option<runmat_cad::assembly::settings::Readout>> =
         const { std::cell::Cell::new(None) };
 }
 
@@ -50,7 +51,7 @@ thread_local! {
 struct ReadoutUnits;
 
 impl ReadoutUnits {
-    fn set(units: Option<runmat_cad::assembly::settings::UnitSystem>) -> Self {
+    fn set(units: Option<runmat_cad::assembly::settings::Readout>) -> Self {
         UNITS.with(|u| u.set(units));
         ReadoutUnits
     }
@@ -320,6 +321,13 @@ fn pair(
     let n: Nearest =
         nearest(&a.prims, &b.prims).ok_or("a picked item has no geometry to measure")?;
     rows.push(row("Minimum distance", mm(n.distance)));
+    // The document's general tolerance on that distance (ISO 2768-1), when it names a class.
+    if let Some(t) = UNITS
+        .with(std::cell::Cell::get)
+        .and_then(|u| u.general_tolerance(n.distance))
+    {
+        rows.push(row("General tolerance", t));
+    }
     let d = sub(n.b, n.a);
     rows.push(row("ΔX", mm(d[0].abs())));
     rows.push(row("ΔY", mm(d[1].abs())));
@@ -389,7 +397,7 @@ pub fn measure(
         .get("configuration")
         .and_then(Value::as_str)
         .filter(|c| !c.is_empty() && *c != "default");
-    let _units = ReadoutUnits::set(crate::analyze::document_units(path, text, files));
+    let _units = ReadoutUnits::set(crate::analyze::document_readout(path, text, files));
     let picks = picks_of(values, "items");
     if picks.is_empty() {
         return Err(

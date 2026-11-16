@@ -410,6 +410,8 @@ This file is generated from the command catalog.
 - `manage.configurations`: Add configurations and edit the design table.
   - Required: `name` (text)
   - Optional: `based_on` (text)
+- `manage.document-settings`: Units and decimals for readouts, the drafting standard and the general tolerance.
+  - Required: `units` (one of `mmgs`, `mks`, `ips`, default `mmgs`); `decimals` (whole number, default 2); `standard` (one of `iso`, `asme`, default `iso`); `tolerance` (one of `none`, `fine`, `medium`, `coarse`, `very_coarse`, default `none`)
 - `manage.equations`: Set an input's value, or add or change a named value or equation.
   - Required: `name` (text); `value` (text)
 - `manage.export`: Export the part as STEP AP242, IGES, STL, 3MF, glTF or a face as DXF.
@@ -627,6 +629,8 @@ This file is generated from the command catalog.
 - `sheet-metal.base-flange`: Start a sheet metal part from a sketch.
   - Required: `profile` (pick: sketch); `thickness` (number in mm, default 1.5); `radius` (number in mm, default 1); `depth` (number in mm, default 20); `bend_rule` (one of `k_factor`, `table`, `allowance`, `deduction`, default `k_factor`); `k` (number, default 0.44) when `bend_rule` is k_factor; `allowance` (number in mm, default 2) when `bend_rule` is allowance; `deduction` (number in mm, default 2) when `bend_rule` is deduction
   - Optional: `bend_table` (text) when `bend_rule` is table; `gauge` (text)
+- `sheet-metal.bend-table`: Choose the bend rule every sheet body of this part follows: a K-factor, DIN 6935 or a bend table in the project.
+  - Required: `rule` (one of `k_factor`, `din6935`, `table`, `feature`, default `k_factor`); `k` (number, default 0.44) when `rule` is k_factor; `table` (text) when `rule` is table
 - `sheet-metal.break-corner`: Chamfer or round a flat corner.
   - Required: `edges` (picks: edge); `break` (one of `chamfer`, `fillet`, default `chamfer`); `distance` (number in mm, default 2)
 - `sheet-metal.closed-corner`: Close the gap between flanges at a corner.
@@ -641,6 +645,9 @@ This file is generated from the command catalog.
   - Optional: `bends` (picks: face)
 - `sheet-metal.form-tool`: Stamp a form (louver, dimple, bead) into a face.
   - Required: `tool` (one of `louver`, `dimple`, `bead`, default `louver`); `face` (pick: face); `position` (pick: sketch point or point or vertex); `rotation` (number in deg, default 0)
+- `sheet-metal.gauge`: Pick the material gauge, which sets every sheet body's thickness, bend radius and K-factor.
+  - Required: `gauges` (one of `steel`, `aluminum`, `file`, default `steel`); `file` (text) when `gauges` is file
+  - Optional: `gauge` (text)
 - `sheet-metal.hem`: Fold an edge back on itself.
   - Required: `edges` (picks: edge); `hem` (one of `closed`, `open`, `teardrop`, `rolled`, default `closed`); `length` (number in mm, default 5); `gap` (number in mm, default 0.5) when `hem` is open
 - `sheet-metal.jog`: Add two bends that offset a flat.

@@ -185,6 +185,14 @@ pub fn dependencies(path: &str, text: &str) -> Vec<String> {
         ));
         // Its release store, which Release adds the next revision to.
         out.push(runmat_cad::refs::release_store::store_path(path));
+        // The gauge and bend tables its sheet metal reads.
+        if let Some(defaults) = &doc.sheet_metal {
+            out.extend(
+                runmat_cad::model::sheet_metal::tables::files(defaults)
+                    .iter()
+                    .map(|f| resolve_path(path, f, &Files::new())),
+            );
+        }
         return out;
     }
     // The folders it can name designs in, and the design files it names by path; beside each,
@@ -304,6 +312,11 @@ pub fn regenerate_part_in(
     let Some(document) = parsed.document else {
         return Err(syntax_diagnostics(path, text, &parsed.diagnostics));
     };
+    // The part's gauge and bend table, read from the project, in every sheet body's rules.
+    let (document, table_problems) =
+        runmat_cad::model::sheet_metal::tables::resolve(&document, &|reference| {
+            values_host::host_file(path, reference)
+        });
     let kernel = crate::kernel::make();
     let request = RegenRequest {
         configuration: configuration.map(runmat_cad::ids::ConfigurationName::new),
@@ -325,6 +338,7 @@ pub fn regenerate_part_in(
         regenerate(&document, &ctx, &request, &mut RegenCache::default())
     });
     result.diagnostics.attach_spans(&parsed.spans);
+    document_problems(&document, table_problems, &mut result);
     // The part as the configuration makes it: its feature parameters, part number and
     // properties, for every reader of the regenerated part (title blocks, exports).
     let document = match &request.configuration {
@@ -365,6 +379,28 @@ pub fn regenerate_part_in(
         display,
         dynamic: used.get(),
     })
+}
+
+/// The part's own setting problems in its regeneration's diagnostics: sheet-metal tables that
+/// can't be read, and on an ASME part each GD&T tolerance whose characteristic ASME Y14.5-2018
+/// withdrew ([`runmat_cad::drawing::standard::DrawingStandard::refusal`]).
+fn document_problems(document: &PartDocument, tables: Vec<String>, result: &mut RegenResult) {
+    use runmat_cad::diagnostics::{Cause, DiagCode, Severity, Site, Subject};
+    let standard = document.settings.as_ref().and_then(|s| s.standard);
+    let refused = document.pmi.tolerances.iter().filter_map(|t| {
+        let why = standard?.refusal(t.characteristic)?;
+        Some(format!("tolerance `{}`: {why}", t.name))
+    });
+    for message in tables.into_iter().chain(refused) {
+        result.diagnostics.push(
+            DiagCode::RegenInvalid,
+            Severity::Warning,
+            Site::of(Subject::Document),
+            message,
+            Cause::Root,
+            Vec::new(),
+        );
+    }
 }
 
 pub fn compile_part(path: &str, text: &str) -> Result<CompiledPart, Vec<Diagnostic>> {
@@ -821,10 +857,16 @@ pub fn compile_assembly_indented(
     files: &Files,
 ) -> Result<CompiledAssemblyWithIndentedBom, Vec<Diagnostic>> {
     let mut rows = Vec::new();
-    let (index, display, problems) =
-        compile_assembly_with(path, text, files, None, &BTreeSet::new(), |resolved, source| {
+    let (index, display, problems) = compile_assembly_with(
+        path,
+        text,
+        files,
+        None,
+        &BTreeSet::new(),
+        |resolved, source| {
             rows = runmat_cad::assembly::bom::indented_bom(resolved, Some(source));
-        })?;
+        },
+    )?;
     Ok(CompiledAssemblyWithIndentedBom {
         index,
         display,
@@ -887,12 +929,8 @@ fn compile_assembly_with(
         &configured,
         &operated.displays,
     );
-    let prototype_digests = prototype_reuse::prototype_digests(
-        &resolved,
-        &documents,
-        &digests,
-        &operated.digests,
-    );
+    let prototype_digests =
+        prototype_reuse::prototype_digests(&resolved, &documents, &digests, &operated.digests);
     let reused = prototype_reuse::omit_known(&mut display, &prototype_digests, known);
     let mut display = serde_json::to_value(&display).unwrap_or(Value::Null);
     prototype_reuse::mark(&mut display, &prototype_digests, &reused);

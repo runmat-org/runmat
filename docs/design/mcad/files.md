@@ -24,6 +24,8 @@ A part file declares one part: `part <name> { … }`. The name matches the file 
 | `annotation <name> = <kind>(…)`, `view <name> = { from, up }` | 3D annotations and annotation views | [3D annotations](/docs/mcad/part/regions-and-publish#3d-annotations) |
 | `configuration <name> = { … }` | a member of the product family | [Configurations](/docs/mcad/part/configurations) |
 | `link <kind> <item> to "<target>"` | a traceable link | [Links](/docs/mcad/part/regions-and-publish#links) |
+| `settings = { units, decimals, standard, tolerance }` | the units and decimals readouts use, the drafting standard and the ISO 2768-1 general tolerance | [Document settings](/docs/mcad/guides/model-a-part#document-settings) |
+| `sheet_metal = { gauges, gauge, bend_table, k }` | the gauge and bend rule every sheet body follows | [Gauges and bend tables](/docs/mcad/guides/sheet-metal#gauges-and-bend-tables) |
 
 ## `.assembly`
 
