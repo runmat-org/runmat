@@ -419,7 +419,11 @@ This file is generated from the command catalog.
   - Required: `material` (one of `material.aluminum_6061_t6`, `material.aluminum_7075_t6`, `material.aluminum_2024_t3`, `material.steel_1018`, `material.steel_4140`, `material.stainless_304`, `material.stainless_316`, `material.titanium_ti_6al_4v`, `material.copper_c110`, `material.brass_c360`, `material.abs`, `material.nylon_pa12`, `material.glass_filled_nylon`, `material.pom_acetal`, `material.peek`, `material.polycarbonate`, `material.acrylic`, `material.carbon_fiber`, `material.fr4`, `material.silicone_rubber`, `material.oak`, `material.concrete`, `material.douglas_fir_lumber`, `material.osb`, `material.gypsum_board`, `material.xps_foam`, default `material.aluminum_6061_t6`)
   - Optional: `bodies` (picks: body or part)
   - Runs on the `selection`: `body`, `part`
+- `manage.recognize-features`: Turn an imported body into a sketch, extrude, cuts, holes, rounds and chamfers.
+  - Required: `body` (pick: body); `tolerance` (number in mm, default 0.01)
 - `manage.release`: Save this part as its next released revision, for assemblies to pin to.
+- `manage.replace-reference`: Point the features that use a face, edge, body, plane or sketch at another one.
+  - Required: `reference` (pick: face or edge or vertex or body or plane or sketch); `with` (pick: face or edge or vertex or body or plane or sketch); `scope` (one of `all`, `one`, default `all`); `feature` (pick: feature or sketch) when `scope` is one
 - `manage.split-to-files`: Save bodies as separate parts and an assembly.
   - Optional: `bodies` (picks: body); `assembly` (true or false, default true)
 

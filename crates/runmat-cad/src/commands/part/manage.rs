@@ -85,10 +85,31 @@ pub(super) fn manage() -> Vec<CommandDescriptor> {
             "replace",
             P,
         )
-        .desc("Point a reference at another file or entity.")
+        .desc("Point the features that use a face, edge, body, plane or sketch at another one.")
+        .kw(&[
+            "re-reference",
+            "redirect",
+            "swap reference",
+            "edit reference",
+        ])
         .inputs(vec![
-            pick("reference", "Reference", &[K::Feature, K::Input]),
-            text("with", "Replace with", Some("other.part")),
+            pick(
+                "reference",
+                "Reference",
+                &[K::Face, K::Edge, K::Vertex, K::Body, K::Plane, K::Sketch],
+            )
+            .help("What the features use now; the summary lists every feature that uses it"),
+            pick(
+                "with",
+                "Replace with",
+                &[K::Face, K::Edge, K::Vertex, K::Body, K::Plane, K::Sketch],
+            ),
+            radio(
+                "scope",
+                "Replace",
+                &[("all", "Every use"), ("one", "In one feature")],
+            ),
+            pick("feature", "Feature", &[K::Feature, K::Sketch]).shown("scope", &["one"]),
         ])
         .edit(edit(EditOp::Edit, Section::Features).item("reference")),
         cmd("manage.freeze-bar", "Freeze bar", "freeze", P)
@@ -187,11 +208,18 @@ pub(super) fn manage() -> Vec<CommandDescriptor> {
             "recognize",
             P,
         )
-        .desc("Turn an imported body into editable features.")
-        .kw(&["feature recognition", "convert"])
+        .desc("Turn an imported body into a sketch, extrude, cuts, holes, rounds and chamfers.")
+        .kw(&[
+            "feature recognition",
+            "convert",
+            "step to features",
+            "defeature",
+        ])
         .inputs(vec![
-            pick("body", "Body", &[K::Body]),
-            flag("interactive", "Pick features one at a time", false),
+            pick("body", "Body", &[K::Body])
+                .help("A body a STEP import made; it is converted whole or left as it is"),
+            length("tolerance", "Match tolerance", 0.01)
+                .help("How far the rebuilt faces may lie from the imported ones"),
         ])
         .when(bodies_exist())
         .edit(edit(EditOp::Edit, Section::Features).item("recognize")),
