@@ -13,7 +13,7 @@ const SUBPLOT_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 1] =
         classes: &crate::ALL_INTEGER_CLASSES,
         availability: BuiltinIntegerInputAvailability::RunMatOnly,
         scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
-        notes: "The compatibility target's public data types for these controls are single and double; RunMat mode additionally parses typed integer scalars exactly.",
+        notes: "The compatibility target's public data types for these controls are single and double; RunMat mode additionally parses typed integer scalar dimensions and scalar or vector positions exactly.",
     }];
 pub const SUBPLOT_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
     [BuiltinIntegerCapabilityDescriptor {
@@ -24,7 +24,7 @@ pub const SUBPLOT_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] 
         overflow: BuiltinIntegerOverflowRule::Error,
         backend: BuiltinIntegerBackendRule::HostOnly,
         overload: BuiltinIntegerOverloadKind::StructuralParameter,
-        notes: "The gated scalars are converted directly to platform dimensions before any figure state changes; the graphics handle remains a host double scalar.",
+        notes: "Dimensions and slot indices are parsed exactly before figure state changes. The grid must fit its 32-bit scene dimensions and slot count; the graphics handle remains a host double scalar.",
     }];
 
 const SUBPLOT_OUTPUT_AX: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
@@ -55,7 +55,7 @@ const SUBPLOT_INPUTS_GRID: [BuiltinParamDescriptor; 3] = [
         ty: BuiltinParamType::SizeArg,
         arity: BuiltinParamArity::Required,
         default: None,
-        description: "1-based subplot position in row-major order.",
+        description: "One-based slot or vector of slots in row-major order. A vector selects their bounding rectangle.",
     },
 ];
 
@@ -68,7 +68,7 @@ const SUBPLOT_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDes
 pub const SUBPLOT_ERROR_INVALID_ARGUMENT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
     code: "RM.SUBPLOT.INVALID_ARGUMENT",
     identifier: Some("RunMat:subplot:InvalidArgument"),
-    when: "Rows/cols/position are unsupported, non-scalar, non-finite, or non-positive.",
+    when: "Rows or columns are not positive integer scalars, position is not a nonempty vector of positive integer slots, or the grid exceeds the scene dimensions or slot-count representation.",
     message: "subplot: invalid argument",
 };
 

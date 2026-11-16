@@ -4,7 +4,7 @@ use serde_json::json;
 use crate::core::analysis::{
     analyze_document_with_compat_and_source_async, document_symbols, CompatMode, DocumentAnalysis,
 };
-use crate::core::project::ProjectContext;
+use crate::core::project::SourceContext;
 use std::collections::HashSet;
 
 pub fn workspace_symbols_with_project(
@@ -20,7 +20,7 @@ pub fn workspace_symbols_with_project(
         let source_hint = docs
             .first()
             .and_then(|(uri, _, _)| source_name_from_uri(uri));
-        if let Some(project) = ProjectContext::discover_from_source_name(source_hint.as_deref()) {
+        if let Some(project) = SourceContext::discover_from_source_name(source_hint.as_deref()) {
             out.extend(project_symbols_sync(&project, compat));
         }
     }
@@ -58,7 +58,7 @@ pub async fn workspace_symbols_with_project_async(
         .first()
         .and_then(|(uri, _, _)| source_name_from_uri(uri));
     if let Some(project) =
-        ProjectContext::discover_from_source_name_async(source_hint.as_deref()).await
+        SourceContext::discover_from_source_name_async(source_hint.as_deref()).await
     {
         out.extend(project_symbols_async(&project, compat).await);
     }
@@ -114,7 +114,7 @@ fn append_document_symbols(
 }
 
 #[cfg(not(target_arch = "wasm32"))]
-fn project_symbols_sync(project: &ProjectContext, compat: CompatMode) -> Vec<SymbolInformation> {
+fn project_symbols_sync(project: &SourceContext, compat: CompatMode) -> Vec<SymbolInformation> {
     let mut out = Vec::new();
     for source in project.visible_source_files() {
         let Some(uri) = file_path_to_url(source) else {
@@ -138,7 +138,7 @@ fn project_symbols_sync(project: &ProjectContext, compat: CompatMode) -> Vec<Sym
 
 #[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
 async fn project_symbols_async(
-    project: &ProjectContext,
+    project: &SourceContext,
     compat: CompatMode,
 ) -> Vec<SymbolInformation> {
     let mut out = Vec::new();

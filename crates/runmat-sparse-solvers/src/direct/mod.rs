@@ -495,6 +495,7 @@ impl<T: FactorScalar> DirectSolver<T> {
                 }
             },
         )?;
+        control.report(factorization_complete());
         control.check()?;
         Ok(Self {
             symbolic,
@@ -523,7 +524,9 @@ impl<T: FactorScalar> DirectSolver<T> {
             &symbolic,
             reference_work::DirectPhase::Factorization,
             || self.refactorize_numeric(matrix),
-        )
+        )?;
+        control.report(factorization_complete());
+        Ok(())
     }
 
     fn refactorize_numeric(&mut self, matrix: SparseInput<'_, T>) -> SolverResult<()> {
@@ -1065,3 +1068,12 @@ pub(crate) fn try_vec<T: Clone>(len: usize, value: T) -> SolverResult<Vec<T>> {
 
 #[cfg(test)]
 mod tests;
+
+const fn factorization_complete() -> Progress {
+    Progress {
+        phase: ProgressPhase::FactorizationComplete,
+        iteration: 0,
+        residual: 0.0,
+        converged: 0,
+    }
+}

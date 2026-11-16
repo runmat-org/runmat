@@ -119,6 +119,20 @@ pub(crate) fn infer_rvalue(
                 .next()
                 .unwrap_or_else(dynamic_value)
         }
+        MirRvalue::Index { base, indexing } => {
+            let inference = crate::analysis::dataflow::indexed_value_inference(
+                &operand_fact_with_summaries(base, state, summaries),
+                indexing,
+                &super::index_selectors(indexing, state),
+            );
+            append_inference_diagnostics(
+                &inference.diagnostics,
+                span,
+                "fact-inference",
+                diagnostics,
+            );
+            inference.fact
+        }
         MirRvalue::Distributed(operation) => distributed_fact(operation, state),
         MirRvalue::Collective(operation) => collective_fact(operation, state),
         MirRvalue::Binary(left, operator, right) => {
@@ -234,7 +248,7 @@ pub(crate) fn infer_expansion_sequence(
             runmat_types::infer_index_sequence(
                 &operand_fact_with_summaries(base, state, summaries),
                 indexing.kind,
-                &crate::analysis::dataflow::index_selectors(indexing, &state.value_facts()),
+                &super::index_selectors(indexing, state),
                 indexing.result_context,
             )
         }
@@ -307,6 +321,13 @@ pub(crate) fn infer_rvalue_outputs(
     }
     let MirRvalue::Call(call) = value else {
         let inference = match value {
+            MirRvalue::Index { base, indexing } => {
+                crate::analysis::dataflow::indexed_value_inference(
+                    &operand_fact_with_summaries(base, state, summaries),
+                    indexing,
+                    &super::index_selectors(indexing, state),
+                )
+            }
             MirRvalue::Binary(left, operator, right) => infer_binary_operator(
                 *operator,
                 operand_fact_with_summaries(left, state, summaries),
@@ -446,14 +467,14 @@ pub(crate) fn rvalue_literal(value: &MirRvalue, state: &FlowState) -> LiteralVal
             crate::analysis::dataflow::literal_value(constant)
         }
         MirRvalue::Use(MirOperand::Local(local)) => state.locals[local.0].literal.clone(),
-        MirRvalue::Unary(runmat_hir::OperatorKind::UnaryMinus, operand) => {
-            let literal = operand_literal(operand, state);
-            runmat_types::LiteralContext::numeric_from_literal(&literal)
-                .map_or(LiteralValue::Unknown, |value| LiteralValue::Number(-value))
+        MirRvalue::Unary(operator, operand) => {
+            runmat_types::infer_unary_literal(*operator, &operand_literal(operand, state))
         }
-        MirRvalue::Unary(runmat_hir::OperatorKind::UnaryPlus, operand) => {
-            operand_literal(operand, state)
-        }
+        MirRvalue::Binary(left, operator, right) => runmat_types::infer_binary_literal(
+            *operator,
+            &operand_literal(left, state),
+            &operand_literal(right, state),
+        ),
         MirRvalue::Aggregate {
             kind: crate::MirAggregateKind::Tensor,
             row_lengths,

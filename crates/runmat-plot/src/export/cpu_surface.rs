@@ -428,40 +428,6 @@ fn is_default_figure_bg(bg: Vec4) -> bool {
         && (bg.w - 1.0).abs() <= EPS
 }
 
-fn compute_tiled_viewports(
-    width: u32,
-    height: u32,
-    rows: usize,
-    cols: usize,
-) -> Vec<(u32, u32, u32, u32)> {
-    if rows == 0 || cols == 0 {
-        return vec![(0, 0, width.max(1), height.max(1))];
-    }
-    let rows_u = rows as u32;
-    let cols_u = cols as u32;
-    let cell_w = (width / cols_u).max(1);
-    let cell_h = (height / rows_u).max(1);
-    let mut out = Vec::with_capacity(rows * cols);
-    for r in 0..rows_u {
-        for c in 0..cols_u {
-            let x = c * cell_w;
-            let y = r * cell_h;
-            let w = if c + 1 == cols_u {
-                width.saturating_sub(x).max(1)
-            } else {
-                cell_w
-            };
-            let h = if r + 1 == rows_u {
-                height.saturating_sub(y).max(1)
-            } else {
-                cell_h
-            };
-            out.push((x, y, w, h));
-        }
-    }
-    out
-}
-
 fn rotation_margin(angle_degrees: f64, margin: u32) -> u32 {
     if angle_degrees.abs() <= f64::EPSILON {
         0
@@ -1776,9 +1742,8 @@ pub async fn render_figure_rgba_bytes(
     };
     let mut canvas = Canvas::new(width, height, to_u8_rgba(bg.to_array()));
 
-    let (rows, cols) = figure.axes_grid();
-    let viewports = compute_tiled_viewports(width, height, rows.max(1), cols.max(1));
-    let axes_count = rows.max(1) * cols.max(1);
+    let viewports = crate::core::axes_layout::figure_viewports_px(&figure, width, height);
+    let axes_count = viewports.len();
 
     let has_3d_flags: Vec<bool> = (0..axes_count)
         .map(|axes_index| axes_has_3d_content(&figure, axes_index))
@@ -1922,7 +1887,10 @@ pub async fn render_figure_rgba_bytes(
         None,
     );
 
-    for axes in &axes_views {
+    for (index, axes) in axes_views.iter().enumerate() {
+        if !figure.axes_is_live(index) {
+            continue;
+        }
         if axes.has_3d_content {
             draw_3d_axes_decorations(&mut canvas, axes);
         } else {
@@ -1931,6 +1899,9 @@ pub async fn render_figure_rgba_bytes(
     }
 
     for (axes_index, rd) in render_items.iter() {
+        if !figure.axes_is_live(*axes_index) {
+            continue;
+        }
         if rd.vertices.is_empty() {
             continue;
         }
@@ -1939,7 +1910,10 @@ pub async fn render_figure_rgba_bytes(
         };
         draw_render_data(&mut canvas, rd, axes);
     }
-    for axes in &axes_views {
+    for (index, axes) in axes_views.iter().enumerate() {
+        if !figure.axes_is_live(index) {
+            continue;
+        }
         if axes.has_3d_content {
             draw_3d_orientation_gizmo(&mut canvas, axes);
             if axes_views.len() == 1 {
@@ -2305,6 +2279,57 @@ mod tests {
         .unwrap();
         assert_eq!(output.len(), 160 * 120 * 4);
         assert_eq!(crate::plots::line::take_viewport_tessellations(), 1);
+    }
+
+    #[test]
+    fn cpu_export_places_independent_axes_and_spans_in_their_own_regions() {
+        for spanned in [false, true] {
+            let mut figure = Figure::new();
+            for (axes, color) in [Vec4::new(1., 0., 0., 1.), Vec4::new(0., 0., 1., 1.)]
+                .into_iter()
+                .enumerate()
+            {
+                figure.ensure_axes(axes);
+                if spanned {
+                    let region = if axes == 0 {
+                        crate::plots::AxesGridCell::from_slots(1, 3, [0, 1]).unwrap()
+                    } else {
+                        crate::plots::AxesGridCell::single(1, 3, 2)
+                    };
+                    figure.set_axes_grid_cell(axes, region).unwrap();
+                } else {
+                    figure.set_axes_position(axes, [0.05 + axes as f64 * 0.5, 0.1, 0.4, 0.8]);
+                }
+                figure.set_axes_limits(axes, Some((0., 10.)), Some((0., 10.)));
+                figure.set_axes_grid_enabled(axes, false);
+                figure.set_axes_legend_enabled(axes, false);
+                figure.add_line_plot_on_axes(
+                    crate::plots::LinePlot::new(vec![2., 8.], vec![5., 5.])
+                        .unwrap()
+                        .with_style(color, 3., crate::plots::LineStyle::Solid),
+                    axes,
+                );
+            }
+            let rgba = pollster::block_on(render_figure_rgba_bytes(
+                figure, 480, 240, None, None, None, None,
+            ))
+            .unwrap();
+            let boundary = if spanned { 320 } else { 240 };
+            let mut counts = [0_usize; 2];
+            for (pixel, rgba) in rgba.chunks_exact(4).enumerate() {
+                if rgba[0] > 200 && rgba[1] < 60 && rgba[2] < 60 {
+                    assert!(pixel % 480 < boundary, "left series escaped its region");
+                    counts[0] += 1;
+                } else if rgba[0] < 60 && rgba[1] < 60 && rgba[2] > 200 {
+                    assert!(pixel % 480 >= boundary, "right series escaped its region");
+                    counts[1] += 1;
+                }
+            }
+            assert!(
+                counts.iter().all(|count| *count > 10),
+                "missing series: {counts:?}"
+            );
+        }
     }
 
     #[test]

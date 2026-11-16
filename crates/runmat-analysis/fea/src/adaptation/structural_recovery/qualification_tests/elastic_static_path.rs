@@ -487,3 +487,80 @@ pub(super) fn multigrid_plan_covers_the_measured_solve() {
         );
     }
 }
+
+/// The proving factorization's plan covers the measured peak heap of the factor solve: the
+/// assembled stiffness, the solver's identity-constrained copy, the ordering graph and the
+/// Cholesky factor with its scratch. The allocation counter is per thread; the default static
+/// options solve serially.
+pub(super) fn factor_plan_covers_the_measured_solve() {
+    use crate::planning::resource::{
+        build_static_resource_plan_selecting, LocalExecutionPlan, StaticResourcePreflight,
+        StaticSolvePath, StaticSolveSelection,
+    };
+    use crate::topology::measure_test_allocations as measured;
+    let model = fixture_model(FixtureId::CantileverLinearStatic);
+    // Tet4 cantilevers of 8 to 12 divisions are left out: their exact Cholesky fill exceeds
+    // the envelope planned on the superset pattern, so the solve refuses before numeric
+    // factorization (fail closed) and there is no factor peak to measure.
+    for divisions in [7, 8] {
+        let order = ElementOrder::Tet10;
+        let mesh = structured_cantilever(divisions, order);
+        let constraints =
+            crate::constraints::CanonicalStructuralConstraintPlan::compile(&model, &mesh).unwrap();
+        let fields = crate::post::fields::structural_static_observable_field_definitions().unwrap();
+        let observations = crate::results::observation::resolve_structural_observation_plan(
+            &model.sequence.steps[0],
+            &model,
+            Some(&mesh),
+            &constraints,
+            &fields,
+            crate::results::observation::ObservationLimits::default(),
+        )
+        .unwrap();
+        let plan = build_static_resource_plan_selecting(
+            StaticResourcePreflight {
+                compilation: None,
+                prepared_inputs: None,
+                model: &model,
+                step: &model.sequence.steps[0],
+                backend: ComputeBackend::Cpu,
+                preconditioner: SpdPreconditionerKind::Auto,
+                observation_execution:
+                    crate::results::observation::ObservationExecutionPolicy::serial(),
+                mesh: Some(&mesh),
+                constraints: &constraints,
+                observations: &observations,
+                accelerator_requests: &[],
+                local_execution: LocalExecutionPlan::serial(),
+            },
+            StaticSolveSelection::Recorded(StaticSolvePath::ProvingFactorization),
+        )
+        .unwrap();
+        let (run, _, peak) = measured(|| solve(&model, &mesh, SpdPreconditionerKind::Auto));
+        assert_eq!(
+            run.structural_static_convergence
+                .as_ref()
+                .unwrap()
+                .operator_proof,
+            StaticOperatorProof::SparseCholesky
+        );
+        let planned = plan.request.memory_bytes;
+        eprintln!(
+            "factor static {order:?} {divisions}: nodes {} measured peak {peak} B, planned {planned} B, ratio {:.2}; breakdown {:?}",
+            mesh.topology.nodes.len(),
+            planned as f64 / peak as f64,
+            plan.breakdown
+        );
+        assert!(
+            peak as u64 <= planned,
+            "{order:?}: peak {peak} above {planned}"
+        );
+        // Measured 2026-11-15: 1.75x (7 divisions) and 1.65x (8). The plan also holds the
+        // factor envelope's 25% headroom, the mass and damping patterns a static solve does not
+        // assemble, and fixed reservations that dominate at this size.
+        assert!(
+            planned <= 2 * peak as u64,
+            "{order:?}: plan {planned} exceeds twice the measured peak {peak}"
+        );
+    }
+}

@@ -8,11 +8,13 @@ pub(crate) fn assign_place(
     place: &MirPlace,
     fact: ValueFact,
     literal: LiteralValue,
+    index_bounds: Option<runmat_types::ScalarIndexBounds>,
     mutation: Option<&crate::MirPlaceMutation>,
     state: &mut FlowState,
 ) {
     if let MirPlace::Local(local) = place {
         state.locals[local.0].set(fact, literal);
+        state.locals[local.0].index_bounds = index_bounds;
         return;
     }
     let mut facts = state.value_facts();
@@ -35,6 +37,17 @@ pub(crate) fn assign_place(
     if let Some((local, empty_cell)) = state.absent_cell_root_for_place(place, root_creation) {
         facts[local.0] = Some(empty_cell);
     }
-    crate::analysis::dataflow::assign_place_fact(place, fact, mutation, &mut facts);
+    crate::analysis::dataflow::assign_place_fact_with_bounds(
+        place,
+        fact,
+        mutation,
+        &mut facts,
+        &|local| state.locals[local.0].index_bounds,
+    );
     state.replace_value_facts(facts);
+    if let Some(root) = place.root_local() {
+        // Stores can change values while leaving every type/shape fact equal.
+        state.locals[root.0].literal = LiteralValue::Unknown;
+        state.locals[root.0].index_bounds = None;
+    }
 }

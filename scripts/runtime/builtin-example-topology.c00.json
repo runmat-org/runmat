@@ -3,7 +3,7 @@
   "products": {
     "browser-wasm": { "artifactProfile": "web" },
     "desktop-native": { "artifactProfile": "desktop-host" },
-    "native-cli": { "artifactProfile": "embedded-aot" }
+    "native-cli": { "artifactProfile": "distributed-aot" }
   },
   "lanes": {
     "browser-host": { "shards": 8, "requiredCapabilities": ["headless-chrome"] },

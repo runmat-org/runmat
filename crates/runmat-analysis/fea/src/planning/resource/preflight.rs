@@ -426,6 +426,7 @@ fn build_static_resource_input_with_facts(
         } else {
             0
         },
+        solve_workspace::operator_preparation_bytes(admission_pattern, path)?,
     )?;
     let publishes_linearization = linearization::requires_envelope(step);
     let recovery_values = facts

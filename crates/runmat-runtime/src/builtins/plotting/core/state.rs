@@ -87,7 +87,7 @@ pub(crate) use property_mutation::{
     update_wordcloud_handle_state_for_property,
 };
 pub(crate) use property_mutation::{
-    axes_state_snapshot_for_property, configure_subplot_state_for_property,
+    axes_state_snapshot_for_property, select_subplot_region_for_property,
 };
 pub(crate) use property_mutation::{
     axis_color_limits_snapshot_for_axes_for_property,
@@ -2332,6 +2332,9 @@ fn validate_axes_index(state: &FigureState, axes_index: usize) -> Result<(), Fig
             index: axes_index,
         });
     }
+    if !state.figure.axes_is_live(axes_index) {
+        return Err(FigureError::InvalidAxesHandle);
+    }
     Ok(())
 }
 
@@ -2594,6 +2597,9 @@ pub fn reset_zoom_baseline_for_figure(handle: FigureHandle) -> Result<(), Figure
         let mut reg = registry();
         let state = existing_state_mut(&mut reg, handle)?;
         for axes_index in 0..axes_count(state) {
+            if !state.figure.axes_is_live(axes_index) {
+                continue;
+            }
             let snapshot = axis_limit_basis_for_zoom(state, axes_index);
             state.zoom_baselines.insert(axes_index, snapshot);
         }
@@ -2629,6 +2635,7 @@ pub fn restore_zoom_baseline_for_figure(handle: FigureHandle) -> Result<(), Figu
                 .get(&handle)
                 .ok_or(FigureError::InvalidHandle(handle.as_u32()))?;
             (0..axes_count(state))
+                .filter(|axes_index| state.figure.axes_is_live(*axes_index))
                 .map(|axes_index| {
                     (
                         axes_index,
@@ -4273,7 +4280,7 @@ pub fn axes_handle_exists(handle: FigureHandle, axes_index: usize) -> bool {
     let reg = registry();
     reg.figures
         .get(&handle)
-        .map(|state| axes_index < axes_count(state))
+        .map(|state| state.figure.axes_is_live(axes_index))
         .unwrap_or(false)
 }
 
@@ -4289,6 +4296,23 @@ pub fn axes_metadata_snapshot(
     axes_metadata_snapshot_for_property(&PropertyMutationTarget::alias(), handle, axes_index)
 }
 
+/// Read inherited layout from its current owner while keeping the axes' own
+/// limits, styling and object identity. Serialized metadata retains the parent
+/// link instead of copying a second layout authority.
+fn axes_metadata_for_read(
+    figure: &Figure,
+    index: usize,
+) -> Option<runmat_plot::plots::AxesMetadata> {
+    let mut metadata = figure.axes_metadata(index)?.clone();
+    let owner = figure.axes_layout_owner(index)?;
+    if owner != index {
+        let layout = figure.axes_metadata(owner)?;
+        metadata.position = layout.position;
+        metadata.units.clone_from(&layout.units);
+    }
+    Some(metadata)
+}
+
 #[cfg(test)]
 pub fn current_axes_handle_for_figure(handle: FigureHandle) -> Result<f64, FigureError> {
     current_axes_handle_for_figure_for_property(&PropertyMutationTarget::alias(), handle)
@@ -4302,6 +4326,7 @@ pub fn axes_handles_for_figure(handle: FigureHandle) -> Result<Vec<f64>, FigureE
 
 fn axes_handles_from_state(state: &FigureState, handle: FigureHandle) -> Vec<f64> {
     (0..axes_count(state))
+        .filter(|index| state.figure.axes_is_live(*index))
         .map(|idx| encode_axes_handle(handle, idx))
         .collect()
 }
@@ -4898,6 +4923,28 @@ pub fn continue_line_color_cycle_after(axes_index: usize, series_count: usize) {
 mod tests {
     use super::*;
     use crate::builtins::plotting::tests::ensure_plot_test_env;
+
+    #[test]
+    fn axes_property_metadata_reads_current_layout_without_replacing_local_limits() {
+        let mut figure = Figure::new();
+        let overlay = figure.ensure_overlay_axes(0);
+        figure.set_axes_limits(overlay, Some((2., 5.)), None);
+        figure
+            .set_axes_grid_cell(0, runmat_plot::plots::AxesGridCell::single(1, 2, 1))
+            .unwrap();
+        let inherited = axes_metadata_for_read(&figure, overlay).unwrap();
+        assert_eq!(inherited.position, [0.5, 0.0, 0.5, 1.0]);
+        assert_eq!(inherited.units, "normalized");
+        assert_eq!(inherited.x_limits, Some((2., 5.)));
+        figure.set_axes_position(overlay, [10., 20., 100., 200.]);
+        figure.set_axes_units(overlay, "pixels");
+        figure.set_axes_position(0, [0.1, 0.2, 0.3, 0.4]);
+        let explicit = axes_metadata_for_read(&figure, overlay).unwrap();
+        assert_eq!(explicit.position, [10., 20., 100., 200.]);
+        assert_eq!(explicit.units, "pixels");
+        figure.retire_axes(overlay);
+        assert!(axes_metadata_for_read(&figure, overlay).is_none());
+    }
 
     #[cfg(test)]
     pub(crate) fn reset_for_tests() {

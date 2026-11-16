@@ -1,3 +1,4 @@
+use crate::provider_path::normalize_virtual_path as normalize_path;
 use crate::{
     AtomicCreateResult, DirEntry, FileHandle, FsFileType, FsMetadata, FsProvider, OpenFlags,
     PublicationDurability,
@@ -770,36 +771,6 @@ impl FileHandle for MemoryFileHandle {
     }
 }
 
-fn normalize_path(path: &Path) -> io::Result<PathBuf> {
-    let mut parts = Vec::<OsString>::new();
-    for component in path.components() {
-        match component {
-            Component::Prefix(_) => {
-                return Err(io::Error::new(
-                    ErrorKind::InvalidInput,
-                    "path prefixes are not supported by memory filesystem",
-                ));
-            }
-            Component::RootDir => parts.clear(),
-            Component::CurDir => {}
-            Component::ParentDir => {
-                if parts.pop().is_none() {
-                    return Err(io::Error::new(
-                        ErrorKind::InvalidInput,
-                        "parent directory traversal is not allowed",
-                    ));
-                }
-            }
-            Component::Normal(part) => parts.push(part.to_os_string()),
-        }
-    }
-    let mut normalized = PathBuf::from("/");
-    for part in parts {
-        normalized.push(part);
-    }
-    Ok(normalized)
-}
-
 fn ensure_parent_dirs(tree: &mut MemoryTree, path: &Path) -> io::Result<()> {
     let parent = path.parent().unwrap_or(Path::new("/"));
     ensure_dirs(tree, parent)
@@ -891,7 +862,8 @@ mod tests {
     use futures::executor;
     use std::sync::{Arc, Barrier};
 
-    #[tokio::test]
+    #[cfg_attr(not(target_arch = "wasm32"), tokio::test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     async fn memory_provider_supports_crud_and_dirs() {
         let provider = MemoryFsProvider::new();
         provider
@@ -932,7 +904,8 @@ mod tests {
         assert_eq!(provider.read_project_path("/out.txt").unwrap(), b"hello");
     }
 
-    #[tokio::test]
+    #[cfg_attr(not(target_arch = "wasm32"), tokio::test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     async fn memory_provider_keeps_file_and_directory_operations_distinct() {
         let provider = MemoryFsProvider::new();
         provider.create_dir(Path::new("/src")).await.unwrap();

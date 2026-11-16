@@ -1,11 +1,12 @@
 //! Additional diagnostics from concrete call inputs. These facts are deliberately
 //! not published into AnalysisStore, executable contracts, or generic summaries.
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 
 use runmat_hir::{DiagnosticExecution, FunctionId, HirDiagnosticSeverity, HirDiagnosticSpan};
 use runmat_types::{ProgramFunctionId, ProgramSourceId, ValueFact};
 
 use super::{call_graph, flow, interprocedural};
+use crate::analysis::inference::{ContextualOutputs, FunctionSummary};
 use crate::{MirAssembly, MirDiagnostic, MirLocalKind};
 
 // This is a precision budget, not a new executable analysis limit. Exhausting
@@ -15,6 +16,7 @@ const MAX_CONTEXTS: usize = interprocedural::MAX_SUMMARY_UPDATES;
 struct ContextFacts {
     function: FunctionId,
     arguments: Vec<ValueFact>,
+    outputs: Option<Vec<ValueFact>>,
     diagnostics: Vec<MirDiagnostic>,
     calls: Vec<flow::CallObservation>,
 }
@@ -32,7 +34,7 @@ enum Resolution {
 }
 
 /// Diagnostic-only precision accounting, never executable specialization.
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct CallContextDiagnostics {
     pub diagnostics: Vec<MirDiagnostic>,
     pub budget_exhausted: bool,
@@ -46,7 +48,7 @@ pub struct CallContextDiagnostics {
 pub fn diagnose_call_contexts(assembly: &MirAssembly) -> CallContextDiagnostics {
     let generic = interprocedural::analyze_program(assembly);
     let graph = call_graph::call_graph(assembly);
-    let recursive = call_graph::strongly_connected_components(&graph)
+    let recursive: BTreeSet<_> = call_graph::strongly_connected_components(&graph)
         .into_iter()
         .filter(|component| {
             component.len() > 1
@@ -56,66 +58,95 @@ pub fn diagnose_call_contexts(assembly: &MirAssembly) -> CallContextDiagnostics 
         })
         .flatten()
         .collect();
-    let mut checker = Checker {
-        assembly,
-        generic: &generic,
-        recursive,
-        contexts: Vec::new(),
-        diagnostics: Vec::new(),
-        budget_exhausted: false,
-        precision_withheld: false,
-    };
-    for (function, body) in &assembly.bodies {
-        let Ok(ordinal) = u32::try_from(function.0) else {
-            continue;
+    let mut summaries = generic.summaries.clone();
+    let mut baseline = BTreeMap::new();
+    let mut fallback = None;
+    // Return facts travel through the same flow transfer as ordinary summaries.
+    // Each pass can expose another call's inputs or a downstream operation;
+    // exact argument keys keep polymorphic calls separate. These summaries are
+    // private to this diagnostic query and never enter executable analysis.
+    for update in 0..=MAX_CONTEXTS {
+        let mut checker = Checker {
+            assembly,
+            summaries: &summaries,
+            recursive: &recursive,
+            contexts: Vec::new(),
+            diagnostics: Vec::new(),
+            budget_exhausted: false,
+            precision_withheld: false,
         };
-        let flow = flow::analyze_body(
-            body,
-            ProgramFunctionId(ordinal),
-            generic.parameters.get(function).map_or(&[], Vec::as_slice),
-            generic.captures.get(function).map_or(&[], Vec::as_slice),
-            super::super::constructor_entry::instance_output_local(assembly, body),
-            &generic.summaries,
-        );
-        // A path/cwd mutation can replace the runtime callable at a later
-        // lookup. Without a per-edge binding proof, withhold contextual calls
-        // from this entire body rather than guess which branch executed.
-        if !flow.converged || has_environment_mutation(&flow) {
-            checker.precision_withheld = true;
-            continue;
-        }
-        let Some(metadata) = assembly.functions.get(function) else {
-            continue;
-        };
-        for call in &flow.calls {
-            let site = HirDiagnosticSpan {
-                span: call.span,
-                label: Some("these call inputs expose an incompatible operation".into()),
-                source: Some(metadata.source),
+        for (function, body) in &assembly.bodies {
+            let Ok(ordinal) = u32::try_from(function.0) else {
+                continue;
             };
-            checker.check(call, &site);
+            let flow = flow::analyze_body(
+                body,
+                ProgramFunctionId(ordinal),
+                generic.parameters.get(function).map_or(&[], Vec::as_slice),
+                generic.captures.get(function).map_or(&[], Vec::as_slice),
+                super::super::constructor_entry::instance_output_local(assembly, body),
+                &summaries,
+            );
+            if update == 0 {
+                baseline.insert(*function, flow.diagnostics.clone());
+            }
+            // A path/cwd mutation can replace the runtime callable at a later
+            // lookup. Withhold contextual facts without a per-edge binding proof.
+            if !flow.converged || has_environment_mutation(&flow) {
+                checker.precision_withheld = true;
+                continue;
+            }
+            let Some(metadata) = assembly.functions.get(function) else {
+                continue;
+            };
+            checker.diagnostics.extend(
+                flow.diagnostics
+                    .iter()
+                    .filter(|diagnostic| {
+                        runtime_error(diagnostic) && !baseline[function].contains(diagnostic)
+                    })
+                    .cloned()
+                    .map(|diagnostic| diagnostic.with_source(metadata.source)),
+            );
+            for call in &flow.calls {
+                let site = HirDiagnosticSpan {
+                    span: call.span,
+                    label: Some("these call inputs expose an incompatible operation".into()),
+                    source: Some(metadata.source),
+                };
+                checker.check(call, &site);
+            }
         }
+        let mut next = generic.summaries.clone();
+        for context in &checker.contexts {
+            if let (Some(summary), Some(outputs)) =
+                (next.get_mut(&context.function), &context.outputs)
+            {
+                summary.contextual_outputs.push(ContextualOutputs {
+                    arguments: context.arguments.clone(),
+                    outputs: outputs.clone(),
+                });
+            }
+        }
+        let report = checker.into_report();
+        if update == 0 {
+            fallback = Some(report.clone());
+        }
+        if next == summaries || report.budget_exhausted {
+            return report;
+        }
+        summaries = next;
     }
-    checker.diagnostics.sort_by_key(|diagnostic| {
-        (
-            diagnostic.primary.source,
-            diagnostic.primary.span.start,
-            diagnostic.primary.span.end,
-            diagnostic.code.clone(),
-        )
-    });
-    checker.diagnostics.dedup();
-    CallContextDiagnostics {
-        diagnostics: checker.diagnostics,
-        budget_exhausted: checker.budget_exhausted,
-        precision_withheld: checker.precision_withheld,
-    }
+    let mut report = fallback.expect("the generic diagnostic pass always runs");
+    report.budget_exhausted = true;
+    report.precision_withheld = true;
+    report
 }
 
 struct Checker<'a> {
     assembly: &'a MirAssembly,
-    generic: &'a interprocedural::ProgramAnalysis,
-    recursive: BTreeSet<FunctionId>,
+    summaries: &'a BTreeMap<FunctionId, FunctionSummary>,
+    recursive: &'a BTreeSet<FunctionId>,
     contexts: Vec<ContextFacts>,
     diagnostics: Vec<MirDiagnostic>,
     budget_exhausted: bool,
@@ -123,6 +154,23 @@ struct Checker<'a> {
 }
 
 impl Checker<'_> {
+    fn into_report(mut self) -> CallContextDiagnostics {
+        self.diagnostics.sort_by_key(|diagnostic| {
+            (
+                diagnostic.primary.source,
+                diagnostic.primary.span.start,
+                diagnostic.primary.span.end,
+                diagnostic.code.clone(),
+            )
+        });
+        self.diagnostics.dedup();
+        CallContextDiagnostics {
+            diagnostics: self.diagnostics,
+            budget_exhausted: self.budget_exhausted,
+            precision_withheld: self.precision_withheld,
+        }
+    }
+
     fn check(&mut self, call: &flow::CallObservation, site: &HirDiagnosticSpan) {
         let Some(first) = self.context(Observation::Root(call)) else {
             return;
@@ -251,7 +299,7 @@ impl Checker<'_> {
             &call.arguments,
             &[],
             None,
-            &self.generic.summaries,
+            self.summaries,
         );
         if !result.converged || has_environment_mutation(&result) {
             return Resolution::PrecisionWithheld;
@@ -259,17 +307,21 @@ impl Checker<'_> {
         Resolution::New(ContextFacts {
             function: call.callee,
             arguments: call.arguments.clone(),
+            outputs: (body.abi.varargout.is_none() && !result.return_facts.is_empty())
+                .then(|| interprocedural::joined_outputs(&result.return_facts)),
             diagnostics: result
                 .diagnostics
                 .into_iter()
-                .filter(|diagnostic| {
-                    diagnostic.severity == HirDiagnosticSeverity::Error
-                        && diagnostic.execution == DiagnosticExecution::RuntimeCheck
-                })
+                .filter(runtime_error)
                 .collect(),
             calls: result.calls,
         })
     }
+}
+
+fn runtime_error(diagnostic: &MirDiagnostic) -> bool {
+    diagnostic.severity == HirDiagnosticSeverity::Error
+        && diagnostic.execution == DiagnosticExecution::RuntimeCheck
 }
 
 fn has_environment_mutation(flow: &flow::BodyFlow) -> bool {

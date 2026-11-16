@@ -14,6 +14,8 @@ pub(super) struct Records<'a> {
     root_storage: GeometryAllocationReservation<'a>,
     nodes: u64,
     triangles: u64,
+    /// Faces this partition admitted; the denominator of the live face count.
+    expected: u64,
 }
 pub(super) struct Output {
     pub records: Vec<Vec<u8>>,
@@ -47,6 +49,7 @@ impl<'a> Records<'a> {
             root_storage,
             nodes: 0,
             triangles: 0,
+            expected: count,
         })
     }
     pub fn accept(
@@ -98,6 +101,12 @@ impl<'a> Records<'a> {
             .ok_or_else(|| invalid("face wire inventory overflow"))?;
         self.records.push(bytes);
         storage.retain_bytes(capacity);
+        let meshed = self.records.len() as u64 - 1;
+        runmat_meshing_core::work_count::report_work(
+            runmat_meshing_core::work_count::MeshingWorkUnit::SurfaceFaces,
+            meshed,
+            Some(self.expected.max(meshed)),
+        );
         Ok(())
     }
     pub fn finish(

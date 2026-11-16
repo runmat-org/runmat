@@ -16,7 +16,7 @@ use crate::analysis::{
 use super::{validate_run_id_token, AnalysisFieldPageLookup};
 
 pub(super) const ACOUSTIC_FREQUENCY_ARTIFACT_SCHEMA_VERSION: &str =
-    "analysis_acoustic_frequency_artifact/2026-10-001";
+    "analysis_acoustic_frequency_artifact/2026-11-001";
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -609,7 +609,7 @@ mod tests {
         .unwrap();
         assert!(
             matches!(super::super::decode_persisted_artifact(&unknown, "frequency-run"),
-            Err(error) if error.contains("unsupported analysis run artifact schema"))
+            Err(error) if error.contains("saved by an earlier version of RunMat"))
         );
     }
 

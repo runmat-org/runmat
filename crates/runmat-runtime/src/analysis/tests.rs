@@ -74,6 +74,7 @@ mod admission_validation;
 mod nonlinear_physical;
 mod persisted_record_shape;
 mod render_topology_presence;
+mod run_record_shape;
 mod static_admission;
 mod structural_study_intent;
 mod structural_study_storage;
@@ -4681,6 +4682,16 @@ fn analysis_results_by_run_id_rejects_unknown_artifact_schema() {
     )
     .expect_err("unknown analysis artifact schemas must be rejected");
     assert_eq!(error.error_type, OperationErrorType::Internal);
+    assert!(
+        error.message.contains(
+            "this result was saved by an earlier version of RunMat (record format \
+             `analysis_run_artifact/unknown`)"
+        ) && error
+            .message
+            .contains("run the study again to regenerate it"),
+        "{}",
+        error.message
+    );
 
     storage::reset_artifact_store_for_tests();
     let _ = fs::remove_dir_all(&root);
