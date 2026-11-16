@@ -8,11 +8,11 @@ import { resolveArtifactPath, validateArtifactManifest } from "./artifacts.mjs";
 import { digestObject, sha256 } from "./identity.mjs";
 import { buildDesktopHostRequest } from "./desktop-host-protocol.mjs";
 import { invokeDesktopHost } from "./desktop-host.mjs";
-import { DESKTOP_HOST_PROTOCOL_PROBE, NATIVE_EMBEDDED_AOT_PROBE } from "./product-contracts.mjs";
+import { DESKTOP_HOST_PROTOCOL_PROBE, NATIVE_EMBEDDED_AOT_PROBE, NATIVE_DISTRIBUTED_AOT_PROBE } from "./product-contracts.mjs";
 import { digest, enumValue, exactKeys, gitRevision, integer } from "./schema.mjs";
 
 export const PRODUCT_PROBE_SCHEMA = "runmat.builtin-examples.product-probe.v2";
-export { DESKTOP_HOST_PROTOCOL_PROBE, NATIVE_EMBEDDED_AOT_PROBE } from "./product-contracts.mjs";
+export { DESKTOP_HOST_PROTOCOL_PROBE, NATIVE_EMBEDDED_AOT_PROBE, NATIVE_DISTRIBUTED_AOT_PROBE } from "./product-contracts.mjs";
 
 const NATIVE_VECTOR_SOURCE = "disp(2 + 3);\n";
 const NATIVE_VECTOR_DIGEST = sha256(NATIVE_VECTOR_SOURCE);
@@ -38,15 +38,22 @@ export function buildProductProbe(fields) {
 }
 
 export function runNativeEmbeddedAotProbe(fields) {
+    if (fields.artifactManifest.artifactProfile !== "embedded-aot") throw new Error("Embedded-AOT probe requires its embedded-aot profile");
+    return runNativeAotProbe(fields);
+}
+
+export function runNativeAotProbe(fields) {
     const { artifactManifest, artifactManifestPath } = fields;
     validateArtifactManifest(artifactManifest, {
         sourceRevision: fields.sourceRevision,
         verifyFiles: true,
         manifestPath: artifactManifestPath
     });
-    if (artifactManifest.product !== "native-cli" || artifactManifest.artifactProfile !== "embedded-aot") {
-        throw new Error(`${NATIVE_EMBEDDED_AOT_PROBE} requires native-cli/embedded-aot`);
+    if (artifactManifest.product !== "native-cli" || !["embedded-aot", "distributed-aot"].includes(artifactManifest.artifactProfile)) {
+        throw new Error("Native AOT probe requires native-cli with an AOT distribution profile");
     }
+    const distributed = artifactManifest.artifactProfile === "distributed-aot";
+    const probeKind = distributed ? NATIVE_DISTRIBUTED_AOT_PROBE : NATIVE_EMBEDDED_AOT_PROBE;
     const runmat = resolveArtifactPath(artifactManifest, artifactManifestPath, "runmat-binary");
     const directory = mkdtempSync(join(tmpdir(), "runmat-product-probe-"));
     let compileExitCode = null;
@@ -57,13 +64,22 @@ export function runNativeEmbeddedAotProbe(fields) {
         const output = join(directory, process.platform === "win32" ? "embedded-aot-probe.exe" : "embedded-aot-probe");
         writeFileSync(source, NATIVE_VECTOR_SOURCE, "utf8");
         const environment = { ...(fields.environment ?? process.env), NO_COLOR: "1" };
-        const compilation = spawnSync(runmat, ["compile", source, "-o", output], {
+        const processOptions = {
             cwd: directory,
             env: environment,
             encoding: null,
             maxBuffer: 16 * 1024 * 1024,
             timeout: fields.timeoutMs ?? 120_000
-        });
+        };
+        let installation = null;
+        if (distributed) {
+            const pack = resolveArtifactPath(artifactManifest, artifactManifestPath, "compile-runtime-pack");
+            installation = spawnSync(runmat, ["--offline", "aot", "install", "--from", pack], processOptions);
+            reportProcessFailure("native runtime installation", installation, fields.onProcessFailure);
+        }
+        // Compilation after explicit provisioning must work without a network.
+        const compilation = installation && installation.status !== 0 ? installation
+            : spawnSync(runmat, [...(distributed ? ["--offline"] : []), "compile", source, "-o", output], processOptions);
         compileExitCode = processExitCode(compilation.status);
         reportProcessFailure("native compile", compilation, fields.onProcessFailure);
         if (compileExitCode === 0) {
@@ -95,7 +111,7 @@ export function runNativeEmbeddedAotProbe(fields) {
             product: artifactManifest.product,
             artifactProfile: artifactManifest.artifactProfile,
             artifactManifestDigest: artifactManifest.artifactManifestDigest,
-            probeKind: NATIVE_EMBEDDED_AOT_PROBE,
+            probeKind,
             vectorDigest: NATIVE_VECTOR_DIGEST,
             result: {
                 kind: "compile-and-execute",
@@ -203,7 +219,7 @@ export function validateProductProbe(probe, options = {}) {
     gitRevision(probe.sourceRevision, "product probe source revision");
     enumValue(probe.product, ["native-cli", "browser-wasm", "desktop-native"], "product probe product");
     digest(probe.artifactManifestDigest, "product probe artifact manifest digest");
-    enumValue(probe.probeKind, [NATIVE_EMBEDDED_AOT_PROBE, DESKTOP_HOST_PROTOCOL_PROBE], "product probe kind");
+    enumValue(probe.probeKind, [NATIVE_EMBEDDED_AOT_PROBE, NATIVE_DISTRIBUTED_AOT_PROBE, DESKTOP_HOST_PROTOCOL_PROBE], "product probe kind");
     digest(probe.vectorDigest, "product probe vector digest");
     digest(probe.stdoutDigest, "product probe stdout digest");
     digest(probe.productProbeDigest, "product probe digest");
@@ -215,8 +231,9 @@ export function validateProductProbe(probe, options = {}) {
         const value = probe.result[field];
         if (value !== null) integer(value, `product probe ${label}`);
     }
-    if (probe.probeKind === NATIVE_EMBEDDED_AOT_PROBE) {
-        if (probe.product !== "native-cli" || probe.artifactProfile !== "embedded-aot") throw new Error("Native embedded-AOT probe has the wrong product profile");
+    if ([NATIVE_EMBEDDED_AOT_PROBE, NATIVE_DISTRIBUTED_AOT_PROBE].includes(probe.probeKind)) {
+        const expectedProfile = probe.probeKind === NATIVE_DISTRIBUTED_AOT_PROBE ? "distributed-aot" : "embedded-aot";
+        if (probe.product !== "native-cli" || probe.artifactProfile !== expectedProfile) throw new Error("Native AOT probe has the wrong product profile");
         if (probe.vectorDigest !== NATIVE_VECTOR_DIGEST) throw new Error("Native embedded-AOT probe vector digest mismatch");
         if ((probe.result.status === "passed") !== (probe.result.failureKind === "none")) throw new Error("Product probe status and failure kind disagree");
         if (probe.result.kind !== "compile-and-execute") throw new Error("Native embedded-AOT probe has the wrong execution kind");

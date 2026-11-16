@@ -27,6 +27,15 @@ export function normalizePath(input: string): string {
   return joined || ".";
 }
 
+/** Memory-backed volumes store relative and absolute paths under rooted keys. */
+export function normalizeAbsolute(path: string): string {
+  const normalized = normalizePath(path);
+  if (!normalized.startsWith("/")) {
+    return normalized === "." ? "/" : `/${normalized}`;
+  }
+  return normalized === "" ? "/" : normalized;
+}
+
 export function dirname(path: string): string {
   const normalized = normalizePath(path);
   if (normalized === "/" || normalized === ".") {

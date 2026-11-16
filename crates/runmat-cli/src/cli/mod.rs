@@ -33,7 +33,8 @@ pub use remote::{
     RemoteCommand,
 };
 pub use root::{
-    Cli, CliOverrideSources, Commands, ConfigCommand, ConfigFormat, ConfigUserCommand, GcCommand,
+    AotCommand, Cli, CliOverrideSources, Commands, ConfigCommand, ConfigFormat, ConfigUserCommand,
+    GcCommand,
 };
 pub use test::{TestArgs, TestCoverageFormatArg, TestIsolationArg, TestReportArg};
 pub use value_types::{

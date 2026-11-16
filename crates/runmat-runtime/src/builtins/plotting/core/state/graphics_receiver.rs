@@ -43,7 +43,7 @@ pub fn graphics_receiver_valid(receiver: &GraphicsReceiverRef) -> bool {
             .figures
             .get(&FigureHandle::from(figure))
             .is_some_and(|state| {
-                index < axes_count(state)
+                state.figure.axes_is_live(index)
                     && state
                         .axes_receivers
                         .get(&index)
@@ -106,7 +106,7 @@ pub(super) fn axes_graphics_receiver_in_registry(
     let Some(state) = reg.figures.get_mut(&handle) else {
         return Ok(None);
     };
-    if index >= axes_count(state) {
+    if !state.figure.axes_is_live(index) {
         return Ok(None);
     }
     if let Some(receiver) = state.axes_receivers.get(&index) {
@@ -144,7 +144,7 @@ pub fn axes_graphics_receiver_for_scene(
             .figure_receiver
             .as_ref()
             .is_some_and(|owned| owned.shares_lease(figure_receiver))
-        || index >= axes_count(state)
+        || !state.figure.axes_is_live(index)
     {
         return Ok(None);
     }
@@ -219,7 +219,7 @@ pub(crate) fn graphics_receiver_class(
             .figures
             .get(&FigureHandle::from(figure))
             .filter(|state| {
-                index < axes_count(state)
+                state.figure.axes_is_live(index)
                     && state
                         .axes_receivers
                         .get(&index)

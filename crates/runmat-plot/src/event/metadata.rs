@@ -252,6 +252,8 @@ impl From<SerializedLegendStyle> for LegendStyle {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SerializedAxesMetadata {
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub retired: bool,
     #[serde(default)]
     pub y_direction: crate::plots::figure::YDirection,
     #[serde(default, skip_serializing_if = "is_cartesian_axes_kind")]

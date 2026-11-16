@@ -2,7 +2,7 @@ import { MemoryWorkspaceAuthority } from "./workspace-memory.js";
 import type { BrowserWorkspaceEntry } from "./browser-workspace.js";
 import type { WorkspaceCaptureRequest, WorkspacePublicationRequest } from "../generated/fea-workspace-contracts.js";
 import type { AtomicCreateResult } from "../generated/collaboration-contracts.js";
-import { basename, dirname, isSubPath, normalizePath } from "./path.js";
+import { basename, dirname, isSubPath, normalizeAbsolute } from "./path.js";
 import { notifyCommittedMutation } from "./mutation-notification.js";
 import { notFound } from "./errors.js";
 import type {
@@ -602,14 +602,6 @@ export function coerceFilesystemBytes(value: Uint8Array | ArrayBuffer | ArrayBuf
     return new Uint8Array(value.buffer.slice(value.byteOffset, value.byteOffset + value.byteLength));
   }
   throw new Error("Unsupported buffer type");
-}
-
-function normalizeAbsolute(path: string): string {
-  const normalized = normalizePath(path);
-  if (!normalized.startsWith("/")) {
-    return normalized === "." ? "/" : `/${normalized}`;
-  }
-  return normalized === "" ? "/" : normalized;
 }
 
 function depth(path: string): number {

@@ -21,6 +21,15 @@ export function stageNativeProduct(fields) {
     chmodSync(stagedExecutable, sourceStat.mode & 0o777);
 
     const staged = new Map([[executableName.toLowerCase(), sha256(readFileSync(source))]]);
+    if (fields.aotRuntimePack) {
+        const pack = resolve(fields.aotRuntimePack);
+        const stat = lstatSync(pack);
+        if (!stat.isFile() || stat.isSymbolicLink()) throw new Error("Compile runtime pack must be a regular file");
+        const name = "runmat-aot-runtime.zip";
+        if (staged.has(name)) throw new Error("Compile runtime pack collides with the executable name");
+        copyFileSync(pack, join(destination, name));
+        staged.set(name, sha256(readFileSync(pack)));
+    }
     for (const directory of fields.dependencyDirectories ?? []) {
         const root = resolve(directory);
         const stat = lstatSync(root);

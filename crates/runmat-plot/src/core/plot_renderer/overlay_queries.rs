@@ -292,6 +292,21 @@ impl PlotRenderer {
             .map(|f| f.axes_count())
             .unwrap_or(1)
     }
+    pub fn figure_axes_use_independent_layout(&self) -> bool {
+        self.last_figure
+            .as_ref()
+            .is_some_and(|figure| figure.axes_use_independent_layout())
+    }
+    /// Rendering and interaction use axes-specific rectangles whenever the
+    /// figure has multiple axes or an explicitly placed single axes.
+    pub fn figure_requires_axes_layout(&self) -> bool {
+        self.figure_axes_count() > 1 || self.figure_axes_use_independent_layout()
+    }
+    pub fn figure_axes_is_live(&self, axes_index: usize) -> bool {
+        self.last_figure
+            .as_ref()
+            .map_or(axes_index == 0, |figure| figure.axes_is_live(axes_index))
+    }
     pub fn overlay_parent_for_axes(&self, axes_index: usize) -> Option<usize> {
         self.last_figure
             .as_ref()
@@ -313,11 +328,19 @@ impl PlotRenderer {
             .and_then(|figure| figure.axes_grid_cell(axes_index))
     }
     pub fn overlay_position_for_axes(&self, axes_index: usize) -> Option<([f64; 4], String)> {
-        self.last_figure
-            .as_ref()
-            .and_then(|f| f.axes_metadata(axes_index))
-            .filter(|m| m.position_explicit)
-            .map(|m| (m.position, m.units.clone()))
+        let figure = self.last_figure.as_ref()?;
+        let owner = figure.axes_layout_owner(axes_index)?;
+        let metadata = figure.axes_metadata(owner)?;
+        if metadata.position_explicit {
+            return Some((metadata.position, metadata.units.clone()));
+        }
+        if figure.axes_use_independent_layout() {
+            let position = figure
+                .resolved_axes_grid_cell(axes_index)?
+                .normalized_position()?;
+            return Some((position, "normalized".into()));
+        }
+        None
     }
     pub fn overlay_y_axis_location_for_axes(&self, axes_index: usize) -> &str {
         self.last_figure

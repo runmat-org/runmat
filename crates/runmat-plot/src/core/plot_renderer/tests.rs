@@ -4,6 +4,30 @@ use super::*;
 use crate::core::DrawCall;
 
 #[test]
+fn view_contract_tracks_independent_axes_limits_layout_and_retirement() {
+    let mut figure = Figure::new();
+    figure.ensure_axes(1);
+    figure.set_axes_position(0, [0.05, 0.1, 0.4, 0.8]);
+    figure.set_axes_position(1, [0.55, 0.1, 0.4, 0.8]);
+    let initial = PlotRenderer::axes_view_contract_for_figure(&figure);
+    figure.set_axes_limits(1, Some((10., 20.)), None);
+    let limited = PlotRenderer::axes_view_contract_for_figure(&figure);
+    assert_ne!(
+        initial, limited,
+        "the second axes must participate in camera invalidation"
+    );
+    figure.set_axes_position(1, [0.55, 0.5, 0.4, 0.4]);
+    let moved = PlotRenderer::axes_view_contract_for_figure(&figure);
+    assert_ne!(limited, moved, "moving an axes changes its camera viewport");
+    figure.retire_axes(0);
+    assert_ne!(moved, PlotRenderer::axes_view_contract_for_figure(&figure));
+    assert!(
+        figure.axes_is_live(1),
+        "retiring another slot must preserve this axes"
+    );
+}
+
+#[test]
 fn pale_scene_lines_darken_on_light_background_only() {
     let line = |color: [f32; 4]| Vertex::new(Vec3::ZERO, Vec4::from_array(color));
     let mut render_data = crate::core::RenderData {

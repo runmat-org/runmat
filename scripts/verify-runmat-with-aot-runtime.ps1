@@ -1,6 +1,7 @@
 param(
     [Parameter(Mandatory = $true)]
-    [string]$RunMatBinary
+    [string]$RunMatBinary,
+    [string]$RuntimePack
 )
 
 $ErrorActionPreference = 'Stop'
@@ -17,9 +18,13 @@ try {
     $program = Join-Path $smokeDirectory 'smoke.exe'
     Set-Content -LiteralPath $source -Value "x = 2 + 3;`ndisp(x);"
 
-    & $RunMatBinary compile $source -o $program
+    if ($RuntimePack) {
+        & $RunMatBinary --offline aot install --from $RuntimePack
+        if ($LASTEXITCODE -ne 0) { throw "compile runtime installation failed with exit code $LASTEXITCODE" }
+    }
+    & $RunMatBinary --offline compile $source -o $program
     if ($LASTEXITCODE -ne 0) {
-        throw "embedded compile runtime verification failed with exit code $LASTEXITCODE"
+        throw "compile runtime verification failed with exit code $LASTEXITCODE"
     }
 
     $output = & $program

@@ -3,8 +3,8 @@
 use super::*;
 
 impl PlotRenderer {
-    /// Render all axes of a subplot grid into their respective viewport rectangles.
-    /// `axes_viewports` is a vector of (x, y, w, h) in physical pixels, length equals rows*cols.
+    /// Render live axes into their viewport rectangles. Indices remain stable
+    /// across retired layout slots; each entry is (x, y, w, h) in physical pixels.
     pub fn render_axes_to_viewports(
         &mut self,
         emission: &runmat_accelerate_api::WgpuEmission<'_>,
@@ -48,6 +48,9 @@ impl PlotRenderer {
             .iter()
             .enumerate()
             .filter_map(|(ax_idx, _)| {
+                if !self.figure_axes_is_live(ax_idx) {
+                    return None;
+                }
                 axes_to_nodes
                     .get(&ax_idx)
                     .filter(|ids| !ids.is_empty())
@@ -67,6 +70,9 @@ impl PlotRenderer {
         };
 
         for (ax_idx, viewport) in axes_viewports.iter().enumerate() {
+            if !self.figure_axes_is_live(ax_idx) {
+                continue;
+            }
             log::debug!(
                 "runmat-plot: renderer.axes_to_viewports.viewport axes_index={} viewport=({}, {}, {}, {})",
                 ax_idx,

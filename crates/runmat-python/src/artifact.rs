@@ -514,7 +514,11 @@ impl PythonArtifactBundle {
                         artifact.logical_name
                     )));
                 }
-                let relative = wheel_install_path(file.name())?;
+                let relative = wheel_install_path(
+                    file.name()
+                        .map_err(|error| PythonArtifactError::Invalid(error.to_string()))?
+                        .as_ref(),
+                )?;
                 if let Some(name) = top_level_import_name(&relative) {
                     top_level_modules.insert(name);
                 }
@@ -679,7 +683,10 @@ fn validate_wheel(artifact: &PythonArtifactBundleEntry) -> Result<(), PythonArti
         let file = archive
             .by_index(index)
             .map_err(|error| PythonArtifactError::Invalid(error.to_string()))?;
-        let path = wheel_install_path(file.name())?;
+        let name = file
+            .name()
+            .map_err(|error| PythonArtifactError::Invalid(error.to_string()))?;
+        let path = wheel_install_path(name.as_ref())?;
         let first = path.components().next();
         module_present |= matches!(
             first,
@@ -687,7 +694,7 @@ fn validate_wheel(artifact: &PythonArtifactBundleEntry) -> Result<(), PythonArti
                 if name == std::ffi::OsStr::new(expected)
                     || name == std::ffi::OsStr::new(&format!("{expected}.py"))
         );
-        metadata_present |= file.name().ends_with(".dist-info/METADATA");
+        metadata_present |= name.ends_with(".dist-info/METADATA");
     }
     if !module_present || !metadata_present {
         return Err(PythonArtifactError::Invalid(format!(

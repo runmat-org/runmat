@@ -4,6 +4,33 @@ use std::sync::Arc;
 
 use crate::{provider_state_lock, FsProvider};
 
+/// Resolve virtual path components from `/`, rejecting traversal above it.
+pub fn normalize_virtual_path(path: &Path) -> io::Result<PathBuf> {
+    let mut normalized = PathBuf::from("/");
+    for component in path.components() {
+        match component {
+            Component::Prefix(_) => {
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidInput,
+                    "path prefixes are not supported by a virtual filesystem",
+                ));
+            }
+            Component::RootDir => normalized = PathBuf::from("/"),
+            Component::CurDir => {}
+            Component::ParentDir => {
+                if !normalized.pop() {
+                    return Err(io::Error::new(
+                        io::ErrorKind::InvalidInput,
+                        "parent directory traversal is not allowed",
+                    ));
+                }
+            }
+            Component::Normal(part) => normalized.push(part),
+        }
+    }
+    Ok(normalized)
+}
+
 /// Absolute-path grammar owned by a filesystem provider. A rooted virtual
 /// path is independent of process CWD even on native Windows.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

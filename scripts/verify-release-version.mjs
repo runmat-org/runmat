@@ -46,6 +46,17 @@ const publishableCratesMissingDescriptions = metadata.packages
 const bindingsPackage = JSON.parse(fs.readFileSync(path.join(root, "bindings/ts/package.json"), "utf8"));
 const bindingsLock = JSON.parse(fs.readFileSync(path.join(root, "bindings/ts/package-lock.json"), "utf8"));
 const mismatches = [...mismatchedCrates, ...publishableCratesMissingDescriptions];
+const privateWorkspaceNames = new Set(metadata.packages
+  .filter(pkg => workspaceMembers.has(pkg.id) && pkg.publish?.length === 0)
+  .map(pkg => pkg.name));
+for (const pkg of metadata.packages.filter(pkg => workspaceMembers.has(pkg.id)
+    && (pkg.publish === null || pkg.publish.length > 0))) {
+  for (const dep of pkg.dependencies) {
+    if (dep.kind !== "dev" && dep.path && privateWorkspaceNames.has(dep.name)) {
+      mismatches.push(`${pkg.name}: registry dependency ${dep.name} has publishing disabled`);
+    }
+  }
+}
 for (const pkg of metadata.packages.filter(pkg => workspaceMembers.has(pkg.id))) {
   if (pkg.name === "runmat-clarabel") {
     if (pkg.license !== "Apache-2.0") mismatches.push("Vendored Clarabel must retain Apache-2.0");

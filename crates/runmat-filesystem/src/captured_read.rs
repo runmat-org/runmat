@@ -34,6 +34,38 @@ pub struct CapturedReadScope {
 }
 
 impl CapturedReadScope {
+    /// Snapshot open editor sources in a virtual host filesystem. The resulting
+    /// view can read the captured provider but cannot derive execution authority.
+    /// A selected Runtime invocation must admit its sources through its own owner.
+    pub fn with_virtual_sources(
+        &self,
+        sources: std::collections::BTreeMap<PathBuf, String>,
+    ) -> io::Result<Self> {
+        if !self.original_selection || self.selected.invocation_owner.is_some() {
+            return Err(derivation_denied());
+        }
+        if self.original.path_namespace() != crate::FsPathNamespace::VirtualRooted {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "editor source overlays require a virtual filesystem",
+            ));
+        }
+        let provider = Arc::new(crate::source_overlay::SourceOverlayProvider::new(
+            self.selected.provider.clone(),
+            sources,
+        )?);
+        Ok(Self {
+            original: self.original.clone(),
+            original_selection: false,
+            selected: Selection {
+                provider: provider.clone(),
+                invocation_provider: provider,
+                readonly: true,
+                ..self.selected.clone()
+            },
+        })
+    }
+
     /// Capture original provider and only the CWD required by known relative
     /// paths, atomically under the existing admission port. Empty paths are valid
     /// but do not grant an ambient CWD. Inputs attenuate reads before discovery.
@@ -385,6 +417,83 @@ pub(super) fn missing_directory() -> io::Error {
 mod tests {
     use super::*;
     use crate::{provider_override_lock, replace_provider, MemoryFsProvider};
+
+    #[test]
+    fn editor_sources_keep_captured_provider_and_cannot_derive_execution() {
+        let _serial = provider_override_lock();
+        let base = Arc::new(MemoryFsProvider::with_current_dir("/workspace"));
+        base.write_project_path("/workspace/helper.m", b"saved")
+            .unwrap();
+        base.write_project_path("/workspace/other.m", b"original provider")
+            .unwrap();
+        let _restore = replace_provider(base.clone());
+        let (scope, _) = CapturedReadScope::capture(&[Path::new(".")], None).unwrap();
+        let sources = std::collections::BTreeMap::from([
+            (PathBuf::from("/workspace/./helper.m"), "unsaved".to_owned()),
+            (PathBuf::from("/workspace/new.m"), "new source".to_owned()),
+        ]);
+        let overlay = scope.with_virtual_sources(sources).unwrap();
+        assert!(overlay.execution().is_err());
+        assert!(overlay.with_virtual_sources(Default::default()).is_err());
+        assert!(overlay
+            .check_invocation(Some((scope.original.clone(), None)))
+            .is_err());
+        crate::set_provider(Arc::new(MemoryFsProvider::new()));
+        let mut yielded = false;
+        futures::executor::block_on(overlay.run(async {
+            poll_fn(|cx| {
+                if yielded {
+                    return std::task::Poll::Ready(());
+                }
+                yielded = true;
+                cx.waker().wake_by_ref();
+                std::task::Poll::Pending
+            })
+            .await;
+            assert_eq!(crate::read_async("helper.m").await.unwrap(), b"unsaved");
+            assert_eq!(
+                crate::read_async("other.m").await.unwrap(),
+                b"original provider"
+            );
+            assert_eq!(crate::read_async("new.m").await.unwrap(), b"new source");
+            let entries = crate::read_dir_async(".").await.unwrap();
+            assert_eq!(entries.len(), 3);
+            assert!(crate::write_async("helper.m", b"forbidden").await.is_err());
+            assert!(crate::write_async("other.m", b"forbidden").await.is_err());
+            assert_eq!(
+                crate::canonicalize_async("./helper.m").await.unwrap(),
+                PathBuf::from("/workspace/helper.m")
+            );
+        }))
+        .unwrap();
+        assert_eq!(
+            base.read_project_path("/workspace/helper.m").unwrap(),
+            b"saved"
+        );
+        let mut invocation = scope.clone();
+        invocation.selected.invocation_owner = Some(
+            crate::InvocationFilesystem::new(base, PathBuf::from("/workspace"), true, true)
+                .unwrap(),
+        );
+        assert!(invocation.with_virtual_sources(Default::default()).is_err());
+    }
+
+    #[test]
+    fn virtual_source_identity_rejects_escape_and_duplicate_normalized_paths() {
+        let _serial = provider_override_lock();
+        let _restore = replace_provider(Arc::new(MemoryFsProvider::new()));
+        let (scope, _) = CapturedReadScope::capture(&[], None).unwrap();
+        for sources in [
+            std::collections::BTreeMap::from([(PathBuf::from("/../escape.m"), String::new())]),
+            std::collections::BTreeMap::from([
+                (PathBuf::from("/a/../same.m"), "first".to_owned()),
+                (PathBuf::from("/same.m"), "second".to_owned()),
+            ]),
+        ] {
+            assert!(scope.with_virtual_sources(sources).is_err());
+        }
+    }
+
     #[test]
     fn local_read_scope_keeps_poll_thread_process_and_invocation_ownership_separate() {
         let _serial = provider_override_lock();

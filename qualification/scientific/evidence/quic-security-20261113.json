@@ -1,0 +1,158 @@
+{
+  "schema_version": 1,
+  "source_revision": "7a8c103b0e290c2ccacc5f37c6fa2c4ee9ba5785",
+  "previous_revision": "65a5fa31314c166a413c93862eeb6a6c74db07a1",
+  "dependency_change": {
+    "package": "quinn-proto",
+    "from": "0.11.14",
+    "to": "0.11.15",
+    "other_locked_package_versions_changed": 0
+  },
+  "source_verification": {
+    "files": 27287,
+    "before_and_after": true
+  },
+  "toolchain": "rustc 1.90.0 (1159e78c4 2025-09-14)",
+  "profile": {
+    "debug": 0,
+    "cargo_build_jobs": 12,
+    "incremental": false
+  },
+  "checks": [
+    {
+      "cohort": "transport",
+      "target": "linux-x86_64",
+      "command": [
+        "cargo",
+        "test",
+        "--locked",
+        "-p",
+        "runmat-execution-transport-native",
+        "--all-features"
+      ],
+      "exit_code": 0,
+      "passed": 16,
+      "failed": 0,
+      "ignored": 0,
+      "harnessless": false,
+      "log_sha256": "2aa1941b973a27fc40d7d56b085629243acf5bece3f849bf3909783970c22c8c",
+      "log_location": "gh-linux-20260327-125436:/home/nallana/rm1293/logs/quinn-security-7a8c103b0e.transport.log"
+    },
+    {
+      "cohort": "clippy",
+      "target": "linux-x86_64",
+      "command": [
+        "cargo",
+        "clippy",
+        "--locked",
+        "--offline",
+        "-p",
+        "runmat-execution-transport-native",
+        "--all-features",
+        "--all-targets",
+        "--",
+        "-D",
+        "warnings"
+      ],
+      "exit_code": 0,
+      "passed": null,
+      "failed": 0,
+      "ignored": 0,
+      "harnessless": false,
+      "log_sha256": "59ad63cb98e286c61f48f38ba1f328d2bff485912f6e3bf800c308b993541b67",
+      "log_location": "gh-linux-20260327-125436:/home/nallana/rm1293/logs/quinn-security-7a8c103b0e.clippy.log"
+    },
+    {
+      "cohort": "runner",
+      "target": "linux-x86_64",
+      "command": [
+        "cargo",
+        "test",
+        "--locked",
+        "--offline",
+        "-p",
+        "runmat-execution-runner-native",
+        "--all-features",
+        "--lib",
+        "remote::tests::remote_driver_executes_exact_encrypted_program_and_commits_once",
+        "--",
+        "--exact"
+      ],
+      "exit_code": 0,
+      "passed": 1,
+      "failed": 0,
+      "ignored": 0,
+      "harnessless": false,
+      "log_sha256": "3da093304e53651aaa1b4770e096d4210213e058696c1aca0b820868cafed72f",
+      "log_location": "gh-linux-20260327-125436:/home/nallana/rm1293/logs/quinn-security-7a8c103b0e.runner.log"
+    },
+    {
+      "cohort": "resume",
+      "target": "linux-x86_64",
+      "command": [
+        "cargo",
+        "test",
+        "--locked",
+        "--offline",
+        "-p",
+        "runmat-execution-runner-native",
+        "--all-features",
+        "--lib",
+        "remote::tests::replacement_driver_consumes_an_exact_resume_safe_checkpoint",
+        "--",
+        "--exact"
+      ],
+      "exit_code": 0,
+      "passed": 1,
+      "failed": 0,
+      "ignored": 0,
+      "harnessless": false,
+      "log_sha256": "4da502247b307e6555f251a248e124cbdab5c3252db4bbf27a02cb9c9fe3e091",
+      "log_location": "gh-linux-20260327-125436:/home/nallana/rm1293/logs/quinn-security-7a8c103b0e.resume.log"
+    },
+    {
+      "cohort": "graph-class",
+      "target": "linux-x86_64",
+      "command": [
+        "/home/nallana/rm1293/targets/debug/deps/graph_worker_roundtrip-eb5b2fc2186a07ed",
+        "--class-worker-only"
+      ],
+      "exit_code": 0,
+      "passed": null,
+      "failed": 0,
+      "ignored": 0,
+      "harnessless": true,
+      "scope": "Existing --class-worker-only selection; full numerical graph harness is outside this bounded result",
+      "log_sha256": "7a15fe6161c1575d124da7554a230bcbf2d304890c42600a27ec0e25755fb37d",
+      "log_location": "gh-linux-20260327-125436:/home/nallana/rm1293/logs/quinn-security-7a8c103b0e.graph-class.log"
+    }
+  ],
+  "artifacts": [
+    {
+      "name": "runmat_execution_transport_native-59cefcb01e4a3f66",
+      "bytes": 15922440,
+      "sha256": "ec9960e6abb6964af4357dfc73d4941033e4c1bfea20ce5bd7b4ce99317b1ef6",
+      "location": "gh-linux-20260327-125436:/home/nallana/rm1293/targets/debug/deps/runmat_execution_transport_native-59cefcb01e4a3f66"
+    },
+    {
+      "name": "quic_overlay-2d33e414d1f0c74f",
+      "bytes": 16162496,
+      "sha256": "128416246f2114f0bd1ea50666f0608354f945928c95de3ae151741702d11721",
+      "location": "gh-linux-20260327-125436:/home/nallana/rm1293/targets/debug/deps/quic_overlay-2d33e414d1f0c74f"
+    },
+    {
+      "name": "runmat_execution_runner_native-37f4fb4bdf4761a0",
+      "bytes": 1368063072,
+      "sha256": "136546bb5166bae9702a1c7027a8f319717cf4511fbfc3ff8d55d02e3599250d",
+      "location": "gh-linux-20260327-125436:/home/nallana/rm1293/targets/debug/deps/runmat_execution_runner_native-37f4fb4bdf4761a0"
+    },
+    {
+      "name": "graph_worker_roundtrip-eb5b2fc2186a07ed",
+      "bytes": 1113708320,
+      "sha256": "1e81ac8b966bdfc0c5253f2b04d6ed22b902f46a059207ca55fc7d6efc1c857c",
+      "location": "gh-linux-20260327-125436:/home/nallana/rm1293/targets/debug/deps/graph_worker_roundtrip-eb5b2fc2186a07ed"
+    }
+  ],
+  "exclusions": "The unrestricted graph harness was stopped during the unrelated nonlinear numerical case; no full-harness pass is claimed. The existing --class-worker-only selection passed with unchanged assertions.",
+  "review": "Conserves the recorded numerical and scientific measurements across the isolated native QUIC protocol security update. Only quinn-proto changes from 0.11.14 to 0.11.15; the native transport manifest enforces that minimum without adding features. Quinn, UDP, TLS, compiler settings, solver arithmetic, model inputs and thresholds remain unchanged. The recorded driver-replacement fixtures use their WebSocket RelayServer rather than direct QUIC; the authored local studies, direct Circuit Session and CAD drawing workloads do not exercise QUIC. Bounded native transport and runner acceptance qualify the affected route separately. This review does not represent a rerun of the scientific or performance measurements."
+}

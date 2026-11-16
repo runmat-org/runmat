@@ -94,7 +94,10 @@ pub async fn run_cli(cli: Cli, sources: CliOverrideSources) -> Result<()> {
         let compilation_only = matches!(
             cli.command,
             Some(
-                Commands::Compile { .. } | Commands::Mesh { .. } | Commands::NativeInterface { .. }
+                Commands::Compile { .. }
+                    | Commands::Aot { .. }
+                    | Commands::Mesh { .. }
+                    | Commands::NativeInterface { .. }
             )
         );
         let wants_gui = match config.plotting.mode {

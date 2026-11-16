@@ -22,6 +22,9 @@ runmat-server-client = { workspace = true }
 rand = "0.8"
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "stream"] }
 quinn = "0.11"
+# Enforce the protocol security floor for downstream crates.io resolutions too.
+# Keep Quinn's existing feature selection; this adds no protocol features.
+quinn-proto = { version = "0.11.15", default-features = false }
 rustls = "0.23"
 sha2 = { workspace = true }
 hex = { workspace = true }

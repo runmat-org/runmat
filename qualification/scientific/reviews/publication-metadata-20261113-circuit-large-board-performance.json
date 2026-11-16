@@ -1,0 +1,483 @@
+{
+  "schema_version": 1,
+  "measured_inputs": {
+    "sha256": "bbb2feddfdd106f27287465c068b8ce426afb6cd6175e26733b229405d7feeb3",
+    "files": 26112,
+    "encoding": "git-mode-type-blob-path-tuples-v1"
+  },
+  "accepted_inputs": {
+    "sha256": "55f884d6cb44d49c880e97e043a427c54be4a91e9d00a6ab8874ac7cf6f03a06",
+    "files": 26117,
+    "encoding": "git-mode-type-blob-path-tuples-v1"
+  },
+  "cohorts": [
+    "circuit-large-board-performance"
+  ],
+  "changed_inputs": [
+    {
+      "path": "Cargo.lock",
+      "before": [
+        "100644",
+        "blob",
+        "6a0348677fb3369c88f3aeacb267208fe1ad68c1"
+      ],
+      "after": [
+        "100644",
+        "blob",
+        "dfca95580a154210d649a2926b25d7dc1d858cd7"
+      ],
+      "reason": "Isolated native QUIC security dependency floor and exact one-package lockfile update; unchanged numerical/plot/CAD code and scientific fixture inputs. Actual bounded transport/runner evidence is attached."
+    },
+    {
+      "path": "crates/runmat-analysis/fea/src/planning/resource/reconciliation.rs",
+      "before": [
+        "100644",
+        "blob",
+        "9fb4d4a9289f08d34d0e675cd0b811e0e4bc39c6"
+      ],
+      "after": [
+        "100644",
+        "blob",
+        "f32ae269858f2836a1a22254b150a9bcdf48c85f"
+      ],
+      "reason": "Widens internal FEA planned-time arithmetic to u128 before comparing actual u64 usage. Direct circuit Session compilation and staged CAD drawing compilation do not create or reconcile an FEA resource request."
+    },
+    {
+      "path": "crates/runmat-analysis/fea/src/planning/resource/tests.rs",
+      "before": [
+        "100644",
+        "blob",
+        "142133eb7f10d2aab4570694d73b8e6c54d2d688"
+      ],
+      "after": [
+        "100644",
+        "blob",
+        "5c8c2bd574a23f4cd6e146fff82fdd4a50c27f5f"
+      ],
+      "reason": "Tests FEA planned-time overflow and actual overruns. This separate cfg(test) module is not linked into either measured integration-test executable."
+    },
+    {
+      "path": "crates/runmat-cad/wasm/Cargo.toml",
+      "before": [
+        "100644",
+        "blob",
+        "a37f6decba07db739347f294d9ec1fd15f52c004"
+      ],
+      "after": [
+        "100644",
+        "blob",
+        "5ea382881ba660e75bc9c073257997b6c07e576e"
+      ],
+      "reason": "Publication enabled for an already-required library; the sole manifest edit removes publish=false. No dependency, feature, version or executable source change."
+    },
+    {
+      "path": "crates/runmat-circuit/src/board3d/solid.rs",
+      "before": [
+        "100644",
+        "blob",
+        "ba9511006688aecbcda578aa66a09dfa214055c5"
+      ],
+      "after": [
+        "100644",
+        "blob",
+        "cc271e3ee0b1922aa7da56758330424fde8c9ae3"
+      ],
+      "reason": "Adds only a transparent type alias for the existing copper-vector and two mask-height intervals. Layout, ownership and all function bodies are unchanged."
+    },
+    {
+      "path": "crates/runmat-circuit/src/library/footprint.rs",
+      "before": [
+        "100644",
+        "blob",
+        "8e706e55ff4442c5d8c429e8da75136719047322"
+      ],
+      "after": [
+        "100644",
+        "blob",
+        "8da6b5af0c05c44f2b3775f0ced633331377d437"
+      ],
+      "reason": "Restores the existing too_many_arguments lint annotation to finish. Its body, parameters, material constants and every call are unchanged."
+    },
+    {
+      "path": "crates/runmat-circuit/src/runtime/session.rs",
+      "before": [
+        "100644",
+        "blob",
+        "2e32e361878405170ae37fcfc054cda8c5461215"
+      ],
+      "after": [
+        "100644",
+        "blob",
+        "64e0fcfb7aeea559e6daa427a195c0d94365f1ab"
+      ],
+      "reason": "Spells the existing return tuple using its exact transparent alias. The board_surfaces function body and all other methods remain byte-identical."
+    },
+    {
+      "path": "crates/runmat-circuit/tests/schematic_sheet_layout.rs",
+      "before": [
+        "100644",
+        "blob",
+        "fefc6eb39bd968f93480972ce644fef25de4863c"
+      ],
+      "after": [
+        "100644",
+        "blob",
+        "6a54f26463ef4e81349570486181e067b7604ea0"
+      ],
+      "reason": "Initializes the same places clone and remaining Default fields in one test-local initializer. Every assertion is unchanged; this separate integration-test target is not linked into the measured scientific executables."
+    },
+    {
+      "path": "crates/runmat-cli/tests/check_cli.rs",
+      "before": [
+        "100644",
+        "blob",
+        "47422d6e5ddd184f0ae501ab7ca78b4b4a72182a"
+      ],
+      "after": [
+        "100644",
+        "blob",
+        "11832177cf5ab7216b0a33a2d1c473fb13b8b66a"
+      ],
+      "reason": "Formats existing CLI FEA integration tests. Neither measured executable links this separate integration-test target."
+    },
+    {
+      "path": "crates/runmat-design-tools/Cargo.toml",
+      "before": [
+        "100644",
+        "blob",
+        "4e9e7f7814e85b0f19cecb9b7bcea488376a4d12"
+      ],
+      "after": [
+        "100644",
+        "blob",
+        "69df048202f9e10224bd01d8106f0ba2c8e10dd6"
+      ],
+      "reason": "Publication enabled for an already-required library; the sole manifest edit removes publish=false. No dependency, feature, version or executable source change."
+    },
+    {
+      "path": "crates/runmat-execution-runner-native/tests/fixtures/boolean_step/battery_cold_plate.step",
+      "before": null,
+      "after": [
+        "100644",
+        "blob",
+        "c904e8318b9a7e2c2bbb71076416645a5d6a9584"
+      ],
+      "reason": "Changes independent OCCT meshing integration tests, their STEP fixture or expected box mesh counts. These test targets and their fixtures are not linked or read by the circuit Session or airliner drawing workloads."
+    },
+    {
+      "path": "crates/runmat-execution-runner-native/tests/occt_boolean_step_meshing.rs",
+      "before": [
+        "100644",
+        "blob",
+        "d8ae97d4d645147d50bc65bd6c0521a321392ec9"
+      ],
+      "after": [
+        "100644",
+        "blob",
+        "66d2f4979587de5febe55606d1c709fb11bf01a8"
+      ],
+      "reason": "Changes independent OCCT meshing integration tests, their STEP fixture or expected box mesh counts. These test targets and their fixtures are not linked or read by the circuit Session or airliner drawing workloads."
+    },
+    {
+      "path": "crates/runmat-execution-runner-native/tests/occt_exact_meshing.rs",
+      "before": [
+        "100644",
+        "blob",
+        "b62cd518abcdc973c9d55065d5ed6e288eff7534"
+      ],
+      "after": [
+        "100644",
+        "blob",
+        "e5da6dccacbb5b52948b3790200e7eb76fe150a5"
+      ],
+      "reason": "Changes independent OCCT meshing integration tests, their STEP fixture or expected box mesh counts. These test targets and their fixtures are not linked or read by the circuit Session or airliner drawing workloads."
+    },
+    {
+      "path": "crates/runmat-execution-runner-native/tests/occt_exact_meshing/differential.rs",
+      "before": [
+        "100644",
+        "blob",
+        "e936c216536a17e00c278bab564bad523515bdd0"
+      ],
+      "after": [
+        "100644",
+        "blob",
+        "a1c911bf3e5c21e99324b32ae875e7d5a8b877bf"
+      ],
+      "reason": "Changes independent OCCT meshing integration tests, their STEP fixture or expected box mesh counts. These test targets and their fixtures are not linked or read by the circuit Session or airliner drawing workloads."
+    },
+    {
+      "path": "crates/runmat-execution-transport-native/Cargo.toml",
+      "before": [
+        "100644",
+        "blob",
+        "0e5c3789cb3c5744b7261f32918a934020055184"
+      ],
+      "after": [
+        "100644",
+        "blob",
+        "cc2b8030c646e98e01482ca9c2bf25d6a10e9318"
+      ],
+      "reason": "Isolated native QUIC security dependency floor and exact one-package lockfile update; unchanged numerical/plot/CAD code and scientific fixture inputs. Actual bounded transport/runner evidence is attached."
+    },
+    {
+      "path": "crates/runmat-meshing/curve/src/shared/geometry_metric.rs",
+      "before": [
+        "100644",
+        "blob",
+        "f54758fd28e98c8fa969e279a72fa2b0ad39f850"
+      ],
+      "after": [
+        "100644",
+        "blob",
+        "b6c6d2e057552729a72e758014c402b4fc150da0"
+      ],
+      "reason": "Changes FEA curve-sizing proximity across material sides. The circuit benchmark uses integer board geometry; the CAD drawing uses OcctKernel tessellation and drawing projection, without invoking the FEA sizing pipeline."
+    },
+    {
+      "path": "crates/runmat-meshing/curve/src/shared/geometry_metric/proximity.rs",
+      "before": [
+        "100644",
+        "blob",
+        "4576f648fd928774d8045ec62373d26f24ce944c"
+      ],
+      "after": [
+        "100644",
+        "blob",
+        "3852cbc02afc31e99a62d9d27b79e23538cdbf50"
+      ],
+      "reason": "Changes FEA curve-sizing proximity across material sides. The circuit benchmark uses integer board geometry; the CAD drawing uses OcctKernel tessellation and drawing projection, without invoking the FEA sizing pipeline."
+    },
+    {
+      "path": "crates/runmat-meshing/tetrahedron/src/cdt/facet_recovery.rs",
+      "before": [
+        "100644",
+        "blob",
+        "33af3024708e09fcb1949d11df5a1454212323a6"
+      ],
+      "after": [
+        "100644",
+        "blob",
+        "c789663da9da2e5c2dc26a3315310da14dc70484"
+      ],
+      "reason": "Changes FEA Delaunay facet recovery, support splitting, per-facet limits and cancellation propagation. The circuit Session and staged airliner CAD drawing do not enter this volume-meshing pipeline. Required authored-physics and recovery cohorts are being measured separately against the consolidated source."
+    },
+    {
+      "path": "crates/runmat-meshing/tetrahedron/src/cdt/facet_recovery/execution.rs",
+      "before": [
+        "100644",
+        "blob",
+        "a6319e5800ce01b47740cbd8618a44d645e5af24"
+      ],
+      "after": [
+        "100644",
+        "blob",
+        "9b38b4112302342d80b3a3cb3f994d7e6c49539c"
+      ],
+      "reason": "Changes FEA Delaunay facet recovery, support splitting, per-facet limits and cancellation propagation. The circuit Session and staged airliner CAD drawing do not enter this volume-meshing pipeline. Required authored-physics and recovery cohorts are being measured separately against the consolidated source."
+    },
+    {
+      "path": "crates/runmat-meshing/tetrahedron/src/cdt/facet_recovery/support_refinement.rs",
+      "before": [
+        "100644",
+        "blob",
+        "77b27e09ef1ea9ea91c7a8078710bd303da50b20"
+      ],
+      "after": [
+        "100644",
+        "blob",
+        "46def14bb5511174847e88171587749631daa1cb"
+      ],
+      "reason": "Changes FEA Delaunay facet recovery, support splitting, per-facet limits and cancellation propagation. The circuit Session and staged airliner CAD drawing do not enter this volume-meshing pipeline. Required authored-physics and recovery cohorts are being measured separately against the consolidated source."
+    },
+    {
+      "path": "crates/runmat-meshing/tetrahedron/src/cdt/facet_recovery/support_refinement/encroachment.rs",
+      "before": [
+        "100644",
+        "blob",
+        "deda98650a76afcfbe55e673d50ab796e591512a"
+      ],
+      "after": [
+        "100644",
+        "blob",
+        "a15923054b013a6b085ddaf1d311ad6cf91393de"
+      ],
+      "reason": "Changes FEA Delaunay facet recovery, support splitting, per-facet limits and cancellation propagation. The circuit Session and staged airliner CAD drawing do not enter this volume-meshing pipeline. Required authored-physics and recovery cohorts are being measured separately against the consolidated source."
+    },
+    {
+      "path": "crates/runmat-meshing/tetrahedron/src/cdt/facet_recovery/tests.rs",
+      "before": [
+        "100644",
+        "blob",
+        "4eccb6cdfecdb34b2f24dcb4843ae1bd26987471"
+      ],
+      "after": [
+        "100644",
+        "blob",
+        "5f5c524657e81ca422a4dbbfca9dcec89ae22f4b"
+      ],
+      "reason": "Adds or updates separate tetrahedral recovery unit fixtures and regressions. These cfg(test) modules do not execute in either measured workload."
+    },
+    {
+      "path": "crates/runmat-meshing/tetrahedron/src/cdt/facet_recovery/tests/cancellation.rs",
+      "before": null,
+      "after": [
+        "100644",
+        "blob",
+        "b443b3e63e675e1f7830c185c080a4fd34155b6c"
+      ],
+      "reason": "Adds or updates separate tetrahedral recovery unit fixtures and regressions. These cfg(test) modules do not execute in either measured workload."
+    },
+    {
+      "path": "crates/runmat-meshing/tetrahedron/src/cdt/facet_recovery/tests/scalable_cavity.rs",
+      "before": [
+        "100644",
+        "blob",
+        "24c0add26f26df89eb416507d7f667a17375b64b"
+      ],
+      "after": [
+        "100644",
+        "blob",
+        "c4e26aef59e4c83553284339ae26fbe94a3f4ecf"
+      ],
+      "reason": "Adds or updates separate tetrahedral recovery unit fixtures and regressions. These cfg(test) modules do not execute in either measured workload."
+    },
+    {
+      "path": "crates/runmat-meshing/tetrahedron/src/cdt/facet_recovery/validation.rs",
+      "before": [
+        "100644",
+        "blob",
+        "445a10a582953274ea23ecbcac72f7154596888d"
+      ],
+      "after": [
+        "100644",
+        "blob",
+        "eb38757cd141466902088b2f15737c431f98de59"
+      ],
+      "reason": "Changes FEA Delaunay facet recovery, support splitting, per-facet limits and cancellation propagation. The circuit Session and staged airliner CAD drawing do not enter this volume-meshing pipeline. Required authored-physics and recovery cohorts are being measured separately against the consolidated source."
+    },
+    {
+      "path": "crates/runmat-meshing/tetrahedron/src/cdt/facet_recovery/validation/cancellation_tests.rs",
+      "before": null,
+      "after": [
+        "100644",
+        "blob",
+        "113aaaf7f62a5e2799a8102848d6b36d7f316a82"
+      ],
+      "reason": "Adds or updates separate tetrahedral recovery unit fixtures and regressions. These cfg(test) modules do not execute in either measured workload."
+    },
+    {
+      "path": "crates/runmat-meshing/tetrahedron/src/cdt/facet_recovery/validation/evidence.rs",
+      "before": [
+        "100644",
+        "blob",
+        "2c1e97c8f3a7c24fc021b852023f571fe155276a"
+      ],
+      "after": [
+        "100644",
+        "blob",
+        "54f65ee341cbf3e4c44321239e889da8824d607e"
+      ],
+      "reason": "Changes FEA Delaunay facet recovery, support splitting, per-facet limits and cancellation propagation. The circuit Session and staged airliner CAD drawing do not enter this volume-meshing pipeline. Required authored-physics and recovery cohorts are being measured separately against the consolidated source."
+    },
+    {
+      "path": "crates/runmat-meshing/tetrahedron/src/cdt/facet_recovery/work.rs",
+      "before": [
+        "100644",
+        "blob",
+        "f47355458a881182f5a98b24f2d11c75736c57bf"
+      ],
+      "after": [
+        "100644",
+        "blob",
+        "27e9462a6325ddf7bf6ec4f98f04b2b4b0b7348f"
+      ],
+      "reason": "Changes FEA Delaunay facet recovery, support splitting, per-facet limits and cancellation propagation. The circuit Session and staged airliner CAD drawing do not enter this volume-meshing pipeline. Required authored-physics and recovery cohorts are being measured separately against the consolidated source."
+    },
+    {
+      "path": "crates/runmat-meshing/tetrahedron/src/cdt/volume_mesh/tests.rs",
+      "before": [
+        "100644",
+        "blob",
+        "7357ff591514935c2215eeca1e0d652b34a7590d"
+      ],
+      "after": [
+        "100644",
+        "blob",
+        "a90973c92a3077fc0d5d1e23186744b75a141952"
+      ],
+      "reason": "Adds or updates separate tetrahedral recovery unit fixtures and regressions. These cfg(test) modules do not execute in either measured workload."
+    },
+    {
+      "path": "crates/runmat-meshing/tetrahedron/src/cdt/volume_mesh/tests/captured_arm_wall.rs",
+      "before": null,
+      "after": [
+        "100644",
+        "blob",
+        "bfa9864c27c031451d2cb5c06f2c5aa2e80af8f5"
+      ],
+      "reason": "Adds or updates separate tetrahedral recovery unit fixtures and regressions. These cfg(test) modules do not execute in either measured workload."
+    },
+    {
+      "path": "crates/runmat-meshing/tetrahedron/src/cdt/volume_mesh/tests/fixtures/arm-thin-wall-facets.json",
+      "before": null,
+      "after": [
+        "100644",
+        "blob",
+        "9f653243d1f7e7958498257825ccfa4fa2ecbc5d"
+      ],
+      "reason": "Adds or updates separate tetrahedral recovery unit fixtures and regressions. These cfg(test) modules do not execute in either measured workload."
+    },
+    {
+      "path": "crates/runmat-process-host/src/child/lifecycle.rs",
+      "before": [
+        "100644",
+        "blob",
+        "9c32ed2bac03c894f9dd2a09acfabadaf9097431"
+      ],
+      "after": [
+        "100644",
+        "blob",
+        "29c71f551bacd24d7cd3e1c35690161c6b17ce4c"
+      ],
+      "reason": "Apple-only denied-signal observation state and regression tests. Non-Apple signal decisions are preserved; Linux focused tests and strict Clippy pass. This edit changes no numerical kernels or direct CAD/circuit workload path."
+    },
+    {
+      "path": "crates/runmat-process-host/src/child/process_tree.rs",
+      "before": [
+        "100644",
+        "blob",
+        "7955c8daa11be2f51b56a211735aabe8219b7ee9"
+      ],
+      "after": [
+        "100644",
+        "blob",
+        "e113dc639689c5b9c53b79726099f02b15dd12e0"
+      ],
+      "reason": "Apple-only denied-signal observation state and regression tests. Non-Apple signal decisions are preserved; Linux focused tests and strict Clippy pass. This edit changes no numerical kernels or direct CAD/circuit workload path."
+    }
+  ],
+  "qualification_evidence": [
+    {
+      "path": "qualification/scientific/evidence/circuit-large-board-performance-35f-to-67e-20261112.json",
+      "sha256": "0b82b722e4f35d127bb5dba59a07a63ade4422737a2fbf89384d6317f87e1912"
+    },
+    {
+      "path": "qualification/scientific/evidence/circuit-quality-20261112.json",
+      "sha256": "b1fc86c09c80ddfe82b393c59f1f0518c4cb5b4099103bbeb740225f67ad0a61"
+    },
+    {
+      "path": "qualification/scientific/evidence/process-retirement-20261112.json",
+      "sha256": "0b914ac4c36badc0fb2076e8af931ce31eae3d1669e3cde94cd2b1407695783c"
+    },
+    {
+      "path": "qualification/scientific/evidence/quic-security-20261113.json",
+      "sha256": "2dac20d9593d586df2f04fae1e3971315ef05c77b20273f359d516ee4476be5a"
+    },
+    {
+      "path": "qualification/scientific/evidence/publication-metadata-20261113.json",
+      "sha256": "dff2f911ef79ec107786dd92da8d24d4893d0f6d16b421a08f3dd21efe0ea20f"
+    }
+  ],
+  "reason": "Conserves the existing scientific measurements across release-publication metadata changes. The only scientific input changes remove publish=false from two required Rust libraries. Package versions, dependencies, features, targets, implementation source, numerical inputs and thresholds are unchanged. Rate-limit retry handling and release scheduling are publication tooling, not simulation execution. This review is not a rerun of scientific or performance measurements."
+}

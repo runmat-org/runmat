@@ -82,11 +82,7 @@ pub(crate) fn axes_metadata_snapshot_for_property(
             index: axes_index,
         });
     }
-    state
-        .figure
-        .axes_metadata(axes_index)
-        .cloned()
-        .ok_or(FigureError::InvalidAxesHandle)
+    axes_metadata_for_read(&state.figure, axes_index).ok_or(FigureError::InvalidAxesHandle)
 }
 
 pub(crate) fn select_axes_for_figure_for_property(
@@ -123,14 +119,7 @@ fn select_axes(
         return Err(FigureError::StalePlotSnapshot);
     }
     let state = get_state_for_query(&mut reg, handle);
-    let total_axes = axes_count(state);
-    if axes_index >= total_axes {
-        return Err(FigureError::InvalidSubplotIndex {
-            rows: state.figure.axes_rows.max(1),
-            cols: state.figure.axes_cols.max(1),
-            index: axes_index,
-        });
-    }
+    validate_axes_index(state, axes_index)?;
     reg.current = handle;
     let state = get_state_mut(&mut reg, handle);
     state.active_axes = axes_index;
