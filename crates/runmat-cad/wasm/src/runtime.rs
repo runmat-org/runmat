@@ -289,6 +289,7 @@ pub fn regenerate_part_in(
         let watched = part_cache::Watched::new(dynamic, &used);
         let ctx = RegenContext {
             kernel: kernel.as_ref(),
+            tessellator: Some(kernel.as_ref()),
             solver: &ConstraintSketchSolver,
             units: &Units,
             dynamic: &watched,
@@ -875,12 +876,8 @@ fn compile_assembly_with(
         &configured,
         &operated.displays,
     );
-    let prototype_digests = prototype_reuse::prototype_digests(
-        &resolved,
-        &documents,
-        &digests,
-        &operated.digests,
-    );
+    let prototype_digests =
+        prototype_reuse::prototype_digests(&resolved, &documents, &digests, &operated.digests);
     let reused = prototype_reuse::omit_known(&mut display, &prototype_digests, known);
     let mut display = serde_json::to_value(&display).unwrap_or(Value::Null);
     prototype_reuse::mark(&mut display, &prototype_digests, &reused);

@@ -204,6 +204,8 @@ This file is generated from the command catalog.
 
 - `direct.delete-face`: Delete faces and heal the gap from the neighbors.
   - Required: `faces` (picks: face); `heal` (one of `heal`, `patch`, `leave`, default `heal`)
+- `direct.instant-3d`: Drag any face or dimension in the view to change it.
+  - Required: `target` (pick: face or dimension or feature); `value` (number in mm, default 0)
 - `direct.move-body`: Move or rotate bodies directly.
   - Required: `bodies` (picks: body); `dx` (number in mm, default 0); `dy` (number in mm, default 0); `dz` (number in mm, default 0); `angle` (number in deg, default 0)
   - Optional: `axis` (pick: axis or edge)
@@ -449,6 +451,9 @@ This file is generated from the command catalog.
 - `part.draft`: Taper faces for molding by neutral plane, parting line or step.
   - Required: `type` (one of `neutral_plane`, `parting_line`, `step`, default `neutral_plane`); `faces` (picks: face); `neutral` (pick: plane or face) when `type` is neutral_plane; `parting` (picks: edge or curve) when `type` is parting_line or step; `angle` (number in deg, default 1)
   - Optional: `pull` (pick: plane or face) when `type` is parting_line or step; `flip` (true or false, default false)
+- `part.edit-sketch-plane`: Move the sketch to another plane or planar face.
+  - Required: `plane` (pick: plane or face)
+  - Runs on the `selection`: `sketch`
 - `part.emboss`: Raise or engrave a sketch or text on a face.
   - Required: `profile` (pick: sketch); `face` (pick: face); `depth` (number in mm, default 0.5); `mode` (one of `emboss`, `deboss`, default `emboss`)
 - `part.export-body`: Write the selected bodies to a STEP or STL file.

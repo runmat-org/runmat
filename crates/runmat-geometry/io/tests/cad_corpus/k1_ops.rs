@@ -1416,6 +1416,7 @@ fn k1_closed_and_open_hems_name_their_faces_as_the_reference_kernel_does() {
         let fake = FakeKernel::new();
         let ctx = RegenContext {
             kernel: &fake,
+            tessellator: Some(&fake),
             ..env.ctx()
         };
         let reference = regenerate(

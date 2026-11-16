@@ -300,12 +300,18 @@ fn part_edit(
                 .ok_or(EditFailure::Invalid(parsed.diagnostics))?;
             let picks = crate::picks::Picks::new(&document, path, text);
             let values = sketch::with_selection(&request.values, &request.selection);
-            if let Some(result) = sketch::sketch_edit(path, text, command, &values, &picks)
-            {
+            if let Some(result) = sketch::sketch_edit(path, text, command, &values, &picks) {
                 return result;
             }
             if let Some(result) = manage::edit(path, text, request, &picks) {
                 return result;
+            }
+            if command == "direct.instant-3d" {
+                if let Some(result) =
+                    crate::direct_edits::instant_dimension(path, text, &values, &document)
+                {
+                    return result;
+                }
             }
             // Extrude, revolve and sweep add one feature per profile picked.
             if let Some(kinds) =
@@ -563,12 +569,26 @@ mod tests {
     #[test]
     fn new_study_on_a_part_or_assembly_hands_off_to_simulation_setup() {
         for path in ["/p/plate.part", "/p/frame.assembly"] {
-            let out = run(path, PLATE, json!({ "command": "study.new", "values": { "physics": "structural" } }));
+            let out = run(
+                path,
+                PLATE,
+                json!({ "command": "study.new", "values": { "physics": "structural" } }),
+            );
             assert_eq!(out["ok"], true, "{out}");
-            assert_eq!(out["files"], json!([]), "the CAD dispatcher writes no study");
+            assert_eq!(
+                out["files"],
+                json!([]),
+                "the CAD dispatcher writes no study"
+            );
             let summary = out["summary"].as_str().unwrap();
-            assert!(summary.contains("Simulation setup guide (simulation_setup)"), "{summary}");
-            assert!(summary.ends_with(&format!("start it on {path}")), "{summary}");
+            assert!(
+                summary.contains("Simulation setup guide (simulation_setup)"),
+                "{summary}"
+            );
+            assert!(
+                summary.ends_with(&format!("start it on {path}")),
+                "{summary}"
+            );
         }
     }
 

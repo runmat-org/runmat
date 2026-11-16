@@ -8,13 +8,14 @@
 mod references;
 mod inputs;
 mod compile;
+mod conversions;
 mod apply;
 mod blend_edges;
 mod sketch_status;
 mod pieces;
 mod profiles;
-pub(crate) use profiles::{curve_segment, profile_loops, segment_samples};
 use profiles::*;
+pub(crate) use profiles::{curve_segment, profile_loops, segment_samples};
 
 use crate::diagnostics::{
     describe_ref_problem_in, describe_wait_in, Cause, DiagCode, DiagnosticReport, Repair, Severity,
@@ -60,6 +61,10 @@ mod sheet;
 
 pub struct RegenContext<'a> {
     pub kernel: &'a dyn CadKernel,
+    /// The kernel's display tessellation, when it has one: a sketch's converted entities (Use
+    /// edges) read the model's edges and faces through it. Without one they keep their
+    /// written position.
+    pub tessellator: Option<&'a dyn crate::regen::kernel::Tessellator>,
     pub solver: &'a dyn SketchSolver,
     pub units: &'a Units,
     pub dynamic: &'a dyn DynamicValueEvaluator,
