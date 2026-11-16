@@ -78,7 +78,7 @@ sketch label on feature.body.face.end {
     t1 = text(text = "RUNMAT", at = [8 mm, 6 mm], height = 6 mm, font = single_line, stroke = 1 mm)
     constrain fix(t1.at)
 }
-feature engrave = extrude(profile = sketch.label, distance = 0.5 mm, reverse, mode = cut)
+feature engrave = extrude(profile = sketch.label, distance = 0.5 mm, mode = cut)
 ```
 
 The text's anchor is the point `t1.at`, so constraints place it like any other point. Text along a curve is not in the sketch model yet.
