@@ -139,12 +139,20 @@ pub(crate) fn init_logging_once() {
     });
 }
 
-pub(crate) fn set_log_filter_override(level: &str) {
+/// Sets the runtime log level for a new session. Before logging starts, the level
+/// becomes the initial filter. After that, only a level the host passed explicitly
+/// (`logLevel`) replaces the live filter, as the native host does; a session without
+/// one keeps the level an earlier session or `setLogFilter` chose.
+pub(crate) fn apply_session_log_level(level: &str, explicit: bool) {
     let normalized = level.trim();
     if normalized.is_empty() {
         return;
     }
     if LOGGING_GUARD.get().is_none() {
         let _ = LOG_FILTER_OVERRIDE.set(normalized.to_string());
+    } else if explicit {
+        if let Err(error) = runmat_logging::update_log_filter(normalized) {
+            log::warn!("RunMat wasm: session log level {normalized} was not applied: {error}");
+        }
     }
 }
