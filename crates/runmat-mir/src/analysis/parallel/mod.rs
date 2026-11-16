@@ -36,6 +36,7 @@ pub(super) fn analyze_parallel_contracts(
                 function,
                 super::inference::FunctionSummary {
                     outputs: analysis.outputs.clone(),
+                    contextual_outputs: Vec::new(),
                     outputs_complete: analysis.callable.outputs_complete,
                     variadic_outputs: analysis.callable.variadic_outputs,
                     effects: analysis.effects.clone(),

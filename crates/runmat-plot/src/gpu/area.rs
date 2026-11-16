@@ -20,7 +20,7 @@ pub struct AreaGpuParams {
     pub baseline: f32,
 }
 
-#[repr(C)]
+#[repr(C, align(16))]
 #[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
 struct AreaUniforms {
     color: [f32; 4],
@@ -28,7 +28,7 @@ struct AreaUniforms {
     cols: u32,
     target_col: u32,
     baseline: f32,
-    _pad: [f32; 3],
+    _pad: [f32; 4],
 }
 
 pub fn pack_vertices(
@@ -63,7 +63,7 @@ pub fn pack_vertices(
         cols: inputs.cols,
         target_col: inputs.target_col,
         baseline: params.baseline,
-        _pad: [0.0; 3],
+        _pad: [0.0; 4],
     };
     let uniform_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
         label: Some("area-pack-uniforms"),

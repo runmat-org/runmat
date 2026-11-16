@@ -227,6 +227,8 @@ fn written_shape(shape: &ShapeFact, selectors: &[IndexSelectorFact]) -> (ShapeFa
             IndexSelectorFact::KnownOneBasedIndex(index) => {
                 planned[dimension] = planned[dimension].max(*index);
             }
+            IndexSelectorFact::BoundedScalar(bounds)
+                if bounds.maximum() <= effective[dimension] => {}
             IndexSelectorFact::Colon => {}
             IndexSelectorFact::End { offset } if *offset <= 0 => {}
             IndexSelectorFact::End { offset } => {
@@ -318,7 +320,10 @@ fn selectors_guarantee_nonempty(shape: &ShapeFact, selectors: &[IndexSelectorFac
     }
     if selectors.iter().all(|selector| {
         matches!(selector, IndexSelectorFact::KnownOneBasedIndex(index) if *index > 0)
-            || matches!(selector, IndexSelectorFact::End { .. })
+            || matches!(
+                selector,
+                IndexSelectorFact::BoundedScalar(_) | IndexSelectorFact::End { .. }
+            )
     }) {
         return true;
     }
@@ -336,6 +341,7 @@ fn selectors_guarantee_nonempty(shape: &ShapeFact, selectors: &[IndexSelectorFac
         .enumerate()
         .all(|(dimension, selector)| match selector {
             IndexSelectorFact::KnownOneBasedIndex(index) => *index > 0,
+            IndexSelectorFact::BoundedScalar(_) => true,
             IndexSelectorFact::Colon => effective[dimension] > 0,
             IndexSelectorFact::End { .. } => true,
             _ => false,

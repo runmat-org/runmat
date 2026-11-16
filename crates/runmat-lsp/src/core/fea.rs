@@ -24,7 +24,7 @@ mod presentation;
 mod project;
 #[cfg(not(target_arch = "wasm32"))]
 mod rename;
-#[cfg(test)]
+#[cfg(all(test, not(target_arch = "wasm32")))]
 mod tests;
 
 use presentation::*;

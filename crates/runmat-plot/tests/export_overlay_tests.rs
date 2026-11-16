@@ -5,7 +5,7 @@
 use glam::Vec4;
 use runmat_plot::export::image::{ImageExportSettings, ImageExporter};
 use runmat_plot::plots::line::LineStyle;
-use runmat_plot::plots::{Figure, LinePlot};
+use runmat_plot::plots::{Figure, Line3Plot, LinePlot};
 use runmat_plot::styling::{PlotThemeConfig, ThemeVariant};
 
 const W: u32 = 800;
@@ -66,6 +66,116 @@ fn is_series(p: [u8; 3]) -> bool {
 
 fn is_ink(p: [u8; 3]) -> bool {
     p.iter().all(|&c| c < 140)
+}
+
+#[tokio::test]
+async fn positioned_axes_export_keeps_3d_and_2d_series_in_their_own_panels() {
+    if !gpu_tests_on() {
+        eprintln!("skipping; set RUNMAT_PLOT_FORCE_GPU_TESTS=1 for native viewport acceptance");
+        return;
+    }
+    let mut figure = Figure::new();
+    for (axes, position) in [
+        [0.03, 0.06, 0.59, 0.88],
+        [0.70, 0.56, 0.28, 0.38],
+        [0.70, 0.08, 0.28, 0.38],
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        figure.ensure_axes(axes);
+        figure.set_axes_position(axes, position);
+        figure.set_axes_legend_enabled(axes, false);
+    }
+    let map = Line3Plot::new(vec![-1., 0., 1.], vec![0., 1., 0.], vec![-0.5, 1., 0.25])
+        .unwrap()
+        .with_style(Vec4::new(1., 0., 1., 1.), 4., LineStyle::Solid);
+    figure.add_line3_plot_on_axes(map, 0);
+    figure.set_axes_view(0, 32., 34.);
+    for (axes, color, y) in [
+        (1, Vec4::new(0., 1., 1., 1.), vec![1., 3., 2.]),
+        (2, Vec4::new(1., 1., 0., 1.), vec![2., 1., 4.]),
+    ] {
+        let line =
+            LinePlot::new(vec![0., 1., 2.], y)
+                .unwrap()
+                .with_style(color, 4., LineStyle::Solid);
+        figure.add_line_plot_on_axes(line, axes);
+    }
+    // Use the GPU context directly: a CPU fallback cannot qualify the GPU
+    // viewport path or its incremental scene updates.
+    let mut context = runmat_plot::export::native_surface::create_headless_context(W, H)
+        .await
+        .unwrap();
+    context.set_theme_config(PlotThemeConfig {
+        variant: ThemeVariant::ClassicLight,
+        ..Default::default()
+    });
+    let rgba = context.render_to_rgba(&figure, None, None).await.unwrap();
+    let _ = image::save_buffer(
+        std::env::temp_dir().join("runtime072-positioned-axes.png"),
+        &rgba,
+        W,
+        H,
+        image::ColorType::Rgba8,
+    );
+    let series_panel = |[red, green, blue]: [u8; 3]| {
+        if red > 160 && green < 100 && blue > 160 {
+            Some(0)
+        } else if red < 60 && green > 160 && blue > 160 {
+            // Cyan series cores have less red than the blue 3D axis labels.
+            Some(1)
+        } else if red > 160 && green > 160 && blue < 100 {
+            Some(2)
+        } else {
+            None
+        }
+    };
+    let mut counts = [0_usize; 3];
+    for y in 0..H {
+        for x in 0..W {
+            let Some(panel) = series_panel(px(&rgba, x, y)) else {
+                continue;
+            };
+            counts[panel] += 1;
+            let in_panel = match panel {
+                0 => x < W * 65 / 100,
+                1 => x > W * 65 / 100 && y < H * 55 / 100,
+                2 => x > W * 65 / 100 && y > H * 45 / 100,
+                _ => unreachable!(),
+            };
+            assert!(
+                in_panel,
+                "series for panel {panel} escaped to pixel ({x}, {y}): {:?}",
+                px(&rgba, x, y)
+            );
+        }
+    }
+    assert!(
+        counts.iter().all(|count| *count > 25),
+        "missing series: {counts:?}"
+    );
+
+    figure.set_axes_view(0, 115., 12.);
+    let Some(runmat_plot::plots::figure::PlotElement::Line(line)) = figure.get_plot_mut(1) else {
+        panic!("the upper-right panel must contain its original line");
+    };
+    line.update_data(vec![0., 0.5, 2.], vec![3., 1., 2.])
+        .unwrap();
+    let updated = context.render_to_rgba(&figure, None, None).await.unwrap();
+    let mut changed = [0_usize; 3];
+    for y in 0..H {
+        for x in 0..W {
+            let before = series_panel(px(&rgba, x, y));
+            let after = series_panel(px(&updated, x, y));
+            for (panel, count) in changed.iter_mut().enumerate() {
+                *count += usize::from((before == Some(panel)) != (after == Some(panel)));
+            }
+        }
+    }
+    assert!(changed[0] > 25, "the 3D view did not update: {changed:?}");
+    assert!(changed[1] > 25, "the line data did not update: {changed:?}");
+    assert_eq!(changed[2], 0, "the untouched panel changed: {changed:?}");
 }
 
 #[tokio::test]

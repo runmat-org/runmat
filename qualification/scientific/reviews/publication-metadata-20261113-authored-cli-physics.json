@@ -1,0 +1,177 @@
+{
+  "schema_version": 1,
+  "measured_inputs": {
+    "sha256": "ba994ecda5890f03352b0d1d658b4eae17c1363da19add65f5dd359cfbe99ce2",
+    "files": 26117,
+    "encoding": "git-mode-type-blob-path-tuples-v1"
+  },
+  "accepted_inputs": {
+    "sha256": "55f884d6cb44d49c880e97e043a427c54be4a91e9d00a6ab8874ac7cf6f03a06",
+    "files": 26117,
+    "encoding": "git-mode-type-blob-path-tuples-v1"
+  },
+  "cohorts": [
+    "authored-cli-physics"
+  ],
+  "changed_inputs": [
+    {
+      "path": "Cargo.lock",
+      "before": [
+        "100644",
+        "blob",
+        "6a0348677fb3369c88f3aeacb267208fe1ad68c1"
+      ],
+      "after": [
+        "100644",
+        "blob",
+        "dfca95580a154210d649a2926b25d7dc1d858cd7"
+      ],
+      "reason": "Isolated native QUIC security dependency floor and exact one-package lockfile update; unchanged numerical/plot/CAD code and scientific fixture inputs. Actual bounded transport/runner evidence is attached."
+    },
+    {
+      "path": "crates/runmat-cad/wasm/Cargo.toml",
+      "before": [
+        "100644",
+        "blob",
+        "a37f6decba07db739347f294d9ec1fd15f52c004"
+      ],
+      "after": [
+        "100644",
+        "blob",
+        "5ea382881ba660e75bc9c073257997b6c07e576e"
+      ],
+      "reason": "Publication enabled for an already-required library; the sole manifest edit removes publish=false. No dependency, feature, version or executable source change."
+    },
+    {
+      "path": "crates/runmat-circuit/src/board3d/solid.rs",
+      "before": [
+        "100644",
+        "blob",
+        "ba9511006688aecbcda578aa66a09dfa214055c5"
+      ],
+      "after": [
+        "100644",
+        "blob",
+        "cc271e3ee0b1922aa7da56758330424fde8c9ae3"
+      ],
+      "reason": "Adds only a transparent type alias for the existing copper-vector and two mask-height intervals. Layout, ownership and all function bodies are unchanged."
+    },
+    {
+      "path": "crates/runmat-circuit/src/library/footprint.rs",
+      "before": [
+        "100644",
+        "blob",
+        "8e706e55ff4442c5d8c429e8da75136719047322"
+      ],
+      "after": [
+        "100644",
+        "blob",
+        "8da6b5af0c05c44f2b3775f0ced633331377d437"
+      ],
+      "reason": "Restores the existing too_many_arguments lint annotation to finish. Its body, parameters, material constants and every call are unchanged."
+    },
+    {
+      "path": "crates/runmat-circuit/src/runtime/session.rs",
+      "before": [
+        "100644",
+        "blob",
+        "2e32e361878405170ae37fcfc054cda8c5461215"
+      ],
+      "after": [
+        "100644",
+        "blob",
+        "64e0fcfb7aeea559e6daa427a195c0d94365f1ab"
+      ],
+      "reason": "Spells the existing return tuple using its exact transparent alias. The board_surfaces function body and all other methods remain byte-identical."
+    },
+    {
+      "path": "crates/runmat-circuit/tests/schematic_sheet_layout.rs",
+      "before": [
+        "100644",
+        "blob",
+        "fefc6eb39bd968f93480972ce644fef25de4863c"
+      ],
+      "after": [
+        "100644",
+        "blob",
+        "6a54f26463ef4e81349570486181e067b7604ea0"
+      ],
+      "reason": "Initializes the same places clone and remaining Default fields in one test-local initializer. Every assertion is unchanged; this separate integration-test target is not linked into the measured scientific executables."
+    },
+    {
+      "path": "crates/runmat-design-tools/Cargo.toml",
+      "before": [
+        "100644",
+        "blob",
+        "4e9e7f7814e85b0f19cecb9b7bcea488376a4d12"
+      ],
+      "after": [
+        "100644",
+        "blob",
+        "69df048202f9e10224bd01d8106f0ba2c8e10dd6"
+      ],
+      "reason": "Publication enabled for an already-required library; the sole manifest edit removes publish=false. No dependency, feature, version or executable source change."
+    },
+    {
+      "path": "crates/runmat-execution-transport-native/Cargo.toml",
+      "before": [
+        "100644",
+        "blob",
+        "0e5c3789cb3c5744b7261f32918a934020055184"
+      ],
+      "after": [
+        "100644",
+        "blob",
+        "cc2b8030c646e98e01482ca9c2bf25d6a10e9318"
+      ],
+      "reason": "Isolated native QUIC security dependency floor and exact one-package lockfile update; unchanged numerical/plot/CAD code and scientific fixture inputs. Actual bounded transport/runner evidence is attached."
+    },
+    {
+      "path": "crates/runmat-process-host/src/child/lifecycle.rs",
+      "before": [
+        "100644",
+        "blob",
+        "9c32ed2bac03c894f9dd2a09acfabadaf9097431"
+      ],
+      "after": [
+        "100644",
+        "blob",
+        "29c71f551bacd24d7cd3e1c35690161c6b17ce4c"
+      ],
+      "reason": "Apple-only denied-signal observation state and regression tests. Non-Apple signal decisions are preserved; Linux focused tests and strict Clippy pass. This edit changes no numerical kernels or direct CAD/circuit workload path."
+    },
+    {
+      "path": "crates/runmat-process-host/src/child/process_tree.rs",
+      "before": [
+        "100644",
+        "blob",
+        "7955c8daa11be2f51b56a211735aabe8219b7ee9"
+      ],
+      "after": [
+        "100644",
+        "blob",
+        "e113dc639689c5b9c53b79726099f02b15dd12e0"
+      ],
+      "reason": "Apple-only denied-signal observation state and regression tests. Non-Apple signal decisions are preserved; Linux focused tests and strict Clippy pass. This edit changes no numerical kernels or direct CAD/circuit workload path."
+    }
+  ],
+  "qualification_evidence": [
+    {
+      "path": "qualification/scientific/evidence/circuit-quality-20261112.json",
+      "sha256": "b1fc86c09c80ddfe82b393c59f1f0518c4cb5b4099103bbeb740225f67ad0a61"
+    },
+    {
+      "path": "qualification/scientific/evidence/process-retirement-20261112.json",
+      "sha256": "0b914ac4c36badc0fb2076e8af931ce31eae3d1669e3cde94cd2b1407695783c"
+    },
+    {
+      "path": "qualification/scientific/evidence/quic-security-20261113.json",
+      "sha256": "2dac20d9593d586df2f04fae1e3971315ef05c77b20273f359d516ee4476be5a"
+    },
+    {
+      "path": "qualification/scientific/evidence/publication-metadata-20261113.json",
+      "sha256": "dff2f911ef79ec107786dd92da8d24d4893d0f6d16b421a08f3dd21efe0ea20f"
+    }
+  ],
+  "reason": "Conserves the existing scientific measurements across release-publication metadata changes. The only scientific input changes remove publish=false from two required Rust libraries. Package versions, dependencies, features, targets, implementation source, numerical inputs and thresholds are unchanged. Rate-limit retry handling and release scheduling are publication tooling, not simulation execution. This review is not a rerun of scientific or performance measurements."
+}

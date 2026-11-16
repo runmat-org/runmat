@@ -12,10 +12,19 @@ use crate::{MirCall, MirCallArg, MirCallee, MirOperand, MirSequenceLocalId};
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct FunctionSummary {
     pub outputs: Vec<ValueFact>,
+    /// Additional return facts for exact argument contexts. Only the diagnostic
+    /// analysis populates these; generic/executable summaries keep them empty.
+    pub contextual_outputs: Vec<ContextualOutputs>,
     pub outputs_complete: bool,
     pub variadic_outputs: bool,
     pub effects: runmat_types::EffectSet,
     pub capabilities: runmat_types::CapabilitySet,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct ContextualOutputs {
+    pub arguments: Vec<ValueFact>,
+    pub outputs: Vec<ValueFact>,
 }
 
 pub(crate) fn infer_mir_call(
@@ -77,9 +86,14 @@ pub(crate) fn infer_mir_call_with_arguments(
 
     if let Some(function) = bound_function(call) {
         if let Some(summary) = summaries.get(&function) {
+            let outputs = summary
+                .contextual_outputs
+                .iter()
+                .find(|context| context.arguments == request.arguments)
+                .map_or(&summary.outputs, |context| &context.outputs);
             return infer_call(
                 &CallContract {
-                    outputs: summary.outputs.clone(),
+                    outputs: outputs.clone(),
                     variadic_output: (summary.variadic_outputs || !summary.outputs_complete)
                         .then(|| Box::new(ValueFact::unknown(DynamicReason::RuntimeValue))),
                     maximum_outputs: (summary.outputs_complete && !summary.variadic_outputs)

@@ -107,35 +107,86 @@ Linux release builds use the first form. Windows and macOS release builds use th
 
 ### Native standalone runtime
 
-`runmat compile` links user objects against the exact compiler-free execution runtime embedded in the CLI. Building that product is intentionally a two-phase operation so an installed RunMat remains one executable and no mutable SDK archive is placed beside it:
+Build the CLI and its matching compile-time runtime pack with the native build helper. For a CPU-only development build on macOS or Linux:
 
 ```bash
 scripts/build-runmat-with-aot-runtime.sh --no-default-features --features jit
 ```
 
-This is a CPU-only archive with the stock console and callable factories. To include a target-built WGPU backend, use `--no-default-features --features jit,wgpu`; use `jit,cuda` or `jit,wgpu,cuda` for the other supported backend combinations. The same flags work with the PowerShell helper. The helper retains the stock factories, forwards selected accelerator features to the runtime archive build, and keeps the full requested feature set for the CLI build. The stock factories do not provide graphical interaction or grant unavailable services. Custom embedding archives select their own qualified factory symbols by building the runtime crate directly. The packer reads backend evidence from the actual target archive; a build-host feature or available device cannot supply that proof.
-
-On Windows PowerShell:
+On Windows:
 
 ```powershell
 scripts/build-runmat-with-aot-runtime.ps1 --no-default-features --features jit
 ```
 
-The first phase builds `runmat-aot-runtime` as a static library from the same Runtime, native executor, and `Value` implementations used elsewhere. The standalone runtime does not depend on the VM or adaptive JIT crate; linked process-image entrypoints and dynamically allocated JIT entrypoints bind through the same verified executor contract. Its Native IR decoder retains portable HIR/MIR operation schema types, but not parser, HIR/MIR lowering, static-analysis, Core composition, Cranelift object emission, VM, or JIT execution code. Cargo reports the target's ordered native link requirements. `runmat-aot-pack --archive` validates and compresses the archive and requires `--payload-out`, `--manifest-out`, and `--notices-out`; the latter writes Runtime's canonical third-party notice bytes. The manifest binds target, native ABI, schema, runtime/catalog identity, capabilities, lengths, digests, and link tokens. The second phase passes the archive pair explicitly to `runmat-aot`'s build script and stages `THIRD_PARTY_NOTICES.txt` beside the built CLI. Normal `cargo build` remains smaller and valid, but its compile command reports that the optional native runtime was not embedded.
+The helpers default to the release profile. Their output directory contains:
 
-Whole-program reachability is computed from canonical MIR, with executable source and binding names supplied by the immutable Core compilation product. AOT consumes that report alongside the builtin catalog's link, placement, provider, and extension contracts; the CLI only renders the resulting plan. `runmat compile --explain-link` prints the retained symbols and reasons, while `--link-plan-json PATH` writes the deterministic program/runtime plan for automated inspection. This keeps source analysis, builtin metadata, artifact identity, and presentation in their owning crates instead of maintaining a second linker-specific registry.
+| Output | Purpose |
+| --- | --- |
+| `runmat` or `runmat.exe` | CLI with the trusted pack manifest embedded |
+| `runmat-aot-runtime.zip` | Separate compile-time runtime, native manifest, licenses and notices |
+| `runmat-aot-runtime.json` | Distribution metadata that pins the pack digest and size |
+| `THIRD_PARTY_NOTICES.txt` | Canonical Runtime third-party notices |
 
-The embedded archive supports two link profiles without duplicating runtime implementations. `native-specialized` uses exact selected bindings and normal archive extraction when the archive capability and complete canonical reachability/catalog closure permit it; otherwise it force-loads the archive for inventory-based runtime discovery. `closed-world` requires that proof and rejects unknown or non-canonical builtin targets. Selected composition emits explicit references to collision-free catalog binding symbols, installs that exact binding set as the invocation-scoped runtime authority, and uses normal archive extraction plus the platform's dead-strip option. `scripts/check-closed-world-binary.sh` compares a produced executable with its JSON link plan and rejects extra builtin bindings or retained compiler, VM, and JIT symbols.
+Ordinary `cargo build` provides script execution without a compile-time distribution manifest. Use the helper when developing `runmat compile`. For the compile-time runtime, the CLI embeds only the small distribution manifest. The temporary packaging directory is removed after the build; Cargo's static library and build cache remain in the target directory.
 
-Compiled program recipes and artifacts carry a versioned target contract rather than a free-form target string. Portable bytecode and executable units can run on native or browser hosts, while native objects include an exact architecture, operating system, pointer width, ABI, and object format identity and are rejected by incompatible hosts. Target identity participates in deterministic recipe and artifact IDs. A compiled execution bundle contains only the exact materialized program and frozen package identities it needs; it does not retain or reconstruct project source. Workloads that require dynamic source access continue to use the separate source-project closure.
+#### Verify the built pair
 
-Set `RUNMAT_BUILD_PROFILE` to select another Cargo profile. An explicit `--target` overrides `RUNMAT_BUILD_TARGET`, which overrides `CARGO_BUILD_TARGET`; the runtime archive and CLI use the same deployment target. The archive packer always runs on the Rust compiler's build-host target, including during cross-compilation. Both helpers honor `CARGO_TARGET_DIR`.
+Pass the binary and pack to the smoke check:
 
-Each Darwin build phase defaults Rust and native C/CMake compilation to macOS deployment target `11.0`, matching the geometry build baseline. Set `MACOSX_DEPLOYMENT_TARGET` or `CMAKE_OSX_DEPLOYMENT_TARGET` to select another minimum; the unset variable inherits the supplied value, and conflicting explicit minima are rejected. These settings are scoped to each phase: a Darwin runtime archive and final CLI use them, and a Darwin-host packer uses them independently even when the deployed target is Linux or Windows. Non-Darwin phases retain the caller's original environment. The public release workflow selects `11.0` before macOS native dependency builds and cache restoration, with a deployment-policy cache prefix that excludes older native objects for both macOS architectures. A deployment target is a compilation/link baseline, not evidence that execution on older macOS versions has been qualified.
+```bash
+scripts/verify-runmat-with-aot-runtime.sh target/release/runmat target/release/runmat-aot-runtime.zip
+```
 
-Release builds use one codegen unit for Runtime, analysis-FEA and Builtins while retaining the normal optimization level and feature selection; this is not a guaranteed archive-size or runtime-performance result.
+The PowerShell verifier accepts the binary and optional pack paths in the same order. These checks provision the explicit pack offline, compile a small program and verify its output. Replace `release` with the selected profile output directory, and include the target triple directory when using `--target`.
 
-The helpers keep intermediate archive products in a private temporary directory and remove them after the CLI build. The embedded payload is never discovered from the installation directory at runtime.
+For the broader installation and cache checks, run:
+
+```bash
+node scripts/distribution/accept-aot-runtime-pack.mjs \
+  target/release/runmat target/release/runmat-aot-runtime.zip \
+  /path/to/new-aot-acceptance.json
+```
+
+This check uses synthetic source and a temporary `RUNMAT_AOT_CACHE_DIR`. It exercises ordinary execution without a pack, offline and unattended misses, concurrent installation, bounded retention, offline compilation, standalone output and corrupt-pack refusal. The receipt binds the binary and pack digests. The temporary cache is removed after the check.
+
+Published download retrieval and interactive terminal consent need separate release checks; this offline cohort does not exercise them.
+
+#### Select execution backends
+
+The CPU-only example keeps the stock console and callable factories. To build a target WGPU backend, use `--no-default-features --features jit,wgpu`. The CUDA combinations are `jit,cuda` and `jit,wgpu,cuda`. Both helpers accept these flags.
+
+The helper forwards accelerator choices to the runtime archive and preserves the full requested feature set for the CLI. Backend support is read from evidence in the target archive. The stock factories provide console and callable services; they provide no graphical interaction or additional service grants. Custom embedding archives select their qualified factory symbols by building the runtime crate directly.
+
+These explicit development feature choices are separate from the production CLI feature set. The compile-time pack split leaves FEA and geometry in ordinary execution.
+
+#### What the helper builds
+
+The first phase builds `runmat-aot-runtime` as a static library using the shared Runtime, native executor and `Value` implementation. The linked process-image and JIT entrypoints use the same verified executor contract. The standalone library retains the HIR/MIR operation schema needed to decode Native IR; parser, lowering, static analysis, Core composition, native object emission, VM and adaptive JIT implementation remain outside it.
+
+Cargo reports the target's ordered native link requirements. The packer validates and compresses that archive, then adds its native manifest, first-party licenses and canonical third-party notices. Distribution output uses paired `--pack-out` and `--pack-manifest-out` arguments with explicit `--license` and `--free-use` inputs. The helpers supply the checkout's canonical license files.
+
+The second phase builds the CLI with the distribution manifest embedded. That manifest pins the complete pack digest and size, native ABI, target, runtime/catalog identities, capabilities and link tokens. `runmat aot install --from PATH` verifies an explicitly supplied pack; compilation loads a verified cached pack or asks to install the exact distribution pinned by the CLI.
+
+#### Source and link contracts
+
+Core supplies the immutable executable unit, source identities and binding names. Canonical MIR owns whole-program reachability, and the builtin catalog supplies link, placement, provider and extension contracts. AOT consumes those inputs; the CLI renders the resulting plan through `--explain-link` or `--link-plan-json PATH`.
+
+`native-specialized` uses exact selected bindings, ordinary archive extraction and platform dead stripping when capabilities and complete reachability/catalog analysis permit it. Otherwise it force-loads the archive for inventory-backed builtin discovery. `closed-world` requires that complete proof and rejects unknown or non-canonical targets. Selected composition references collision-free catalog binding symbols and installs the selected set as the invocation-scoped runtime authority.
+
+`scripts/check-closed-world-binary.sh` compares an executable with its JSON link plan and rejects extra builtin bindings or retained compiler, VM and JIT symbols.
+
+Native objects carry a versioned architecture, operating system, pointer width, ABI and object-format contract. Incompatible hosts reject them, and target identity contributes to recipe and artifact IDs. Portable bytecode and executable units can run on native or browser hosts. Compiled execution bundles retain the materialized program and frozen package identities without reconstructing project source; dynamic source access uses the separate source-project closure.
+
+#### Build settings
+
+Use `--profile` or `RUNMAT_BUILD_PROFILE` to select a Cargo profile. An explicit `--target` overrides `RUNMAT_BUILD_TARGET`, which overrides `CARGO_BUILD_TARGET`. The runtime archive and CLI use the deployment target; the packer executes on the Rust compiler's build-host target. Both helpers honor `CARGO_TARGET_DIR`.
+
+Darwin phases default Rust and native C/CMake compilation to deployment target `11.0`. Set `MACOSX_DEPLOYMENT_TARGET` or `CMAKE_OSX_DEPLOYMENT_TARGET` to choose another minimum; an unset variable inherits the supplied one, and conflicting explicit values are rejected. The deployment archive and CLI apply this policy when their target is Darwin. The packer applies it independently when its build host is Darwin. Other phases retain the original environment.
+
+The release workflow selects `11.0` before macOS dependency builds and cache restoration. Its deployment-policy cache prefix excludes objects built under older policies for both macOS architectures. Execution support on older macOS versions requires its own qualification evidence.
+
+Runtime, analysis-FEA and Builtins use eight release codegen units so LLVM can optimize them in parallel. Optimization levels and feature selection retain their configured values.
 
 ## WASM And TypeScript Build
 

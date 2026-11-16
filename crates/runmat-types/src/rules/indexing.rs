@@ -109,6 +109,7 @@ pub fn infer_index(
                 selector,
                 IndexSelectorFact::Scalar
                     | IndexSelectorFact::KnownOneBasedIndex(_)
+                    | IndexSelectorFact::BoundedScalar(_)
                     | IndexSelectorFact::End { .. }
             )
         });
@@ -137,6 +138,9 @@ fn composite_contents(
     let valid = match selectors {
         [IndexSelectorFact::KnownOneBasedIndex(index)] => {
             *index > 0 && usize::try_from(composite.labs.0).is_ok_and(|labs| *index <= labs)
+        }
+        [IndexSelectorFact::BoundedScalar(bounds)] => {
+            usize::try_from(composite.labs.0).is_ok_and(|labs| bounds.minimum() <= labs)
         }
         [IndexSelectorFact::Numeric(value) | IndexSelectorFact::Logical(value)] => {
             value.shape.element_count().is_none_or(|count| count == 1)
@@ -199,6 +203,9 @@ fn infer_cell_contents_sequence(
         if let Some(value) = cell.elements.get(index) {
             return SequenceFactInference::exact(ValueSequenceFact::single(value.clone()));
         }
+    }
+    if matches!(selectors, [IndexSelectorFact::BoundedScalar(_)]) {
+        return SequenceFactInference::exact(ValueSequenceFact::single((*cell.element).clone()));
     }
     let (outputs, variadic) = if cell.elements_complete {
         match selectors {
@@ -290,6 +297,7 @@ fn index_shape(base: &ShapeFact, selectors: &[IndexSelectorFact]) -> ShapeFact {
         match selector {
             IndexSelectorFact::Scalar
             | IndexSelectorFact::KnownOneBasedIndex(_)
+            | IndexSelectorFact::BoundedScalar(_)
             | IndexSelectorFact::End { .. } => output.push(crate::DimensionFact::Known(1)),
             IndexSelectorFact::Colon => output.push(base_dimensions[dimension].clone()),
             IndexSelectorFact::Numeric(fact) => {
@@ -313,12 +321,61 @@ fn selector_shape(selector: &IndexSelectorFact, base: &ShapeFact) -> ShapeFact {
     match selector {
         IndexSelectorFact::Scalar
         | IndexSelectorFact::KnownOneBasedIndex(_)
+        | IndexSelectorFact::BoundedScalar(_)
         | IndexSelectorFact::End { .. } => ShapeFact::Scalar,
         IndexSelectorFact::Colon => ShapeFact::from(vec![base.element_count(), Some(1)]),
-        IndexSelectorFact::Numeric(fact) => fact.shape.clone(),
-        IndexSelectorFact::Logical(_) => ShapeFact::from(vec![None, Some(1)]),
+        IndexSelectorFact::Numeric(fact) => numeric_selector_shape(base, &fact.shape),
+        IndexSelectorFact::Logical(fact) => logical_selector_shape(base, &fact.shape),
         IndexSelectorFact::Unknown => ShapeFact::Unknown,
     }
+}
+
+fn numeric_selector_shape(base: &ShapeFact, selector: &ShapeFact) -> ShapeFact {
+    if selector.element_count() == Some(1) {
+        return ShapeFact::Scalar;
+    }
+    if let (Some(source), Some(indices)) = (base.known_dims(), selector.known_dims()) {
+        // Equal vector orientations give the same result whether the source
+        // turns out to be scalar or non-scalar. Its length need not be known.
+        if source.len() == 2
+            && indices.len() == 2
+            && ((source[0] == Some(1) && indices[0] == Some(1))
+                || (source[1] == Some(1) && indices[1] == Some(1)))
+        {
+            return selector.clone();
+        }
+    }
+    let exact = |shape: &ShapeFact| shape.known_dims()?.into_iter().collect::<Option<Vec<_>>>();
+    let (Some(source), Some(indices)) = (exact(base), exact(selector)) else {
+        // An unknown source can still be a row or column vector. The
+        // selector's orientation alone cannot establish the result's shape.
+        return ShapeFact::Unknown;
+    };
+    let Some(count) = selector.element_count() else {
+        return ShapeFact::Unknown;
+    };
+    ShapeFact::from(
+        crate::geometry::numeric_linear_shape(&source, &indices, count)
+            .as_slice()
+            .iter()
+            .copied()
+            .map(Some)
+            .collect::<Vec<_>>(),
+    )
+}
+
+fn logical_selector_shape(base: &ShapeFact, selector: &ShapeFact) -> ShapeFact {
+    let exact = |shape: &ShapeFact| shape.known_dims()?.into_iter().collect::<Option<Vec<_>>>();
+    let (Some(source), Some(mask)) = (exact(base), exact(selector)) else {
+        return ShapeFact::Unknown;
+    };
+    ShapeFact::from(
+        if crate::geometry::logical_linear_source_is_row(&source, &mask) {
+            vec![Some(1), None]
+        } else {
+            vec![None, Some(1)]
+        },
+    )
 }
 
 fn dimensions(shape: &ShapeFact, rank: usize) -> Vec<crate::DimensionFact> {
@@ -420,6 +477,7 @@ fn selector_bounds_diagnostic(
         let Some(bound) = bound else { continue };
         let invalid = match selector {
             IndexSelectorFact::KnownOneBasedIndex(index) => *index == 0 || *index > bound,
+            IndexSelectorFact::BoundedScalar(bounds) => bounds.minimum() > bound,
             IndexSelectorFact::End { offset } => {
                 let resolved = isize::try_from(bound)
                     .ok()

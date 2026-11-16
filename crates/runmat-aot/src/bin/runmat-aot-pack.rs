@@ -1,8 +1,8 @@
 use std::path::PathBuf;
 
 use runmat_aot::archive::{
-    build_runtime_archive, RuntimeArchiveCapabilities, RuntimeArchiveEncoding,
-    RuntimeArchiveManifest,
+    build_runtime_archive, build_runtime_pack, RuntimeArchiveCapabilities, RuntimeArchiveEncoding,
+    RuntimeArchiveManifest, RuntimePackLicenses,
 };
 #[cfg(target_os = "windows")]
 use runmat_aot::archive::{prepare_msvc_runtime_archive, MsvcImportLibrary};
@@ -14,6 +14,14 @@ struct Arguments {
     notices_out: PathBuf,
     native_link_tokens: Vec<String>,
     msvc_import_libraries: Vec<PathBuf>,
+    distribution: Option<DistributionOutputs>,
+}
+
+struct DistributionOutputs {
+    pack: PathBuf,
+    manifest: PathBuf,
+    license: PathBuf,
+    free_use: PathBuf,
 }
 
 fn main() {
@@ -41,18 +49,23 @@ fn run() -> Result<(), String> {
     if !cfg!(target_os = "windows") && !arguments.msvc_import_libraries.is_empty() {
         return Err("MSVC import libraries require the Windows archive packer".into());
     }
-    if arguments.archive == arguments.payload_out
-        || arguments.archive == arguments.manifest_out
-        || arguments.archive == arguments.notices_out
-        || arguments.payload_out == arguments.manifest_out
-        || arguments.payload_out == arguments.notices_out
-        || arguments.manifest_out == arguments.notices_out
-    {
-        return Err("runtime archive inputs and outputs must be distinct paths".to_string());
+    let mut paths = vec![
+        &arguments.archive,
+        &arguments.payload_out,
+        &arguments.manifest_out,
+        &arguments.notices_out,
+    ];
+    if let Some(distribution) = &arguments.distribution {
+        paths.extend([&distribution.pack, &distribution.manifest]);
     }
-    reject_existing(&arguments.payload_out)?;
-    reject_existing(&arguments.manifest_out)?;
-    reject_existing(&arguments.notices_out)?;
+    for (index, path) in paths.iter().enumerate() {
+        if paths[index + 1..].contains(path) {
+            return Err("runtime archive inputs and outputs must be distinct paths".to_string());
+        }
+    }
+    for path in paths.into_iter().skip(1) {
+        reject_existing(path)?;
+    }
     let bytes = std::fs::read(&arguments.archive)
         .map_err(|error| format!("read `{}`: {error}", arguments.archive.display()))?;
     let native_link_tokens = arguments.native_link_tokens;
@@ -100,18 +113,50 @@ fn run() -> Result<(), String> {
     )
     .map_err(|error| error.to_string())?;
     let manifest = canonical_manifest_json(&product.manifest)?;
-    write_new(&arguments.payload_out, product.payload())?;
-    if let Err(error) = write_new(&arguments.manifest_out, manifest.as_bytes()) {
-        let _ = std::fs::remove_file(&arguments.payload_out);
-        return Err(error);
+    // Prepare the whole distribution before publishing any output. An
+    // unsupported pack cannot leave an apparently complete native payload.
+    let distribution = arguments
+        .distribution
+        .as_ref()
+        .map(|outputs| {
+            let license = read_bounded(&outputs.license, 8 * 1024 * 1024)?;
+            let free_use = read_bounded(&outputs.free_use, 8 * 1024 * 1024)?;
+            let pack = build_runtime_pack(
+                &product,
+                RuntimePackLicenses {
+                    license: &license,
+                    free_use: &free_use,
+                },
+            )
+            .map_err(|error| error.to_string())?;
+            let metadata =
+                serde_json::to_vec_pretty(&pack.manifest).map_err(|error| error.to_string())?;
+            Ok::<_, String>((outputs, pack, metadata))
+        })
+        .transpose()?;
+    let mut outputs = vec![
+        (&arguments.payload_out, product.payload()),
+        (&arguments.manifest_out, manifest.as_bytes()),
+        (
+            &arguments.notices_out,
+            runmat_runtime::third_party_notices::bytes(),
+        ),
+    ];
+    if let Some((paths, pack, metadata)) = &distribution {
+        outputs.extend([
+            (&paths.pack, pack.bytes.as_slice()),
+            (&paths.manifest, metadata.as_slice()),
+        ]);
     }
-    if let Err(error) = write_new(
-        &arguments.notices_out,
-        runmat_runtime::third_party_notices::bytes(),
-    ) {
-        let _ = std::fs::remove_file(&arguments.manifest_out);
-        let _ = std::fs::remove_file(&arguments.payload_out);
-        return Err(error);
+    let mut published = Vec::new();
+    for (path, bytes) in outputs {
+        if let Err(error) = write_new(path, bytes) {
+            for path in published {
+                let _ = std::fs::remove_file(path);
+            }
+            return Err(error);
+        }
+        published.push(path);
     }
     Ok(())
 }
@@ -660,6 +705,10 @@ fn parse_arguments(
     let mut notices_out = None;
     let mut native_link_tokens = Vec::new();
     let mut msvc_import_libraries = Vec::new();
+    let mut pack_out = None;
+    let mut pack_manifest_out = None;
+    let mut license = None;
+    let mut free_use = None;
     while let Some(argument) = arguments.next() {
         let argument = argument
             .into_string()
@@ -669,6 +718,10 @@ fn parse_arguments(
             | "--payload-out"
             | "--manifest-out"
             | "--notices-out"
+            | "--pack-out"
+            | "--pack-manifest-out"
+            | "--license"
+            | "--free-use"
             | "--native-link-token"
             | "--msvc-import-library" => arguments
                 .next()
@@ -680,6 +733,10 @@ fn parse_arguments(
             "--payload-out" => payload_out = Some(PathBuf::from(value)),
             "--manifest-out" => manifest_out = Some(PathBuf::from(value)),
             "--notices-out" => notices_out = Some(PathBuf::from(value)),
+            "--pack-out" => pack_out = Some(PathBuf::from(value)),
+            "--pack-manifest-out" => pack_manifest_out = Some(PathBuf::from(value)),
+            "--license" => license = Some(PathBuf::from(value)),
+            "--free-use" => free_use = Some(PathBuf::from(value)),
             "--msvc-import-library" => msvc_import_libraries.push(PathBuf::from(value)),
             "--native-link-token" => native_link_tokens.push(
                 value
@@ -689,6 +746,16 @@ fn parse_arguments(
             _ => unreachable!(),
         }
     }
+    let distribution = match (pack_out, pack_manifest_out) {
+        (None, None) if license.is_none() && free_use.is_none() => None,
+        (Some(pack), Some(manifest)) => Some(DistributionOutputs {
+            pack,
+            manifest,
+            license: license.ok_or("distribution packs require --license")?,
+            free_use: free_use.ok_or("distribution packs require --free-use")?,
+        }),
+        _ => return Err("--pack-out and --pack-manifest-out must be supplied together".into()),
+    };
     Ok(Arguments {
         archive: archive.ok_or_else(|| "--archive is required".to_string())?,
         payload_out: payload_out.ok_or_else(|| "--payload-out is required".to_string())?,
@@ -696,6 +763,7 @@ fn parse_arguments(
         notices_out: notices_out.ok_or_else(|| "--notices-out is required".to_string())?,
         native_link_tokens,
         msvc_import_libraries,
+        distribution,
     })
 }
 
@@ -725,19 +793,74 @@ fn reject_existing(path: &std::path::Path) -> Result<(), String> {
 
 fn write_new(path: &std::path::Path, bytes: &[u8]) -> Result<(), String> {
     use std::io::Write;
-    let mut file = std::fs::OpenOptions::new()
-        .write(true)
-        .create_new(true)
-        .open(path)
-        .map_err(|error| format!("create `{}`: {error}", path.display()))?;
+    let parent = path
+        .parent()
+        .filter(|parent| !parent.as_os_str().is_empty())
+        .unwrap_or_else(|| std::path::Path::new("."));
+    let mut file = tempfile::Builder::new()
+        .make_in(parent, |temporary| {
+            std::fs::OpenOptions::new()
+                .write(true)
+                .create_new(true)
+                .open(temporary)
+        })
+        .map_err(|error| format!("stage `{}`: {error}", path.display()))?;
     file.write_all(bytes)
-        .and_then(|()| file.sync_all())
-        .map_err(|error| format!("write `{}`: {error}", path.display()))
+        .and_then(|()| file.as_file().sync_all())
+        .map_err(|error| format!("write `{}`: {error}", path.display()))?;
+    file.persist_noclobber(path)
+        .map_err(|error| format!("publish `{}`: {error}", path.display()))?;
+    Ok(())
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn distribution_outputs_are_optional_and_paired() {
+        let required = [
+            "--archive",
+            "runtime.a",
+            "--payload-out",
+            "runtime.payload",
+            "--manifest-out",
+            "runtime.json",
+            "--notices-out",
+            "notices.txt",
+        ];
+        let parse = |extra: &[&str]| {
+            parse_arguments(required.iter().chain(extra).map(std::ffi::OsString::from))
+        };
+        assert!(parse(&[]).unwrap().distribution.is_none());
+        assert!(parse(&["--pack-out", "runtime.zip"]).is_err());
+        assert!(parse(&["--pack-manifest-out", "pack.json"]).is_err());
+        let outputs = parse(&[
+            "--pack-out",
+            "runtime.zip",
+            "--pack-manifest-out",
+            "pack.json",
+            "--license",
+            "LICENSE.md",
+            "--free-use",
+            "FREE-USE.md",
+        ])
+        .unwrap()
+        .distribution
+        .unwrap();
+        assert_eq!(outputs.pack, PathBuf::from("runtime.zip"));
+        assert_eq!(outputs.manifest, PathBuf::from("pack.json"));
+    }
+
+    #[test]
+    fn publication_preserves_existing_outputs_and_cleans_staging_files() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("runtime.zip");
+        write_new(&path, b"original").unwrap();
+        assert!(write_new(&path, b"replacement").is_err());
+        assert_eq!(std::fs::read(&path).unwrap(), b"original");
+        assert_eq!(std::fs::read_dir(directory.path()).unwrap().count(), 1);
+    }
 
     #[test]
     fn standalone_archive_requires_explicit_notice_output() {

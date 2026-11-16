@@ -19,6 +19,82 @@ fn lower(source: &str) -> MirAssembly {
 const HELPER: &str = "\nfunction C = helper(A, B)\nC = A * B;\nend\n";
 
 #[test]
+fn concrete_function_results_reach_later_caller_operations() {
+    let source = "x = ones(10,1); y = helper(x); invalid = y * y;\nfunction y = helper(x)\ny = 2 * x;\nend\n";
+    let mir = lower(source);
+    let report = diagnose_call_contexts(&mir);
+    assert!(!report.budget_exhausted);
+    assert!(!report.precision_withheld);
+    assert!(
+        report
+            .diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.code == "RM-TYPE-MATMUL"),
+        "the 10-by-1 returned value must expose the incompatible caller product: {:#?}",
+        report.diagnostics
+    );
+    let diagnostic = report
+        .diagnostics
+        .iter()
+        .find(|diagnostic| diagnostic.code == "RM-TYPE-MATMUL")
+        .unwrap();
+    let span = diagnostic.primary.span;
+    assert_eq!(&source[span.start..span.end], "invalid = y * y");
+    assert_eq!(diagnostic.primary.source, Some(ProgramSourceId(0)));
+}
+
+#[test]
+fn returned_shapes_remain_specific_to_each_call_and_reach_nested_calls() {
+    let helper = "\nfunction y = helper(x)\ny = 2 * x;\nend\n";
+    let valid = lower(&format!(
+        "a = helper(ones(2,3)); b = helper(ones(4,2)); c = a * ones(3,1); d = b * ones(2,1);{helper}"
+    ));
+    assert!(diagnose_call_contexts(&valid).diagnostics.is_empty());
+
+    let source = format!(
+        "a = helper(ones(2,3)); b = helper(ones(4,2)); c = a * ones(2,1); d = b * ones(2,1);{helper}"
+    );
+    let report = diagnose_call_contexts(&lower(&source));
+    let [diagnostic] = report.diagnostics.as_slice() else {
+        panic!("only the first call's product is incompatible: {report:#?}");
+    };
+    assert_eq!(diagnostic.code, "RM-TYPE-MATMUL");
+    let span = diagnostic.primary.span;
+    assert_eq!(&source[span.start..span.end], "c = a * ones(2,1)");
+
+    let nested = lower("x = ones(10,1); y = outer(x); bad = y * y;\nfunction y = outer(x)\ny = helper(x);\nend\nfunction y = helper(x)\ny = 2 * x;\nend\n");
+    let report = diagnose_call_contexts(&nested);
+    assert!(!report.budget_exhausted);
+    assert!(report
+        .diagnostics
+        .iter()
+        .any(|diagnostic| diagnostic.code == "RM-TYPE-MATMUL"));
+}
+
+#[test]
+fn conditional_return_shapes_do_not_invent_a_concrete_caller_failure() {
+    let mir = lower("y = helper(ones(10,1), false); valid = y * ones(10,1);\nfunction y = helper(x, flag)\nif flag\ny = x;\nelse\ny = ones(1,10);\nend\nend\n");
+    let report = diagnose_call_contexts(&mir);
+    assert!(!report.budget_exhausted);
+    assert!(report.precision_withheld);
+    assert!(report.diagnostics.is_empty(), "{report:#?}");
+}
+
+#[test]
+fn contextual_multiple_results_keep_their_distinct_output_slots() {
+    let source = "[a,b] = helper(ones(2,3), ones(4,2)); good = a * ones(3,1); bad = b * ones(3,1);\nfunction [u,v] = helper(x,y)\nu = 2*x; v = y;\nend\n";
+    let report = diagnose_call_contexts(&lower(source));
+    assert!(!report.budget_exhausted);
+    let [diagnostic] = report.diagnostics.as_slice() else {
+        panic!("only the second output's caller product is incompatible: {report:#?}");
+    };
+    assert_eq!(diagnostic.code, "RM-TYPE-MATMUL");
+    assert_eq!(diagnostic.primary.source, Some(ProgramSourceId(0)));
+    let span = diagnostic.primary.span;
+    assert_eq!(&source[span.start..span.end], "bad = b * ones(3,1)");
+}
+
+#[test]
 fn actual_ones_producers_supply_exact_call_facts_and_local_matrix_error() {
     let local = lower("A = ones(2,3); B = ones(4,2); C = A * B;");
     assert!(crate::analysis::analyze_assembly(&local)

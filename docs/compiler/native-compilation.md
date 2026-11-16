@@ -1,6 +1,6 @@
 # Native Compilation
 
-`runmat compile` compiles a MATLAB-syntax `.m` entrypoint into an executable for the current host:
+`runmat compile` turns a MATLAB-syntax `.m` script or a function with no required inputs into an executable for the current computer:
 
 ```bash
 runmat compile simulation.m -o simulation
@@ -14,11 +14,53 @@ runmat compile simulation.m -o simulation.exe
 .\simulation.exe
 ```
 
-The executable contains native program code and a matching compiler-free RunMat runtime. It runs without the RunMat CLI, project source, or a separately installed RunMat SDK.
+The executable contains native program code and a matching compiler-free RunMat runtime. It runs without the RunMat CLI, project source or a separate RunMat SDK. Native libraries enabled in the build must still be available on the execution host.
 
-Plain compiled programs run offline without sign-in, including programs whose FEA branch is not taken. Executing object-based meshing or solving uses the same local Server lease adapter as the CLI and needs sign-in, a connection and an available simulation allowance. Configure the account with `runmat login` before deployment, or use the supported API-key and organization configuration on the execution host. Credentials are resolved when FEA executes, not embedded by compilation. The runtime archive must also provide the numerical and geometry capabilities used by the program.
+## Install the compile-time runtime
 
-Calling `fea.run("study.fea")` from a standalone image remains unsupported because the image has no document study runner. Build the study through the supported object-based `.m` APIs instead; this does not add a dynamic `.fea` compiler to the image.
+The first compile asks to download the matching AOT runtime pack if it is missing. Accept to verify and cache the pack, then continue compiling. Declining leaves the installation unchanged and prints the command for installing it later. Ordinary `.m` execution never requests this pack; FEA and geometry remain included in ordinary execution.
+
+### Unattended builds
+
+Install the pack before compiling:
+
+```bash
+runmat aot install
+runmat compile simulation.m --offline -o simulation
+```
+
+You can also authorize installation as part of the compile:
+
+```bash
+runmat compile simulation.m --install-aot-runtime -o simulation
+```
+
+A noninteractive compile requires a cached pack or the affirmative installation flag. It exits with instructions when neither is available.
+
+### Offline machines
+
+Download the pack for the exact CLI version and target from the RunMat release, transfer it to the offline machine, then install it explicitly:
+
+```bash
+runmat aot install --offline --from /path/to/runmat-aot-runtime-VERSION-TARGET.zip
+runmat compile simulation.m --offline -o simulation
+```
+
+Both explicit provisioning and cached compilation use the same verifier. It checks the trusted pack size and digest, native ABI, target and runtime identities. Mismatched or damaged packs are refused. `--offline` and `--frozen` prohibit downloads.
+
+### Cache location
+
+Packs live in the platform user cache under `runmat/aot-runtime`. Set `RUNMAT_AOT_CACHE_DIR` to choose a dedicated cache, such as one managed by a build environment. Changing the location preserves the same verification requirements.
+
+The installer retains the current pack and at most one previous pack. The operating system may clear its cache; after cache removal or a CLI update, another matching pack may be needed.
+
+## Run the compiled program
+
+Plain compiled programs run offline without sign-in, including programs whose FEA branch is not taken.
+
+Object-based FEA meshing and solving require sign-in, a connection and an available simulation allowance on the execution host. They use the same local Server lease adapter as the CLI. Configure the account with `runmat login`, or use the supported API-key and organization configuration. Credentials are resolved when FEA executes and are never embedded by compilation. The runtime archive must provide the numerical and geometry capabilities used by the program.
+
+Standalone images have no document study runner, so `fea.run("study.fea")` is unsupported there. Use the supported object-based `.m` APIs to build the study.
 
 ## Choose an execution form
 
@@ -65,7 +107,7 @@ MATLAB-syntax source + project/package closure
 
 Project composition resolves entry-file functions, configured source roots, package dependencies, package and class folders, private functions, and imports. HIR and MIR preserve source bindings, requested output counts, control flow, call identities, effects, and analysis facts. Core packages those products into an immutable executable unit bound to the program and environment revision.
 
-`runmat-native-codegen` lowers the executable unit into verified Native IR. Cranelift then emits a Mach-O object on macOS, an ELF object on Linux, or a COFF object on Windows. The system linker combines that object with the runtime archive embedded in the installed `runmat` binary.
+`runmat-native-codegen` lowers the executable unit into verified Native IR. Cranelift then emits a Mach-O object on macOS, an ELF object on Linux, or a COFF object on Windows. The system linker combines that object with the verified runtime archive from the installed compile-time pack.
 
 Adaptive JIT and ahead-of-time compilation share executable-unit construction, Native IR lowering, the native ABI, runtime operations, and `runmat-native-executor`. The JIT publishes machine-code entrypoints into a running session. `runmat compile` emits relocatable objects and links them into an executable before launch.
 
@@ -265,13 +307,13 @@ Temporary objects, the decoded runtime archive, and the linker response file are
 
 ## Runtime archive and compatibility checks
 
-Official native CLI packages embed a compressed static archive built from `runmat-aot-runtime`. The archive contains `Value`, garbage collection, runtime operations, builtin implementations, and the shared native executor. It excludes the parser, HIR/MIR lowering, static analysis, Core composition, VM, adaptive JIT policy, and native object emitter.
+RunMat verifies the runtime archive before linking it with program objects. The manifest binds the target, object format, native ABI, schema versions, runtime and builtin-catalog identities, archive digests, native link requirements and supported capabilities. A mismatch stops compilation.
 
-Selected target-pack compilation also requires an independent host-admission file. When the selected Clock service declares deterministic behavior, supply its typed `clock_inputs` in that file; the compiler validates and binds those inputs into the executable. Missing inputs or inputs inconsistent with the selected service stop compilation. Ordinary embedded-runtime compilation uses the host clock and does not require these inputs.
+The compile-time pack contains a compressed static archive built from `runmat-aot-runtime`, its native manifest, first-party licenses and third-party notices. The archive supplies `Value`, garbage collection, runtime operations, builtins and the shared native executor. Parser and lowering code, static analysis, Core composition, VM, adaptive JIT policy and the native object emitter remain in the compiler.
 
-The archive manifest records the target, object format, native ABI, schema versions, runtime and builtin-catalog identities, archive digests, linker requirements, and supported runtime capabilities. Before linking, RunMat checks the archive against the compiler and current host. A target, ABI, schema, runtime, archive, or catalog mismatch stops compilation.
+Stock-runtime compilation uses the host clock. A selected target pack instead needs an independent host-admission file. If its Clock service declares deterministic behavior, provide typed `clock_inputs`; the compiler validates them and binds them into the executable. Missing or inconsistent inputs stop compilation.
 
-`cargo build` can produce a CLI without the embedded archive. To develop or test `runmat compile`, use the two-phase helper documented under [Native standalone runtime](/docs/runtime/development/build-system#native-standalone-runtime). The archive is an internal build product. RunMat does not expose it as a public SDK or discover it from the installation directory.
+For source development, the [two-phase helper](/docs/runtime/development/build-system#native-standalone-runtime) builds the CLI and matching pack together. Plain `cargo build` provides ordinary execution without a compile-time distribution manifest. Explicitly supplied packs and cached packs use the same admission path.
 
 ## Platforms and linkers
 
@@ -299,7 +341,8 @@ See [Supported Architectures](/docs/runtime/development/supported-architectures)
 | Entry file is rejected | `runmat compile` currently accepts `.m` entrypoints |
 | A project function cannot be resolved | Add its stable directory to `[sources].roots` or its package to the project lock |
 | `closed-world` reports an unknown or unbounded target | Remove the dynamic call, provide a statically resolvable target, or select `native-specialized` explicitly |
-| The RunMat build has no native compile runtime | Build with the two-phase AOT runtime helper or install an official native package |
+| The matching compile-time pack is missing | Run `runmat aot install`, or provision the exact pack with `runmat aot install --offline --from PATH` |
+| The RunMat build has no distribution manifest | Install an official native CLI or build the CLI and pack with the native build helper |
 | No supported linker is found | Install a platform C/C++ toolchain or set `--linker` or `RUNMAT_LINKER` |
 | The linker cannot find a native library | Install the development library used by the RunMat build and expose its standard search path |
 | The output or JSON link plan already exists | Choose another path or pass `--force` |

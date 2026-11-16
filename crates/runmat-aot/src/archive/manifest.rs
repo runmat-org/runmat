@@ -7,7 +7,7 @@ pub const RUNTIME_ARCHIVE_SCHEMA_VERSION: u16 = 8;
 pub const MAX_RUNTIME_ARCHIVE_BYTES: u64 = 2 * 1024 * 1024 * 1024;
 pub const MAX_RUNTIME_PAYLOAD_BYTES: u64 = 1024 * 1024 * 1024;
 const MAX_LINK_TOKENS: usize = 256;
-const MAX_RUNTIME_MANIFEST_BYTES: usize = 1024 * 1024;
+pub(super) const MAX_RUNTIME_MANIFEST_BYTES: usize = 1024 * 1024;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "kebab-case")]

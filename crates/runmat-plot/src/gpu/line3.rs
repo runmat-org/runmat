@@ -22,7 +22,7 @@ pub struct Line3GpuParams {
     pub line_style: LineStyle,
 }
 
-#[repr(C)]
+#[repr(C, align(16))]
 #[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
 struct Line3Uniforms {
     color: [f32; 4],
@@ -30,7 +30,7 @@ struct Line3Uniforms {
     half_width_data: f32,
     line_style: u32,
     thick: u32,
-    _pad: u32,
+    _pad: [u32; 4],
 }
 
 pub fn pack_vertices_from_xyz(
@@ -90,7 +90,7 @@ pub fn pack_vertices_from_xyz(
         half_width_data: params.half_width_data.max(0.0001),
         line_style: line_style_code(params.line_style),
         thick: if params.thick { 1 } else { 0 },
-        _pad: 0,
+        _pad: [0; 4],
     };
     let uniform_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
         label: Some("line3-pack-uniforms"),
