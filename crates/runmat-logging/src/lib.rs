@@ -27,7 +27,8 @@ pub use native_otel::{
     shutdown_otel_result, ExportStats,
 };
 
-use tracing_subscriber::reload;
+mod level;
+pub use level::{LogLevelFilter, SharedLogLevel, TraceFeedFilter, TRACE_FEED_FLOOR};
 
 #[cfg(all(
     not(target_arch = "wasm32"),
@@ -43,11 +44,6 @@ use opentelemetry::trace::{SpanContext, SpanId, TraceFlags, TraceId, TraceState}
 use opentelemetry::Context as OtelContext;
 
 const DEFAULT_LOG_FILTER: &str = "info";
-
-/// The trace feed records spans and events at this level and above, whatever the
-/// log level is. The runtime's spans are INFO.
-const TRACE_FEED_LEVEL: tracing_subscriber::filter::LevelFilter =
-    tracing_subscriber::filter::LevelFilter::INFO;
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -144,9 +140,8 @@ where
 }
 
 /// The layer that forwards events to the runtime log hook, for hosts that build
-/// their own subscriber instead of calling [`init_logging`]. Put it under the
-/// host's log level filter, as a per-layer filter, so the level never reaches
-/// [`runtime_trace_bridge_layer`].
+/// their own subscriber instead of calling [`init_logging`]. Put it under
+/// [`SharedLogLevel::log_filter`] as a per-layer filter.
 pub fn runtime_log_bridge_layer<S>() -> impl Layer<S>
 where
     S: Subscriber + for<'a> tracing_subscriber::registry::LookupSpan<'a>,
@@ -154,14 +149,15 @@ where
     LogBridgeLayer
 }
 
-/// The layer that forwards spans and events to the runtime trace hook, with the
-/// trace feed's own INFO floor. Hosts add it beside their log layers and outside
-/// any log level filter, so a quiet log level never empties a run's trace.
-pub fn runtime_trace_bridge_layer<S>(pid: i64) -> impl Layer<S>
+/// The layer that forwards spans and events to the runtime trace hook. It records
+/// what `level` allows and always INFO and above, so a quiet log level keeps a run's
+/// spans and "debug" or "trace" adds the detailed ones. Hosts add it beside their log
+/// layers, outside the log feed's filter, with the same [`SharedLogLevel`].
+pub fn runtime_trace_bridge_layer<S>(pid: i64, level: &SharedLogLevel) -> impl Layer<S>
 where
     S: Subscriber + for<'a> tracing_subscriber::registry::LookupSpan<'a>,
 {
-    TraceBridgeLayer { pid }.with_filter(TRACE_FEED_LEVEL)
+    TraceBridgeLayer { pid }.with_filter(level.trace_filter())
 }
 
 #[derive(Clone, Default)]
@@ -279,32 +275,28 @@ fn init_logging_impl(
         let collector_layer: Option<tracing_subscriber::layer::Identity> = None;
 
         // The log level (default filter, RUST_LOG/RUNMAT_LOG, update_log_filter) selects
-        // the log feed, the file and the collector export. The trace feed has its own
-        // floor, so a quiet log level never empties a run's spans.
-        let (filter_layer, filter_handle) = reload::Layer::new(env_filter.clone());
+        // the log feed, the file and the collector export. The trace feed takes the same
+        // level with an INFO floor, so a quiet log level never empties a run's spans.
+        let level = SharedLogLevel::new(env_filter.clone());
         let log_layers = runtime_log_bridge_layer()
             .and_then(file_layer)
             .and_then(collector_layer)
-            .with_filter(filter_layer);
+            .with_filter(level.log_filter());
         let trace_layer = opts
             .enable_traces
-            .then(|| runtime_trace_bridge_layer(opts.pid));
+            .then(|| runtime_trace_bridge_layer(opts.pid, &level));
         let subscriber = tracing_subscriber::registry()
             .with(log_layers)
             .with(trace_layer);
-        (subscriber, filter_handle)
+        (subscriber, level)
     };
 
-    let (subscriber, filter_handle) = build_subscriber();
+    let (subscriber, level) = build_subscriber();
 
     let guard = match tracing::subscriber::set_global_default(subscriber) {
         Ok(()) => {
-            // Only the installed subscriber's handle is live; a dropped one reports
-            // "subscriber no longer exists" on every reload.
-            set_log_filter_reloader(move |spec| {
-                let filter = EnvFilter::try_new(spec).map_err(|err| err.to_string())?;
-                filter_handle.reload(filter).map_err(|err| err.to_string())
-            });
+            // Only the installed subscriber's level is live.
+            set_log_filter_reloader(move |spec| level.set(spec));
             None
         }
         Err(_) if global_only => return Err("Another tracing subscriber is already installed; configured file logging was not activated".into()),

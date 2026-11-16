@@ -92,14 +92,30 @@ console.log("setLogFilter(info):", JSON.stringify({ logs: logs.length, traces: t
 assert.equal(seen.started, 1, "the info line reached the log feed");
 assert.ok(logs.every((record) => typeof record.target === "string" && record.ts), "log records carry target and time");
 
-// 3. The quietest log level leaves the trace feed whole.
+// 3. Desktop's "all" filter: the trace feed adds the debug and trace entries.
+native.setLogFilter("trace,wgpu=trace,wgpu_core=trace,wgpu_hal=trace,runmat=trace");
+seen = await run(quiet);
+const instants = () => new Set(traces.filter((event) => event.ph === "i").map((event) => event.name));
+const detailed = logs.filter((record) => record.level === "DEBUG" || record.level === "TRACE").map((record) => record.message);
+console.log("setLogFilter(all):", JSON.stringify({ logs: logs.length, traces: traces.length, detailed: detailed.length }));
+assert.ok(seen.spans.includes("runmat.execute"), "spans reach the trace feed at the all level");
+assert.ok(detailed.length > 0, "the run wrote debug or trace lines at the all level");
+const allInstants = instants();
+assert.ok(detailed.every((message) => allInstants.has(message)), "every debug and trace line reached the trace feed");
+const allTraces = traces.length;
+
+// 4. The quietest log level keeps the INFO spans and drops the detailed entries.
 native.setLogFilter("error");
 seen = await run(quiet);
 console.log("setLogFilter(error):", JSON.stringify({ logs: logs.length, traces: traces.length }));
 assert.equal(seen.started, 0);
 assert.ok(seen.spans.includes("runmat.execute"), "spans survive the error log level");
+assert.ok(seen.spans.includes("runtime.compile"), "the core compile span survives the error log level");
+const errorInstants = instants();
+assert.ok(detailed.every((message) => !errorInstants.has(message)), "debug and trace lines stay out of the trace feed at error");
+assert.ok(traces.length < allTraces, "the error level carries fewer trace entries than all");
 
-// 4. A later session's explicit logLevel replaces the live level.
+// 5. A later session's explicit logLevel replaces the live level.
 quiet.dispose?.();
 const verbose = await native.initRunMat(sessionOptions({ logLevel: "debug" }));
 seen = await run(verbose);
