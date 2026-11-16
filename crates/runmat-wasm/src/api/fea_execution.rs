@@ -362,12 +362,21 @@ impl RunMatWasm {
             .take()
             .ok_or_else(|| js_error("The selected execution options are no longer available."))?;
         // Await the installed host before the first mesh/solve effect.
+        // The check-time operations estimate travels with the lease request: the host records
+        // it, and admission refuses before any work when it exceeds the allowance left.
+        let estimate = fresh
+            .fea_execution_preflight()
+            .ok()
+            .and_then(|preflight| preflight.estimate)
+            .and_then(|estimate| estimate.operations(instance_budget_bytes()))
+            .and_then(|operations| operations.total().ok());
         let request = FeaRunRequest::local(
             FeaRunKind::MeshAndSolve,
             1000,
             checked_study_identity(&fresh)?,
         )
-        .map_err(super::fea_lease::denied_to_js)?;
+        .map_err(super::fea_lease::denied_to_js)?
+        .with_estimate(estimate);
         let context = super::fea_async_host::start(
             self.fea_admission.clone(),
             self.active_fea_lease.clone(),

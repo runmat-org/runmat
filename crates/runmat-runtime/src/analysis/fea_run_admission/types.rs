@@ -39,9 +39,19 @@ pub struct FeaRunRequest {
     pub estimated_wall_seconds: Option<u64>,
     pub study_identity: String,
     pub measurement_version: MeasurementVersion,
+    /// Upper estimate of the operations this run charges, from its run plan. Admission refuses
+    /// the run before any work when the estimate exceeds the allowance its lease grants.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub estimate_ops: Option<OperationCount>,
 }
 
 impl FeaRunRequest {
+    /// Attach the run plan's operations estimate, which admission compares with the allowance.
+    pub fn with_estimate(mut self, estimate_ops: Option<OperationCount>) -> Self {
+        self.estimate_ops = estimate_ops;
+        self
+    }
+
     pub fn local(
         kind: FeaRunKind,
         allocated_cpu_millicores: u64,
@@ -63,6 +73,7 @@ impl FeaRunRequest {
             estimated_wall_seconds: None,
             study_identity: study_identity.to_string(),
             measurement_version: MeasurementVersion::reference_v1(),
+            estimate_ops: None,
         };
         request.validate()?;
         Ok(request)
@@ -104,6 +115,12 @@ pub enum FeaRunDenied {
     BudgetUnavailable {
         available_ops: Option<OperationCount>,
     },
+    /// The run plan's operations estimate exceeds what the lease's allowance has left. Admission
+    /// refuses before any work, so the run charges nothing.
+    AllowanceInsufficient {
+        estimated_ops: OperationCount,
+        available_ops: OperationCount,
+    },
     Accounting(LedgerError),
 }
 
@@ -124,6 +141,7 @@ impl FeaRunDenied {
             Self::ServerUnreachable => "RM.FEA.ServerUnreachable",
             Self::AllowanceUnpublished => "RM.FEA.AllowanceUnpublished",
             Self::BudgetUnavailable { .. } => "RM.FEA.BudgetUnavailable",
+            Self::AllowanceInsufficient { .. } => "RM.FEA.AllowanceInsufficient",
             Self::Accounting(LedgerError::BudgetExceeded { .. }) => "RM.FEA.BudgetReached",
             Self::Accounting(LedgerError::MoreGrantRequired { .. }) => "RM.FEA.GrantRequired",
             Self::Accounting(_) => "RM.FEA.AccountingInvalid",
@@ -195,6 +213,16 @@ impl std::fmt::Display for FeaRunDenied {
                 }
                 f.write_str(".")
             }
+            Self::AllowanceInsufficient {
+                estimated_ops,
+                available_ops,
+            } => write!(
+                f,
+                "This run needs about {} operations; {} remain in this period's simulation allowance. \
+                 Coarsen the mesh, or see your simulation allowance and plans at https://runmat.com/pricing",
+                super::readable_count::readable_estimate(*estimated_ops),
+                super::readable_count::readable_available(*available_ops),
+            ),
         }
     }
 }
