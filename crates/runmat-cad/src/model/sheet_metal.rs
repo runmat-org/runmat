@@ -51,6 +51,9 @@ pub enum BendRule {
     Allowance {
         value: ValueExpr,
     },
+    /// The K-factor DIN 6935 gives for each bend's radius-to-thickness ratio
+    /// ([`tables::din6935_k`]).
+    Din6935,
 }
 
 /// A bend table: allowance rows, SI.
@@ -404,7 +407,7 @@ impl SheetMetalRules {
         match &self.rule {
             BendRule::KFactor { k } => v.value(k),
             BendRule::Deduction { value } | BendRule::Allowance { value } => v.value(value),
-            BendRule::Table { .. } => {}
+            BendRule::Table { .. } | BendRule::Din6935 => {}
         }
         relief_values(&self.relief, v);
     }
@@ -620,4 +623,5 @@ impl Params for SheetMetalFeature {
 }
 
 mod develop;
+pub mod tables;
 pub use develop::*;

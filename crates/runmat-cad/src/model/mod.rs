@@ -94,6 +94,13 @@ pub struct PartDocument {
     /// `feature def` templates defined in this file (library features).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub feature_defs: Vec<FeatureDef>,
+    /// Document settings: units, decimals, drafting standard and general tolerance
+    /// ([`crate::assembly::settings`]).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub settings: Option<crate::assembly::settings::DocumentSettings>,
+    /// The gauge and bend table every sheet body follows ([`sheet_metal::tables`]).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sheet_metal: Option<sheet_metal::tables::SheetMetalDefaults>,
 }
 
 impl PartDocument {
@@ -115,6 +122,8 @@ impl PartDocument {
             pmi: PmiSet::default(),
             closed: false,
             feature_defs: Vec::new(),
+            settings: None,
+            sheet_metal: None,
         }
     }
 

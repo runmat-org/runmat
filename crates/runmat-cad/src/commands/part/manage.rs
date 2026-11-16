@@ -37,8 +37,8 @@ pub(super) fn manage() -> Vec<CommandDescriptor> {
             "settings",
             P,
         )
-        .desc("Units, drafting standard and default tolerances.")
-        .kw(&["units", "standard", "tolerance"])
+        .desc("Units and decimals for readouts, the drafting standard and the general tolerance.")
+        .kw(&["units", "standard", "tolerance", "decimals", "iso 2768"])
         .inputs(vec![
             choice(
                 "units",
@@ -49,26 +49,26 @@ pub(super) fn manage() -> Vec<CommandDescriptor> {
                     ("ips", "Inch, pound, second"),
                 ],
             ),
+            count("decimals", "Decimals", 2, 0)
+                .help("Decimal places in mass properties and Measure readouts"),
             choice(
                 "standard",
-                "Standard",
-                &[
-                    ("iso", "ISO"),
-                    ("ansi", "ANSI"),
-                    ("din", "DIN"),
-                    ("jis", "JIS"),
-                ],
-            ),
+                "Drafting standard",
+                &[("iso", "ISO"), ("asme", "ASME Y14.5")],
+            )
+            .help("The standard the part's 3D annotations follow"),
             choice(
-                "tolerance_class",
+                "tolerance",
                 "General tolerance",
                 &[
-                    ("m", "ISO 2768-m"),
-                    ("f", "ISO 2768-f"),
-                    ("c", "ISO 2768-c"),
+                    ("none", "None"),
+                    ("fine", "ISO 2768-f (fine)"),
+                    ("medium", "ISO 2768-m (medium)"),
+                    ("coarse", "ISO 2768-c (coarse)"),
+                    ("very_coarse", "ISO 2768-v (very coarse)"),
                 ],
-            ),
-            count("decimals", "Decimals", 2, 0),
+            )
+            .help("For dimensions written without a tolerance; Measure lists it beside a distance"),
         ])
         .edit(edit(EditOp::Set, Section::Settings).item("document")),
         cmd("manage.release", "Release", "release", P)

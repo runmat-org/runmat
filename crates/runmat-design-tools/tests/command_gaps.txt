@@ -1,14 +1,3 @@
-assembly.configurations assembly
-assembly.contacts assembly
-assembly.copy-with-mates assembly
-assembly.document-settings assembly
-assembly.envelope assembly
-assembly.options assembly
-assembly.options-effectivity assembly
-assembly.representation assembly
-assembly.skeleton assembly
-assembly.update-pins assembly
-assembly.visualization assembly
 board.align circuit
 board.align circuit.layout
 board.place circuit
@@ -28,7 +17,9 @@ circuit.net-length circuit.layout
 circuit.swap-pins circuit
 circuit.swap-pins circuit.layout
 direct.instant-3d part
-manage.document-settings part
+drawing.check drawing
+drawing.edit-view drawing
+explode.auto assembly
 manage.recognize-features part
 manage.replace-reference part
 motion.animation assembly
@@ -39,8 +30,6 @@ motion.mate-controller assembly
 motion.to-fea assembly
 part.edit-sketch-plane part
 part.library part
-sheet-metal.bend-table part
-sheet-metal.gauge part
 simulate.defeature part
 simulate.region part
 simulate.representation part

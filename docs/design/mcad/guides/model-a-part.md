@@ -136,6 +136,19 @@ The source view marks each problem at its line as you type. A feature that fails
 
 Evaluate's Mass properties command weighs the plate from its material's density: mass, center of gravity and inertia about it. See [Evaluate](/docs/mcad/evaluate).
 
+### Document settings
+
+**Document settings** on the Manage tab writes one line in the part:
+
+```
+settings = { units = ips, standard = asme, tolerance = medium, decimals = 3 }
+```
+
+- **Units**: Mass properties and Measure read in millimeter, gram, second (`mmgs`); meter, kilogram, second (`mks`); or inch, pound, second (`ips`). The model stays in SI, so changing the units changes no geometry.
+- **Decimals**: readouts round to this many decimal places. Without it they keep six significant digits.
+- **Drafting standard**: the standard the part's 3D annotations follow, `iso` or `asme` (ASME Y14.5). ASME Y14.5-2018 withdrew the concentricity and symmetry tolerances, so on an ASME part each GD&T tolerance with one of them is reported in the editor's bottom strip.
+- **General tolerance**: the ISO 2768-1 class (`fine`, `medium`, `coarse` or `very_coarse`, the standard's f, m, c and v) for dimensions written without a tolerance. Measure lists it under a distance. A 100 mm distance in class m reads `± 0.3 mm (ISO 2768-m)`, the deviation ISO 2768-1 Table 1 gives for nominal sizes over 30 mm up to 120 mm.
+
 ## Next
 
 - [Build an assembly](/docs/mcad/guides/build-an-assembly) places this plate and mates a part to it.

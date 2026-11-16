@@ -275,35 +275,50 @@ fn mm(m: f64) -> String {
     format!("{:.2}", m * 1000.0)
 }
 
-/// The unit system an assembly's settings name ([`runmat_cad::assembly::settings`]); `None`
-/// for a part or an assembly without settings.
+/// The unit system a part's or an assembly's settings name ([`runmat_cad::assembly::settings`]);
+/// `None` without settings.
 pub fn document_units(
     path: &str,
     text: &str,
     files: &Files,
 ) -> Option<runmat_cad::assembly::settings::UnitSystem> {
-    if !path.ends_with(".assembly") {
-        return None;
-    }
-    let scope = crate::runtime::module_scope(path, text, files);
-    runmat_cad::syntax::parse_assembly_in(path, text, &scope)
-        .document?
-        .settings
-        .map(|s| s.units)
+    document_readout(path, text, files).map(|r| r.units)
+}
+
+/// How a part's or an assembly's readouts show values: its settings' units, decimals and
+/// general tolerance. `None` without settings.
+pub fn document_readout(
+    path: &str,
+    text: &str,
+    files: &Files,
+) -> Option<runmat_cad::assembly::settings::Readout> {
+    let settings = if path.ends_with(".assembly") {
+        let scope = crate::runtime::module_scope(path, text, files);
+        runmat_cad::syntax::parse_assembly_in(path, text, &scope)
+            .document?
+            .settings
+    } else if path.ends_with(".part") {
+        runmat_cad::syntax::parse_part(path, text)
+            .document?
+            .settings
+    } else {
+        None
+    };
+    settings.map(|s| s.readout())
 }
 
 fn mass_analysis(
     report: &MassReport,
-    units: Option<runmat_cad::assembly::settings::UnitSystem>,
+    units: Option<runmat_cad::assembly::settings::Readout>,
 ) -> Analysis {
     let t = &report.total;
     let c = t.center;
     // kg·mm², the unit drawings and data sheets quote.
     let i = |r: usize, k: usize| format!("{:.1}", t.inertia[r][k] * 1e6);
     let mut summary = match units {
-        // In the assembly's document units.
+        // In the document's units.
         Some(u) => {
-            let l = |v: f64| runmat_cad::assembly::settings::significant(u.length_value(v), 6);
+            let l = |v: f64| u.number(u.length_value(v), 6);
             let mi = |r: usize, k: usize| {
                 let s = u.inertia(t.inertia[r][k]);
                 s.split(' ').next().unwrap_or_default().to_owned()
@@ -416,7 +431,7 @@ pub fn analyze(
             } else {
                 part_mass(path, text, configuration)?
             };
-            Ok(mass_analysis(&report, document_units(path, text, files)))
+            Ok(mass_analysis(&report, document_readout(path, text, files)))
         }
         "evaluate.interference"
         | "evaluate.clearance"
@@ -845,13 +860,9 @@ pub fn analyze(
             &request.selection,
         ),
         "view.measure" => crate::measure::measure(path, text, files, &request.values),
-        "assembly.visualization" if assembly => visualization::visualization(
-            path,
-            text,
-            files,
-            configuration,
-            &request.values,
-        ),
+        "assembly.visualization" if assembly => {
+            visualization::visualization(path, text, files, configuration, &request.values)
+        }
         "motion.collision" if assembly => motion_collision::collision(
             path,
             text,

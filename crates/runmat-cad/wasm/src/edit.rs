@@ -488,6 +488,9 @@ pub fn edit(
             files: out,
             summary,
         });
+    } else if let Some(result) = manage::settings::edit(path, text, files, request) {
+        // The part's document settings, gauge and bend rule: they read the project's tables.
+        result?
     } else if request.command == "manage.split-to-files" {
         // New part files and an assembly beside this part, which stays as it is.
         let parsed = parse_part(path, text);

@@ -13,7 +13,10 @@
 //!   number and material (`output bracket = { body = feature.pad.body }`).
 //! - `manage.split-to-files` ([`split`]): each body becomes its own `.part` beside this one and
 //!   an assembly places them where they sit.
+//! - `manage.document-settings`, `sheet-metal.gauge`, `sheet-metal.bend-table` ([`settings`]):
+//!   the part's units, standard and general tolerance, and its sheet bodies' gauge and bend rule.
 
+pub(super) mod settings;
 pub(super) mod split;
 
 use super::{model, text_value, EditRequest};
