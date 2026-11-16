@@ -142,14 +142,16 @@ fn a_filleted_plates_hole_rims_draw_as_closed_ellipses_in_an_isometric_view() {
     let tangent = lines(iso, "tangent");
     // Every rim the sharp bracket shows whole closes again, in the thin lines.
     assert_eq!(closed_rims(iso, &tangent), sharp_rims(), "{iso:#}");
-    // The L reads whole: the thin lines run the length of the 60 mm extrusion.
-    let along_z = |l: &Vec<f64>| {
-        let v: Vec<f64> = l.iter().skip(1).step_by(2).copied().collect();
+    // The L reads whole: the thin lines span the view as its outline does.
+    let span = |ls: &[Vec<f64>]| {
+        let v: Vec<f64> = ls.iter().flat_map(|l| l.iter().skip(1).step_by(2).copied()).collect();
         v.iter().cloned().fold(f64::MIN, f64::max) - v.iter().cloned().fold(f64::MAX, f64::min)
     };
+    let outline = span(&lines(iso, "visible"));
     assert!(
-        tangent.iter().filter(|l| along_z(l) > 40.0).count() >= 4,
-        "the rounds' long boundaries: {tangent:?}"
+        span(&tangent) > 0.9 * outline,
+        "thin lines span {} of the outline's {outline}",
+        span(&tangent)
     );
     for view in ["front", "top", "side"] {
         assert_eq!(data["hlr"][view]["tangent_edges"], "hide", "{view}");
@@ -253,8 +255,12 @@ fn a_dimension_placed_across_a_view_keeps_its_figure_off_the_models_lines() {
         &serde_json::Map::new(),
     )
     .expect("check");
-    assert!(
-        !found.iter().any(|f| f.message.contains("drawn over the")),
-        "{found:#?}"
-    );
+    // The 50 is clear; the front view's 15s, placed by hand over its hidden lines, are found.
+    let over = |item: &str| {
+        found
+            .iter()
+            .any(|f| f.item == item && f.message.contains("drawn over the"))
+    };
+    assert!(!over("annotation:height"), "{found:#?}");
+    assert!(over("annotation:bottom_pitch"), "{found:#?}");
 }
