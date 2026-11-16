@@ -4,7 +4,7 @@ use std::path::{Path, PathBuf};
 use serde_json::json;
 use tower_lsp::lsp_types::{Diagnostic, DiagnosticSeverity, NumberOrString, Position, Range, Url};
 
-use crate::core::fea::{is_fea_uri, resolve_project_facts, FeaDocumentAnalysis};
+use crate::core::fea::{analyze_fea_source, is_fea_uri, FeaDocumentAnalysis};
 
 use super::{RunMatLanguageServer, RunmatStatusNotification};
 
@@ -34,16 +34,8 @@ pub(super) async fn reanalyze_open_documents(server: &RunMatLanguageServer) {
 pub(super) async fn workspace_analyses(
     server: &RunMatLanguageServer,
 ) -> Result<Vec<FeaDocumentAnalysis>, String> {
-    let (mut workspace_roots, overlays, source_overlays, compat, open_documents) = {
+    let (workspace_roots, source_overlays, compat, open_documents) = {
         let state = server.state.read().await;
-        let overlays = state
-            .documents
-            .iter()
-            .filter(|(uri, _)| is_fea_uri(uri))
-            .filter_map(|(uri, document)| {
-                Some((uri.to_file_path().ok()?, document.text.as_bytes().to_vec()))
-            })
-            .collect::<Vec<_>>();
         let source_overlays = state
             .documents
             .iter()
@@ -59,32 +51,33 @@ pub(super) async fn workspace_analyses(
             .collect::<Vec<_>>();
         (
             state.workspace_roots.clone(),
-            overlays,
             source_overlays,
             state.compat_mode,
             open_documents,
         )
     };
 
-    if workspace_roots.is_empty() {
-        workspace_roots.extend(
-            source_overlays
-                .keys()
-                .find_map(|path| {
-                    super::ProjectContext::discover_from_source_name(path.to_str())
-                        .and_then(|project| project.manifest_path().parent().map(Path::to_path_buf))
-                })
-                .into_iter(),
-        );
+    // The folders rename searches for studies that aren't open. Each study is still checked
+    // against the same source root as an open one.
+    let mut scan_roots = workspace_roots.clone();
+    if scan_roots.is_empty() {
+        for path in source_overlays.keys() {
+            if let Some(project) =
+                super::ProjectContext::discover_from_source_name_async(path.to_str()).await
+            {
+                scan_roots.extend(project.manifest_path().parent().map(Path::to_path_buf));
+                break;
+            }
+        }
     }
-    if workspace_roots.is_empty() {
-        workspace_roots.extend(
+    if scan_roots.is_empty() {
+        scan_roots.extend(
             source_overlays
                 .keys()
                 .filter_map(|path| path.parent().map(Path::to_path_buf)),
         );
-        workspace_roots.sort();
-        workspace_roots.dedup();
+        scan_roots.sort();
+        scan_roots.dedup();
     }
 
     let analyses = open_documents
@@ -99,69 +92,54 @@ pub(super) async fn workspace_analyses(
         .map(|(path, _)| path)
         .collect::<HashSet<_>>();
     let mut analyses = analyses;
-    for path in workspace_fea_paths(&workspace_roots)? {
+    for path in workspace_fea_paths(&scan_roots)? {
         if open_paths.contains(&path) {
             continue;
         }
-        let source = runmat_filesystem::read_to_string(&path).map_err(|error| {
-            format!(
-                "rename cannot inspect FEA source {}: {error}",
-                path.display()
-            )
-        })?;
-        let analysis = analyze_source(
-            &source,
-            &path,
-            &workspace_roots,
-            &overlays,
-            &source_overlays,
-            compat,
-        )
-        .map_err(|error| {
-            format!(
-                "rename cannot verify FEA source {}: {error}",
-                path.display()
-            )
-        })?;
+        let source = runmat_filesystem::read_to_string_async(&path)
+            .await
+            .map_err(|error| {
+                format!(
+                    "rename cannot inspect FEA source {}: {error}",
+                    path.display()
+                )
+            })?;
+        let analysis =
+            analyze_fea_source(&source, &path, &workspace_roots, &source_overlays, compat)
+                .await
+                .map_err(|error| {
+                    format!(
+                        "rename cannot verify FEA source {}: {error}",
+                        path.display()
+                    )
+                })?;
         analyses.push(analysis);
     }
     Ok(analyses)
 }
 
 async fn reanalyze_document(server: &RunMatLanguageServer, uri: &Url) {
-    let (text, roots, overlays, source_overlays, compat) = {
+    let (text, roots, source_overlays, compat) = {
         let state = server.state.read().await;
         let Some(document) = state.documents.get(uri) else {
             return;
         };
-        let overlays = state
-            .documents
-            .iter()
-            .filter(|(document_uri, _)| is_fea_uri(document_uri))
-            .filter_map(|(document_uri, document)| {
-                Some((
-                    document_uri.to_file_path().ok()?,
-                    document.text.as_bytes().to_vec(),
-                ))
-            })
-            .collect::<Vec<_>>();
         let source_overlays = state
             .documents
             .iter()
             .filter_map(|(document_uri, document)| {
                 Some((document_uri.to_file_path().ok()?, document.text.clone()))
             })
-            .collect::<std::collections::BTreeMap<_, _>>();
+            .collect::<BTreeMap<_, _>>();
         (
             document.text.clone(),
             state.workspace_roots.clone(),
-            overlays,
             source_overlays,
             state.compat_mode,
         )
     };
     let result = match uri.to_file_path() {
-        Ok(path) => analyze_source(&text, &path, &roots, &overlays, &source_overlays, compat),
+        Ok(path) => analyze_fea_source(&text, &path, &roots, &source_overlays, compat).await,
         Err(()) => Err("FEA language tooling requires a file-backed document".to_string()),
     };
     let (analysis, error) = match result {
@@ -193,29 +171,6 @@ async fn reanalyze_document(server: &RunMatLanguageServer, uri: &Url) {
         .client
         .publish_diagnostics(uri.clone(), diagnostics, None)
         .await;
-}
-
-fn analyze_source(
-    source: &str,
-    path: &Path,
-    workspace_roots: &[PathBuf],
-    overlays: &[(PathBuf, Vec<u8>)],
-    source_overlays: &BTreeMap<PathBuf, String>,
-    compat: crate::core::analysis::CompatMode,
-) -> Result<FeaDocumentAnalysis, String> {
-    let prepared =
-        FeaDocumentAnalysis::prepare_with_overlays(source, path, workspace_roots, overlays)?;
-    let requests = prepared.function_requests()?;
-    let facts = resolve_project_facts(
-        prepared.source_root(),
-        &requests,
-        path,
-        compat,
-        source_overlays,
-    )?;
-    prepared
-        .check(facts.functions, facts.profiles)
-        .map(|checked| FeaDocumentAnalysis::from_checked(checked, facts.function_sources))
 }
 
 fn workspace_fea_paths(roots: &[PathBuf]) -> Result<Vec<PathBuf>, String> {
@@ -296,5 +251,141 @@ mod tests {
             workspace_fea_paths(&[workspace.path().to_path_buf()]).unwrap(),
             vec![nested.join("module.FEA"), studies.join("root.fea")]
         );
+    }
+
+    use tower_lsp::lsp_types::{
+        DidChangeWorkspaceFoldersParams, DidOpenTextDocumentParams, InitializeParams,
+        TextDocumentItem, WorkspaceFolder, WorkspaceFoldersChangeEvent,
+    };
+    use tower_lsp::LanguageServer;
+
+    const STEEL: &str = "material steel {\n    mass_density = 7850 kg/m^3\n    elastic {\n        youngs_modulus = 200 GPa\n        poisson_ratio = 0.3\n    }\n}\n";
+
+    /// `project/materials.fea`, `outside.fea` above the project, and `project/simulation/`.
+    fn project_layout() -> (tempfile::TempDir, PathBuf, PathBuf) {
+        let temporary = tempfile::tempdir().unwrap();
+        let project = temporary.path().join("project");
+        let simulation = project.join("simulation");
+        std::fs::create_dir_all(&simulation).unwrap();
+        std::fs::write(project.join("materials.fea"), STEEL).unwrap();
+        std::fs::write(temporary.path().join("outside.fea"), STEEL).unwrap();
+        (temporary, project, simulation)
+    }
+
+    fn folder(path: &Path) -> WorkspaceFolder {
+        WorkspaceFolder {
+            uri: Url::from_directory_path(path).unwrap(),
+            name: path.file_name().unwrap().to_string_lossy().into_owned(),
+        }
+    }
+
+    async fn open_study(server: &RunMatLanguageServer, path: &Path, text: &str) -> Url {
+        let uri = Url::from_file_path(path).unwrap();
+        server
+            .did_open(DidOpenTextDocumentParams {
+                text_document: TextDocumentItem {
+                    uri: uri.clone(),
+                    language_id: "runmat-fea".into(),
+                    version: 1,
+                    text: text.into(),
+                },
+            })
+            .await;
+        uri
+    }
+
+    /// Whether the open study's import was refused as escaping its source root.
+    async fn import_refused(server: &RunMatLanguageServer, uri: &Url) -> bool {
+        let state = server.state.read().await;
+        let document = &state.documents[uri];
+        let analysis = document.fea_analysis.as_ref().expect("checked study");
+        analysis
+            .diagnostics(&document.text)
+            .iter()
+            .any(|diagnostic| {
+                diagnostic.code == Some(NumberOrString::String("fea.module.invalid_path".into()))
+                    && diagnostic
+                        .message
+                        .contains("escapes the declared source root")
+            })
+    }
+
+    async fn initialize(server: &RunMatLanguageServer, root: &Path) {
+        let params = InitializeParams {
+            root_uri: Some(Url::from_directory_path(root).unwrap()),
+            ..InitializeParams::default()
+        };
+        server.initialize(params).await.unwrap();
+    }
+
+    #[test]
+    fn initialize_root_bounds_what_a_study_may_read() {
+        let (_temporary, project, simulation) = project_layout();
+        tokio::runtime::Builder::new_current_thread()
+            .build()
+            .unwrap()
+            .block_on(async {
+                let (service, _socket) = crate::native::service();
+                let server = service.inner();
+                initialize(server, &project).await;
+                let inside = open_study(
+                    server,
+                    &simulation.join("inside.fea"),
+                    "import material steel from \"../materials.fea\"\n",
+                )
+                .await;
+                let above = open_study(
+                    server,
+                    &simulation.join("above.fea"),
+                    "import material steel from \"../../outside.fea\"\n",
+                )
+                .await;
+                assert!(!import_refused(server, &inside).await);
+                assert!(import_refused(server, &above).await);
+            });
+    }
+
+    #[test]
+    fn workspace_folder_changes_recheck_open_studies() {
+        let (_temporary, project, simulation) = project_layout();
+        tokio::runtime::Builder::new_current_thread()
+            .build()
+            .unwrap()
+            .block_on(async {
+                let (service, _socket) = crate::native::service();
+                let server = service.inner();
+                initialize(server, &simulation).await;
+                let study = open_study(
+                    server,
+                    &simulation.join("study.fea"),
+                    "import material steel from \"../materials.fea\"\n",
+                )
+                .await;
+                assert!(import_refused(server, &study).await);
+
+                server
+                    .did_change_workspace_folders(DidChangeWorkspaceFoldersParams {
+                        event: WorkspaceFoldersChangeEvent {
+                            added: vec![folder(&project)],
+                            removed: vec![folder(&simulation)],
+                        },
+                    })
+                    .await;
+                assert_eq!(
+                    server.state.read().await.workspace_roots,
+                    vec![project.clone()]
+                );
+                assert!(!import_refused(server, &study).await);
+
+                server
+                    .did_change_workspace_folders(DidChangeWorkspaceFoldersParams {
+                        event: WorkspaceFoldersChangeEvent {
+                            added: vec![folder(&simulation)],
+                            removed: vec![folder(&project)],
+                        },
+                    })
+                    .await;
+                assert!(import_refused(server, &study).await);
+            });
     }
 }
