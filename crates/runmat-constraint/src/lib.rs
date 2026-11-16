@@ -59,6 +59,7 @@ mod ids;
 mod linalg;
 mod report;
 mod residual;
+mod rows;
 mod seed;
 mod solver;
 mod system;
@@ -68,6 +69,7 @@ pub use report::{
     Algorithm, ComponentReport, DependentConstraint, DragReport, EntityDof, Measurement, Method,
     SolveOptions, SolveReport, Status, WarmStart, WarmStartReport,
 };
+pub use rows::{constraint_rows, ConstraintRows};
 pub use solver::{drag, solve, DragRequest};
 pub use system::{
     AngleMode, BuildError, Constraint, ConstraintKindRecord, ConstraintRecord, CurveEnd,

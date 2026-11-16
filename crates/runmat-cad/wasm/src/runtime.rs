@@ -843,7 +843,7 @@ fn compile_assembly_with(
     also: impl FnOnce(&runmat_cad::assembly::resolve::ResolvedAssembly, &MemorySource),
 ) -> Result<(Value, Value, Vec<Diagnostic>), Vec<Diagnostic>> {
     let AssemblyResolution {
-        source,
+        mut source,
         displays,
         documents,
         resolved,
@@ -903,6 +903,14 @@ fn compile_assembly_with(
             "exploded".into(),
             crate::exploded::exploded_views(&resolved, &source),
         );
+        row.insert(
+            "motion".into(),
+            crate::motion::motion_studies(&resolved, &mut source, &documents, files),
+        );
+        row.insert(
+            "positions".into(),
+            crate::motion::mate_positions(&resolved, &source),
+        );
     }
     Ok((index, display, problems))
 }
@@ -916,10 +924,11 @@ pub fn assembly_index(
     files: &Files,
 ) -> Result<(Value, Vec<Diagnostic>), Vec<Diagnostic>> {
     let AssemblyResolution {
-        source,
+        mut source,
         resolved,
         problems,
         unbuilt,
+        documents,
         ..
     } = resolve_assembly(path, text, files)?;
     let mut index =
@@ -929,6 +938,14 @@ pub fn assembly_index(
         row.insert(
             "exploded".into(),
             crate::exploded::exploded_views(&resolved, &source),
+        );
+        row.insert(
+            "motion".into(),
+            crate::motion::motion_studies(&resolved, &mut source, &documents, files),
+        );
+        row.insert(
+            "positions".into(),
+            crate::motion::mate_positions(&resolved, &source),
         );
     }
     Ok((index, problems))

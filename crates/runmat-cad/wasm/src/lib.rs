@@ -12,7 +12,8 @@
 //!   `{ kind: "assembly", data: <assembly index> }` and `display` is `{ kind, data }` with the
 //!   part display (`part_display` with `sketch_display`) or the assembly display. An
 //!   assembly's projection also carries `exploded`: each saved exploded view evaluated
-//!   ([`exploded`]).
+//!   ([`exploded`]), and `motion`: each motion study solved frame by frame ([`motion`]), with
+//!   `positions`, the named mate positions.
 //!   A `.drawing` compiles to `{ kind: "drawing", data: <drawing index> }` with `models`: the
 //!   display of each part or assembly its views show, by the file name the view wrote
 //!   ([`drawing`]).
@@ -51,6 +52,7 @@ pub mod hlr;
 pub mod kernel;
 pub mod mass;
 pub mod measure;
+pub mod motion;
 pub mod parents;
 pub mod picks;
 pub mod probe;

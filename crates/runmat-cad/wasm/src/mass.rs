@@ -321,6 +321,56 @@ fn board_mass(file: &str, files: &Files) -> Result<Mass, String> {
 
 /// The mass properties of the assembly `path` in its named configuration, over every placed
 /// part occurrence.
+/// Writes each placed part's mass, centre of mass and inertia (about the centre, part axes)
+/// into its configured summary in `source`, the facts a dynamic motion study reads
+/// ([`runmat_cad::assembly::motion::dynamics`]). Each part is integrated once per file and
+/// configuration (and kept by content); a part with no density, or whose bodies the kernel
+/// can't integrate, keeps no mass, and the study names it.
+pub fn fill_part_masses(
+    resolved: &runmat_cad::assembly::resolve::ResolvedAssembly,
+    documents: &BTreeMap<String, PartDocument>,
+    source: &mut runmat_cad::assembly::source::MemorySource,
+    files: &Files,
+) {
+    use std::sync::Arc;
+    let mut done = std::collections::BTreeSet::new();
+    for node in &resolved.nodes {
+        if node.parent.is_none() || node.failed || node.definition.kind != DefinitionKind::Part {
+            continue;
+        }
+        let file = node.definition.file.0.clone();
+        let digest = node.configuration.digest();
+        if !done.insert((node.definition.clone(), node.revision.clone(), digest.clone())) {
+            continue;
+        }
+        let content = crate::evaluate::content_key(&file, &digest, files);
+        let found = match content.and_then(kept::get) {
+            Some(found) => found,
+            None => {
+                let Some(document) = documents.get(&file) else { continue };
+                let configured = document.in_configuration(node.configuration.name.as_ref());
+                let (result, kernel) = regenerate_configured(document, &node.configuration);
+                let Ok(found) = integrate(&configured, &result, kernel.as_ref()) else { continue };
+                if let Some(k) = content {
+                    kept::put(k, found.clone());
+                }
+                found
+            }
+        };
+        let Some((density, _)) = found.density else { continue };
+        let m = scaled(&found.unit, density);
+        let Some(part) = source.parts.get_mut(&(node.definition.clone(), node.revision.clone())) else {
+            continue;
+        };
+        let Some(summary) = part.configured.get(&digest) else { continue };
+        let mut filled = (**summary).clone();
+        filled.mass = Some(m.mass);
+        filled.center_of_mass = Some(m.center);
+        filled.inertia = Some(m.inertia);
+        part.configured.insert(digest, Arc::new(filled));
+    }
+}
+
 pub fn assembly_mass(
     path: &str,
     text: &str,

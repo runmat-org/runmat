@@ -212,4 +212,5 @@ Mass properties, Measure and the BOM read in these units. With units set, the BO
 ## Next
 
 - [Make a drawing](/docs/mcad/guides/make-a-drawing) of the assembly with its BOM.
+- [Motion studies](/docs/mcad/assembly/motion) turn the table through its range over time and check the motion for collisions.
 - [Scripting and sweeps](/docs/mcad/scripting) runs the stage at many angles from a `.m` script.

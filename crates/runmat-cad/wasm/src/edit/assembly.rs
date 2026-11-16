@@ -52,9 +52,12 @@ mod copy;
 mod envelopes;
 mod explode;
 pub(crate) mod frames;
+mod drag;
 mod mate;
 mod mate_edits;
 mod mirror;
+mod motion;
+pub(super) mod to_fea;
 mod operation;
 mod path_picks;
 mod pins;
@@ -90,6 +93,12 @@ mod envelopes_tests;
 mod explode_tests;
 #[cfg(test)]
 mod skeleton_tests;
+#[cfg(test)]
+mod drag_tests;
+#[cfg(test)]
+mod motion_tests;
+#[cfg(test)]
+mod to_fea_tests;
 #[cfg(test)]
 mod sketch_tests;
 #[cfg(test)]
@@ -532,6 +541,21 @@ pub(super) fn edit(
             operation::delete_or_suppress(&mut document, request)?
         }
         "assembly.feature" => operation::apply(&mut document, &compiled, &request.values)?,
+        "assembly.delete"
+            if motion::selected(&request.selection).next().is_some()
+                || motion::selected_positions(&request.selection).next().is_some() =>
+        {
+            motion::delete(&mut document, &request.selection)?
+        }
+        "motion.mate-controller" => {
+            motion::controller(&mut document, &request.values, &request.selection)?
+        }
+        "motion.animation" => {
+            motion::animation(&mut document, &compiled, &request.values, &request.selection)?
+        }
+        "motion.basic" => {
+            motion::basic(&mut document, &compiled, &request.values, &request.selection)?
+        }
         "assembly.delete" if connector::selected(request).next().is_some() => {
             connector::delete(&mut document, request)?
         }
@@ -618,6 +642,12 @@ pub(super) fn edit(
                 &names,
                 text_value(&request.values, "configuration"),
             )?
+        }
+        "motion.drag" => drag::drag(&mut document, &compiled, path, text, files, request)?,
+        "assembly.move"
+            if request.values.get("mode").and_then(Value::as_str) == Some("drag") =>
+        {
+            drag::drag(&mut document, &compiled, path, text, files, request)?
         }
         "assembly.move" => {
             let names = selected_names(&compiled, request)?;

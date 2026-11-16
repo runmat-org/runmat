@@ -168,6 +168,10 @@ pub enum SelectKind {
     Contact,
     /// An option or effectivity axis of the assembly's options (`option:<name>`).
     ProductOption,
+    /// A motion study of the assembly (`motion:<name>`).
+    MotionStudy,
+    /// A named mate position of the assembly (`position:<name>`).
+    MatePosition,
     // Drawing.
     Sheet,
     View,
@@ -230,6 +234,8 @@ impl SelectKind {
             Envelope => "envelope",
             Contact => "contact region",
             ProductOption => "option",
+            MotionStudy => "motion study",
+            MatePosition => "mate position",
             Sheet => "sheet",
             View => "view",
             Annotation => "annotation",
