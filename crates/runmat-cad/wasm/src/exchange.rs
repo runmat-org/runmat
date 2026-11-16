@@ -237,6 +237,43 @@ pub fn part_step_in(
 ) -> Result<Option<Vec<u8>>, String> {
     let part = crate::runtime::regenerate_part_in(path, text, configuration, &Default::default())
         .map_err(|d| first_message(&d))?;
+    part_step_of(path, part)
+}
+
+/// [`part_step_in`] for a simulation study: a part whose regeneration reports an error is
+/// refused with that error, so a study never analyzes the bodies its failed features left.
+pub fn part_study_step_in(
+    path: &str,
+    text: &str,
+    configuration: Option<&str>,
+) -> Result<Option<Vec<u8>>, String> {
+    let part = crate::runtime::regenerate_part_in(path, text, configuration, &Default::default())
+        .map_err(|d| first_message(&d))?;
+    if let Some(error) = part.result.diagnostics.errors().next() {
+        let line = error
+            .span
+            .as_ref()
+            .map(|span| format!(" (line {})", line_of(text, span.start)))
+            .unwrap_or_default();
+        return Err(format!(
+            "`{}` doesn't regenerate{line}: {}",
+            path.rsplit('/').next().unwrap_or(path),
+            error.message
+        ));
+    }
+    part_step_of(path, part)
+}
+
+/// The 1-based line of byte `offset` in `text`.
+fn line_of(text: &str, offset: u32) -> usize {
+    let end = (offset as usize).min(text.len());
+    text.as_bytes()[..end].iter().filter(|b| **b == b'\n').count() + 1
+}
+
+fn part_step_of(
+    path: &str,
+    part: crate::runtime::RegeneratedPart,
+) -> Result<Option<Vec<u8>>, String> {
     let product = Product::new(
         &stem(path),
         part.document.clone(),
