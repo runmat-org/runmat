@@ -219,8 +219,11 @@ pub const ASSEMBLY: DocumentGrammar = DocumentGrammar {
         named("mirror", "mirrors", "mirror"),
         named("fasteners", "fasteners", "fasteners"),
         named("envelope", "envelopes", "envelope"),
+        // `contact c1 = { a = { occurrence = [{ name = lower }], face = top }, b = …, bonded = true }`
+        named("contact", "contacts", "contact"),
         named("publish", "publishes", "publish"),
         named("configuration", "configurations", "configuration"),
+        named("display_state", "display_states", "display_state"),
         named("property", "properties", "property"),
         named("exploded", "exploded", "exploded"),
         // `view hero = { from = [-0.62, 0.7, -0.36], up = [0, 0, 1], default = true }`

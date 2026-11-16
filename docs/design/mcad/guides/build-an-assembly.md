@@ -104,6 +104,8 @@ The solve reports an occurrence that still moves freely (`cad.asm.under_defined`
 
 `pattern posts = grid(…)` copies the standoff into a 2 × 2 grid 80 mm apart. Each copy has a key that later statements name it by, and `skip` leaves copies out. A `follow_pattern` places one copy per hole of a hole pattern a part publishes, so fasteners stay on their holes as the part changes. See [Patterns, mirrors and fasteners](/docs/mcad/assembly/patterns-and-mirrors).
 
+To place one more of a mated component somewhere else, use **Copy with mates** on the Assemble tab. Pick the components, then one new reference per mate that joins them to something outside the copy, in the order the Outline lists those mates. The copy (`block2` for `block`) gets its own connectors and mates, and each outside mate end moves to its new reference. A mate end with no pick left keeps its original reference. Mates between two copied components join the two copies. The copy floats, so its mates place it.
+
 ## 5. Check the assembly
 
 Evaluate measures the assembly in its current pose:
@@ -111,8 +113,74 @@ Evaluate measures the assembly in its current pose:
 - **Interference** lists pairs of occurrences whose solids overlap, with the overlap volume.
 - **Clearance** lists pairs closer than a gap you set, such as 0.5 mm between the turntable and the standoffs.
 - **Mass properties** adds every part at its placement: total mass, center of gravity and inertia.
+- **Assembly visualization** sorts the part occurrences by mass, volume, cost or count, largest first, and colors the model in five bands from the smallest value (blue) to the largest (red). Cost reads each component's `cost` property, else the `cost` property of its part. Count is how many occurrences share the part, such as 4 for each standoff. Selecting a row selects that component; closing the results clears the colors.
 
 The bill of materials lists each part number with its quantity: one base, one turntable and four standoffs. A drawing places the same list as a BOM table with balloons. See [Evaluate](/docs/mcad/evaluate).
+
+## 6. Show a component as its envelope
+
+A component's representation sets what the assembly draws and checks for it. Right-click a component and choose **Representation**, or set it in the component's Properties:
+
+- **Full** draws and checks the part's exact solid. It is the default and writes nothing.
+- **Envelope** draws the component as its bounding box, shaded translucent, and interference and clearance checks use that box. A sub-assembly at envelope draws one box around all its parts.
+
+```assembly fragment
+use part base as base {
+    representation = envelope
+}
+```
+
+Use an envelope to keep space for a component whose detail doesn't matter here, such as a purchased motor or a neighboring module. Here the stage's base draws as its box. Mass properties still add the parts an envelope stands for at their own mass and center of gravity.
+
+## 7. Reserve space
+
+An envelope is a box of space the assembly keeps for something, such as room to service a part or the path a cable runs along. **Envelope** on the Layout tab fits the box round the components you pick and adds a margin on every side. It writes one line:
+
+```assembly fragment
+envelope service = { owner = base, min = [-5 mm, -5 mm, -5 mm], max = [105 mm, 85 mm, 15 mm], keep_out = true }
+```
+
+The view draws the box's edges, and the Outline lists it under **Envelopes**. With **Keep out** on, Interference lists every component inside the box except its owner, the one component allowed in it. Run Envelope from the row to change it: with no components picked, the box stays and only the other settings change. Delete removes it.
+
+## 8. Drive the layout from a skeleton
+
+A skeleton is a part that holds the assembly's layout: sketches, planes and frames that the other parts are placed against. **Skeleton part** on the Layout tab creates the part beside the assembly and places it at the origin as a reference component. Name a part already beside the assembly to use that one instead.
+
+```part file=layout.part
+runmat 0.7
+std 1
+
+part layout {
+}
+```
+
+```assembly fragment
+use part layout as layout {
+    reference = true
+}
+```
+
+Open the skeleton to draw the layout and publish the frames other parts attach to. A reference component is drawn, picked and mated to like any other, and is left out of the parts list, mass properties and interference checks. Set `reference = true` on any component to treat it the same way.
+
+## 9. Name the contact regions
+
+A study needs to know which faces of different components touch. **Contact regions** on the Simulate tab scans every pair of components and names each pair of touching faces as a contact region. Two flat faces touch when they face each other, the gap between them is within the gap tolerance (0.05 mm by default), and part of one lies on the other. Two cylindrical faces touch when they share an axis and a radius within the tolerance and overlap along the axis, such as a pin in its hole.
+
+```assembly fragment
+contact contact1 = { a = { occurrence = [{ name = plate }], face = top }, b = { occurrence = [{ name = block }], face = bottom }, bonded = true }
+```
+
+Each face is published from its part, so the region follows the part's edits. A bonded region is glued together in a study. Clear **Treat as bonded** to let the faces slide or separate. Running the command again adds only pairs that have no region yet. To change whether a region is bonded, run Contact regions from its row under Contact regions in the Outline. Reference and suppressed components are left out.
+
+## 10. Offer product options
+
+One assembly file can describe every option a product is sold with. **Options and effectivity** on the Manage tab adds an option and its values, the first one standard. The optional effectivity limits the other values to a serial range: `MSN 1-99` declares the `msn` axis and writes the rule `engine_effectivity`, so engine `b` is legal only on MSN 1 to 99. Run the command again with the same option name to change its values or range.
+
+```assembly fragment
+options = { axes = [{ name = engine, domain = { domain = enum, values = [a, b] }, default = a }, { name = msn, domain = { domain = unit, min = 1, max = 99 }, default = 1 }], rules = [{ name = engine_effectivity, condition = { when = any, of = [{ when = not, of = { when = is, axis = engine, value = a } }, { when = range, axis = msn, min = 1, max = 99 }] } }] }
+```
+
+A component written with `when` appears only in the configurations its condition allows. **Options** in the document bar picks the values the assembly shows, such as `engine=b` and `MSN 42`, and checks each against its option. The Outline lists each option under Options with its values, the value shown and its effectivity. Delete removes an option once no component or rule reads it.
 
 ## Next
 

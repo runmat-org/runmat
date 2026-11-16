@@ -779,19 +779,21 @@ pub fn compile_assembly(
     text: &str,
     files: &Files,
 ) -> Result<(Value, Value, Vec<Diagnostic>), Vec<Diagnostic>> {
-    compile_assembly_known(path, text, files, &BTreeSet::new())
+    compile_assembly_known(path, text, files, None, &BTreeSet::new())
 }
 
 /// [`compile_assembly`] for a caller that holds the part displays whose digests are in `known`:
 /// each prototype carries its part's `digest`, and a known one is sent `reused` without its
-/// part display ([`prototype_reuse`]).
+/// part display ([`prototype_reuse`]). `configuration` is the top assembly's active
+/// configuration (the Desktop's Configuration menu); `None` compiles it as written.
 pub fn compile_assembly_known(
     path: &str,
     text: &str,
     files: &Files,
+    configuration: Option<&str>,
     known: &BTreeSet<String>,
 ) -> Result<(Value, Value, Vec<Diagnostic>), Vec<Diagnostic>> {
-    compile_assembly_with(path, text, files, known, |_, _| ())
+    compile_assembly_with(path, text, files, configuration, known, |_, _| ())
 }
 
 /// An assembly's projection, display, diagnostics and hierarchical parts list.
@@ -811,7 +813,7 @@ pub fn compile_assembly_indented(
 ) -> Result<CompiledAssemblyWithIndentedBom, Vec<Diagnostic>> {
     let mut rows = Vec::new();
     let (index, display, problems) =
-        compile_assembly_with(path, text, files, &BTreeSet::new(), |resolved, source| {
+        compile_assembly_with(path, text, files, None, &BTreeSet::new(), |resolved, source| {
             rows = runmat_cad::assembly::bom::indented_bom(resolved, Some(source));
         })?;
     Ok(CompiledAssemblyWithIndentedBom {
@@ -827,6 +829,7 @@ fn compile_assembly_with(
     path: &str,
     text: &str,
     files: &Files,
+    configuration: Option<&str>,
     known: &BTreeSet<String>,
     also: impl FnOnce(&runmat_cad::assembly::resolve::ResolvedAssembly, &MemorySource),
 ) -> Result<(Value, Value, Vec<Diagnostic>), Vec<Diagnostic>> {
@@ -838,7 +841,7 @@ fn compile_assembly_with(
         problems,
         digests,
         unbuilt,
-    } = resolve_assembly(path, text, files)?;
+    } = resolve_assembly_in(path, text, files, configuration)?;
     also(&resolved, &source);
     let index = build_assembly_index(&resolved, Some(&source));
     let configured = crate::configured::configured_displays(&resolved, &documents);
@@ -962,7 +965,7 @@ pub fn compile_json_known(
         return crate::drawing::compile_json(path, text, files);
     }
     let out = if is_assembly(path) {
-        match compile_assembly_known(path, text, files, known) {
+        match compile_assembly_known(path, text, files, configuration, known) {
             Ok((mut index, display, diagnostics)) => {
                 crate::repairs::label_candidates(&mut index["diagnostics"]);
                 // Built from the values held: `json!` would serialize a copy of the assembly's

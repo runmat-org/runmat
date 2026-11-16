@@ -18,6 +18,7 @@ pub(super) fn add_rows(catalog: &mut Catalog) {
         mode: EditMode::Model,
         default_tab: "assemble".into(),
         document_bar: vec![
+            c("view.configuration"),
             c("assembly.options"),
             c("view.representation"),
             c("view.working-set"),

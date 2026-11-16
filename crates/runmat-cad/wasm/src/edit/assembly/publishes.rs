@@ -12,7 +12,7 @@ use runmat_cad::ids::PublishName;
 use runmat_cad::syntax::edit::EditFailure;
 use serde_json::{Map, Value};
 
-fn valid_name(name: &str) -> bool {
+pub(super) fn valid_name(name: &str) -> bool {
     let mut chars = name.chars();
     chars
         .next()

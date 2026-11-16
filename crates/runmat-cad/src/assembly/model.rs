@@ -335,6 +335,52 @@ impl Representation {
         Representation::Midsurface,
         Representation::Beam,
     ];
+
+    /// The representations a component can be set to from its menu, its Properties and
+    /// `assembly.representation`: each changes what the assembly draws or checks. `full` is the
+    /// exact model; `envelope` draws and checks the component (a sub-assembly, everything under
+    /// it) as its box. `defeatured`, `midsurface` and `beam` join when an engine fills them.
+    pub const OFFERED: [Representation; 2] = [Representation::Full, Representation::Envelope];
+
+    /// Its word in the source and in command values (`envelope`, `midsurface`): the one key
+    /// every surface uses.
+    pub fn key(self) -> &'static str {
+        match self {
+            Representation::Full => "full",
+            Representation::Envelope => "envelope",
+            Representation::Interface => "interface",
+            Representation::Display => "display",
+            Representation::Defeatured => "defeatured",
+            Representation::Midsurface => "midsurface",
+            Representation::Beam => "beam",
+        }
+    }
+
+    /// The representation a [`Representation::key`] names.
+    pub fn from_key(key: &str) -> Option<Representation> {
+        Representation::ALL.into_iter().find(|r| r.key() == key)
+    }
+
+    /// What a menu or form calls it.
+    pub fn label(self) -> &'static str {
+        match self {
+            Representation::Full => "Full",
+            Representation::Envelope => "Envelope",
+            Representation::Interface => "Interface",
+            Representation::Display => "Display only",
+            Representation::Defeatured => "Defeatured",
+            Representation::Midsurface => "Mid-surface",
+            Representation::Beam => "Beam",
+        }
+    }
+
+    /// The choices a form offers: [`Representation::OFFERED`] as (key, label) pairs.
+    pub fn offered_choices() -> Vec<(&'static str, &'static str)> {
+        Representation::OFFERED
+            .into_iter()
+            .map(|r| (r.key(), r.label()))
+            .collect()
+    }
 }
 
 /// A typed override on a descendant occurrence. There is no free attribute override.
@@ -426,6 +472,10 @@ pub struct Occurrence {
     pub flexible: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub representation: Option<Representation>,
+    /// A reference component (a skeleton or layout part): drawn, picked and mated to, but left
+    /// out of the parts list, mass properties and interference checks.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub reference: bool,
     #[serde(default)]
     pub suppressed: bool,
     /// Some alternative of this name must be active in every legal configuration.
@@ -455,6 +505,7 @@ impl Occurrence {
             fixed: true,
             flexible: false,
             representation: None,
+            reference: false,
             suppressed: false,
             required: false,
             overrides: Vec::new(),
@@ -820,6 +871,26 @@ pub struct EnvelopeDecl {
     pub keep_out: bool,
 }
 
+/// A contact region: a face of one component touching a face of another, for studies and
+/// checks (`assembly.contacts` finds them). Each face is one its part publishes.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct ContactDecl {
+    pub name: String,
+    pub a: ContactFace,
+    pub b: ContactFace,
+    /// Bonded: the faces are glued together in a study. Otherwise they touch and may slide
+    /// or separate.
+    #[serde(default = "yes")]
+    pub bonded: bool,
+}
+
+/// One side of a contact region: a face the component's part publishes.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct ContactFace {
+    pub occurrence: RelPath,
+    pub face: PublishName,
+}
+
 /// What an assembly exposes to the assemblies that use it.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case", tag = "publishes")]
@@ -843,6 +914,17 @@ pub struct AssemblyConfiguration {
     pub overrides: BTreeMap<InputName, ValueExpr>,
     #[serde(default)]
     pub suppress: BTreeSet<String>,
+}
+
+/// A display state: how the assembly shows, without changing what it is. The components it
+/// hides drop out of the view (and only the view: the BOM, mass and studies keep them), in
+/// whichever configuration is active. `display_state exploded_look = { hidden = [lid, cover] }`.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct AssemblyDisplayState {
+    pub name: String,
+    /// Component names (the top assembly's children) the view leaves out.
+    #[serde(default)]
+    pub hidden: BTreeSet<String>,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -883,10 +965,16 @@ pub struct AssemblyDocument {
     pub fasteners: Vec<FastenerSet>,
     #[serde(default)]
     pub envelopes: Vec<EnvelopeDecl>,
+    /// Contact regions between components' faces ([`ContactDecl`]).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub contacts: Vec<ContactDecl>,
     #[serde(default)]
     pub publishes: Vec<AssemblyPublish>,
     #[serde(default)]
     pub configurations: Vec<AssemblyConfiguration>,
+    /// Named display states ([`AssemblyDisplayState`]).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub display_states: Vec<AssemblyDisplayState>,
     #[serde(default)]
     pub properties: Vec<Property>,
     #[serde(default)]
@@ -920,8 +1008,10 @@ impl AssemblyDocument {
             mirrors: Vec::new(),
             fasteners: Vec::new(),
             envelopes: Vec::new(),
+            contacts: Vec::new(),
             publishes: Vec::new(),
             configurations: Vec::new(),
+            display_states: Vec::new(),
             properties: Vec::new(),
             links: Vec::new(),
             exploded: Vec::new(),

@@ -49,12 +49,27 @@ This file is generated from the command catalog.
 - `assembly.component-configuration`: Use another configuration of the component's file.
   - Required: `configuration` (text)
   - Runs on the `selection`: `occurrence`
-- `assembly.delete`: Delete components, mates, mate connectors, publishes, sketches, assembly features or sketch curves.
-  - Runs on the `selection`: `occurrence`, `mate`, `mate_connector`, `publish`, `sketch`, `feature`, `sketch_entity`, `sketch_point`
+- `assembly.configurations`: Add or change a configuration (input values and suppressed components) or a display state (hidden components).
+  - Required: `kind` (one of `configuration`, `display_state`, default `configuration`); `name` (text)
+  - Optional: `values` (text) when `kind` is configuration; `suppress` (picks: component) when `kind` is configuration; `hidden` (picks: component) when `kind` is display_state
+  - Runs on the `selection`: `configuration`, `display_state`
+- `assembly.contacts`: Find touching faces between components and name them as contact regions; on a region's row, change whether it is bonded.
+  - Required: `tolerance` (number in mm, default 0.05)
+  - Optional: `bonded` (true or false, default true)
+  - Runs on the `selection`: `contact`
+- `assembly.copy-with-mates`: Copy components with their connectors and mates; each mate to an outside reference takes the next picked new reference.
+  - Required: `components` (picks: component)
+  - Optional: `references` (picks: mate connector or face or edge or vertex or plane or axis or point or component or sketch entity or sketch point)
+- `assembly.delete`: Delete components, mates, mate connectors, publishes, configurations, display states, envelopes, contact regions, options, sketches, assembly features or sketch curves.
+  - Runs on the `selection`: `occurrence`, `mate`, `mate_connector`, `publish`, `configuration`, `display_state`, `envelope`, `contact`, `product_option`, `sketch`, `feature`, `sketch_entity`, `sketch_point`
 - `assembly.edit-mate`: Change the mate's type, distance, angle, limits or alignment.
   - Required: `type` (one of `fasten`, `revolute`, `slider`, `cylindrical`, `planar`, `ball`, `parallel`, `distance`, `angle`, `tangent`, `pin_slot`, `gear`, `rack_pinion`, `screw`, `cam`, `width`, `symmetric`, `path`, `linear_coupler`, `hinge`, `universal_joint`, default `fasten`); `offset` (number in mm, default 0) when `type` is distance; `angle` (number in deg, default 0) when `type` is angle; `min` (number in deg, default -30) when `angle_limits` is true; `max` (number in deg, default 45) when `angle_limits` is true; `near` (number in mm, default 0) when `distance_limits` is true; `far` (number in mm, default 10) when `distance_limits` is true; `ratio` (number, default 1) when `type` is gear or linear_coupler; `pitch` (number in mm, default 1) when `type` is screw or rack_pinion; `radius` (number in mm, default 5) when `type` is tangent; `profile` (text) when `type` is cam
   - Optional: `angle_limits` (true or false, default false) when `type` is revolute or cylindrical or hinge; `distance_limits` (true or false, default false) when `type` is slider or cylindrical; `flip` (true or false, default false); `first2` (pick: mate connector or face or edge or vertex or plane or axis or point or component or sketch entity or sketch point) when `type` is width; `second2` (pick: mate connector or face or edge or vertex or plane or axis or point or component or sketch entity or sketch point) when `type` is width; `plane` (pick: mate connector or face or edge or vertex or plane or axis or point or component or sketch entity or sketch point) when `type` is symmetric; `path` (picks: edge) when `type` is path; `joint_point` (true or false, default true) when `type` is universal_joint
   - Runs on the `selection`: `mate`
+- `assembly.envelope`: Reserve a box of space that interference checks keep other components out of.
+  - Required: `name` (text); `margin` (number in mm, default 0)
+  - Optional: `around` (picks: component); `keep_out` (true or false, default true); `owner` (pick: component)
+  - Runs on the `selection`: `envelope`
 - `assembly.export`: Export as a STEP assembly, glTF or USD.
   - Required: `format` (one of `step`, `gltf`, `usd`, default `step`)
   - Optional: `hidden` (true or false, default false)
@@ -97,6 +112,12 @@ This file is generated from the command catalog.
 - `assembly.new-part`: Create a part inside the assembly, referencing its neighbors.
   - Required: `name` (text)
   - Optional: `plane` (pick: plane or face)
+- `assembly.options`: Pick the product options and effectivity the assembly shows.
+  - Optional: `options` (text); `effectivity` (text)
+- `assembly.options-effectivity`: Define product options and the serial ranges they apply to.
+  - Required: `option` (text); `values` (text)
+  - Optional: `effectivity` (text)
+  - Runs on the `selection`: `product_option`
 - `assembly.pack-and-share`: Collect the assembly and every file it references.
   - Required: `folder` (text)
 - `assembly.pattern`: Repeat components in a line, a circle, or by a part's feature pattern.
@@ -109,6 +130,11 @@ This file is generated from the command catalog.
   - Required: `components` (picks: component); `with` (text)
   - Optional: `remate` (true or false, default true)
   - Runs on the `selection`: `occurrence`
+- `assembly.representation`: Draw and check components as their full model or as their envelope box.
+  - Required: `components` (picks: component); `representation` (one of `full`, `envelope`, default `full`)
+  - Runs on the `selection`: `occurrence`
+- `assembly.skeleton`: Add a skeleton part that drives the layout: a reference component left out of the parts list, mass and interference.
+  - Required: `name` (text)
 - `assembly.sketch`: Start a sketch in the assembly on an origin plane or a component's planar face.
   - Required: `plane` (pick: plane or face)
 - `assembly.smart-mate`: Drag a component onto another and accept the suggested mate.
@@ -118,6 +144,8 @@ This file is generated from the command catalog.
   - Runs on the `selection`: `occurrence`
 - `assembly.suppress`: Leave components out of this configuration, or turn a sketch or assembly feature off.
   - Runs on the `selection`: `occurrence`, `mate`, `sketch`, `feature`
+- `assembly.visualization`: Sort and color components by mass, volume, cost or count.
+  - Required: `by` (one of `mass`, `volume`, `cost`, `count`, default `mass`)
 - `assembly.where-used`: List where a component's file is used.
   - Runs on the `selection`: `occurrence`
 

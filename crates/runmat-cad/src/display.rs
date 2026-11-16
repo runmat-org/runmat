@@ -748,12 +748,32 @@ pub fn prototype_key<T>(
     operated: &BTreeMap<u32, T>,
 ) -> (String, String) {
     let (file, configuration) = configuration_key(node);
-    if operated.contains_key(&(id as u32)) {
+    if node.representation == crate::assembly::model::Representation::Envelope {
+        (file, format!("{configuration}#envelope"))
+    } else if operated.contains_key(&(id as u32)) {
         (file, format!("{configuration}#operated:{id}"))
     } else {
         (file, configuration)
     }
 }
+
+/// Whether node `id` of `resolved` draws a prototype of its own: a part or circuit board no
+/// ancestor stands in for, or an occurrence at the envelope representation (a sub-assembly's
+/// envelope stands in for its contents) ([`crate::assembly::representation::is_envelope`]).
+pub fn draws_prototype(resolved: &ResolvedAssembly, id: usize) -> bool {
+    let node = &resolved.nodes[id];
+    if crate::assembly::representation::is_envelope(resolved, id as u32) {
+        return true;
+    }
+    matches!(
+        node.definition.kind,
+        DefinitionKind::Part | DefinitionKind::Circuit
+    ) && !node.represented_by_ancestor
+}
+
+/// How an envelope draws: its color at this opacity, so what it stands for reads as space
+/// rather than as a part.
+pub const ENVELOPE_ALPHA: f32 = 0.35;
 
 /// [`assembly_display_configured`] where a part occurrence the assembly's features changed
 /// draws its display from `operated` (by node index).
@@ -774,19 +794,47 @@ pub fn assembly_display_operated(
     };
     let mut prototype_of: BTreeMap<(String, String), u32> = BTreeMap::new();
     for (id, node) in resolved.nodes.iter().enumerate() {
-        // Parts and circuit boards are leaves that draw; a board draws its 3D model.
-        let drawn = matches!(
-            node.definition.kind,
-            DefinitionKind::Part | DefinitionKind::Circuit
-        );
-        if !drawn || node.represented_by_ancestor {
+        // Parts and circuit boards are leaves that draw; a board draws its 3D model. An
+        // occurrence at the envelope representation draws as its box.
+        if !draws_prototype(resolved, id) {
             continue;
         }
+        let envelope = crate::assembly::representation::is_envelope(resolved, id as u32);
         let file = node.definition.file.as_str().to_string();
         let configuration = node.configuration.name.as_ref().map(|c| c.to_string());
         let key = prototype_key(id, node, operated);
         let prototype = match prototype_of.get(&key) {
             Some(p) => *p,
+            None if envelope => {
+                let shape = match crate::assembly::representation::envelope_box(
+                    resolved,
+                    source,
+                    id as u32,
+                ) {
+                    Some(b) => PrototypeShape::Box {
+                        bounds: Bounds {
+                            min: b.min.map(|v| v as f32),
+                            max: b.max.map(|v| v as f32),
+                        },
+                    },
+                    None => PrototypeShape::Empty,
+                };
+                let mut appearance = crate::appearance::material_appearance(
+                    node.material.as_ref().map(|m| m.0.as_str()),
+                )
+                .1;
+                appearance[3] = ENVELOPE_ALPHA;
+                out.prototypes.push(Prototype {
+                    file,
+                    configuration,
+                    material: node.material.as_ref().map(|m| m.0.clone()),
+                    appearance,
+                    shape,
+                });
+                let p = (out.prototypes.len() - 1) as u32;
+                prototype_of.insert(key, p);
+                p
+            }
             None => {
                 let shape = match operated
                     .get(&(id as u32))
@@ -885,6 +933,8 @@ pub fn assembly_display_operated(
         });
     }
     out.references = references::connector_displays(resolved, out.bounds.as_ref());
+    out.references
+        .extend(references::envelope_displays(resolved));
     out
 }
 
