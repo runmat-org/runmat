@@ -3,6 +3,9 @@ use serde::{Deserialize, Serialize};
 
 use super::ObservationValueShape;
 
+mod source_names;
+pub use source_names::{SourceQuantity, SOURCE_QUANTITIES};
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ObservationQuantity {
@@ -357,67 +360,10 @@ impl ObservationQuantity {
     /// Keeping this closed mapping beside the canonical enum prevents frontends from growing
     /// independent string-dispatch tables for the same result quantities.
     pub fn from_source_name(name: &str) -> Option<Self> {
-        Some(match name {
-            "displacement" => Self::Displacement,
-            "rotation" => Self::Rotation,
-            "velocity" => Self::Velocity,
-            "acceleration" => Self::Acceleration,
-            "strain" => Self::Strain,
-            "stress" => Self::Stress,
-            "von_mises_stress" => Self::VonMisesStress,
-            "reaction_force" => Self::ReactionForce,
-            "reaction_moment" => Self::ReactionMoment,
-            "strain_energy" => Self::StrainEnergy,
-            "beam_axial_force" => Self::BeamAxialForce,
-            "beam_shear_force" => Self::BeamShearForce,
-            "beam_torsion_moment" => Self::BeamTorsionMoment,
-            "beam_bending_moment" => Self::BeamBendingMoment,
-            "beam_bending_stress" => Self::BeamBendingStress,
-            "beam_torsion_stress" => Self::BeamTorsionStress,
-            "shell_membrane_force" => Self::ShellMembraneForce,
-            "shell_bending_moment" => Self::ShellBendingMoment,
-            "shell_transverse_shear" => Self::ShellTransverseShear,
-            "shell_von_mises" => Self::ShellVonMises,
-            "temperature" => Self::Temperature,
-            "temperature_gradient" => Self::TemperatureGradient,
-            "heat_flux" => Self::HeatFlux,
-            "heat_rate" => Self::HeatRate,
-            "thermal_energy_storage_rate_density" => Self::ThermalEnergyStorageRateDensity,
-            "electric_potential" => Self::ElectricPotential,
-            "electric_field" => Self::ElectricField,
-            "electric_displacement" => Self::ElectricDisplacement,
-            "electric_energy_density" => Self::ElectricEnergyDensity,
-            "joule_power_density" => Self::JoulePowerDensity,
-            "electric_current" => Self::ElectricCurrent,
-            "electric_current_density" => Self::ElectricCurrentDensity,
-            "electric_charge" => Self::ElectricCharge,
-            "electric_edge_circulation" => Self::ElectricEdgeCirculation,
-            "magnetic_edge_circulation" => Self::MagneticEdgeCirculation,
-            "magnetic_vector_potential" => Self::MagneticVectorPotential,
-            "magnetic_flux_density" => Self::MagneticFluxDensity,
-            "magnetic_field_intensity" => Self::MagneticFieldIntensity,
-            "acoustic_pressure" => Self::AcousticPressure,
-            "acoustic_particle_velocity" => Self::AcousticParticleVelocity,
-            "acoustic_intensity" => Self::AcousticIntensity,
-            "acoustic_port_intensity" => Self::AcousticPortIntensity,
-            "sound_pressure_level" => Self::SoundPressureLevel,
-            "transmission_loss" => Self::TransmissionLoss,
-            "fluid_pressure" => Self::FluidPressure,
-            "fluid_velocity" => Self::FluidVelocity,
-            "vorticity" => Self::Vorticity,
-            "mass_flow_rate" => Self::MassFlowRate,
-            "volume_flow_rate" => Self::VolumeFlowRate,
-            "wall_shear_stress" => Self::WallShearStress,
-            "modal_frequency" => Self::ModalFrequency,
-            "modal_participation" => Self::ModalParticipation,
-            "eigenvalue" => Self::Eigenvalue,
-            "residual" => Self::Residual,
-            "balance" => Self::Balance,
-            "constraint_violation" => Self::ConstraintViolation,
-            "contact_gap" => Self::ContactGap,
-            "contact_pressure" => Self::ContactPressure,
-            _ => return None,
-        })
+        source_names::SOURCE_QUANTITIES
+            .iter()
+            .find(|row| row.name == name)
+            .map(|row| row.quantity)
     }
 
     /// The line parameter an `electromagnetic line_parameters` analysis publishes under the

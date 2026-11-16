@@ -3,7 +3,7 @@ use std::collections::BTreeSet;
 use runmat_analysis_core::{
     AuthoredExtremaTiePolicy, AuthoredFieldProjection, AuthoredOutput, AuthoredOutputExpression,
     AuthoredPrincipalSelection, AuthoredRegionSource, AuthoredSeriesReduction,
-    AuthoredSpatialReduction, AuthoredVectorComponent, FieldLocation, Position,
+    AuthoredSpatialReduction, AuthoredVectorComponent, FieldLocation, Position, ProcedureStep,
 };
 
 use crate::{
@@ -15,13 +15,19 @@ use super::lower;
 
 mod fields;
 mod policy;
+mod published;
 mod series;
 
 pub(crate) use fields::{field_location, field_reference_type};
+pub use published::FIELD_LOCATION_CODE;
+pub use published::{
+    step_field_admission, step_published_fields, StepFieldRefusal,
+};
 use series::{checked_series_weighting, interpolation_positions, series_domain, series_sampling};
 
 pub(super) fn lower_outputs(
     bound: &BoundFeaProgram,
+    steps: &[ProcedureStep],
     declaration: &CheckedFeaDeclaration,
     section: Option<&runmat_geometry_core::CrossSectionDefinition>,
     diagnostics: &mut Vec<FeaDiagnostic>,
@@ -46,7 +52,7 @@ pub(super) fn lower_outputs(
             };
             let expression = match line_parameter(declaration, value, section, diagnostics) {
                 Some(lowered) => lowered?,
-                None => lower_expression(bound, declaration, value, &available, diagnostics)?,
+                None => lower_expression(bound, steps, declaration, value, &available, diagnostics)?,
             };
             available.insert(name.as_str());
             Some(AuthoredOutput {
@@ -60,6 +66,7 @@ pub(super) fn lower_outputs(
 
 fn lower_expression(
     bound: &BoundFeaProgram,
+    steps: &[ProcedureStep],
     declaration: &CheckedFeaDeclaration,
     expression: &CheckedExpression,
     available: &BTreeSet<&str>,
@@ -72,20 +79,26 @@ fn lower_expression(
             {
                 let (quantity, _) = field_reference_type(quantity_name)?;
                 let location = field_location(location_name)?;
-                if location == runmat_analysis_core::FieldLocation::Mode {
-                    // No procedure publishes mode-located fields; every run would reject it.
-                    super::lower::error(
-                        declaration,
-                        expression.span,
-                        crate::semantic::pending::with_pending(
-                            format!(
-                                "no procedure publishes mode-located fields (`field.mode.{quantity_name}`) yet"
-                            ),
-                            Some(crate::semantic::pending::OUTPUT_MODE_LOCATION),
-                        ),
-                        diagnostics,
-                    );
-                    return None;
+                // The one admission rule Simulation setup's `outputs` choices also read. A step
+                // that isn't in the sequence is reported when the outputs attach.
+                if let Some(step) = steps.iter().find(|step| step.step_id.0 == *step_id) {
+                    let reference = format!("field.{location_name}.{quantity_name}");
+                    if let Err(refusal) = step_field_admission(step.family, step.procedure, &reference) {
+                        let message = refusal.message(step_id, &reference);
+                        match refusal {
+                            StepFieldRefusal::Location(_) => diagnostics.push(FeaDiagnostic::error(
+                                FIELD_LOCATION_CODE,
+                                message,
+                                crate::FeaDiagnosticPhase::Lowering,
+                                Some(crate::FeaDiagnosticLocation {
+                                    path: declaration.module.clone(),
+                                    span: expression.span,
+                                }),
+                            )),
+                            _ => super::lower::error(declaration, expression.span, message, diagnostics),
+                        }
+                        return None;
+                    }
                 }
                 Some(AuthoredOutputExpression::AnalysisField {
                     step_id: step_id.clone(),
@@ -124,6 +137,7 @@ fn lower_expression(
                     },
                     source: Box::new(lower_expression(
                         bound,
+                        steps,
                         declaration,
                         source,
                         available,
@@ -161,6 +175,7 @@ fn lower_expression(
                     projection: AuthoredFieldProjection::Component(component),
                     source: Box::new(lower_expression(
                         bound,
+                        steps,
                         declaration,
                         source,
                         available,
@@ -197,6 +212,7 @@ fn lower_expression(
                     projection: AuthoredFieldProjection::Principal(which),
                     source: Box::new(lower_expression(
                         bound,
+                        steps,
                         declaration,
                         source,
                         available,
@@ -231,6 +247,7 @@ fn lower_expression(
                 Some(AuthoredOutputExpression::Recovery {
                     source: Box::new(lower_expression(
                         bound,
+                        steps,
                         declaration,
                         source,
                         available,
@@ -289,6 +306,7 @@ fn lower_expression(
                     },
                     source: Box::new(lower_expression(
                         bound,
+                        steps,
                         declaration,
                         source,
                         available,
@@ -413,6 +431,7 @@ fn lower_expression(
                     reduction: AuthoredSpatialReduction::NormalFlux,
                     source: Box::new(lower_expression(
                         bound,
+                        steps,
                         declaration,
                         source,
                         available,
@@ -439,6 +458,7 @@ fn lower_expression(
                 Some(AuthoredOutputExpression::SpatialSelection {
                     source: Box::new(lower_expression(
                         bound,
+                        steps,
                         declaration,
                         source,
                         available,
@@ -462,6 +482,7 @@ fn lower_expression(
                 Some(AuthoredOutputExpression::Interpolation {
                     source: Box::new(lower_expression(
                         bound,
+                        steps,
                         declaration,
                         source,
                         available,
@@ -486,6 +507,7 @@ fn lower_expression(
                 Some(AuthoredOutputExpression::Sampling {
                     source: Box::new(lower_expression(
                         bound,
+                        steps,
                         declaration,
                         source,
                         available,
@@ -549,6 +571,7 @@ fn lower_expression(
                     reduction,
                     source: Box::new(lower_expression(
                         bound,
+                        steps,
                         declaration,
                         source,
                         available,

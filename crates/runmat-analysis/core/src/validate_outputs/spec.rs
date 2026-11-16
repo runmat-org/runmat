@@ -198,14 +198,25 @@ fn validate_quantity_family(
 }
 
 pub fn quantity_supported(step: &ProcedureStep, quantity: ObservationQuantity) -> bool {
+    family_supports_quantity(step.family, step.procedure, quantity)
+}
+
+/// Whether a step of `family` running `procedure` produces `quantity`: the same rule
+/// [`quantity_supported`] applies to a lowered step, for a host that knows only the step's
+/// physics and procedure (a study being set up, before its `.fea` exists).
+pub fn family_supports_quantity(
+    family: PhysicsFamily,
+    procedure: AnalysisProcedure,
+    quantity: ObservationQuantity,
+) -> bool {
     // A `line_parameters` step publishes exactly the line parameters of its cross-section.
     let line = quantity.line_parameter_scope().is_some();
-    if step.procedure == AnalysisProcedure::LineParameters || line {
-        return step.procedure == AnalysisProcedure::LineParameters
-            && step.family == PhysicsFamily::Electromagnetic
+    if procedure == AnalysisProcedure::LineParameters || line {
+        return procedure == AnalysisProcedure::LineParameters
+            && family == PhysicsFamily::Electromagnetic
             && line;
     }
-    (match step.family {
+    (match family {
         PhysicsFamily::Structural => is_structural(quantity),
         PhysicsFamily::Thermal => is_thermal(quantity),
         PhysicsFamily::Electromagnetic => is_electromagnetic(quantity),
@@ -224,6 +235,35 @@ pub fn quantity_supported(step: &ProcedureStep, quantity: ObservationQuantity) -
             is_fluid(quantity) || is_structural(quantity)
         }
     }) || is_universal(quantity)
+}
+
+/// The field locations a step of `family` publishes `quantity` at
+/// (`analysis.<step>.field.<location>.<quantity>`), read from the source-name table
+/// ([`crate::SOURCE_QUANTITIES`]). A coupled family publishes what its physics
+/// publish, plus the rows keyed to the coupled family itself. Empty when the family publishes no field of the quantity. The checker refuses any
+/// other location, and Simulation setup offers only these.
+pub fn published_locations(family: PhysicsFamily, quantity: ObservationQuantity) -> Vec<FieldLocation> {
+    use PhysicsFamily as F;
+    let physics: &[PhysicsFamily] = match family {
+        F::Coupled(CoupledPhysicsFamily::Thermomechanical) => &[F::Structural, F::Thermal],
+        F::Coupled(CoupledPhysicsFamily::Electrothermal) => &[F::Electromagnetic, F::Thermal],
+        F::Coupled(CoupledPhysicsFamily::ConjugateHeatTransfer) => &[F::Fluid, F::Thermal],
+        F::Coupled(CoupledPhysicsFamily::FluidStructureInteraction) => &[F::Fluid, F::Structural],
+        _ => std::slice::from_ref(&family),
+    };
+    let mut locations = Vec::new();
+    for row in crate::SOURCE_QUANTITIES.iter().filter(|row| row.quantity == quantity) {
+        for (owner, published) in row.fields {
+            if *owner == family || physics.contains(owner) {
+                for location in *published {
+                    if !locations.contains(location) {
+                        locations.push(*location);
+                    }
+                }
+            }
+        }
+    }
+    locations
 }
 
 fn is_structural(quantity: ObservationQuantity) -> bool {
@@ -570,7 +610,22 @@ pub(super) fn is_scalar_result(spec: &ObservationSpec) -> bool {
 mod tests {
     use crate::{ObservationQuantity, ProcedureStep};
 
-    use super::quantity_supported;
+    use super::{published_locations, quantity_supported};
+
+    #[test]
+    fn published_locations_follow_the_family() {
+        use crate::{CoupledPhysicsFamily as C, FieldLocation as L, ObservationQuantity as Q, PhysicsFamily as F};
+        assert_eq!(published_locations(F::Structural, Q::Displacement), [L::Node]);
+        assert_eq!(published_locations(F::Structural, Q::VonMisesStress), [L::Element, L::Node]);
+        assert_eq!(published_locations(F::Fluid, Q::FluidVelocity), [L::Node, L::Cell]);
+        assert!(published_locations(F::Thermal, Q::Displacement).is_empty());
+        let coupled = F::Coupled(C::Thermomechanical);
+        assert_eq!(published_locations(coupled, Q::Temperature), [L::Node, L::Element, L::IntegrationPoint]);
+        assert_eq!(published_locations(F::Thermal, Q::Temperature), [L::Node]);
+        assert_eq!(published_locations(F::Coupled(C::Electrothermal), Q::Temperature), [L::Node]);
+        assert_eq!(published_locations(coupled, Q::Displacement), [L::Node]);
+        assert!(published_locations(F::Structural, Q::HeatRate).is_empty());
+    }
 
     #[test]
     fn quantity_support_follows_physics_family() {
