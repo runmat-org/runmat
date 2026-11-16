@@ -15,6 +15,7 @@ use crate::analysis::workspace_effect::current_scope_bindings;
 pub(crate) struct LocalState {
     pub fact: Option<ValueFact>,
     pub literal: LiteralValue,
+    pub index_bounds: Option<runmat_types::ScalarIndexBounds>,
     pub assignment: InitFact,
 }
 
@@ -23,6 +24,7 @@ impl LocalState {
         Self {
             fact: None,
             literal: LiteralValue::Unknown,
+            index_bounds: None,
             assignment: InitFact::Unassigned,
         }
     }
@@ -31,6 +33,7 @@ impl LocalState {
         Self {
             fact: None,
             literal: LiteralValue::Unknown,
+            index_bounds: None,
             assignment: InitFact::RuntimeWorkspaceLookup,
         }
     }
@@ -38,6 +41,7 @@ impl LocalState {
     pub fn assigned(fact: ValueFact, literal: LiteralValue) -> Self {
         Self {
             fact: Some(fact),
+            index_bounds: crate::analysis::inference::literal_index_bounds(&literal),
             literal,
             assignment: InitFact::DefinitelyAssigned,
         }
@@ -45,6 +49,7 @@ impl LocalState {
 
     pub fn set(&mut self, fact: ValueFact, literal: LiteralValue) {
         self.fact = Some(fact);
+        self.index_bounds = crate::analysis::inference::literal_index_bounds(&literal);
         self.literal = literal;
         self.assignment = InitFact::DefinitelyAssigned;
     }
@@ -190,6 +195,15 @@ impl FlowState {
                     *id,
                     *root,
                     LocalState {
+                        index_bounds: if assignment == InitFact::RuntimeWorkspaceLookup {
+                            None
+                        } else {
+                            crate::analysis::inference::join_index_bounds(
+                                current.index_bounds,
+                                next.index_bounds,
+                                widen,
+                            )
+                        },
                         fact: if assignment == InitFact::RuntimeWorkspaceLookup {
                             None
                         } else {
@@ -224,10 +238,24 @@ impl FlowState {
             } else {
                 LiteralValue::Unknown
             };
-            if slot.assignment != assignment || slot.fact != fact || slot.literal != literal {
+            let index_bounds = if assignment == InitFact::RuntimeWorkspaceLookup {
+                None
+            } else {
+                crate::analysis::inference::join_index_bounds(
+                    slot.index_bounds,
+                    next.index_bounds,
+                    widen,
+                )
+            };
+            if slot.assignment != assignment
+                || slot.fact != fact
+                || slot.literal != literal
+                || slot.index_bounds != index_bounds
+            {
                 slot.assignment = assignment;
                 slot.fact = fact;
                 slot.literal = literal;
+                slot.index_bounds = index_bounds;
                 changed = true;
             }
         }
@@ -312,6 +340,7 @@ impl FlowState {
             if fact != local.fact {
                 local.fact = fact;
                 local.literal = LiteralValue::Unknown;
+                local.index_bounds = None;
                 local.assignment = InitFact::DefinitelyAssigned;
             }
         }

@@ -15,6 +15,7 @@ fs.writeFileSync(fixture, `
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct Root {
+    #[doc = "Array [x] coordinates"]
     pub required_value: String,
     #[serde(with = "runmat_types::physical::canonical_scalar")]
     pub canonical_modulus: YoungsModulus,
@@ -49,7 +50,7 @@ pub enum Spectrum {
 
 #[derive(Serialize)]
 #[serde(transparent)]
-pub struct PhysicalSeries(#[serde(with = "runmat_types::physical::canonical_storage")] pub Quantity<Frequency, Vec<f64>>);
+pub struct PhysicalSeries(#[doc = "Samples [Hz]"] #[serde(with = "runmat_types::physical::canonical_storage")] pub Quantity<Frequency, Vec<f64>>);
 
 #[derive(Serialize)]
 pub struct YoungsModulus { pub pascals: f64 }
@@ -76,6 +77,7 @@ pub enum Offset {
 #[derive(Serialize)]
 #[serde(rename_all = "snake_case", tag = "kind")]
 pub enum State {
+    #[doc = "Ready [state]"]
     Ready,
     Running { worker_count: u32 },
 }

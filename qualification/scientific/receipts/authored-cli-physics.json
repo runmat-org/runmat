@@ -86,14 +86,14 @@
       "encoding": "git-mode-type-blob-path-tuples-v1"
     },
     "accepted_inputs": {
-      "sha256": "190b41b66e4260e756e5a6187443feb05e3d1ae4f8b261e02a9ee57b831ab6da",
+      "sha256": "55f884d6cb44d49c880e97e043a427c54be4a91e9d00a6ab8874ac7cf6f03a06",
       "files": 26117,
       "encoding": "git-mode-type-blob-path-tuples-v1"
     },
-    "reason": "Conserves the recorded scientific measurements across the reviewed process-retirement lifecycle change. Apple group-signal EPERM commits to bounded observation and retains its error; positive leader/group retirement is still required. Linux and Windows retain their previous signal/error decisions. No solver arithmetic, scientific inputs, dependencies, compiler settings or measured thresholds change. The direct in-process circuit Session workload and CAD drawing host workload do not invoke this child-retirement path. The actual Mac meshing and supervisor conformance executables pass with unchanged assertions; they qualify the affected native path separately from these conserved scientific measurements.",
+    "reason": "Conserves the existing scientific measurements across release-publication metadata changes. The only scientific input changes remove publish=false from two required Rust libraries. Package versions, dependencies, features, targets, implementation source, numerical inputs and thresholds are unchanged. Rate-limit retry handling and release scheduling are publication tooling, not simulation execution. This review is not a rerun of scientific or performance measurements.",
     "review": {
-      "path": "qualification/scientific/reviews/process-retirement-20261112-authored-cli-physics.json",
-      "sha256": "cbc7ba8fd102722c0dae40e52273df44f1b85f188e5ebdc1ae1e7bb7f92b62c5"
+      "path": "qualification/scientific/reviews/publication-metadata-20261113-authored-cli-physics.json",
+      "sha256": "b34bd31eedf320142f506a8c9904c7f546cb4ce7fa9190f202bf21e4154a547b"
     }
   }
 }

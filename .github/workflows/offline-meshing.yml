@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       source_ref:
-        description: Exact source commit to qualify
+        description: Reviewed full commit SHA at the selected workflow branch or tag
         required: true
         type: string
 
@@ -19,11 +19,25 @@ jobs:
       CARGO_TARGET_DIR: ${{ github.workspace }}/target
       CARGO_INCREMENTAL: '0'
     steps:
+      - name: Validate qualification source
+        shell: bash
+        env:
+          EXPECTED_SOURCE: ${{ inputs.source_ref }}
+        run: |
+          set -euo pipefail
+          if [[ ! "${EXPECTED_SOURCE}" =~ ^[0-9a-f]{40}$ || "${EXPECTED_SOURCE}" != "${GITHUB_SHA}" ]]; then
+            echo 'Select the branch or tag containing the reviewed commit and enter its full tip SHA.' >&2
+            exit 1
+          fi
       - uses: actions/checkout@v5
         with:
-          ref: ${{ inputs.source_ref }}
+          ref: ${{ github.sha }}
+          persist-credentials: false
       - uses: dtolnay/rust-toolchain@1.90.0
       - uses: Swatinem/rust-cache@v2
+        with:
+          # Start a clean namespace; GitHub also scopes writes to the dispatch ref.
+          prefix-key: offline-meshing-v2
       - name: Install native dependencies
         run: |
           sudo apt-get update

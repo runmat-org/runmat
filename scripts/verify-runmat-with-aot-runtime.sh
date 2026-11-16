@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-if [[ $# -ne 1 ]]; then
-  echo "usage: $0 <runmat-binary>" >&2
+if [[ $# -lt 1 || $# -gt 2 ]]; then
+  echo "usage: $0 <runmat-binary> [matching-runtime-pack.zip]" >&2
   exit 2
 fi
 
@@ -49,5 +49,8 @@ smoke_directory="$(mktemp -d "${TMPDIR:-/tmp}/runmat-aot-smoke.XXXXXX")"
 trap 'rm -rf "$smoke_directory"' EXIT
 printf 'x = 2 + 3;\ndisp(x);\n' > "$smoke_directory/smoke.m"
 
-"$runmat_binary" compile "$smoke_directory/smoke.m" -o "$smoke_directory/smoke"
+if [[ $# -eq 2 ]]; then
+  "$runmat_binary" --offline aot install --from "$2"
+fi
+"$runmat_binary" --offline compile "$smoke_directory/smoke.m" -o "$smoke_directory/smoke"
 "$smoke_directory/smoke" | grep -Fx '5'

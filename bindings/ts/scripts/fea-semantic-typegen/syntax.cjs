@@ -30,6 +30,19 @@ function matching(source, start, open, close) {
   throw new Error(`Unclosed ${open} at byte ${start}`);
 }
 
+function leadingAttributes(source) {
+  let cursor = 0;
+  const skipWhitespace = () => {
+    while (cursor < source.length && /\s/.test(source[cursor])) cursor += 1;
+  };
+  skipWhitespace();
+  while (source.startsWith("#[", cursor)) {
+    cursor = matching(source, cursor + 1, "[", "]") + 1;
+    skipWhitespace();
+  }
+  return { attrs: source.slice(0, cursor), rest: source.slice(cursor) };
+}
+
 function splitTopLevel(source, separator = ",") {
   const output = [];
   let start = 0;
@@ -228,6 +241,7 @@ function hasSerde(attrs, key) {
 
 module.exports = {
   hasSerde,
+  leadingAttributes,
   parseDeclarations,
   rustFiles,
   serde,

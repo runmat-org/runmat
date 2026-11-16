@@ -877,7 +877,7 @@ impl PlotOverlay {
             (plot_area, None)
         };
         let (rows, cols) = plot_renderer.figure_axes_grid();
-        if rows * cols <= 1 {
+        if rows * cols <= 1 || plot_renderer.figure_axes_use_independent_layout() {
             (0..plot_renderer.figure_axes_count().max(1))
                 .map(|axes_index| {
                     let axes_outer =
@@ -1039,9 +1039,9 @@ impl PlotOverlay {
     }
 
     pub fn outer_plot_area_for_axes(available_rect: Rect, plot_renderer: &PlotRenderer) -> Rect {
-        let (rows, cols) = plot_renderer.figure_axes_grid();
-        let single_axes_is_3d = rows * cols <= 1 && Self::axes_is_3d(plot_renderer, 0);
-        if single_axes_is_3d || rows * cols > 1 {
+        let single_axes_is_3d =
+            plot_renderer.figure_axes_count() <= 1 && Self::axes_is_3d(plot_renderer, 0);
+        if single_axes_is_3d || plot_renderer.figure_requires_axes_layout() {
             available_rect
         } else {
             available_rect.shrink2(egui::vec2(8.0, 8.0))
@@ -1225,6 +1225,9 @@ impl PlotOverlay {
             .iter()
             .enumerate()
             .filter_map(|(index, rect)| {
+                if !renderer.figure_axes_is_live(index) {
+                    return None;
+                }
                 let mut camera = renderer.axes_camera(index)?.clone();
                 // The rendered viewport uses this axes rectangle, not the outer
                 // figure's aspect ratio. Rebuild the projection for the same
@@ -1285,8 +1288,10 @@ impl PlotOverlay {
         }
 
         let axes_count = plot_renderer.figure_axes_count().max(1);
-        if rows * cols > 1 || axes_count > 1 {
-            let rects = if rows * cols > 1 {
+        let axes_layout = plot_renderer.figure_requires_axes_layout();
+        if axes_layout {
+            let independent_layout = plot_renderer.figure_axes_use_independent_layout();
+            let rects = if rows * cols > 1 && !independent_layout {
                 self.compute_subplot_rects(
                     plot_area_rect,
                     rows,
@@ -1297,7 +1302,11 @@ impl PlotOverlay {
             } else {
                 vec![plot_area_rect; axes_count]
             };
-            let grid_cols = if rows * cols > 1 { cols } else { 0 };
+            let grid_cols = if rows * cols > 1 && !independent_layout {
+                cols
+            } else {
+                0
+            };
             let mut panel_layouts = self
                 .grid_panel_layouts(&rects, grid_cols, plot_renderer, config.font_scale)
                 .into_iter();
@@ -1321,6 +1330,9 @@ impl PlotOverlay {
                 let frame_rect =
                     Self::snap_rect_to_pixels(panel_layout.frame_rect, ui.ctx().pixels_per_point());
                 rendered_axes_rects.push(r);
+                if !plot_renderer.figure_axes_is_live(i) {
+                    continue;
+                }
                 log::debug!(
                     target: "runmat_plot.axes_layout",
                     "computed axes panel layout axes_index={} rows={} cols={} is_3d={} cell=({}, {})..({}, {}) frame=({}, {})..({}, {}) content=({}, {})..({}, {})",
@@ -1663,13 +1675,13 @@ impl PlotOverlay {
                 );
             }
         }
-        let centered_plot_rect = if rows * cols <= 1 && axes_count <= 1 {
+        let centered_plot_rect = if !axes_layout {
             self.panel_layout_for_axes(plot_area_rect, plot_renderer, 0, config.font_scale)
                 .plot_rect
         } else {
             plot_area_rect
         };
-        for (label, pos) in if rows * cols <= 1 && axes_count <= 1 {
+        for (label, pos) in if !axes_layout {
             plot_renderer.active_axes_pie_labels()
         } else {
             Vec::new()
@@ -1686,7 +1698,7 @@ impl PlotOverlay {
         }
 
         // Draw legend if enabled and entries available
-        if rows * cols <= 1 && axes_count <= 1 && plot_renderer.overlay_show_legend_for_axes(0) {
+        if !axes_layout && plot_renderer.overlay_show_legend_for_axes(0) {
             // Per-axes entries include each pie slice.
             self.draw_axes_legend(ui, centered_plot_rect, plot_renderer, 0, config.font_scale);
         }

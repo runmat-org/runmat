@@ -10,6 +10,7 @@ pub(super) fn solve_policy(
     stiffness_nonzeros: u64,
     admission: SolverAdmissionResourcePolicy,
     transpose_index_bytes: u64,
+    preparation_bytes: u64,
 ) -> Result<SolveResourcePolicy, ResourcePlanningError> {
     // Multiplier enforcement is solved on the affine-reduced SPD system (one canonical path).
     // The elastic rigidity path always solves with AMG-preconditioned CG.
@@ -62,8 +63,85 @@ pub(super) fn solve_policy(
         preconditioner: storage,
         admission,
         transpose_index_bytes_upper_bound: ByteCount(transpose_index_bytes),
+        preparation_bytes_upper_bound: ByteCount(preparation_bytes),
         path,
     })
+}
+
+/// Memory the solve allocates to prepare the operator it proves and solves while the assembled
+/// stiffness stays resident: the affine-reduced operator (an owned, reduced admission pattern)
+/// or the identity-constrained copy, plus the fill-reducing ordering's graph when a
+/// factorization proves it. The allocator keeps that freed graph resident through the numeric
+/// factorization, so it is charged beside the factor.
+pub(in crate::planning::resource) fn operator_preparation_bytes(
+    pattern: std::borrow::Cow<'_, crate::algebra::SparsePattern>,
+    path: StaticSolvePath,
+) -> Result<u64, ResourcePlanningError> {
+    let reduced = matches!(pattern, std::borrow::Cow::Owned(_));
+    let factored = path == StaticSolvePath::ProvingFactorization;
+    let rows = u64::try_from(pattern.rows())
+        .map_err(|_| ResourcePlanningError::Overflow("prepared operator rows"))?;
+    let entries = u64::try_from(pattern.column_indices().len())
+        .map_err(|_| ResourcePlanningError::Overflow("prepared operator entries"))?;
+    let copy = if reduced {
+        affine_reduced_operator_bytes(rows, entries)?
+    } else {
+        identity_constrained_operator_bytes(rows, entries)?
+    };
+    let ordering = if factored {
+        // The copy adds at most one diagonal entry per row to the planned pattern.
+        runmat_sparse_solvers::estimate::ordering_scratch_bytes(
+            pattern.rows(),
+            pattern
+                .column_indices()
+                .len()
+                .checked_add(pattern.rows())
+                .ok_or(ResourcePlanningError::Overflow("ordered entries"))?,
+        )
+    } else {
+        0
+    };
+    checked_add(copy, ordering, "operator preparation bytes")
+}
+
+/// The identity-constrained copy of the stiffness that a direct-elimination solve proves and
+/// solves while the assembled stiffness stays resident: every stored entry plus a unit diagonal
+/// per row, as row offsets, 8-byte column indices and values.
+pub(in crate::planning::resource) fn identity_constrained_operator_bytes(
+    rows: u64,
+    stiffness_nonzeros: u64,
+) -> Result<u64, ResourcePlanningError> {
+    let entries = stiffness_nonzeros
+        .checked_add(rows)
+        .ok_or(ResourcePlanningError::Overflow(
+            "identity-constrained entries",
+        ))?;
+    checked_add(
+        checked_bytes(
+            rows.checked_add(1)
+                .ok_or(ResourcePlanningError::Overflow("identity-constrained rows"))?,
+            8,
+            "identity-constrained row offsets",
+        )?,
+        checked_bytes(entries, 16, "identity-constrained columns and values")?,
+        "identity-constrained operator bytes",
+    )
+}
+
+/// The affine-reduced operator `Tᵀ K T` beside the assembled stiffness: the planned reduced
+/// support (retained for the solve), the operator's own copy of that pattern, and its values.
+fn affine_reduced_operator_bytes(rows: u64, entries: u64) -> Result<u64, ResourcePlanningError> {
+    let offsets = checked_bytes(
+        rows.checked_add(1)
+            .ok_or(ResourcePlanningError::Overflow("reduced operator rows"))?,
+        16,
+        "reduced support and operator row offsets",
+    )?;
+    checked_add(
+        offsets,
+        checked_bytes(entries, 24, "reduced support, operator columns and values")?,
+        "affine-reduced operator bytes",
+    )
 }
 
 pub(in crate::planning::resource) fn saddle_gmres_workspace_bytes(
@@ -167,6 +245,7 @@ mod tests {
             ConstraintEnforcement::LagrangeMultiplier,
             144,
             admission.clone(),
+            0,
             0,
         )
         .unwrap();

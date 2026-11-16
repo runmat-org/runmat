@@ -4,7 +4,7 @@ use runmat_types::{
     infer_mutation, infer_struct, infer_tensor_aggregate, AssignmentCreationPolicy,
     AssignmentShapePolicy, DynamicReason, IndexKind, IndexResultContext, IndexSelectorFact,
     MemberName, MutationContract, NumericClass, NumericDomain, NumericFact, PlaceMutationKind,
-    SequenceUse, ShapeFact, ValueFact, ValueKindFact,
+    ScalarIndexBounds, SequenceUse, ShapeFact, ValueFact, ValueKindFact,
 };
 use std::collections::BTreeMap;
 
@@ -15,6 +15,140 @@ fn numeric(class: NumericClass, shape: ShapeFact) -> ValueFact {
     }));
     fact.shape = shape;
     fact
+}
+
+#[test]
+fn bounded_scalar_indices_preserve_only_proven_in_bounds_shapes() {
+    let base = numeric(
+        NumericClass::Double,
+        ShapeFact::from(vec![Some(6), Some(10)]),
+    );
+    let assigned = numeric(
+        NumericClass::Double,
+        ShapeFact::from(vec![Some(6), Some(1)]),
+    );
+    let contract = MutationContract {
+        kind: PlaceMutationKind::IndexedAssign,
+        creation: AssignmentCreationPolicy::CreateArrayByIndex,
+        shape: AssignmentShapePolicy::MatlabCompatible,
+    };
+    let bounded = |maximum| {
+        [
+            IndexSelectorFact::Colon,
+            IndexSelectorFact::BoundedScalar(ScalarIndexBounds::new(1, maximum).unwrap()),
+        ]
+    };
+    assert_eq!(
+        infer_index_mutation(&base, &bounded(10), &assigned, contract)
+            .fact
+            .shape,
+        base.shape
+    );
+    assert_eq!(
+        infer_index_mutation(&base, &bounded(11), &assigned, contract)
+            .fact
+            .shape,
+        ShapeFact::Unknown
+    );
+    let uncertain = infer_index(
+        &base,
+        IndexKind::Paren,
+        &bounded(11),
+        IndexResultContext::ReadSingle,
+    );
+    assert!(
+        uncertain.diagnostics.is_empty(),
+        "a range crossing the bound is not definitely invalid"
+    );
+    assert!(ScalarIndexBounds::new(0, 1).is_none());
+    assert!(ScalarIndexBounds::new(2, 1).is_none());
+    assert!(serde_json::from_str::<ScalarIndexBounds>(r#"{"minimum":0,"maximum":1}"#).is_err());
+    let restored: ScalarIndexBounds =
+        serde_json::from_str(r#"{"minimum":1,"maximum":10}"#).unwrap();
+    assert_eq!(restored, ScalarIndexBounds::new(1, 10).unwrap());
+}
+
+#[test]
+fn numeric_linear_selection_shares_runtime_vector_orientation() {
+    for (source, selector, expected) in [
+        (vec![6, 1], vec![1, 3], vec![3, 1]),
+        (vec![1, 6], vec![3, 1], vec![1, 3]),
+        (vec![1, 1], vec![3, 1], vec![3, 1]),
+        (vec![6, 1], vec![2, 2], vec![2, 2]),
+        (vec![2, 3], vec![3, 1], vec![3, 1]),
+        (vec![6, 1, 1], vec![1, 3], vec![3, 1]),
+    ] {
+        let shape =
+            |dims: Vec<usize>| ShapeFact::from(dims.into_iter().map(Some).collect::<Vec<_>>());
+        let result = infer_index(
+            &numeric(NumericClass::Double, shape(source)),
+            IndexKind::Paren,
+            &[IndexSelectorFact::Numeric(numeric(
+                NumericClass::Double,
+                shape(selector),
+            ))],
+            IndexResultContext::ReadSingle,
+        );
+        assert!(result.fact.shape.is_proven_equivalent(&shape(expected)));
+    }
+    let unknown = infer_index(
+        &numeric(NumericClass::Double, ShapeFact::Unknown),
+        IndexKind::Paren,
+        &[IndexSelectorFact::Numeric(numeric(
+            NumericClass::Double,
+            ShapeFact::from(vec![Some(1), Some(3)]),
+        ))],
+        IndexResultContext::ReadSingle,
+    );
+    assert_eq!(unknown.fact.shape, ShapeFact::Unknown);
+    let selected = infer_index(
+        &numeric(
+            NumericClass::Double,
+            ShapeFact::from(vec![Some(1), Some(6)]),
+        ),
+        IndexKind::Paren,
+        &[IndexSelectorFact::Logical(ValueFact::proven(
+            ValueKindFact::Logical,
+            ShapeFact::from(vec![Some(6), Some(1)]),
+            runmat_types::StorageFact::Dense,
+        ))],
+        IndexResultContext::ReadSingle,
+    );
+    assert_eq!(selected.fact.shape.known_dims(), Some(vec![Some(1), None]));
+}
+
+#[test]
+fn partial_vector_selection_preserves_only_unambiguous_orientation() {
+    for (source, selector, expected) in [
+        (
+            vec![Some(1), None],
+            vec![Some(1), Some(22)],
+            Some(vec![Some(1), Some(22)]),
+        ),
+        (
+            vec![None, Some(1)],
+            vec![Some(22), Some(1)],
+            Some(vec![Some(22), Some(1)]),
+        ),
+        (vec![None, Some(1)], vec![Some(1), Some(22)], None),
+        (vec![Some(1), None], vec![Some(22), Some(1)], None),
+        (vec![None, None], vec![Some(1), Some(22)], None),
+    ] {
+        let result = infer_index(
+            &numeric(NumericClass::Double, ShapeFact::from(source)),
+            IndexKind::Paren,
+            &[IndexSelectorFact::Numeric(numeric(
+                NumericClass::Double,
+                ShapeFact::from(selector),
+            ))],
+            IndexResultContext::ReadSingle,
+        );
+        assert!(result.diagnostics.is_empty());
+        assert_eq!(
+            result.fact.shape,
+            expected.map_or(ShapeFact::Unknown, ShapeFact::from)
+        );
+    }
 }
 
 #[test]

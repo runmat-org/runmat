@@ -24,7 +24,7 @@ pub struct QuiverGpuParams {
     pub head_size: f32,
 }
 
-#[repr(C)]
+#[repr(C, align(16))]
 #[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
 struct QuiverUniforms {
     color: [f32; 4],
@@ -34,7 +34,7 @@ struct QuiverUniforms {
     xy_mode: u32,
     scale: f32,
     head_size: f32,
-    _pad: f32,
+    _pad: [f32; 2],
 }
 
 pub fn pack_vertices(
@@ -68,7 +68,7 @@ pub fn pack_vertices(
         xy_mode: inputs.xy_mode,
         scale: params.scale,
         head_size: params.head_size,
-        _pad: 0.0,
+        _pad: [0.0; 2],
     };
     let uniform_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
         label: Some("quiver-pack-uniforms"),

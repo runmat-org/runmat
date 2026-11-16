@@ -53,7 +53,7 @@ impl FigureSnapshot {
 }
 
 impl FigureScene {
-    pub const SCHEMA_VERSION: u32 = 7;
+    pub const SCHEMA_VERSION: u32 = 8;
 
     pub fn capture(figure: &Figure) -> Self {
         if let Some(scene) = figure.geometry_source() {
@@ -257,6 +257,9 @@ impl FigureScene {
         figure.background_color = rgba_to_vec4(self.metadata.background_rgba);
 
         for plot in self.plots {
+            if !figure.axes_is_live(plot.axes_index() as usize) {
+                return Err("figure scene plot references an unavailable axes".into());
+            }
             plot.apply_to_figure(&mut figure)?;
         }
 
@@ -320,6 +323,25 @@ impl FigureScene {
         }
         if self.schema_version < 5 && !self.layout.axes_grid_cells.is_empty() {
             return Err("axes grid-cell identity requires figure scene schema version 5".into());
+        }
+        if self.schema_version < 8
+            && self
+                .layout
+                .axes_grid_cells
+                .iter()
+                .flatten()
+                .any(|cell| cell.row_span != 1 || cell.column_span != 1)
+        {
+            return Err("subplot spans require figure scene schema version 8".into());
+        }
+        if self.schema_version < 8
+            && self
+                .metadata
+                .axes_metadata
+                .as_ref()
+                .is_some_and(|axes| axes.iter().any(|axes| axes.retired))
+        {
+            return Err("retired axes require figure scene schema version 8".into());
         }
         Ok(())
     }

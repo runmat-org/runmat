@@ -53,6 +53,10 @@ pub struct NativeExecutionConfig {
     pub worker_capabilities: BTreeSet<Capability>,
     pub host_inventory: runmat_execution::host::ExecutionHostInventory,
     pub accelerator_devices: Vec<runmat_execution::resource::AcceleratorDevice>,
+    /// Receives live progress of FEA work run under this configuration. Host wiring only: it
+    /// never enters serialization, equality or a study identity.
+    #[serde(skip)]
+    pub progress_observer: crate::local_progress::ProgressObserverSlot,
 }
 
 impl NativeExecutionConfig {
@@ -110,6 +114,7 @@ impl NativeExecutionConfig {
             ]),
             host_inventory,
             accelerator_devices,
+            progress_observer: Default::default(),
         })
     }
 

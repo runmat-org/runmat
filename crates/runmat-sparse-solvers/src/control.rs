@@ -8,6 +8,8 @@ pub enum ProgressPhase {
     Ordering,
     SymbolicFactorization,
     NumericFactorization,
+    /// Numeric factorization finished; follows its `NumericFactorization` report.
+    FactorizationComplete,
     TriangularSolve,
     Refinement,
     Krylov,

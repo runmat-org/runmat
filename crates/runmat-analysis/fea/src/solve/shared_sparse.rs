@@ -89,8 +89,8 @@ pub(crate) fn fea_cancelled() -> bool {
 pub(crate) fn control() -> SolveControl<'static> {
     SolveControl {
         cancelled: Some(&fea_cancelled),
-        progress: None,
-        progress_stride: 0,
+        progress: Some(&crate::progress::solver::report_solver_progress),
+        progress_stride: crate::progress::solver::SOLVER_PROGRESS_STRIDE,
     }
 }
 

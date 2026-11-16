@@ -3,7 +3,7 @@
 use super::*;
 use runmat_analysis_core::*;
 
-fn element_peak(step_id: &str, geometry_id: &str, output_id: &str) -> AuthoredOutput {
+pub(super) fn element_peak(step_id: &str, geometry_id: &str, output_id: &str) -> AuthoredOutput {
     AuthoredOutput {
         output_id: output_id.into(),
         expression: AuthoredOutputExpression::SpatialReduction {
@@ -20,7 +20,7 @@ fn element_peak(step_id: &str, geometry_id: &str, output_id: &str) -> AuthoredOu
     }
 }
 
-fn displacement_peak(step_id: &str, geometry_id: &str) -> AuthoredOutput {
+pub(super) fn displacement_peak(step_id: &str, geometry_id: &str) -> AuthoredOutput {
     AuthoredOutput {
         output_id: "peak_displacement".into(),
         expression: AuthoredOutputExpression::SpatialReduction {

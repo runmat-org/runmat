@@ -565,16 +565,21 @@ fn read_embedding_text_from_zip(bytes: &[u8]) -> BuiltinResult<String> {
         if entry.is_dir() {
             continue;
         }
-        if entry.size() > MAX_EMBEDDING_FILE_BYTES {
-            return Err(embedding_error(
-                "readWordEmbedding",
-                format!(
-                    "readWordEmbedding: zip entry '{}' exceeds maximum supported size of {MAX_EMBEDDING_FILE_BYTES} bytes",
-                    entry.name()
-                ),
-            ));
-        }
-        let name = entry.name().to_ascii_lowercase();
+        let name = {
+            let name = entry.name().map_err(|error| {
+                embedding_error(
+                    "readWordEmbedding",
+                    format!("readWordEmbedding: unable to decode zip entry name: {error}"),
+                )
+            })?;
+            if entry.size() > MAX_EMBEDDING_FILE_BYTES {
+                return Err(embedding_error(
+                    "readWordEmbedding",
+                    format!("readWordEmbedding: zip entry '{name}' exceeds maximum supported size of {MAX_EMBEDDING_FILE_BYTES} bytes"),
+                ));
+            }
+            name.to_ascii_lowercase()
+        };
         let text_like = matches!(
             Path::new(&name)
                 .extension()

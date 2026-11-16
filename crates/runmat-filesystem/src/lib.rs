@@ -12,6 +12,8 @@ mod dialog;
 #[cfg(not(target_arch = "wasm32"))]
 mod file_lock;
 mod invocation;
+#[cfg(target_arch = "wasm32")]
+pub mod js;
 mod mapped_backing;
 mod memory;
 #[cfg(not(target_arch = "wasm32"))]
@@ -23,6 +25,7 @@ mod provider_path;
 mod captured_read;
 mod resource;
 mod selected_provider;
+mod source_overlay;
 mod staged_output;
 mod sync_access;
 mod unavailable;
@@ -57,7 +60,9 @@ pub use native_path::{
     NativeProcessRevocation,
 };
 pub use native_path_intent::NativePathIntent;
-pub use provider_path::{capture_provider_for_paths, capture_provider_path, FsPathNamespace};
+pub use provider_path::{
+    capture_provider_for_paths, capture_provider_path, normalize_virtual_path, FsPathNamespace,
+};
 use provider_path::{capture_provider_many, capture_provider_pair};
 #[cfg(not(target_arch = "wasm32"))]
 pub use remote::{RemoteFsConfig, RemoteFsProvider};
@@ -1483,6 +1488,7 @@ mod tests {
         provider_override_lock()
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     fn comparable_path(path: impl AsRef<Path>) -> PathBuf {
         let path = path.as_ref();
         let canonical = std::fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf());
@@ -1503,6 +1509,7 @@ mod tests {
         }
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     fn assert_same_path(left: impl AsRef<Path>, right: impl AsRef<Path>) {
         assert_eq!(comparable_path(left), comparable_path(right));
     }
@@ -1574,6 +1581,7 @@ mod tests {
         previous_current_dir: Option<PathBuf>,
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     struct ProcessCwdGuard {
         previous: PathBuf,
     }
@@ -1584,6 +1592,7 @@ mod tests {
         files: Mutex<HashMap<PathBuf, Vec<u8>>>,
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     impl Drop for ProcessCwdGuard {
         fn drop(&mut self) {
             let _ = std::env::set_current_dir(&self.previous);

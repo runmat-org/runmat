@@ -30,11 +30,12 @@ use super::{
 #[path = "dataflow/workspace_binding_tests.rs"]
 mod workspace_binding_tests;
 
-pub(crate) fn assign_place_fact(
+pub(crate) fn assign_place_fact_with_bounds(
     place: &MirPlace,
     assigned: ValueFact,
     mutation: Option<&crate::MirPlaceMutation>,
     facts: &mut [Option<ValueFact>],
+    bounds: &impl Fn(crate::MirLocalId) -> Option<runmat_types::ScalarIndexBounds>,
 ) {
     match place {
         MirPlace::Local(local) => facts[local.0] = Some(assigned),
@@ -47,7 +48,7 @@ pub(crate) fn assign_place_fact(
                 )
             });
             let updated = infer_member_write(&current, member, &assigned, allow_creation).fact;
-            assign_place_fact(base, updated, mutation, facts);
+            assign_place_fact_with_bounds(base, updated, mutation, facts, bounds);
         }
         MirPlace::Index(base, indexing) => {
             let current = place_fact(base, facts);
@@ -70,19 +71,20 @@ pub(crate) fn assign_place_fact(
             }
             let updated = infer_index_mutation(
                 &current,
-                &index_selectors(indexing, facts),
+                &index_selectors_with_bounds(indexing, facts, bounds),
                 &assigned,
                 contract,
             )
             .fact;
-            assign_place_fact(base, updated, mutation, facts);
+            assign_place_fact_with_bounds(base, updated, mutation, facts, bounds);
         }
         MirPlace::DynamicMember(base, _) => {
-            assign_place_fact(
+            assign_place_fact_with_bounds(
                 base,
                 ValueFact::unknown(DynamicReason::DynamicDispatch),
                 mutation,
                 facts,
+                bounds,
             );
         }
         MirPlace::Binding(_) => {}
@@ -191,25 +193,10 @@ pub(crate) fn simple_rvalue_inference(
             };
             infer_range(numeric_operand(start), step, numeric_operand(end))
         }
-        MirRvalue::Index { base, indexing }
-            if matches!(
-                indexing.result_context,
-                runmat_types::IndexResultContext::ReadCommaList
-                    | runmat_types::IndexResultContext::FunctionArgumentExpansion
-            ) =>
-        {
-            legacy_sequence_as_value_inference(runmat_types::infer_index_sequence(
-                &simple_operand_fact(base, facts),
-                indexing.kind,
-                &index_selectors(indexing, facts),
-                indexing.result_context,
-            ))
-        }
-        MirRvalue::Index { base, indexing } => infer_index(
+        MirRvalue::Index { base, indexing } => indexed_value_inference(
             &simple_operand_fact(base, facts),
-            indexing.kind,
+            indexing,
             &index_selectors(indexing, facts),
-            indexing.result_context,
         ),
         MirRvalue::Member {
             base,
@@ -239,6 +226,28 @@ pub(crate) fn simple_rvalue_inference(
         MirRvalue::Distributed(_) | MirRvalue::Collective(_) => {
             runmat_types::FactInference::exact(dynamic_value())
         }
+    }
+}
+
+/// Infer an indexed value using selectors from the caller's available proofs.
+pub(crate) fn indexed_value_inference(
+    base: &ValueFact,
+    indexing: &MirIndexing,
+    selectors: &[IndexSelectorFact],
+) -> runmat_types::FactInference {
+    if matches!(
+        indexing.result_context,
+        runmat_types::IndexResultContext::ReadCommaList
+            | runmat_types::IndexResultContext::FunctionArgumentExpansion
+    ) {
+        legacy_sequence_as_value_inference(runmat_types::infer_index_sequence(
+            base,
+            indexing.kind,
+            selectors,
+            indexing.result_context,
+        ))
+    } else {
+        infer_index(base, indexing.kind, selectors, indexing.result_context)
     }
 }
 
@@ -423,12 +432,34 @@ pub(crate) fn index_selectors(
     indexing: &MirIndexing,
     facts: &[Option<ValueFact>],
 ) -> Vec<IndexSelectorFact> {
+    index_selectors_with_bounds(indexing, facts, &|_| None)
+}
+
+pub(crate) fn index_selectors_with_bounds(
+    indexing: &MirIndexing,
+    facts: &[Option<ValueFact>],
+    bounds: &impl Fn(crate::MirLocalId) -> Option<runmat_types::ScalarIndexBounds>,
+) -> Vec<IndexSelectorFact> {
     indexing
         .components
         .iter()
         .map(|component| match component {
             MirIndexComponent::Colon => IndexSelectorFact::Colon,
-            MirIndexComponent::Expr(operand) => index_selector_for_operand(operand, facts),
+            MirIndexComponent::Expr(operand) => {
+                if let MirOperand::Local(local) = operand {
+                    let fact = simple_operand_fact(operand, facts);
+                    if fact.is_scalar() && matches!(fact.kind, ValueKindFact::Numeric(_)) {
+                        if let Some(bounds) = bounds(*local) {
+                            return if bounds.minimum() == bounds.maximum() {
+                                IndexSelectorFact::KnownOneBasedIndex(bounds.minimum())
+                            } else {
+                                IndexSelectorFact::BoundedScalar(bounds)
+                            };
+                        }
+                    }
+                }
+                index_selector_for_operand(operand, facts)
+            }
             MirIndexComponent::ContextualExpr(_)
             | MirIndexComponent::PreparedExpr(_)
             | MirIndexComponent::Expansion(_) => {
@@ -442,17 +473,18 @@ fn index_selector_for_operand(
     operand: &MirOperand,
     facts: &[Option<ValueFact>],
 ) -> IndexSelectorFact {
-    if let Some(index) =
-        numeric_operand(operand).filter(|index| *index >= 1.0 && index.fract() == 0.0)
-    {
-        IndexSelectorFact::KnownOneBasedIndex(index as usize)
-    } else {
-        let fact = simple_operand_fact(operand, facts);
-        if matches!(fact.kind, ValueKindFact::Logical) {
-            IndexSelectorFact::Logical(fact)
-        } else {
-            IndexSelectorFact::Numeric(fact)
+    if let MirOperand::Constant(constant) = operand {
+        if let Some(index) =
+            crate::analysis::inference::literal_index_position(&literal_value(constant))
+        {
+            return IndexSelectorFact::KnownOneBasedIndex(index);
         }
+    }
+    let fact = simple_operand_fact(operand, facts);
+    if matches!(fact.kind, ValueKindFact::Logical) {
+        IndexSelectorFact::Logical(fact)
+    } else {
+        IndexSelectorFact::Numeric(fact)
     }
 }
 

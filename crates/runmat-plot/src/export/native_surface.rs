@@ -997,13 +997,14 @@ impl NativeSurfaceRenderContext {
             }
 
             let (rows, cols) = self.renderer.figure_axes_grid();
+            let expected_axes = self.renderer.figure_axes_count().max(1);
             log::debug!(
                 "runmat-plot: native_surface.render_scene_with_overlay.axes_grid rows={} cols={} plot_area_present={}",
                 rows,
                 cols,
                 plot_area_points.is_some()
             );
-            if rows * cols > 1 {
+            if self.renderer.figure_requires_axes_layout() {
                 log::debug!(
                     "runmat-plot: native_surface.render_scene_with_overlay.branch_subplot_axes"
                 );
@@ -1022,9 +1023,9 @@ impl NativeSurfaceRenderContext {
                     rows,
                     cols,
                     existing_rect_count,
-                    rows * cols
+                    expected_axes
                 );
-                let rects = if overlay.plot_overlay.axes_plot_rects().len() == rows * cols {
+                let rects = if overlay.plot_overlay.axes_plot_rects().len() == expected_axes {
                     log::debug!(
                         "runmat-plot: native_surface.render_scene_with_overlay.subplot_rect_source_existing rects={}",
                         existing_rect_count

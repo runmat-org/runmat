@@ -76,6 +76,14 @@ pub async fn execute_prepared_study_locally_with_observers(
     observers: LocalStructuralStudyObservers,
 ) -> NativeExecutionResult<LocalStudyCompletion> {
     const OPERATION: &str = "fea.typed_study";
+    // Every event of this run, including worker progress, passes one rate-limiting relay that
+    // also sends heartbeats while a phase reports no new count.
+    let (progress, _heartbeat) = crate::local_progress::relay_observer(observers.progress);
+    let observers = LocalStructuralStudyObservers {
+        progress,
+        mesh: observers.mesh,
+    };
+    config.progress_observer = crate::ProgressObserverSlot::new(observers.progress.clone());
     emit_local_progress(
         &observers,
         OPERATION,

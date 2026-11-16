@@ -91,9 +91,8 @@ pub(in crate::gui) enum WindowRenderError {
 #[cfg(feature = "gui")]
 impl<'window> PlotWindow<'window> {
     fn update_subplot_camera_aspects_for_rect(&mut self, plot_rect: egui::Rect) {
-        let (rows, cols) = self.plot_renderer.figure_axes_grid();
         let expected_axes = self.plot_renderer.figure_axes_count().max(1);
-        if rows * cols <= 1 && expected_axes <= 1 {
+        if !self.plot_renderer.figure_requires_axes_layout() {
             let plot_width = plot_rect.width();
             let plot_height = plot_rect.height();
             if plot_width > 0.0 && plot_height > 0.0 {
@@ -686,8 +685,7 @@ impl<'window> PlotWindow<'window> {
             .depth_texture
             .create_view(&wgpu::TextureViewDescriptor::default());
 
-        let (rows, cols) = self.plot_renderer.figure_axes_grid();
-        if rows * cols > 1 {
+        if self.plot_renderer.figure_requires_axes_layout() {
             if let Some(plot_rect) = self.plot_overlay.plot_area() {
                 self.update_subplot_camera_aspects_for_rect(plot_rect);
             }
@@ -747,8 +745,7 @@ impl<'window> PlotWindow<'window> {
         let full_output = self.egui_ctx.run(raw_input, |ctx| {
             // Use PlotOverlay for plot controls and annotations.
             let has_per_axes_grid = self.plot_renderer.last_figure.as_ref().is_some_and(|fig| {
-                let (rows, cols) = fig.axes_grid();
-                let axes_count = (rows * cols).max(1);
+                let axes_count = fig.axes_count();
                 (0..axes_count).any(|idx| {
                     self.plot_renderer.overlay_show_grid_for_axes(idx)
                         || self.plot_renderer.overlay_show_minor_grid_for_axes(idx)
@@ -798,8 +795,7 @@ impl<'window> PlotWindow<'window> {
         if let Some(show) = toggle_grid_opt {
             // mutate last_figure and overlay flag
             if let Some(mut fig) = self.plot_renderer.last_figure.clone() {
-                let (rows, cols) = fig.axes_grid();
-                let axes_count = (rows * cols).max(1);
+                let axes_count = fig.axes_count();
                 for idx in 0..axes_count {
                     fig.set_axes_grid_enabled(idx, show);
                 }
@@ -907,9 +903,8 @@ impl<'window> PlotWindow<'window> {
         if let Some(plot_rect) = plot_area {
             // Use egui's pixels-per-point for exact device pixel mapping
             let ppp = self.pixels_per_point.max(0.5);
-            let (rows, cols) = self.plot_renderer.figure_axes_grid();
             let expected_axes = self.plot_renderer.figure_axes_count().max(1);
-            let axes_plot_rects = if rows * cols > 1 || expected_axes > 1 {
+            let axes_plot_rects = if self.plot_renderer.figure_requires_axes_layout() {
                 if self.plot_overlay.axes_plot_rects().len() == expected_axes {
                     self.plot_overlay.axes_plot_rects().to_vec()
                 } else {
@@ -1023,7 +1018,7 @@ impl<'window> PlotWindow<'window> {
                     );
                     viewports.push((svx as u32, svy as u32, svw as u32, svh as u32));
 
-                    if hovered_axes.is_none() {
+                    if hovered_axes.is_none() && self.plot_renderer.figure_axes_is_live(i) {
                         let px_min_x = rx;
                         let px_min_y = ry;
                         if mouse_pos.x >= px_min_x
@@ -1163,14 +1158,16 @@ impl<'window> PlotWindow<'window> {
                 if let Some(plot_rect) = self.plot_overlay.plot_area() {
                     let mx = self.mouse_position.x;
                     let my = self.mouse_position.y;
-                    let (rows, cols) = self.plot_renderer.figure_axes_grid();
-                    if rows * cols > 1 {
+                    if self.plot_renderer.figure_requires_axes_layout() {
                         let rects = self.plot_overlay.compute_subplot_plot_rects(
                             plot_rect,
                             &self.plot_renderer,
                             1.0,
                         );
                         for (i, r) in rects.into_iter().enumerate() {
+                            if !self.plot_renderer.figure_axes_is_live(i) {
+                                continue;
+                            }
                             let rx = r.min.x * self.pixels_per_point;
                             let ry = r.min.y * self.pixels_per_point;
                             let rw = r.width() * self.pixels_per_point;
@@ -1218,8 +1215,7 @@ impl<'window> PlotWindow<'window> {
         // Pan when left mouse button is held down: shift orthographic bounds in world units
         if self.is_mouse_over_plot && delta.length() > 0.0 {
             if let Some(plot_rect) = self.plot_overlay.plot_area() {
-                let (rows, cols) = self.plot_renderer.figure_axes_grid();
-                if rows * cols > 1 {
+                if self.plot_renderer.figure_requires_axes_layout() {
                     // Pan only the subplot captured on mouse-down.
                     if let Some(i) = self.active_drag_axes {
                         let rects = self.plot_overlay.compute_subplot_plot_rects(
@@ -1297,14 +1293,16 @@ impl<'window> PlotWindow<'window> {
 
         // Zoom in/out by scaling the orthographic projection. Anchor zoom at cursor when inside plot area.
         if let Some(plot_rect) = self.plot_overlay.plot_area() {
-            let (rows, cols) = self.plot_renderer.figure_axes_grid();
-            if rows * cols > 1 {
+            if self.plot_renderer.figure_requires_axes_layout() {
                 let rects = self.plot_overlay.compute_subplot_plot_rects(
                     plot_rect,
                     &self.plot_renderer,
                     1.0,
                 );
                 for (i, r) in rects.iter().enumerate() {
+                    if !self.plot_renderer.figure_axes_is_live(i) {
+                        continue;
+                    }
                     let rx = r.min.x * self.pixels_per_point;
                     let ry = r.min.y * self.pixels_per_point;
                     let rw = r.width() * self.pixels_per_point;

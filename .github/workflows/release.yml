@@ -41,12 +41,33 @@ jobs:
         run: echo "Testing ${{ inputs.ref }} without publishing a release."
 
   release-validation:
-    name: Validate release with CI
+    name: Verify qualified CI checkpoint and publication contracts
     needs: [validate-release-state]
-    uses: ./.github/workflows/ci.yml
-    with:
-      release_validation: true
-      source_ref: ${{ github.event.inputs.ref || github.ref_name }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      actions: read
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+          ref: ${{ github.event.inputs.ref || github.ref_name }}
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24
+      - name: Verify completed cross-platform CI and exact publication-only delta
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: node scripts/distribution/release-ci-checkpoint.mjs
+      - name: Test publication controls
+        run: node --test scripts/publish-crates.test.mjs scripts/distribution/release-ci-checkpoint.test.mjs
+      - name: Retain release CI checkpoint proof
+        uses: actions/upload-artifact@v7
+        with:
+          name: release-ci-checkpoint
+          path: release-ci-checkpoint.json
+          if-no-files-found: error
 
   meshing-release-evidence:
     name: Verify meshing catalogs and scientific release evidence
@@ -224,7 +245,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: ./infra/scripts/prepare-windows-cross-dependencies.ps1 -Target "${{ matrix.platform.target }}"
 
-      - name: Build release CLI with embedded AOT runtime (Unix)
+      - name: Build release CLI and separate AOT runtime (Unix)
         if: runner.os != 'Windows'
         shell: bash
         env:
@@ -253,7 +274,7 @@ jobs:
             -Target "${{ matrix.platform.target }}" `
             -Destination "target/windows-dxc/${{ matrix.platform.target }}"
 
-      - name: Build release CLI with embedded AOT runtime (Windows)
+      - name: Build release CLI and separate AOT runtime (Windows)
         if: runner.os == 'Windows'
         shell: pwsh
         env:
@@ -267,7 +288,20 @@ jobs:
         run: |
           $ErrorActionPreference = 'Stop'
           & ./scripts/build-runmat-with-aot-runtime.ps1 --locked --release --target "${{ matrix.platform.target }}" --bin runmat --features "blas-lapack,vendored-openssl,occt-native"
-          if ($LASTEXITCODE -ne 0) { throw "embedded-runtime release build failed with exit code $LASTEXITCODE" }
+          if ($LASTEXITCODE -ne 0) { throw "separate-runtime release build failed with exit code $LASTEXITCODE" }
+
+      - name: Stage versioned AOT runtime assets
+        shell: bash
+        run: |
+          if [[ "$GITHUB_EVENT_NAME" == push ]]; then
+            pack_version="${VERSION#v}"
+          else
+            pack_version="$(node -p 'require("./bindings/ts/package.json").version')"
+          fi
+          node scripts/distribution/stage-aot-runtime-pack.mjs \
+            "target/${{ matrix.platform.target }}/release/runmat-aot-runtime.zip" \
+            "target/${{ matrix.platform.target }}/release/runmat-aot-runtime.json" \
+            . "$pack_version" "${{ matrix.platform.target }}"
 
       - name: Sign and notarize release artifact (macOS)
         if: runner.os == 'macOS'
@@ -289,14 +323,19 @@ jobs:
           source_revision="$(git rev-parse HEAD)"
           node scripts/runtime/stage-builtin-example-product.mjs \
             --binary "target/${{ matrix.platform.target }}/release/${{ matrix.platform.bin }}" \
-            --destination "$root/product" --executable-name "${{ matrix.platform.bin }}"
+            --destination "$root/product" --executable-name "${{ matrix.platform.bin }}" \
+            --aot-runtime-pack "target/${{ matrix.platform.target }}/release/runmat-aot-runtime.zip"
           node scripts/runtime/verify-builtin-examples.mjs artifacts \
-            --product native-cli --profile embedded-aot --source-revision "$source_revision" \
+            --product native-cli --profile distributed-aot --source-revision "$source_revision" \
             --root "$root/product" --entrypoint "runmat-binary=${{ matrix.platform.bin }}" \
+            --entrypoint "compile-runtime-pack=runmat-aot-runtime.zip" \
             --output "$root/${{ matrix.platform.release_for }}.artifact-manifest.json"
           node scripts/distribution/accept-native-product.mjs \
             "$root/${{ matrix.platform.release_for }}.artifact-manifest.json" \
             "$root/${{ matrix.platform.release_for }}.acceptance.json"
+          node scripts/distribution/accept-aot-runtime-pack.mjs \
+            "$root/product/${{ matrix.platform.bin }}" "$root/product/runmat-aot-runtime.zip" \
+            "$root/${{ matrix.platform.release_for }}.aot-runtime-acceptance.json"
 
       - name: Stage and accept distributed product (Windows)
         if: runner.os == 'Windows' && matrix.platform.target != 'aarch64-pc-windows-gnu'
@@ -314,7 +353,8 @@ jobs:
             "scripts/runtime/stage-builtin-example-product.mjs",
             "--binary", "target/${{ matrix.platform.target }}/release/${{ matrix.platform.bin }}",
             "--destination", "$root/product",
-            "--executable-name", "${{ matrix.platform.bin }}"
+            "--executable-name", "${{ matrix.platform.bin }}",
+            "--aot-runtime-pack", "target/${{ matrix.platform.target }}/release/runmat-aot-runtime.zip"
           )
           $arguments += @("--dependency-dir", $dxc.BinDir, "--dependency-notice-dir", $dxc.NoticeDir)
           $vcpkgBin = Join-Path $env:VCPKG_ROOT ("installed\" + $env:VCPKG_DEFAULT_TRIPLET + "\bin")
@@ -326,14 +366,19 @@ jobs:
           & node @arguments
           if ($LASTEXITCODE -ne 0) { throw "native product staging failed with exit code $LASTEXITCODE" }
           & node scripts/runtime/verify-builtin-examples.mjs artifacts `
-            --product native-cli --profile embedded-aot --source-revision $sourceRevision `
+            --product native-cli --profile distributed-aot --source-revision $sourceRevision `
             --root "$root/product" --entrypoint "runmat-binary=${{ matrix.platform.bin }}" `
+            --entrypoint "compile-runtime-pack=runmat-aot-runtime.zip" `
             --output "$root/${{ matrix.platform.release_for }}.artifact-manifest.json"
           if ($LASTEXITCODE -ne 0) { throw "native artifact manifest failed with exit code $LASTEXITCODE" }
           & node scripts/distribution/accept-native-product.mjs `
             "$root/${{ matrix.platform.release_for }}.artifact-manifest.json" `
             "$root/${{ matrix.platform.release_for }}.acceptance.json"
           if ($LASTEXITCODE -ne 0) { throw "native product probe failed with exit code $LASTEXITCODE" }
+          & node scripts/distribution/accept-aot-runtime-pack.mjs `
+            "$root/product/${{ matrix.platform.bin }}" "$root/product/runmat-aot-runtime.zip" `
+            "$root/${{ matrix.platform.release_for }}.aot-runtime-acceptance.json"
+          if ($LASTEXITCODE -ne 0) { throw "compile runtime acceptance failed with exit code $LASTEXITCODE" }
 
       - name: Package as archive (Windows)
         if: runner.os == 'Windows' && matrix.platform.target != 'aarch64-pc-windows-gnu'
@@ -386,6 +431,7 @@ jobs:
           path: |
             runmat-*.tar.gz
             runmat-*.zip
+            runmat-aot-runtime-*.json
             artifacts/release-product/${{ matrix.platform.release_for }}/*.json
           if-no-files-found: error
 
@@ -456,9 +502,10 @@ jobs:
   publish-crates:
     if: github.event_name == 'push'
     name: Publish crates to crates.io
-    needs: [create-release]
+    needs: [release-validation, meshing-release-evidence]
     environment: Production
     runs-on: ubuntu-latest
+    timeout-minutes: 360
     permissions:
       contents: read
     env:
@@ -472,6 +519,11 @@ jobs:
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@1.90.0
+
+      - name: Setup Node.js for rate-aware publication
+        uses: actions/setup-node@v5
+        with:
+          node-version: 24
 
       - name: Ensure LICENSE is included in each crate
         shell: bash
@@ -522,20 +574,13 @@ jobs:
         run: |
           set -euxo pipefail
           cargo install cargo-workspaces --locked
-          cargo workspaces publish \
-            --all \
-            --yes \
-            --allow-dirty \
-            --skip-published \
-            --publish-as-is \
-            --publish-interval 30 \
-            --no-verify \
-            --token "$CARGO_REGISTRY_TOKEN"
+          node --test scripts/publish-crates.test.mjs
+          node scripts/publish-crates.mjs
 
   publish-bindings:
     if: github.event_name == 'push'
     name: Publish wasm bindings to npm
-    needs: [publish-crates]
+    needs: [release-validation, meshing-release-evidence]
     uses: ./.github/workflows/wasm-bindings.yml
     secrets: inherit
     with:

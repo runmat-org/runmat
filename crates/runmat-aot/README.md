@@ -1,21 +1,53 @@
 # RunMat AOT orchestration
 
-This host-only crate composes verified native user objects with the exact embedded RunMat runtime archive. Archive identity, target/ABI/schema/catalog compatibility, payload compression, linker discovery, response-file construction, temporary inputs, diagnostics, and atomic output publication live in separate bounded modules.
+This host-only crate links verified native user objects with a matching RunMat
+runtime archive. Its bounded modules validate archive identity, target, ABI,
+schema and builtin catalog; decode the payload; discover the linker; construct
+response files; and publish outputs atomically with structured diagnostics.
+Browser/WASM consumers use portable execution artifacts and report native
+capability absence. This crate stays outside the portable dependency graph.
 
-The runtime archive is an internal two-phase build product. A matching compressed payload and manifest may be supplied through `RUNMAT_AOT_RUNTIME_ARCHIVE` and `RUNMAT_AOT_RUNTIME_MANIFEST`; the crate copies them into Cargo's output directory and embeds them into the consuming RunMat binary. Without both inputs, normal developer builds remain valid and the compile workflow reports that this RunMat build has no embedded native runtime. The archive is never discovered from an installation directory and is not a public SDK.
+## Build and acquire the compile-time runtime
 
-Native system linking is host-only. Browser/WASM consumers continue to use portable execution artifacts and receive explicit native-capability absence; this crate does not enter the portable dependency graph.
+`scripts/build-runmat-with-aot-runtime.sh` and its PowerShell equivalent build a
+light CLI plus a separate runtime pack and descriptor. The pack contains the
+compressed native archive, its manifest, first-party license files and canonical
+third-party notices. The CLI embeds the descriptor's exact pack digest and
+native compatibility identity.
 
-Selected paired products use `compile_operator_selected_pair`: the existing
-bounded `selected_admission` loader consumes a caller-issued host admission,
-selected-pack manifest and component root. The CLI selected compiler uses this
-same loader. The pack cannot grant its own tool qualification, source-loading
-capability or storage allowance. Both linked roles have completed-image digests;
-the pair is not an atomic two-file publication transaction.
+`runmat aot install` downloads and verifies the matching pack into the user cache.
+`runmat aot install --offline --from PATH` provisions an already downloaded pack
+through the same verifier. First compilation can request consent to install;
+unattended callers explicitly install first or pass `--install-aot-runtime`.
+Ordinary script execution does not acquire a compile-time pack. See the
+[native compilation guide](../../docs/compiler/native-compilation.md) for cache,
+offline and linking requirements.
 
-The `runmat-aot-pack --selected-tree` and `--selected-pack` producer modes build
-exact tool/sysroot tree metadata and runtime components from explicit build-owner
-declarations. They do not qualify those products or issue host admission. In
-particular, `scripts/build-runmat-with-aot-runtime.sh --profile dev` builds the
-ordinary embedded archive; that alone does not supply a selected pack or an
-independent toolchain qualification.
+The crate's build script supports three configurations:
+
+- No runtime inputs: a developer build can execute ordinary code; stock native
+  compilation reports that the build lacks its distribution descriptor.
+- `RUNMAT_AOT_RUNTIME_MANIFEST` alone: embed the trusted distribution descriptor
+  for a light CLI. The CLI owns acquisition and supplies a verified archive to
+  the linker.
+- Both `RUNMAT_AOT_RUNTIME_ARCHIVE` and `RUNMAT_AOT_RUNTIME_MANIFEST`: embed the
+  legacy compressed payload and native archive manifest in the consumer.
+
+An archive input without its manifest is rejected. Runtime packs provide
+compile-time runtime inputs; external linker and system-library requirements
+still apply.
+
+## Selected paired products
+
+`compile_operator_selected_pair` uses the bounded `selected_admission` loader
+with a caller-issued host admission, selected-pack manifest and component root.
+The CLI selected compiler uses the same loader. Selected packs require external
+tool qualification, source-loading capability and storage allowance. Both
+linked roles receive completed-image digests. Publishing the pair does not form
+an atomic two-file transaction.
+
+The packer's `--selected-tree` and `--selected-pack` modes produce exact
+tool/sysroot metadata and runtime components from explicit build declarations.
+Those modes do not qualify the products or issue host admission. Building a
+stock compile-time runtime pack, including with `--profile dev`, does not supply
+a selected pack or independent toolchain qualification.

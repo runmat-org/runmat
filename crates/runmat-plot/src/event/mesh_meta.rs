@@ -72,6 +72,7 @@ pub struct SerializedMeshDeformation {
 impl From<AxesMetadata> for SerializedAxesMetadata {
     fn from(value: AxesMetadata) -> Self {
         Self {
+            retired: value.retired,
             y_direction: value.y_direction,
             axes_kind: value.axes_kind.into(),
             overlay_parent: value.overlay_parent,
@@ -137,6 +138,7 @@ impl From<AxesMetadata> for SerializedAxesMetadata {
 impl From<SerializedAxesMetadata> for AxesMetadata {
     fn from(value: SerializedAxesMetadata) -> Self {
         Self {
+            retired: value.retired,
             y_direction: value.y_direction,
             axes_kind: value.axes_kind.into(),
             overlay_parent: value.overlay_parent,

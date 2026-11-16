@@ -17,7 +17,7 @@ pub use call::infer_call;
 pub use conversion::infer_numeric_conversion;
 pub use indexing::{infer_index, infer_index_sequence};
 pub use join::FactJoin;
-pub use literal::{infer_literal, infer_struct_literal};
+pub use literal::{infer_binary_literal, infer_literal, infer_struct_literal, infer_unary_literal};
 pub use member::{infer_member_read, infer_member_sequence, infer_member_write};
 pub use mutation::{infer_index_mutation, infer_mutation};
 pub use operator::{

@@ -111,6 +111,10 @@ struct AxesViewContract {
 
 #[derive(Clone, Debug, PartialEq)]
 struct AxesViewContractEntry {
+    live: bool,
+    grid_cell: Option<crate::plots::AxesGridCell>,
+    position: Option<[f64; 4]>,
+    normalized_units: bool,
     y_direction: crate::plots::figure::YDirection,
     has_3d_content: bool,
     axes_kind: AxesKind,
@@ -460,7 +464,7 @@ impl PlotRenderer {
 
     fn axes_view_contract_for_figure(figure: &Figure) -> AxesViewContract {
         let (rows, cols) = figure.axes_grid();
-        let axes_count = rows.max(1) * cols.max(1);
+        let axes_count = figure.axes_count();
         let mut has_3d_content = vec![false; axes_count];
         for (plot, axes_index) in figure
             .plots()
@@ -474,6 +478,13 @@ impl PlotRenderer {
             .map(|axes_index| {
                 let meta = figure.axes_metadata(axes_index);
                 AxesViewContractEntry {
+                    live: figure.axes_is_live(axes_index),
+                    grid_cell: figure.axes_grid_cell(axes_index),
+                    position: meta
+                        .filter(|metadata| metadata.position_explicit)
+                        .map(|metadata| metadata.position),
+                    normalized_units: meta
+                        .is_some_and(|metadata| metadata.units.eq_ignore_ascii_case("normalized")),
                     y_direction: meta.map(|m| m.y_direction).unwrap_or_default(),
                     has_3d_content: has_3d_content[axes_index],
                     axes_kind: meta.map(|m| m.axes_kind).unwrap_or(AxesKind::Cartesian),
