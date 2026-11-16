@@ -55,7 +55,7 @@ pub(crate) fn validate_accuracy(step: &ProcedureStep) -> Result<(), AnalysisVali
             _ => None,
         };
         if let AccuracyTarget::Quantity(quantity) = &criterion.target {
-            if !crate::validate_outputs::spec::quantity_supported(step, *quantity) {
+            if !crate::validate_outputs::quantity_supported(step, *quantity) {
                 return accuracy_error(
                     plan,
                     format!(
