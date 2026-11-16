@@ -657,8 +657,8 @@ fn figure_box(prims: &[Prim]) -> Option<BoxR> {
 /// Whether a figure box lies over any view's drawn lines (visible, tangent, and hidden where
 /// the view draws them), on the sheet.
 pub fn over_lines(f: &BoxR, views: &[ViewPlan]) -> bool {
-    // A hair inside the box: a line that only touches its edge doesn't cross the figure.
-    let g = BoxR::new(f.x0 + 0.2, f.y0 + 0.2, f.x1 - 0.2, f.y1 - 0.2);
+    // The figure with a 0.75 mm margin, so no line runs close enough to read as touching it.
+    let g = BoxR::new(f.x0 - 0.75, f.y0 - 0.75, f.x1 + 0.75, f.y1 + 0.75);
     views.iter().any(|v| {
         let b = v.geom_box();
         if b.x1 < g.x0 || b.x0 > g.x1 || b.y1 < g.y0 || b.y0 > g.y1 {
