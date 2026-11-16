@@ -1,5 +1,6 @@
 export { physicalLengthUnit, physicalLengthUnitName, isPhysicalLengthUnit, resolvedSourceLengthUnit, sourceLengthUnitLabel, PHYSICAL_LENGTH_UNITS } from "./physical.js";
 export type { LengthUnit, LengthUnitEvidence } from "./physical.js";
+import type { LengthUnit } from "./physical.js";
 import { resolveNativeRuntimeSettings, editNativeUserRuntimeSettings } from "./settings.js";
 import type { HostRuntimeSettings, ResolvedRuntimeSettings, UserRuntimeSettingsEdit, RuntimeSettingsNativeExports, PreparedClusterProgram } from "./settings.js";
 export type { HostRuntimeSettings, ResolvedRuntimeSettings, RuntimeSettingsConfig, RuntimeSettingSource, UserRuntimeSettingsEdit, SettingsJsonValue, PreparedClusterProgram } from "./settings.js";
@@ -1194,7 +1195,8 @@ export interface GeometryAssetSummary {
   source: GeometrySourceSummary;
   sourceGeometry: GeometrySourceGeometrySummary;
   tessellationProfile: GeometryTessellationProfileSummary;
-  units: string;
+  /** The length unit of the preview's coordinates (scene positions, mesh bounds, picks); null when the source's physical scale is unresolved. */
+  coordinateUnits: LengthUnit | null;
   meshes: GeometryMeshSummary[];
   mappingSummary: GeometryRegionMappingSummary;
   cad: GeometryCadSummary;
