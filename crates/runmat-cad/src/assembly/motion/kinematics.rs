@@ -121,12 +121,12 @@ impl DesignSource for Overlay<'_> {
 
 /// What a drive's `from` value measures, and the mate's target it sets.
 fn drive_quantity(kind: &MateKind, quantity: DriveQuantity) -> bool {
-    match (kind, quantity) {
-        (MateKind::Revolute { .. } | MateKind::Angle { .. }, DriveQuantity::Angle) => true,
-        (MateKind::Slider { .. } | MateKind::Distance { .. }, DriveQuantity::Length) => true,
-        (MateKind::Cylindrical { .. }, _) => true,
-        _ => false,
-    }
+    matches!(
+        (kind, quantity),
+        (MateKind::Revolute { .. } | MateKind::Angle { .. }, DriveQuantity::Angle)
+            | (MateKind::Slider { .. } | MateKind::Distance { .. }, DriveQuantity::Length)
+            | (MateKind::Cylindrical { .. }, _)
+    )
 }
 
 /// Whether mate kind `kind` can be driven at all, and by what.
