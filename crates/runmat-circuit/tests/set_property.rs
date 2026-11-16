@@ -431,8 +431,7 @@ fn a_component_param_is_written_as_typed_and_read_by_its_name() {
         json!("5 V"),
         CompileOptions::default(),
     )
-    .err()
-    .expect("volts aren't a mass");
+    .expect_err("volts aren't a mass");
     assert!(refused.message.contains("mass"), "{}", refused.message);
     // So is a param the component doesn't have.
     assert!(set(
