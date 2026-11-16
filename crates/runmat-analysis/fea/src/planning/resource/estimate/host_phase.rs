@@ -174,6 +174,7 @@ pub(super) fn build_host_phase_resource_plan(
         workspace_bytes: accounting.workspace_bytes,
         preconditioner_bytes: zero,
         factorization_bytes: zero,
+        operator_preparation_bytes: zero,
         constraint_bytes: zero,
         phase_resident_bytes: ByteCount(output_construction),
         phase_scratch_bytes: ByteCount(0),

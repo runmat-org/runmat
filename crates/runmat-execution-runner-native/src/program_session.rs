@@ -30,6 +30,7 @@ pub struct NativeProgramSession {
     pub(crate) meshing_cache_root: std::path::PathBuf,
     values: Mutex<HashMap<ValueId, (ValueRef, ValuePayload)>>,
     cancelled: AtomicBool,
+    progress_observer: crate::local_progress::ProgressObserverSlot,
 }
 
 impl NativeProgramSession {
@@ -102,6 +103,7 @@ impl NativeProgramSession {
         let nonce = NEXT_PROGRAM_SCOPE.fetch_add(1, Ordering::Relaxed);
         let scope_id = fresh_scope_id(b"native-program-session", nonce);
         let meshing_cache_root = config.store_root.join("meshing-stage-cache/v1");
+        let progress_observer = config.progress_observer.clone();
         config.scope_store(scope_id);
         let authorization_scope = scope_id.to_string();
         Ok(Self {
@@ -119,7 +121,13 @@ impl NativeProgramSession {
             },
             values: Mutex::new(HashMap::new()),
             cancelled: AtomicBool::new(false),
+            progress_observer,
         })
+    }
+
+    /// The host's live progress observer for FEA work in this session.
+    pub(crate) fn progress_observer(&self) -> &crate::local_progress::ProgressObserverSlot {
+        &self.progress_observer
     }
 
     pub fn scope_id(&self) -> ExecutionScopeId {
