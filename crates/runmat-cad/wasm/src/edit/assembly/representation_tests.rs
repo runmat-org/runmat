@@ -40,7 +40,15 @@ fn an_envelope_component_draws_as_its_box_and_full_writes_nothing() {
     assert!((alpha - 0.35).abs() < 1e-6, "{block}");
     // The others still draw their parts.
     assert_eq!(prototype(&c, "plate")["shape"], "mesh");
-    assert_eq!(c.index["occurrences"].as_array().unwrap().iter().find(|r| r["path"] == "block").unwrap()["representation"], "envelope");
+    assert_eq!(
+        c.index["occurrences"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|r| r["path"] == "block")
+            .unwrap()["representation"],
+        "envelope"
+    );
     let text = represent(&text, &c, "block", "full");
     assert!(!text.contains("representation"), "{text}");
     assert_eq!(prototype(&compile(&text), "block")["shape"], "mesh");
@@ -62,12 +70,17 @@ fn an_analysis_representation_the_part_doesnt_declare_is_refused_and_an_unknown_
     for key in ["midsurface", "beam", "defeatured"] {
         let out = run_key(key);
         assert_eq!(out["ok"], false, "{key}: {out}");
-        assert!(out.to_string().contains(&format!("declares no {key} representation")), "{key}: {out}");
+        assert!(
+            out.to_string()
+                .contains(&format!("declares no {key} representation")),
+            "{key}: {out}"
+        );
     }
     let out = run_key("mid_surface");
     assert_eq!(out["ok"], false, "{out}");
     assert!(
-        out.to_string().contains("choose `full` or `envelope` or `defeatured` or `midsurface` or `beam`"),
+        out.to_string()
+            .contains("choose `full` or `envelope` or `defeatured` or `midsurface` or `beam`"),
         "{out}"
     );
 }
@@ -99,11 +112,7 @@ fn a_sub_assembly_at_envelope_draws_one_box_around_its_parts_and_weighs_them() {
     // An export writes the parts the envelope stands for, not its box.
     let meshes =
         crate::exchange::meshes::assembly_meshes("/p/rig.assembly", top, &all, None).unwrap();
-    let mut exported: Vec<&str> = meshes
-        .occurrences
-        .iter()
-        .map(|o| o.path.as_str())
-        .collect();
+    let mut exported: Vec<&str> = meshes.occurrences.iter().map(|o| o.path.as_str()).collect();
     exported.sort();
     assert_eq!(exported, vec!["plate", "s/a", "s/b"]);
 }

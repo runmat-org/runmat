@@ -100,6 +100,8 @@ representation spar : beam = { body = feature.body.body }
 
 In the editor, **Simulate › Defeature** adds a `defeatured` representation and **Simulate › Representation** adds any of the three. Each is built before it is written, so a beam of a body that isn't prismatic is refused and nothing is written. The new representation is drawn at once. The **Representation** menu in the bottom strip switches between **full** (the design) and each representation; beside it, the strip lists what the drawn one removed, its wall thicknesses or its beam section, or why it could not be built.
 
+Each representation has a row in the Outline's **Representations** folder. Select a defeatured representation's row to change its thresholds or **Keep named regions** in Properties; RunMat rebuilds it at once and refuses a change it cannot build. A mid-surface or beam has no thresholds to edit. Right-click a row and choose **Delete** to remove the representation. If it was the one drawn, the strip goes back to **full**.
+
 A study reads a part in its full representation. A `.fea` geometry cannot yet select a part's `defeatured`, `midsurface` or `beam` representation, so meshing one of them in a study is not available yet.
 
 ## Published values

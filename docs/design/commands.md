@@ -136,7 +136,7 @@ This file is generated from the command catalog.
   - Optional: `remate` (true or false, default true)
   - Runs on the `selection`: `occurrence`
 - `assembly.representation`: Draw and check components as their full model or as their envelope box.
-  - Required: `components` (picks: component); `representation` (one of `full`, `envelope`, default `full`)
+  - Required: `components` (picks: component); `representation` (one of `full`, `envelope`, `defeatured`, `midsurface`, `beam`, default `full`)
   - Runs on the `selection`: `occurrence`
 - `assembly.skeleton`: Add a skeleton part that drives the layout: a reference component left out of the parts list, mass and interference.
   - Required: `name` (text)
@@ -482,7 +482,7 @@ This file is generated from the command catalog.
   - Required: `points` (picks: vertex or point or sketch point)
   - Optional: `closed` (true or false, default false)
 - `part.delete`: Delete the item, after showing what depends on it.
-  - Runs on the `selection`: `feature`, `sketch`, `sketch_entity`, `sketch_point`, `region`, `input`, `plane`, `mate_connector`, `annotation`, `view`
+  - Runs on the `selection`: `feature`, `sketch`, `sketch_entity`, `sketch_point`, `region`, `representation`, `input`, `plane`, `mate_connector`, `annotation`, `view`
 - `part.draft`: Taper faces for molding by neutral plane, parting line or step.
   - Required: `type` (one of `neutral_plane`, `parting_line`, `step`, default `neutral_plane`); `faces` (picks: face); `neutral` (pick: plane or face) when `type` is neutral_plane; `parting` (picks: edge or curve) when `type` is parting_line or step; `angle` (number in deg, default 1)
   - Optional: `pull` (pick: plane or face) when `type` is parting_line or step; `flip` (true or false, default false)
@@ -669,6 +669,9 @@ This file is generated from the command catalog.
 - `simulate.dc-sweep`: Add a DC sweep of a source to the simulation section.
   - Required: `source` (text); `start` (number in V, default 0); `stop` (number in V, default 5); `step` (number in V, default 0.1)
   - Optional: `name` (text)
+- `simulate.defeature`: Add a defeatured representation for meshing: small fillets, holes and chamfers removed. The design stays as it is.
+  - Required: `name` (text); `max_fillet` (number in mm, default 2); `max_hole` (number in mm, default 3); `max_chamfer` (number in mm, default 1)
+  - Optional: `keep_regions` (true or false, default true)
 - `simulate.monte-carlo`: Add a Monte Carlo over the section's tolerances that reruns another analysis of the section.
   - Required: `kind` (one of `monte_carlo`, default `monte_carlo`); `of` (text); `runs` (whole number, default 1000); `seed` (whole number, default 1)
   - Optional: `name` (text)
@@ -685,6 +688,11 @@ This file is generated from the command catalog.
   - Runs on the `selection`: `pin`
 - `simulate.publish`: Publish a region, frame, value or path for assemblies and studies to use.
   - Required: `name` (text); `target` (one of `region`, `frame`, `value`, `path`, default `region`); `item` (pick: region or mate connector or input) when `target` is region or frame or value; `edges` (picks: edge) when `target` is path
+- `simulate.region`: Name faces, edges or bodies so studies can load and fix them.
+  - Required: `name` (text); `kind` (one of `face`, `edge`, `body`, `vertex`, default `face`); `select` (picks: face or edge or body or vertex); `expect` (one of `at_least_one`, `exactly_one`, `any`, default `at_least_one`)
+- `simulate.representation`: Add an analysis representation for meshing: defeatured, mid-surface or beam. Full draws the design itself.
+  - Required: `kind` (one of `full`, `defeatured`, `midsurface`, `beam`, default `full`); `name` (text) when `kind` is defeatured or midsurface or beam; `max_fillet` (number in mm, default 2) when `kind` is defeatured; `max_hole` (number in mm, default 3) when `kind` is defeatured; `max_chamfer` (number in mm, default 1) when `kind` is defeatured
+  - Optional: `body` (pick: body) when `kind` is midsurface or beam; `keep_regions` (true or false, default true) when `kind` is defeatured
 - `simulate.set-tolerance`: Set the tolerance a Monte Carlo varies parts by (it replaces the parts' own bands).
   - Required: `match` (text); `percent` (number, default 1)
   - Optional: `name` (text)

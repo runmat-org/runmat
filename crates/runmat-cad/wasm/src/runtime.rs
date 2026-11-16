@@ -821,10 +821,16 @@ pub fn compile_assembly_indented(
     files: &Files,
 ) -> Result<CompiledAssemblyWithIndentedBom, Vec<Diagnostic>> {
     let mut rows = Vec::new();
-    let (index, display, problems) =
-        compile_assembly_with(path, text, files, None, &BTreeSet::new(), |resolved, source| {
+    let (index, display, problems) = compile_assembly_with(
+        path,
+        text,
+        files,
+        None,
+        &BTreeSet::new(),
+        |resolved, source| {
             rows = runmat_cad::assembly::bom::indented_bom(resolved, Some(source));
-        })?;
+        },
+    )?;
     Ok(CompiledAssemblyWithIndentedBom {
         index,
         display,
@@ -897,12 +903,8 @@ fn compile_assembly_with(
         &configured,
         &operated.displays,
     );
-    let prototype_digests = prototype_reuse::prototype_digests(
-        &resolved,
-        &documents,
-        &digests,
-        &operated.digests,
-    );
+    let prototype_digests =
+        prototype_reuse::prototype_digests(&resolved, &documents, &digests, &operated.digests);
     let reused = prototype_reuse::omit_known(&mut display, &prototype_digests, known);
     let mut display = serde_json::to_value(&display).unwrap_or(Value::Null);
     prototype_reuse::mark(&mut display, &prototype_digests, &reused);

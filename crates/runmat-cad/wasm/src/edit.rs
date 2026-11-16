@@ -181,9 +181,10 @@ fn part_edit(
         }
         "part.delete"
             if selected.is_empty()
-                && request.selection.iter().any(|id| {
-                    id.starts_with("region:") || id.starts_with("representation:")
-                }) =>
+                && request
+                    .selection
+                    .iter()
+                    .any(|id| id.starts_with("region:") || id.starts_with("representation:")) =>
         {
             // Regions and analysis representations, from their Outline rows.
             let ids = request.selection.clone();
@@ -201,7 +202,9 @@ fn part_edit(
                             .representations
                             .iter()
                             .position(|r| r.name == name)
-                            .ok_or_else(|| model(format!("the part has no representation `{name}`")))?;
+                            .ok_or_else(|| {
+                                model(format!("the part has no representation `{name}`"))
+                            })?;
                         document.representations.remove(at);
                     }
                 }
@@ -379,8 +382,7 @@ fn part_edit(
                 .ok_or(EditFailure::Invalid(parsed.diagnostics))?;
             let picks = crate::picks::Picks::new(&document, path, text);
             let values = sketch::with_selection(&request.values, &request.selection);
-            if let Some(result) = sketch::sketch_edit(path, text, command, &values, &picks)
-            {
+            if let Some(result) = sketch::sketch_edit(path, text, command, &values, &picks) {
                 return result;
             }
             if let Some(result) = manage::edit(path, text, request, &picks) {
@@ -653,12 +655,26 @@ mod tests {
     #[test]
     fn new_study_on_a_part_or_assembly_hands_off_to_simulation_setup() {
         for path in ["/p/plate.part", "/p/frame.assembly"] {
-            let out = run(path, PLATE, json!({ "command": "study.new", "values": { "physics": "structural" } }));
+            let out = run(
+                path,
+                PLATE,
+                json!({ "command": "study.new", "values": { "physics": "structural" } }),
+            );
             assert_eq!(out["ok"], true, "{out}");
-            assert_eq!(out["files"], json!([]), "the CAD dispatcher writes no study");
+            assert_eq!(
+                out["files"],
+                json!([]),
+                "the CAD dispatcher writes no study"
+            );
             let summary = out["summary"].as_str().unwrap();
-            assert!(summary.contains("Simulation setup guide (simulation_setup)"), "{summary}");
-            assert!(summary.ends_with(&format!("start it on {path}")), "{summary}");
+            assert!(
+                summary.contains("Simulation setup guide (simulation_setup)"),
+                "{summary}"
+            );
+            assert!(
+                summary.ends_with(&format!("start it on {path}")),
+                "{summary}"
+            );
         }
     }
 

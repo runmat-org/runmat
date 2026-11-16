@@ -29,7 +29,11 @@ pub(super) fn valid_name(name: &str) -> bool {
 }
 
 fn text<'a>(values: &'a Map<String, Value>, key: &str) -> &'a str {
-    values.get(key).and_then(Value::as_str).map(str::trim).unwrap_or("")
+    values
+        .get(key)
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .unwrap_or("")
 }
 
 /// `simulate.region`: adds a region of the picked faces, edges, vertices or bodies. Every pick
@@ -108,6 +112,76 @@ pub fn region(
     Ok((change, format!("Region {name}: {count} {kind}{plural}")))
 }
 
+/// A threshold length (`max_fillet`, `max_hole`, `max_chamfer`) from the form: absent or blank is
+/// none; a number is in mm.
+fn length_value(
+    values: &Map<String, Value>,
+    key: &str,
+) -> Result<Option<runmat_cad::value::ValueExpr>, EditFailure> {
+    match values.get(key) {
+        None | Some(Value::Null) => Ok(None),
+        Some(Value::String(s)) if s.trim().is_empty() => Ok(None),
+        Some(_) => {
+            let v = crate::features::value(values, key, "mm")?;
+            serde_json::from_value(v)
+                .map(Some)
+                .map_err(|e| model(format!("`{key}`: {e}")))
+        }
+    }
+}
+
+/// Builds representation `name` of the part in `source`: one that can't be made is refused, and
+/// the summary says what it is.
+fn built_summary(path: &str, source: &str, name: &str) -> Result<String, EditFailure> {
+    let tessellation = runmat_cad::regen::kernel::TessellationOptions::default();
+    let full = crate::runtime::regenerate_part_in(path, source, None, &tessellation)
+        .map_err(|d| model(d.first().map(|d| d.message.clone()).unwrap_or_default()))?;
+    let built = crate::representation::build(path, source, None, &full, name, &tessellation)
+        .map_err(model)?;
+    Ok(built.summary())
+}
+
+/// `part.set-property` on a representation's row (`representation:<name>`): a defeatured
+/// representation's thresholds and whether it keeps region faces. Rebuilt at once, so a change
+/// that can't be made is refused and nothing is written.
+pub fn set_representation(
+    path: &str,
+    text_in: &str,
+    name: &str,
+    values: &Map<String, Value>,
+) -> Result<(SourceChange, String), EditFailure> {
+    use runmat_cad::assembly::model::Representation;
+    let keys = ["max_fillet", "max_hole", "max_chamfer", "keep_regions"];
+    let Some(key) = values.keys().find(|k| keys.contains(&k.as_str())) else {
+        return Err(model(format!(
+            "a representation's settings are {}",
+            keys.join(", ")
+        )));
+    };
+    let change = edit_part(text_in, path, |document| {
+        let rep = document
+            .representations
+            .iter_mut()
+            .find(|r| r.name == name)
+            .ok_or_else(|| model(format!("the part has no representation `{name}`")))?;
+        if rep.kind != Representation::Defeatured {
+            return Err(model(format!(
+                "`{name}` is a {} representation: only a defeatured one has thresholds",
+                rep.kind.key()
+            )));
+        }
+        match key.as_str() {
+            "max_fillet" => rep.max_fillet = length_value(values, key)?,
+            "max_hole" => rep.max_hole = length_value(values, key)?,
+            "max_chamfer" => rep.max_chamfer = length_value(values, key)?,
+            _ => rep.keep_regions = values.get(key).and_then(Value::as_bool).unwrap_or(true),
+        }
+        Ok(())
+    })?;
+    let summary = built_summary(path, &change.source, name)?;
+    Ok((change, summary))
+}
+
 /// `simulate.defeature` (`kind` is `defeatured`) and `simulate.representation`.
 pub fn representation(
     path: &str,
@@ -122,7 +196,11 @@ pub fn representation(
         "" | "defeatured" => Representation::Defeatured,
         "midsurface" => Representation::Midsurface,
         "beam" => Representation::Beam,
-        other => return Err(model(format!("a part's representation is full, defeatured, midsurface or beam, not `{other}`"))),
+        other => {
+            return Err(model(format!(
+                "a part's representation is full, defeatured, midsurface or beam, not `{other}`"
+            )))
+        }
     };
     let name = text(values, "name");
     if !valid_name(name) {
@@ -132,18 +210,7 @@ pub fn representation(
             format!("`{name}` isn't a representation name: use letters, digits and `_`, starting with a letter")
         }));
     }
-    let length = |key: &str| -> Result<Option<runmat_cad::value::ValueExpr>, EditFailure> {
-        match values.get(key) {
-            None | Some(Value::Null) => Ok(None),
-            Some(Value::String(s)) if s.trim().is_empty() => Ok(None),
-            Some(_) => {
-                let v = crate::features::value(values, key, "mm")?;
-                serde_json::from_value(v)
-                    .map(Some)
-                    .map_err(|e| model(format!("`{key}`: {e}")))
-            }
-        }
-    };
+    let length = |key: &str| length_value(values, key);
     let body = match picks_of(values, "body").first() {
         Some(id) if kind != Representation::Defeatured => Some(
             serde_json::from_value::<Reference>(picks.reference(id)?)
@@ -159,7 +226,10 @@ pub fn representation(
             max_fillet: length("max_fillet")?,
             max_hole: length("max_hole")?,
             max_chamfer: length("max_chamfer")?,
-            keep_regions: values.get("keep_regions").and_then(Value::as_bool).unwrap_or(true),
+            keep_regions: values
+                .get("keep_regions")
+                .and_then(Value::as_bool)
+                .unwrap_or(true),
         }
     } else {
         PartRepresentation {
@@ -174,18 +244,16 @@ pub fn representation(
     };
     let change = edit_part(text_in, path, |document| {
         if document.representations.iter().any(|r| r.name == name) {
-            return Err(model(format!("the part already has a representation `{name}`")));
+            return Err(model(format!(
+                "the part already has a representation `{name}`"
+            )));
         }
         document.representations.push(entry.clone());
         Ok(())
     })?;
     // Built now: one that can't be made is refused, and the summary says what it is.
-    let tessellation = runmat_cad::regen::kernel::TessellationOptions::default();
-    let full = crate::runtime::regenerate_part_in(path, &change.source, None, &tessellation)
-        .map_err(|d| model(d.first().map(|d| d.message.clone()).unwrap_or_default()))?;
-    let built = crate::representation::build(path, &change.source, None, &full, name, &tessellation)
-        .map_err(model)?;
-    Ok((change, built.summary()))
+    let summary = built_summary(path, &change.source, name)?;
+    Ok((change, summary))
 }
 
 #[cfg(test)]
@@ -198,8 +266,13 @@ mod tests {
 
     fn run(text: &str, values: Value) -> Value {
         let request = json!({ "command": "simulate.region", "values": values });
-        serde_json::from_str(&edit_json("/p/puck.part", text, &Files::new(), &request.to_string()))
-            .unwrap()
+        serde_json::from_str(&edit_json(
+            "/p/puck.part",
+            text,
+            &Files::new(),
+            &request.to_string(),
+        ))
+        .unwrap()
     }
 
     #[test]
@@ -222,30 +295,79 @@ mod tests {
             &Files::new(),
         ))
         .unwrap();
-        let regions = compiled["projection"]["data"]["index"]["regions"].as_array().unwrap();
+        let regions = compiled["projection"]["data"]["index"]["regions"]
+            .as_array()
+            .unwrap();
         assert!(regions.iter().any(|r| r["name"] == "mount"), "{regions:?}");
-        let faces = compiled["display"]["data"]["bodies"][0]["faces"].as_array().unwrap();
-        let held: Vec<&Value> = faces.iter().filter(|f| f["regions"] == json!(["mount"])).collect();
+        let faces = compiled["display"]["data"]["bodies"][0]["faces"]
+            .as_array()
+            .unwrap();
+        let held: Vec<&Value> = faces
+            .iter()
+            .filter(|f| f["regions"] == json!(["mount"]))
+            .collect();
         assert_eq!(held.len(), 1, "one face carries the region");
     }
 
     #[test]
     fn a_region_refuses_a_pick_of_another_kind_a_taken_name_and_a_wrong_count() {
-        let out = run(PUCK, json!({ "name": "mount", "kind": "edge", "select": ["feature.puck.face.start"] }));
+        let out = run(
+            PUCK,
+            json!({ "name": "mount", "kind": "edge", "select": ["feature.puck.face.start"] }),
+        );
         assert_eq!(out["ok"], false);
-        assert!(out["message"].as_str().unwrap().contains("is a face; this region holds edges"), "{out}");
+        assert!(
+            out["message"]
+                .as_str()
+                .unwrap()
+                .contains("is a face; this region holds edges"),
+            "{out}"
+        );
         let out = run(
             PUCK,
             json!({ "name": "ends", "kind": "face", "select": ["feature.puck.face.start", "feature.puck.face.end"], "expect": "exactly_one" }),
         );
-        assert!(out["message"].as_str().unwrap().contains("exactly one face and 2 are picked"), "{out}");
-        let once = run(PUCK, json!({ "name": "mount", "select": ["feature.puck.face.start"] }));
+        assert!(
+            out["message"]
+                .as_str()
+                .unwrap()
+                .contains("exactly one face and 2 are picked"),
+            "{out}"
+        );
+        let once = run(
+            PUCK,
+            json!({ "name": "mount", "select": ["feature.puck.face.start"] }),
+        );
         let text = once["files"][0]["text"].as_str().unwrap();
-        let again = run(text, json!({ "name": "mount", "select": ["feature.puck.face.end"] }));
-        assert!(again["message"].as_str().unwrap().contains("already has a region `mount`"), "{again}");
-        let out = run(PUCK, json!({ "name": "2nd", "select": ["feature.puck.face.end"] }));
-        assert!(out["message"].as_str().unwrap().contains("isn't a region name"), "{out}");
-        let out = run(PUCK, json!({ "name": "body", "kind": "body", "select": ["feature:puck"] }));
-        assert_eq!(out["ok"], true, "a body pick names the feature's body: {out}");
+        let again = run(
+            text,
+            json!({ "name": "mount", "select": ["feature.puck.face.end"] }),
+        );
+        assert!(
+            again["message"]
+                .as_str()
+                .unwrap()
+                .contains("already has a region `mount`"),
+            "{again}"
+        );
+        let out = run(
+            PUCK,
+            json!({ "name": "2nd", "select": ["feature.puck.face.end"] }),
+        );
+        assert!(
+            out["message"]
+                .as_str()
+                .unwrap()
+                .contains("isn't a region name"),
+            "{out}"
+        );
+        let out = run(
+            PUCK,
+            json!({ "name": "body", "kind": "body", "select": ["feature:puck"] }),
+        );
+        assert_eq!(
+            out["ok"], true,
+            "a body pick names the feature's body: {out}"
+        );
     }
 }

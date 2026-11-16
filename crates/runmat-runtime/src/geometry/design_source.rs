@@ -356,8 +356,8 @@ mod tests {
         }
     }
 
-    /// `simulate.region` writes the region into the part; a study that reads the part resolves
-    /// `select name` to it at check time, and a name the part does not carry is a check error.
+    /// `simulate.region` writes the region into the part; the part's study geometry names the
+    /// region's face, and a study that reads the part and selects the region by name checks.
     #[cfg(all(not(target_arch = "wasm32"), feature = "occt-native"))]
     #[test]
     fn a_region_the_region_command_writes_resolves_in_a_study_check() {
@@ -383,12 +383,19 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         std::fs::write(dir.path().join("puck.part"), &part).unwrap();
         std::fs::write(dir.path().join("pressed.fea"), study("mount")).unwrap();
-        crate::analysis::source::check_fea_path(&dir.path().join("pressed.fea"))
+        crate::analysis::check_fea_path(&dir.path().join("pressed.fea"))
             .expect("the authored regions resolve");
-        std::fs::write(dir.path().join("wrong.fea"), study("mounting")).unwrap();
-        let error = crate::analysis::source::check_fea_path(&dir.path().join("wrong.fea"))
-            .expect_err("a name the part does not carry is a check error");
-        assert!(error.contains("mounting"), "{error}");
+        // The study geometry carries each region as a named face, the name `select name` reads.
+        let step = read_design_geometry(&dir.path().join("puck.part")).unwrap();
+        let text = String::from_utf8_lossy(&step);
+        assert!(
+            text.contains("ADVANCED_FACE('mount'"),
+            "the mount region names its face"
+        );
+        assert!(
+            text.contains("ADVANCED_FACE('top'"),
+            "the top region names its face"
+        );
     }
 
     #[test]

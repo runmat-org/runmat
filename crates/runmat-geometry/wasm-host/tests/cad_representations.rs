@@ -120,3 +120,26 @@ fn a_component_at_beam_draws_its_parts_beam() {
     assert_eq!(body["edges"].as_array().unwrap().len(), 1, "the centerline");
 }
 
+
+#[test]
+fn a_defeatured_representation_is_edited_from_its_properties_and_rebuilt() {
+    let out = edit(PLATE, "simulate.defeature", json!({ "name": "simple", "max_fillet": 2.0, "max_hole": 10.0, "max_chamfer": 1.0 }));
+    let text = out["files"][0]["text"].as_str().unwrap().to_owned();
+    let set = |text: &str, values: Value| {
+        let request = json!({ "command": "part.set-property", "selection": ["representation:simple"], "values": values }).to_string();
+        call("edit", &["/p/plate.part", text, "{}", &request])
+    };
+    // Holes up to 25 mm: the large hole goes too, and the summary lists it.
+    let edited = set(&text, json!({ "max_hole": 25.0 }));
+    assert_eq!(edited["ok"], true, "{edited}");
+    let text = edited["files"][0]["text"].as_str().unwrap().to_owned();
+    assert!(text.contains("max_hole = 25 mm"), "{text}");
+    assert!(edited["summary"].as_str().unwrap().contains("hole large, ⌀ 20 mm"), "{edited}");
+    // A mid-surface has no thresholds: refused by name, nothing written.
+    let shell = edit(&text, "simulate.representation", json!({ "kind": "midsurface", "name": "shell" }));
+    let text = shell["files"][0]["text"].as_str().unwrap().to_owned();
+    let request = json!({ "command": "part.set-property", "selection": ["representation:shell"], "values": { "max_hole": 5.0 } }).to_string();
+    let refused = call("edit", &["/p/plate.part", &text, "{}", &request]);
+    assert_eq!(refused["ok"], false, "{refused}");
+    assert!(refused["message"].as_str().unwrap().contains("only a defeatured one has thresholds"), "{refused}");
+}

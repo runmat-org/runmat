@@ -115,7 +115,9 @@ fn load_revision(
                 sink.queue.push((file.to_owned(), sub.clone()));
                 sink.source.add_assembly_revision(sub, &revision.0);
             }
-            None => sink.problems.push(failed(file, key, revision, "has errors")),
+            None => sink
+                .problems
+                .push(failed(file, key, revision, "has errors")),
         },
         DefinitionKind::Part => {
             let cache_key = part_cache::assembly_key(&held, text, &ASSEMBLY_TESSELLATION);
@@ -135,8 +137,12 @@ fn load_revision(
                         .find(|e| e.severity == "error")
                         .map(|e| e.message.clone())
                         .unwrap_or_default();
-                    sink.problems
-                        .push(failed(file, key, revision, &format!("doesn't compile: {first}")));
+                    sink.problems.push(failed(
+                        file,
+                        key,
+                        revision,
+                        &format!("doesn't compile: {first}"),
+                    ));
                 }
             }
         }
@@ -165,7 +171,12 @@ pub(super) fn part_summary(
 ) -> (DefinitionSummary, ConfiguredSummary) {
     let mut summary = DefinitionSummary::new(def.clone());
     // The analysis representations the part declares: a component can take each kind.
-    summary.representations = part.document.representations.iter().map(|r| r.kind).collect();
+    summary.representations = part
+        .document
+        .representations
+        .iter()
+        .map(|r| r.kind)
+        .collect();
     summary.configurations = part
         .document
         .configurations

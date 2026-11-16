@@ -219,8 +219,21 @@ pub(super) fn annotate() -> Vec<CommandDescriptor> {
     };
     // Characteristics that take a diametral zone (a feature of size's axis) and a material
     // condition (ASME Y14.5, ISO 1101).
-    let diametral = &["position", "straightness", "perpendicularity", "parallelism", "angularity", "concentricity"];
-    let sized = &["position", "straightness", "perpendicularity", "parallelism", "angularity"];
+    let diametral = &[
+        "position",
+        "straightness",
+        "perpendicularity",
+        "parallelism",
+        "angularity",
+        "concentricity",
+    ];
+    let sized = &[
+        "position",
+        "straightness",
+        "perpendicularity",
+        "parallelism",
+        "angularity",
+    ];
     let related = &[
         "position",
         "perpendicularity",

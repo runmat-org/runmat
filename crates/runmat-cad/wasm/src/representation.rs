@@ -18,13 +18,15 @@
 use crate::runtime::{regenerate_part_in, RegeneratedPart};
 use runmat_cad::assembly::model::Representation;
 use runmat_cad::display::{BodyDisplay, EdgeDisplay, FaceDisplay, PartDisplay};
-use runmat_cad::model::{DirectEdit, Feature, FeatureKind, PartDocument, PartRepresentation, SurfaceFeature};
+use runmat_cad::model::{
+    DirectEdit, Feature, FeatureKind, PartDocument, PartRepresentation, SurfaceFeature,
+};
+use runmat_cad::refs::history::SurfaceKind;
 use runmat_cad::refs::Reference;
 use runmat_cad::regen::kernel::TessellationOptions;
 use runmat_cad::syntax::edit::edit_part;
 use runmat_cad::units::{Dimension, Units};
 use runmat_cad::value::{Evaluator, NoDynamicValues, ValueExpr};
-use runmat_cad::refs::history::SurfaceKind;
 use serde::Serialize;
 use serde_json::Value;
 
@@ -86,7 +88,11 @@ impl Built {
                 self.name,
                 self.thicknesses.len(),
                 if self.thicknesses.len() == 1 { "" } else { "s" },
-                self.thicknesses.iter().map(|t| mm(*t)).collect::<Vec<_>>().join(", ")
+                self.thicknesses
+                    .iter()
+                    .map(|t| mm(*t))
+                    .collect::<Vec<_>>()
+                    .join(", ")
             ),
             _ => match &self.beam {
                 Some(b) => format!(
@@ -119,7 +125,11 @@ fn dot(a: [f64; 3], b: [f64; 3]) -> f64 {
     a[0] * b[0] + a[1] * b[1] + a[2] * b[2]
 }
 fn cross(a: [f64; 3], b: [f64; 3]) -> [f64; 3] {
-    [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]]
+    [
+        a[1] * b[2] - a[2] * b[1],
+        a[2] * b[0] - a[0] * b[2],
+        a[0] * b[1] - a[1] * b[0],
+    ]
 }
 fn norm(a: [f64; 3]) -> f64 {
     dot(a, a).sqrt()
@@ -142,7 +152,11 @@ fn points(face: &FaceDisplay) -> Vec<[f64; 3]> {
 
 /// Two unit vectors spanning the plane normal to `n`.
 fn basis(n: [f64; 3]) -> ([f64; 3], [f64; 3]) {
-    let seed = if n[0].abs() < 0.9 { [1.0, 0.0, 0.0] } else { [0.0, 1.0, 0.0] };
+    let seed = if n[0].abs() < 0.9 {
+        [1.0, 0.0, 0.0]
+    } else {
+        [0.0, 1.0, 0.0]
+    };
     let u = unit(cross(n, seed));
     (u, cross(n, u))
 }
@@ -175,8 +189,12 @@ pub fn build(
         .find(|r| r.name == name)
         .ok_or_else(|| format!("the part has no representation `{name}`"))?;
     match rep.kind {
-        Representation::Defeatured => defeatured(path, text, configuration, full, rep, tessellation),
-        Representation::Midsurface => midsurface(path, text, configuration, full, rep, tessellation),
+        Representation::Defeatured => {
+            defeatured(path, text, configuration, full, rep, tessellation)
+        }
+        Representation::Midsurface => {
+            midsurface(path, text, configuration, full, rep, tessellation)
+        }
         Representation::Beam => beam(full, rep),
         other => Err(format!(
             "a part's representation is defeatured, midsurface or beam, not `{}`",
@@ -186,8 +204,16 @@ pub fn build(
 }
 
 /// The body `rep` names, else the part's only body.
-fn body_of<'a>(full: &'a RegeneratedPart, rep: &PartRepresentation) -> Result<&'a BodyDisplay, String> {
-    let bodies: Vec<&BodyDisplay> = full.display.bodies.iter().filter(|b| !b.flat_pattern).collect();
+fn body_of<'a>(
+    full: &'a RegeneratedPart,
+    rep: &PartRepresentation,
+) -> Result<&'a BodyDisplay, String> {
+    let bodies: Vec<&BodyDisplay> = full
+        .display
+        .bodies
+        .iter()
+        .filter(|b| !b.flat_pattern)
+        .collect();
     match &rep.body {
         Some(r) => {
             let text = runmat_cad::syntax::refs::print_reference(r).unwrap_or_default();
@@ -236,7 +262,11 @@ fn failures(part: &RegeneratedPart, ids: &[String]) -> Vec<String> {
         .diagnostics
         .iter()
         .filter(|d| d.severity == Severity::Error)
-        .filter(|d| ids.iter().any(|id| d.message.contains(id.as_str()) || format!("{:?}", d.site).contains(id.as_str())))
+        .filter(|d| {
+            ids.iter().any(|id| {
+                d.message.contains(id.as_str()) || format!("{:?}", d.site).contains(id.as_str())
+            })
+        })
         .map(|d| d.message.clone())
         .collect()
 }
@@ -256,15 +286,27 @@ struct Candidate {
     regions: Vec<String>,
 }
 
-fn length(ev: &Evaluator<'_>, full: &RegeneratedPart, v: &Option<ValueExpr>) -> Result<Option<f64>, String> {
+fn length(
+    ev: &Evaluator<'_>,
+    full: &RegeneratedPart,
+    v: &Option<ValueExpr>,
+) -> Result<Option<f64>, String> {
     v.as_ref()
-        .map(|v| ev.eval_as(v, &full.result.values, Dimension::LENGTH).map_err(|e| e.to_string()))
+        .map(|v| {
+            ev.eval_as(v, &full.result.values, Dimension::LENGTH)
+                .map_err(|e| e.to_string())
+        })
         .transpose()
 }
 
 /// Whether `face` is a full concave cylinder (a hole's wall), and its radius.
 fn concave_cylinder(face: &FaceDisplay) -> Option<f64> {
-    let Some(SurfaceKind::Cylinder { axis_point, axis_direction, radius }) = face.surface else {
+    let Some(SurfaceKind::Cylinder {
+        axis_point,
+        axis_direction,
+        radius,
+    }) = face.surface
+    else {
         return None;
     };
     let a = unit(axis_direction);
@@ -304,12 +346,18 @@ fn defeatured(
     rep: &PartRepresentation,
     tessellation: &TessellationOptions,
 ) -> Result<Built, String> {
-    let ev = Evaluator { units: &Units, dynamic: &NoDynamicValues };
+    let ev = Evaluator {
+        units: &Units,
+        dynamic: &NoDynamicValues,
+    };
     let max_fillet = length(&ev, full, &rep.max_fillet)?;
     let max_hole = length(&ev, full, &rep.max_hole)?;
     let max_chamfer = length(&ev, full, &rep.max_chamfer)?;
     if max_fillet.is_none() && max_hole.is_none() && max_chamfer.is_none() {
-        return Err(format!("`{}` sets no threshold: set fillets, holes or chamfers up to a size", rep.name));
+        return Err(format!(
+            "`{}` sets no threshold: set fillets, holes or chamfers up to a size",
+            rep.name
+        ));
     }
     let doc = &full.document;
     let eps = 1e-9;
@@ -330,7 +378,12 @@ fn defeatured(
                 .filter(|id| {
                     matches!(
                         doc.features.iter().find(|f| f.id.0 == *id).map(|f| &f.kind),
-                        Some(FeatureKind::Fillet(_) | FeatureKind::FaceFillet(_) | FeatureKind::Chamfer(_) | FeatureKind::Hole(_))
+                        Some(
+                            FeatureKind::Fillet(_)
+                                | FeatureKind::FaceFillet(_)
+                                | FeatureKind::Chamfer(_)
+                                | FeatureKind::Hole(_)
+                        )
                     )
                 });
             match maker {
@@ -342,7 +395,11 @@ fn defeatured(
             }
         }
         for (id, faces) in groups {
-            let feature = doc.features.iter().find(|f| f.id.0 == id).expect("found above");
+            let feature = doc
+                .features
+                .iter()
+                .find(|f| f.id.0 == id)
+                .expect("found above");
             let cylinder = faces
                 .iter()
                 .filter_map(|f| match f.surface {
@@ -352,10 +409,21 @@ fn defeatured(
                 .fold(None, |m: Option<f64>, r| Some(m.map_or(r, |m| m.max(r))));
             let (what, size, limit) = match &feature.kind {
                 FeatureKind::Fillet(f) => {
-                    let r = ev.eval_as(&f.radius, &full.result.values, Dimension::LENGTH).ok().or(cylinder);
-                    (format!("fillet {id}"), r.map(|r| (format!("r {}", mm(r)), r)), max_fillet)
+                    let r = ev
+                        .eval_as(&f.radius, &full.result.values, Dimension::LENGTH)
+                        .ok()
+                        .or(cylinder);
+                    (
+                        format!("fillet {id}"),
+                        r.map(|r| (format!("r {}", mm(r)), r)),
+                        max_fillet,
+                    )
                 }
-                FeatureKind::FaceFillet(_) => (format!("fillet {id}"), cylinder.map(|r| (format!("r {}", mm(r)), r)), max_fillet),
+                FeatureKind::FaceFillet(_) => (
+                    format!("fillet {id}"),
+                    cylinder.map(|r| (format!("r {}", mm(r)), r)),
+                    max_fillet,
+                ),
                 FeatureKind::Chamfer(c) => {
                     let form = serde_json::to_value(&c.form).unwrap_or(Value::Null);
                     let d = form
@@ -368,7 +436,11 @@ fn defeatured(
                         .fold(None, |m: Option<f64>, d| Some(m.map_or(d, |m| m.max(d))));
                     (format!("chamfer {id}"), d.map(|d| (mm(d), d)), max_chamfer)
                 }
-                _ => (format!("hole {id}"), cylinder.map(|r| (format!("⌀ {}", mm(2.0 * r)), 2.0 * r)), max_hole),
+                _ => (
+                    format!("hole {id}"),
+                    cylinder.map(|r| (format!("⌀ {}", mm(2.0 * r)), 2.0 * r)),
+                    max_hole,
+                ),
             };
             let Some(limit) = limit else { continue };
             let Some((size_text, size)) = size else {
@@ -387,12 +459,17 @@ fn defeatured(
         }
         if let Some(limit) = max_hole {
             for face in loose {
-                let Some(r) = concave_cylinder(face) else { continue };
+                let Some(r) = concave_cylinder(face) else {
+                    continue;
+                };
                 if 2.0 * r > limit + eps {
                     continue;
                 }
                 let Some(reference) = face.reference.clone() else {
-                    too_big.push(format!("hole {}: the face has no name to remove it by", face_name(face)));
+                    too_big.push(format!(
+                        "hole {}: the face has no name to remove it by",
+                        face_name(face)
+                    ));
                     continue;
                 };
                 candidates.push(Candidate {
@@ -429,7 +506,10 @@ fn defeatured(
             }
             let id = fresh(doc, "defeature", &ids);
             ids.push(id.clone());
-            features.push(Feature::new(&id, FeatureKind::Direct(DirectEdit::DeleteFaces { faces, heal: true })));
+            features.push(Feature::new(
+                &id,
+                FeatureKind::Direct(DirectEdit::DeleteFaces { faces, heal: true }),
+            ));
         }
         let part = regenerate_with(path, text, configuration, features, tessellation)?;
         Ok((part, ids))
@@ -461,7 +541,9 @@ fn defeatured(
     Ok(Built {
         name: rep.name.clone(),
         kind: "defeatured".into(),
-        display: part.map(|p| p.display).unwrap_or_else(|| full.display.clone()),
+        display: part
+            .map(|p| p.display)
+            .unwrap_or_else(|| full.display.clone()),
         removed: accepted.iter().map(|c| c.what.clone()).collect(),
         kept,
         ..Default::default()
@@ -475,6 +557,9 @@ fn plane_normal(face: &FaceDisplay) -> Option<[f64; 3]> {
     }
 }
 
+/// A planar face of a body: the face, its unit normal and its tessellation points.
+type PlanarFace<'a> = (&'a FaceDisplay, [f64; 3], Vec<[f64; 3]>);
+
 fn midsurface(
     path: &str,
     text: &str,
@@ -484,8 +569,11 @@ fn midsurface(
     tessellation: &TessellationOptions,
 ) -> Result<Built, String> {
     let body = body_of(full, rep)?;
-    let body_text = body.reference.clone().ok_or("the body has no name to refer to")?;
-    let planes: Vec<(&FaceDisplay, [f64; 3], Vec<[f64; 3]>)> = body
+    let body_text = body
+        .reference
+        .clone()
+        .ok_or("the body has no name to refer to")?;
+    let planes: Vec<PlanarFace<'_>> = body
         .faces
         .iter()
         .filter_map(|f| plane_normal(f).map(|n| (f, n, points(f))))
@@ -526,7 +614,10 @@ fn midsurface(
             }
         }
         if let Some((j, t)) = best {
-            if !pairs.iter().any(|(a, b, _)| (*a == j && *b == i) || (*a == i && *b == j)) {
+            if !pairs
+                .iter()
+                .any(|(a, b, _)| (*a == j && *b == i) || (*a == i && *b == j))
+            {
                 pairs.push((i, j, t));
             }
         }
@@ -546,20 +637,31 @@ fn midsurface(
     let id = fresh(&full.document, "midsurface", &[]);
     let feature = Feature::new(
         &id,
-        FeatureKind::Surface(SurfaceFeature::MidSurface { body: reference_of(&body_text)?, pairs: refs }),
+        FeatureKind::Surface(SurfaceFeature::MidSurface {
+            body: reference_of(&body_text)?,
+            pairs: refs,
+        }),
     );
     let part = regenerate_with(path, text, configuration, vec![feature], tessellation)?;
     if let Some(error) = failures(&part, std::slice::from_ref(&id)).first() {
         return Err(format!("the mid-surface of `{body_text}` failed: {error}"));
     }
     let mut display = part.display.clone();
-    display.bodies.retain(|b| b.reference.as_deref().is_some_and(|r| r.contains(&id)));
+    display
+        .bodies
+        .retain(|b| b.reference.as_deref().is_some_and(|r| r.contains(&id)));
     if display.bodies.is_empty() {
         display.bodies = part
             .display
             .bodies
             .iter()
-            .filter(|b| !full.display.bodies.iter().any(|f| f.reference == b.reference))
+            .filter(|b| {
+                !full
+                    .display
+                    .bodies
+                    .iter()
+                    .any(|f| f.reference == b.reference)
+            })
             .cloned()
             .collect();
     }
@@ -583,18 +685,30 @@ fn section(face: &FaceDisplay, n: [f64; 3]) -> (f64, [f64; 3], f64, f64, f64) {
     let (mut area, mut cu, mut cv) = (0.0, 0.0, 0.0);
     let (mut iuu, mut ivv, mut iuv) = (0.0, 0.0, 0.0);
     for t in face.triangles.chunks_exact(3) {
-        let q: Vec<(f64, f64)> = t.iter().map(|k| (dot(p[*k as usize], u), dot(p[*k as usize], v))).collect();
-        let a = 0.5 * ((q[1].0 - q[0].0) * (q[2].1 - q[0].1) - (q[2].0 - q[0].0) * (q[1].1 - q[0].1));
+        let q: Vec<(f64, f64)> = t
+            .iter()
+            .map(|k| (dot(p[*k as usize], u), dot(p[*k as usize], v)))
+            .collect();
+        let a =
+            0.5 * ((q[1].0 - q[0].0) * (q[2].1 - q[0].1) - (q[2].0 - q[0].0) * (q[1].1 - q[0].1));
         let a = a.abs();
         area += a;
         cu += a * (q[0].0 + q[1].0 + q[2].0) / 3.0;
         cv += a * (q[0].1 + q[1].1 + q[2].1) / 3.0;
         let (x, y) = ([q[0].0, q[1].0, q[2].0], [q[0].1, q[1].1, q[2].1]);
         // About the origin: ∫v², ∫u², ∫uv over the triangle.
-        ivv += a / 6.0 * (x[0] * x[0] + x[1] * x[1] + x[2] * x[2] + x[0] * x[1] + x[1] * x[2] + x[2] * x[0]);
-        iuu += a / 6.0 * (y[0] * y[0] + y[1] * y[1] + y[2] * y[2] + y[0] * y[1] + y[1] * y[2] + y[2] * y[0]);
+        ivv += a / 6.0
+            * (x[0] * x[0] + x[1] * x[1] + x[2] * x[2] + x[0] * x[1] + x[1] * x[2] + x[2] * x[0]);
+        iuu += a / 6.0
+            * (y[0] * y[0] + y[1] * y[1] + y[2] * y[2] + y[0] * y[1] + y[1] * y[2] + y[2] * y[0]);
         iuv += a / 12.0
-            * (2.0 * (x[0] * y[0] + x[1] * y[1] + x[2] * y[2]) + x[0] * y[1] + x[1] * y[0] + x[1] * y[2] + x[2] * y[1] + x[2] * y[0] + x[0] * y[2]);
+            * (2.0 * (x[0] * y[0] + x[1] * y[1] + x[2] * y[2])
+                + x[0] * y[1]
+                + x[1] * y[0]
+                + x[1] * y[2]
+                + x[2] * y[1]
+                + x[2] * y[0]
+                + x[0] * y[2]);
     }
     if area == 0.0 {
         return (0.0, [0.0; 3], 0.0, 0.0, 0.0);
@@ -615,7 +729,10 @@ fn section(face: &FaceDisplay, n: [f64; 3]) -> (f64, [f64; 3], f64, f64, f64) {
 
 fn beam(full: &RegeneratedPart, rep: &PartRepresentation) -> Result<Built, String> {
     let body = body_of(full, rep)?;
-    let body_text = body.reference.clone().unwrap_or_else(|| format!("body {}", body.index));
+    let body_text = body
+        .reference
+        .clone()
+        .unwrap_or_else(|| format!("body {}", body.index));
     // End-face candidates: pairs of opposite planar faces, longest first.
     let mut ends: Vec<(usize, usize, f64)> = Vec::new();
     for (i, a) in body.faces.iter().enumerate() {
@@ -634,7 +751,9 @@ fn beam(full: &RegeneratedPart, rep: &PartRepresentation) -> Result<Built, Strin
     }
     ends.sort_by(|x, y| y.2.total_cmp(&x.2));
     let Some(longest) = ends.first().copied() else {
-        return Err(format!("`{body_text}` isn't prismatic: it has no two parallel end faces"));
+        return Err(format!(
+            "`{body_text}` isn't prismatic: it has no two parallel end faces"
+        ));
     };
     let mut first_breach: Option<String> = None;
     for (i, j, len) in ends {
@@ -644,7 +763,9 @@ fn beam(full: &RegeneratedPart, rep: &PartRepresentation) -> Result<Built, Strin
                 && *k != j
                 && match f.surface {
                     Some(SurfaceKind::Plane { normal }) => dot(unit(normal), axis).abs() > 1e-6,
-                    Some(SurfaceKind::Cylinder { axis_direction, .. }) => dot(unit(axis_direction), axis).abs() < 1.0 - 1e-6,
+                    Some(SurfaceKind::Cylinder { axis_direction, .. }) => {
+                        dot(unit(axis_direction), axis).abs() < 1.0 - 1e-6
+                    }
                     _ => true,
                 }
         });
@@ -675,7 +796,10 @@ fn beam(full: &RegeneratedPart, rep: &PartRepresentation) -> Result<Built, Strin
             index: 0,
             reference: Some(format!("representation.{}", rep.name)),
             faces: [0, 1],
-            points: [ca, cb].iter().flat_map(|p| p.iter().map(|x| *x as f32)).collect(),
+            points: [ca, cb]
+                .iter()
+                .flat_map(|p| p.iter().map(|x| *x as f32))
+                .collect(),
         };
         let mut caps = vec![body.faces[i].clone(), body.faces[j].clone()];
         for (k, c) in caps.iter_mut().enumerate() {
@@ -742,7 +866,13 @@ pub fn requested() -> Option<String> {
 /// A part compile's output drawing representation `name`: the display is the representation's,
 /// and `representation` reports what it is (`{ name, kind, removed, kept, thicknesses, beam,
 /// summary }`). When it can't be built, the design draws and `representation` carries `error`.
-pub fn apply(path: &str, text: &str, configuration: Option<&str>, name: &str, out: &mut serde_json::Map<String, Value>) {
+pub fn apply(
+    path: &str,
+    text: &str,
+    configuration: Option<&str>,
+    name: &str,
+    out: &mut serde_json::Map<String, Value>,
+) {
     let tessellation = TessellationOptions::default();
     let built = regenerate_part_in(path, text, configuration, &tessellation)
         .map_err(|d| d.first().map(|d| d.message.clone()).unwrap_or_default())
@@ -751,7 +881,10 @@ pub fn apply(path: &str, text: &str, configuration: Option<&str>, name: &str, ou
         Ok(built) => {
             let mut report = serde_json::to_value(&built).unwrap_or(Value::Null);
             report["summary"] = Value::String(built.summary());
-            out.insert("display".into(), serde_json::json!({ "kind": "part", "data": built.display }));
+            out.insert(
+                "display".into(),
+                serde_json::json!({ "kind": "part", "data": built.display }),
+            );
             out.insert("representation".into(), report);
         }
         Err(error) => {
@@ -787,10 +920,17 @@ pub fn assembly_displays(
         let (Some(document), Some(text)) = (documents.get(&key), files.get(&key)) else {
             continue;
         };
-        let Some(rep) = document.representations.iter().find(|r| r.kind == node.representation) else {
+        let Some(rep) = document
+            .representations
+            .iter()
+            .find(|r| r.kind == node.representation)
+        else {
             problems.push((
                 node.segment.name.to_string(),
-                format!("`{key}` declares no {} representation", node.representation.key()),
+                format!(
+                    "`{key}` declares no {} representation",
+                    node.representation.key()
+                ),
             ));
             continue;
         };
@@ -798,13 +938,23 @@ pub fn assembly_displays(
         let tessellation = crate::runtime::ASSEMBLY_TESSELLATION;
         let built = regenerate_part_in(&key, text, configuration.as_deref(), &tessellation)
             .map_err(|d| d.first().map(|d| d.message.clone()).unwrap_or_default())
-            .and_then(|full| build(&key, text, configuration.as_deref(), &full, &rep.name, &tessellation));
+            .and_then(|full| {
+                build(
+                    &key,
+                    text,
+                    configuration.as_deref(),
+                    &full,
+                    &rep.name,
+                    &tessellation,
+                )
+            });
         match built {
             Ok(built) => {
                 operated.displays.insert(id as u32, built.display);
-                operated
-                    .digests
-                    .insert(id as u32, format!("representation:{}:{}:{}", key, rep.name, text.len()));
+                operated.digests.insert(
+                    id as u32,
+                    format!("representation:{}:{}:{}", key, rep.name, text.len()),
+                );
             }
             Err(why) => problems.push((node.segment.name.to_string(), why)),
         }
