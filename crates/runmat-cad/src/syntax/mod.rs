@@ -122,6 +122,10 @@ pub const PART: DocumentGrammar = DocumentGrammar {
             ..named("region", "regions", "region")
         },
         Collection {
+            type_field: Some("kind"),
+            ..named("representation", "representations", "representation")
+        },
+        Collection {
             tagged: Some(Tagged {
                 field: "target",
                 tag: "publishes",

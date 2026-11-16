@@ -356,6 +356,41 @@ mod tests {
         }
     }
 
+    /// `simulate.region` writes the region into the part; a study that reads the part resolves
+    /// `select name` to it at check time, and a name the part does not carry is a check error.
+    #[cfg(all(not(target_arch = "wasm32"), feature = "occt-native"))]
+    #[test]
+    fn a_region_the_region_command_writes_resolves_in_a_study_check() {
+        let puck = "runmat 0.7\nstd 1\n\npart puck {\n    sketch s on origin.xy {\n        c = circle(center = [0 mm, 0 mm], radius = 7 mm)\n    }\n    feature puck = extrude(profile = sketch.s, distance = 5 mm)\n    output puck = { body = feature.puck.body, material = \"aluminum_6061\" }\n}\n";
+        let mut part = puck.to_string();
+        for (name, face) in [("mount", "start"), ("top", "end")] {
+            let request = serde_json::json!({ "command": "simulate.region", "values": { "name": name, "kind": "face", "select": [format!("feature.puck.face.{face}")], "expect": "exactly_one" } });
+            let out: serde_json::Value = serde_json::from_str(&runmat_cad_wasm::edit::edit_json(
+                "/p/puck.part",
+                &part,
+                &runmat_cad_wasm::runtime::Files::new(),
+                &request.to_string(),
+            ))
+            .unwrap();
+            assert_eq!(out["ok"], true, "{out}");
+            part = out["files"][0]["text"].as_str().unwrap().to_owned();
+        }
+        let study = |mount: &str| {
+            format!(
+                "geometry puck {{\n    file = \"./puck.part\"\n    region body : solid {{ select name \"puck\"; expect exactly_one }}\n    region mount : face {{ select name \"{mount}\"; expect exactly_one }}\n    region top : face {{ select name \"top\"; expect exactly_one }}\n}}\n\nmesh puck on geometry.puck {{\n    tetrahedra {{\n        order = linear\n        target_size = 2 mm\n    }}\n}}\n\nmaterial aluminum {{\n    mass_density = 2700 kg/m^3\n    elastic {{\n        youngs_modulus = 69 GPa\n        poisson_ratio = 0.33\n    }}\n}}\n\nmodel pressed {{\n    assign material.aluminum to geometry.puck.region.body\n    constraint seat {{\n        structural.fixed {{ target = geometry.puck.region.mount }}\n    }}\n    load press {{\n        traction on geometry.puck.region.top = [0, 0, -1000000] Pa\n    }}\n    load_case service {{ include load.press }}\n}}\n\nstudy pressed {{\n    geometry = geometry.puck\n    mesh = mesh.puck\n    model = model.pressed\n    analysis static {{ structural static {{}} }}\n    output displacement = analysis.static.field.node.displacement\n}}\n"
+            )
+        };
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("puck.part"), &part).unwrap();
+        std::fs::write(dir.path().join("pressed.fea"), study("mount")).unwrap();
+        crate::analysis::source::check_fea_path(&dir.path().join("pressed.fea"))
+            .expect("the authored regions resolve");
+        std::fs::write(dir.path().join("wrong.fea"), study("mounting")).unwrap();
+        let error = crate::analysis::source::check_fea_path(&dir.path().join("wrong.fea"))
+            .expect_err("a name the part does not carry is a check error");
+        assert!(error.contains("mounting"), "{error}");
+    }
+
     #[test]
     fn only_parts_and_assemblies_are_design_geometry() {
         assert!(is_design_geometry("sim/arm.part"));

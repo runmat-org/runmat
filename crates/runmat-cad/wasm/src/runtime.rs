@@ -861,13 +861,23 @@ fn compile_assembly_with(
         &crate::runtime::module_scope(path, text, files),
     )
     .document;
-    let operated = match &assembly {
+    let mut operated = match &assembly {
         Some(doc) if !doc.operations.is_empty() => {
             crate::operated::operated_displays(&resolved, doc, &documents)
         }
         _ => Default::default(),
     };
+    // Components at a part's analysis representation draw that representation.
+    let represented =
+        crate::representation::assembly_displays(&resolved, &documents, files, &mut operated);
     let mut problems = problems;
+    problems.extend(represented.into_iter().map(|(name, why)| Diagnostic {
+        path: path.to_owned(),
+        start: 0,
+        end: 0,
+        severity: "warning".into(),
+        message: format!("component `{name}` draws its full part: {why}"),
+    }));
     // Each at its `operation <name>` statement.
     problems.extend(operated.problems.iter().map(|(name, why)| {
         let word = format!("operation {name}");
@@ -998,12 +1008,19 @@ pub fn compile_json_known(
         match compile_part_in(path, text, configuration) {
             Ok(mut part) => {
                 crate::repairs::label_candidates(&mut part.projection["index"]["diagnostics"]);
-                json!({
+                let mut out = json!({
                     "projection": { "kind": "part", "data": part.projection },
                     "display": { "kind": "part", "data": part.display },
                     "diagnostics": part.diagnostics,
                     "kernel": crate::kernel::name(),
-                })
+                });
+                // The analysis representation the Desktop draws on request.
+                if let (Some(name), Some(map)) =
+                    (crate::representation::requested(), out.as_object_mut())
+                {
+                    crate::representation::apply(path, text, configuration, &name, map);
+                }
+                out
             }
             Err(diagnostics) => json!({ "diagnostics": diagnostics }),
         }

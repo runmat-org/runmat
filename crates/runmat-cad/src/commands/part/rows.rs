@@ -26,7 +26,7 @@ pub(super) fn rows(catalog: &Catalog) -> EditorRows {
         mode: EditMode::Model,
         default_tab: "features".into(),
         view_cluster: cluster_3d(vec![]),
-        document_bar: vec![c("view.configuration")],
+        document_bar: vec![c("view.configuration"), c("view.part-representation")],
         shortcut_box: [
             "part.sketch",
             "part.extrude",

@@ -164,6 +164,8 @@ pub(super) fn part_summary(
     text: &str,
 ) -> (DefinitionSummary, ConfiguredSummary) {
     let mut summary = DefinitionSummary::new(def.clone());
+    // The analysis representations the part declares: a component can take each kind.
+    summary.representations = part.document.representations.iter().map(|r| r.kind).collect();
     summary.configurations = part
         .document
         .configurations

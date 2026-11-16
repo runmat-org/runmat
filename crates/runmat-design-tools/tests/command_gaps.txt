@@ -33,9 +33,6 @@ part.edit-sketch-plane part
 part.library part
 sheet-metal.bend-table part
 sheet-metal.gauge part
-simulate.defeature part
-simulate.region part
-simulate.representation part
 sketch.use-edges part
 sketch.use-edges part type=intersection
 sketch.use-edges part type=offset_on_surface

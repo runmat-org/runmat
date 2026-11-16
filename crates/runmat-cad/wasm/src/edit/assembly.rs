@@ -351,6 +351,54 @@ fn representation(
     Ok(format!("Representation of {}: {}", names.join(", "), chosen.label()))
 }
 
+/// A part analysis representation (`defeatured`, `midsurface`, `beam`) needs the component's
+/// part to declare one of that kind; anything else passes.
+fn declared_representations(
+    compiled: &Compiled,
+    files: &Files,
+    names: &[String],
+    key: &str,
+) -> Result<(), EditFailure> {
+    use runmat_cad::assembly::model::Representation;
+    use runmat_cad::model::PartRepresentation;
+    let Some(kind) = Representation::from_key(key).filter(|r| PartRepresentation::KINDS.contains(r))
+    else {
+        return Ok(());
+    };
+    for name in names {
+        let Some(file) = compiled
+            .rows
+            .iter()
+            .find(|r| r["path"].as_str() == Some(name.as_str()))
+            .and_then(|r| r["definition"]["file"].as_str())
+        else {
+            continue;
+        };
+        let Some((path, text)) = files
+            .iter()
+            .find(|(p, _)| p.as_str() == file || p.ends_with(&format!("/{}", file.trim_start_matches("./"))))
+        else {
+            continue;
+        };
+        if !path.ends_with(".part") {
+            return Err(model(format!(
+                "`{name}` isn't a part: a {} representation is a part's",
+                kind.label().to_lowercase()
+            )));
+        }
+        let declared = runmat_cad::syntax::parse_part(path, text)
+            .document
+            .is_some_and(|d| d.representations.iter().any(|r| r.kind == kind));
+        if !declared {
+            return Err(model(format!(
+                "`{path}` declares no {} representation: add one in the part with Simulate › Representation",
+                kind.key()
+            )));
+        }
+    }
+    Ok(())
+}
+
 fn find(document: &AssemblyDocument, name: &str) -> Result<usize, EditFailure> {
     document
         .occurrences
@@ -607,7 +655,9 @@ pub(super) fn edit(
         }
         "assembly.representation" => {
             let names = selected_names(&compiled, request)?;
-            representation(&mut document, &names, text_value(&request.values, "representation"))?
+            let key = text_value(&request.values, "representation");
+            declared_representations(&compiled, files, &names, key)?;
+            representation(&mut document, &names, key)?
         }
         "assembly.insert" => place::insert(&mut document, files, &request.values)?,
         "assembly.component-configuration" => {

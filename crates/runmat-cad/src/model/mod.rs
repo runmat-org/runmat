@@ -16,6 +16,7 @@ pub mod hole_tables;
 pub mod items;
 pub mod materials;
 pub mod mold;
+pub mod representation;
 pub mod sheet_metal;
 pub mod sketch;
 pub mod surface;
@@ -34,6 +35,7 @@ pub use direct::*;
 pub use feature::*;
 pub use items::*;
 pub use mold::MoldFeature;
+pub use representation::PartRepresentation;
 pub use sheet_metal::SheetMetalFeature;
 pub use sketch::*;
 pub use surface::SurfaceFeature;
@@ -74,6 +76,9 @@ pub struct PartDocument {
     pub parts: Vec<PartOutput>,
     #[serde(default)]
     pub regions: Vec<Region>,
+    /// Analysis representations (`representation simple : defeatured = { … }`).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub representations: Vec<PartRepresentation>,
     #[serde(default)]
     pub publishes: Vec<PublishEntry>,
     #[serde(default)]
@@ -107,6 +112,7 @@ impl PartDocument {
             rollback_after: None,
             parts: Vec::new(),
             regions: Vec::new(),
+            representations: Vec::new(),
             publishes: Vec::new(),
             materials: Vec::new(),
             links: Vec::new(),

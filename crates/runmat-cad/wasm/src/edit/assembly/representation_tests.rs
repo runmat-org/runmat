@@ -1,6 +1,6 @@
 //! Representations: a component set to `envelope` draws as its box (a sub-assembly, one box
-//! around its parts) and still weighs its parts; `full` writes nothing; kinds with no engine
-//! are refused.
+//! around its parts) and still weighs its parts; `full` writes nothing; a part analysis
+//! representation the part doesn't declare is refused.
 use super::tests::{compile, files, run, Compiled, RIG};
 use crate::edit::edit_json;
 use crate::runtime::compile_assembly;
@@ -47,23 +47,29 @@ fn an_envelope_component_draws_as_its_box_and_full_writes_nothing() {
 }
 
 #[test]
-fn a_representation_with_no_engine_is_refused_by_its_key() {
+fn an_analysis_representation_the_part_doesnt_declare_is_refused_and_an_unknown_key_too() {
     let c = compile(RIG);
     let pick = format!("occurrence:{}", c.uuid("pin"));
-    for key in ["midsurface", "mid_surface", "beam", "defeatured"] {
-        let out: Value = serde_json::from_str(&edit_json(
+    let run_key = |key: &str| -> Value {
+        serde_json::from_str(&edit_json(
             "/p/rig.assembly",
             RIG,
             &files(),
             &json!({ "command": "assembly.representation", "values": { "components": [pick], "representation": key } }).to_string(),
         ))
-        .unwrap();
+        .unwrap()
+    };
+    for key in ["midsurface", "beam", "defeatured"] {
+        let out = run_key(key);
         assert_eq!(out["ok"], false, "{key}: {out}");
-        assert!(
-            out.to_string().contains("choose `full` or `envelope`"),
-            "{key}: {out}"
-        );
+        assert!(out.to_string().contains(&format!("declares no {key} representation")), "{key}: {out}");
     }
+    let out = run_key("mid_surface");
+    assert_eq!(out["ok"], false, "{out}");
+    assert!(
+        out.to_string().contains("choose `full` or `envelope` or `defeatured` or `midsurface` or `beam`"),
+        "{out}"
+    );
 }
 
 #[test]

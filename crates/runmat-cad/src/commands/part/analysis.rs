@@ -463,7 +463,8 @@ pub(super) fn simulate() -> Vec<CommandDescriptor> {
             .kw(&["named selection", "boundary", "load face"])
             .inputs(vec![
                 text("name", "Name", Some("mount_face")),
-                radio("kind", "Kind", &[("face", "Faces"), ("edge", "Edges"), ("body", "Bodies"), ("vertex", "Vertices")]),
+                radio("kind", "Kind", &[("face", "Faces"), ("edge", "Edges"), ("body", "Bodies"), ("vertex", "Vertices")])
+                    .help("A study reads face regions by name with `select name`, and a body by its output's name. Edge and vertex regions name items for drawings and assemblies; studies don't read them yet."),
                 picks("select", "Items", &[K::Face, K::Edge, K::Body, K::Vertex]),
                 choice("expect", "Expect", &[("at_least_one", "At least one"), ("exactly_one", "Exactly one"), ("any", "Any number")]),
             ])
@@ -481,25 +482,37 @@ pub(super) fn simulate() -> Vec<CommandDescriptor> {
             ])
             .edit(edit(EditOp::Add, Section::Publishes).item("publish")),
         cmd("simulate.representation", "Representation", "representation", P)
-            .desc("Define how the part appears in assemblies and studies: full, envelope, defeatured, mid-surface or beam.")
+            .desc("Add an analysis representation for meshing: defeatured, mid-surface or beam. Full draws the design itself.")
+            .kw(&["idealization", "midsurface", "mid-surface", "beam", "shell", "simplify"])
             .inputs(vec![
-                choice("kind", "Representation", &[("full", "Full"), ("envelope", "Envelope"), ("defeatured", "Defeatured"), ("mid_surface", "Mid-surface"), ("beam", "Beam")]),
-                text("name", "Name", Some("defeatured")),
+                choice("kind", "Representation", &[("full", "Full"), ("defeatured", "Defeatured"), ("midsurface", "Mid-surface"), ("beam", "Beam")])
+                    .help("Drawn from the bottom strip's Representation menu. A study reads the full design: it can't select a representation yet."),
+                text("name", "Name", Some("simple")).shown("kind", &["defeatured", "midsurface", "beam"]),
+                pick("body", "Body", &[K::Body])
+                    .optional()
+                    .shown("kind", &["midsurface", "beam"])
+                    .help("Empty: the part's only body. A mid-surface needs a thin wall; a beam needs a prismatic body."),
+                length("max_fillet", "Fillets up to", 2.0).shown("kind", &["defeatured"]),
+                length("max_hole", "Holes up to", 3.0).shown("kind", &["defeatured"]),
+                length("max_chamfer", "Chamfers up to", 1.0).shown("kind", &["defeatured"]),
+                flag("keep_regions", "Keep named regions", true).shown("kind", &["defeatured"]),
             ])
             .when(bodies_exist())
             .edit(edit(EditOp::Add, Section::Configurations).item("representation")),
         cmd("simulate.defeature", "Defeature", "defeature", P)
-            .desc("Remove small fillets, holes and chamfers for simulation.")
-            .kw(&["simplify"])
+            .desc("Add a defeatured representation for meshing: small fillets, holes and chamfers removed. The design stays as it is.")
+            .kw(&["simplify", "small features", "suppress fillets"])
             .inputs(vec![
+                text("name", "Name", Some("defeatured"))
+                    .help("Drawn from the bottom strip's Representation menu. A study reads the full design: it can't select a representation yet."),
                 length("max_fillet", "Fillets up to", 2.0),
                 length("max_hole", "Holes up to", 3.0),
                 length("max_chamfer", "Chamfers up to", 1.0),
-                flag("keep_regions", "Keep named regions", true),
+                flag("keep_regions", "Keep named regions", true)
+                    .help("Faces a region holds stay, so a study's loads and supports keep their faces."),
             ])
             .when(bodies_exist())
-            .preview()
-            .edit(add_feature_variant("direct", "direct", "delete_faces")),
+            .edit(edit(EditOp::Add, Section::Configurations).item("representation")),
         cmd("simulate.check", "Study checks", "check", &[EditorKind::Part, EditorKind::Assembly])
             .desc("Check fit and mass before a study meshes the design: overlapping parts, open contacts and parts without a material.")
             .kw(&["preflight", "fit check", "mass check", "before simulation"])

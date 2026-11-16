@@ -135,7 +135,9 @@ pub fn compile_json_with_values(
             return super::assembly_stages::compile_parts(path, text, files);
         }
         crate::drawing::progress::with_stage(stage, || {
-            super::compile_json_known(path, text, files, configuration.as_deref(), &known)
+            crate::representation::with_requested(crate::representation::requested_in(options), || {
+                super::compile_json_known(path, text, files, configuration.as_deref(), &known)
+            })
         })
     });
     let pending = pending.borrow();
