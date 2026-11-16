@@ -105,14 +105,20 @@ impl GeometryScene {
     /// Measure's dimensions: each a haloed line between its two points with a dot at each end,
     /// drawn over the model so a dimension behind a wall still reads. The value draws at the
     /// line's middle in the overlay (`PlotRenderer::geometry_screen_dimensions`).
-    pub(super) fn dimension_nodes(&self, presentation: &GeometryScenePresentation) -> Vec<SceneNode> {
+    pub(super) fn dimension_nodes(
+        &self,
+        presentation: &GeometryScenePresentation,
+    ) -> Vec<SceneNode> {
         if presentation.dimensions.is_empty() {
             return Vec::new();
         }
         let mut strokes = Vec::new();
         for dimension in &presentation.dimensions {
             let color = dimension.color.unwrap_or(GEOMETRY_DIMENSION_COLOR);
-            let (from, to) = (Vec3::from_array(dimension.from), Vec3::from_array(dimension.to));
+            let (from, to) = (
+                Vec3::from_array(dimension.from),
+                Vec3::from_array(dimension.to),
+            );
             if !from.is_finite() || !to.is_finite() {
                 continue;
             }

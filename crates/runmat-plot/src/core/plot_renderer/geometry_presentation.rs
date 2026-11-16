@@ -138,9 +138,7 @@ impl PlotRenderer {
         &self,
         viewport_size: [f32; 2],
     ) -> Vec<GeometryScreenDimension> {
-        if self.last_geometry_scene.is_none()
-            || viewport_size[0] <= 0.0
-            || viewport_size[1] <= 0.0
+        if self.last_geometry_scene.is_none() || viewport_size[0] <= 0.0 || viewport_size[1] <= 0.0
         {
             return Vec::new();
         }

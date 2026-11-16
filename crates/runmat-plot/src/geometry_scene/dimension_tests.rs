@@ -62,7 +62,9 @@ fn a_dimension_draws_its_line_and_end_dots_over_the_model() {
         assert!(positions.contains(&end), "no vertex at the end {end:?}");
     }
     assert!(
-        positions.iter().all(|p| p[1] == 0.0 && p[2] == 0.0 && (0.0..=0.04).contains(&p[0])),
+        positions
+            .iter()
+            .all(|p| p[1] == 0.0 && p[2] == 0.0 && (0.0..=0.04).contains(&p[0])),
         "the line leaves the measured span: {positions:?}"
     );
     // Halo strokes are dark; the line and dots take the dimension's color.
@@ -73,7 +75,10 @@ fn a_dimension_draws_its_line_and_end_dots_over_the_model() {
 
 #[test]
 fn no_dimension_draws_nothing_and_a_broken_one_is_skipped() {
-    assert!(dimension_node(&plate().nodes_with_presentation(&GeometryScenePresentation::default())).is_none());
+    assert!(dimension_node(
+        &plate().nodes_with_presentation(&GeometryScenePresentation::default())
+    )
+    .is_none());
     let nodes = plate().nodes_with_presentation(&GeometryScenePresentation {
         dimensions: vec![GeometrySceneDimension {
             from: [f32::NAN, 0.0, 0.0],
@@ -97,7 +102,12 @@ fn touching_items_measure_zero_and_show_their_dot() {
         }],
         ..Default::default()
     });
-    let data = dimension_node(&nodes).and_then(|n| n.render_data.as_ref()).expect("dots");
+    let data = dimension_node(&nodes)
+        .and_then(|n| n.render_data.as_ref())
+        .expect("dots");
     assert_eq!(data.vertices.len(), 12);
-    assert!(data.vertices.iter().all(|v| v.color[..3] == GEOMETRY_DIMENSION_COLOR[..3]));
+    assert!(data
+        .vertices
+        .iter()
+        .all(|v| v.color[..3] == GEOMETRY_DIMENSION_COLOR[..3]));
 }

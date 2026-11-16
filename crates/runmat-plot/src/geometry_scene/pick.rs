@@ -247,7 +247,7 @@ impl GeometryScenePickIndex {
             normal: (triangle.b - triangle.a)
                 .cross(triangle.c - triangle.a)
                 .try_normalize()
-                .map(Vec3::to_array),
+                .map(|n| n.to_array()),
             owner_node_ids: triangle.owner_node_ids.clone(),
         })
     }
