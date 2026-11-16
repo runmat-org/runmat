@@ -29,7 +29,6 @@ motion.drag assembly
 motion.mate-controller assembly
 motion.to-fea assembly
 part.edit-sketch-plane part
-part.library part
 simulate.defeature part
 simulate.region part
 simulate.representation part
@@ -38,4 +37,3 @@ sketch.use-edges part type=intersection
 sketch.use-edges part type=offset_on_surface
 sketch.use-edges part type=project
 sketch.use-edges part type=silhouette
-weldment.profile-library part

@@ -22,6 +22,7 @@
 pub(crate) mod assembly;
 mod configuration;
 mod history;
+mod library;
 mod manage;
 mod publish;
 pub(crate) mod release;
@@ -480,6 +481,33 @@ pub fn edit(
     } else if let Some(result) = manage::settings::edit(path, text, files, request) {
         // The part's document settings, gauge and bend rule: they read the project's tables.
         result?
+    } else if let Some(result) = library::edit(path, text, files, request) {
+        // The profile and part libraries: they read the project's library folder, and saving a
+        // profile writes a file there.
+        let done = result?;
+        let mut out: Vec<FileChange> = done
+            .created
+            .into_iter()
+            .map(|(p, t)| {
+                let change = SourceChange {
+                    edits: vec![runmat_design_syntax::edit::TextEdit::replace(
+                        runmat_types::Span { start: 0, end: 0 },
+                        t.clone(),
+                    )],
+                    source: t,
+                    reprinted: true,
+                };
+                file_change(&p, "", change)
+            })
+            .collect();
+        if let Some(own) = done.own {
+            let own = history::insert_at_bar(path, text, own)?;
+            out.insert(0, file_change(path, text, own));
+        }
+        return Ok(EditOutput {
+            files: out,
+            summary: done.summary,
+        });
     } else if request.command == "manage.split-to-files" {
         // New part files and an assembly beside this part, which stays as it is.
         let parsed = parse_part(path, text);

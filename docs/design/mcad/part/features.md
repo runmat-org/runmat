@@ -195,7 +195,7 @@ feature mir = mirror(features = [pk2], plane = plane.mp)
 | `body_op.copy` | Copies bodies, the originals kept: copy `k` moves `k` times by the offset, then turns `k` times by `angle` about `axis`. | `bodies`, `dx`, `dy`, `dz`, `axis`, `angle`, `count` |
 | `body_op.indent` | Presses a tool body into a target; the tool, grown by `clearance`, is cut from the target and kept. | `target`, `tool`, `clearance` |
 | `import` | A body from a STEP file, held by the file's digest; its named faces read as `feature.<name>.face("Top")`. | `source`, `digest` |
-| `library` | An instance of a reusable feature definition (`feature_def`). | `def`, `args`, `bindings`, `mode` |
+| `library` | An instance of a reusable feature definition (`feature_def`) or a library part. | `def`, `args`, `bindings`, `mode`, `plane` |
 <!-- /arguments -->
 
 ```part fragment
@@ -204,6 +204,22 @@ feature halve = split(body = feature.body.body, tool = plane.cutp)
 feature drop = body_op.delete(bodies = [feature.halve.body.body(side = negative)])
 feature step = import(source = "supplier/housing.step", digest = d2)
 feature boss1 = library(def = "feature_def.boss", args = { h = 8 mm }, mode = add)
+```
+
+### Library features and parts
+
+A project's `library/` folder, beside the part, holds features and parts to reuse. Nothing is fetched from a network.
+
+- Each `feature_def` in a `library/*.part` file is a library feature, named `library/<file>.part#feature_def.<name>`. Its features are written on `origin.xy`. The instance's `plane` names the face or datum plane that `origin.xy` stands for, so the feature lands there. A cut written with `reverse = true` goes into the face.
+- A `library/*.part` file with no `feature_def` is a library part, named `library/<file>.part`. Inserting it adds its features to this part as a new body, at the origin. Its `input`s become the instance's `args`. A library part can't compute `let` values.
+
+`args` sets the inputs; the others keep their defaults. The instance's features are named `<instance>.<feature>` (`slot1.cut`). Editing the library file rebuilds every part that uses it.
+
+The **Library** command (Features tab) searches the library folder as you type, and takes the placement face and the input values.
+
+```part fragment
+feature slot1 = library(def = "library/fixtures.part#feature_def.slot", args = { width = 30 mm, depth = 4 mm }, plane = feature.block.face.end)
+feature pin1 = library(def = "library/pin.part", args = { d = 8 mm })
 ```
 
 ## Datums and curves
@@ -281,6 +297,24 @@ feature flat = sheet_metal.flat_pattern(fixed_face = feature.base.face.sheet(bas
 feature members = weldment.structural_member(groups = [{ sketch = layout, segments = [bottom, right, top, left], profile = rect_tube(width = 0.02, height = 0.02, wall = 0.002), material = S235 }])
 feature shrink = mold.shrink(bodies = [feature.body.body], x = 0.005, y = 0.005, z = 0.005)
 feature draft_check = mold.parting_line(body = feature.body.body, pull = origin.z, min_draft = 1 deg)
+```
+
+### Structural profiles
+
+A member's `profile` is a parametric family (`rect_tube`, `pipe`, `angle`, `channel`, `i_beam`, `flat_bar`, `round_bar`), a standard size, or a closed sketch region.
+
+| Profile | Writes | Sizes |
+|---|---|---|
+| A standard size | `standard(designation = "IPE 200")` | IPE 80–600, HEA 100–300 and HEB 100–300 from EN 10365:2017, with their root radii; pipe NPS ½–12 Schedule 40 from ASME B36.10M (`NPS 2 Sch 40`) |
+| A sketch region | `sketch_region(sketch = ell_40)` | every closed region of the sketch, holes subtracted; the sketch's origin sits on the member's path |
+
+The cut list weighs each member by its section's area. For an I-section, that area includes the four root fillets: IPE 200 is 2 × 100 × 8.5 + 183 × 5.6 + (4 − π) × 12² = 2848 mm², the 28.5 cm² the standard lists. For a sketch region, regeneration integrates the solved sketch.
+
+The **Profile library** command (Weldments tab) searches the standard sizes and the project's profiles as you type, and places members on the picked sketch lines. Its summary gives the section's area and second moments of area. With **Save sketch as profile**, it writes the picked sketch to `library/profiles/<name>.part` beside the part. Placing a project profile copies its sketch into the part under the profile's name, so later edits to the library file don't change members already placed.
+
+```part fragment
+feature beams = weldment.structural_member(groups = [{ sketch = layout, segments = [bottom, right], profile = standard(designation = "IPE 200"), material = s235 }])
+feature rails = weldment.structural_member(groups = [{ sketch = layout, segments = [top], profile = sketch_region(sketch = ell_40), material = al_6061 }])
 ```
 
 ## Direct edits

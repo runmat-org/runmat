@@ -185,6 +185,19 @@ pub fn dependencies(path: &str, text: &str) -> Vec<String> {
         ));
         // Its release store, which Release adds the next revision to.
         out.push(runmat_cad::refs::release_store::store_path(path));
+        // The library files its library features and parts come from, and the library
+        // folders the Profile library and Library panels search.
+        out.extend(
+            runmat_cad::model::library::files(&doc)
+                .iter()
+                .map(|f| resolve_path(path, f, &Files::new())),
+        );
+        for folder in [
+            runmat_cad::model::library::FOLDER,
+            runmat_cad::model::library::PROFILES,
+        ] {
+            out.push(format!("{}/", resolve_path(path, folder, &Files::new())));
+        }
         // The gauge and bend tables its sheet metal reads.
         if let Some(defaults) = &doc.sheet_metal {
             out.extend(
@@ -313,10 +326,16 @@ pub fn regenerate_part_in(
         return Err(syntax_diagnostics(path, text, &parsed.diagnostics));
     };
     // The part's gauge and bend table, read from the project, in every sheet body's rules.
-    let (document, table_problems) =
+    let (document, mut table_problems) =
         runmat_cad::model::sheet_metal::tables::resolve(&document, &|reference| {
             values_host::host_file(path, reference)
         });
+    // Library features and parts from the project's library files.
+    let (document, library_problems) =
+        runmat_cad::model::library::resolve(&document, &|reference| {
+            values_host::host_file(path, reference)
+        });
+    table_problems.extend(library_problems);
     let kernel = crate::kernel::make();
     let request = RegenRequest {
         configuration: configuration.map(runmat_cad::ids::ConfigurationName::new),
@@ -379,6 +398,27 @@ pub fn regenerate_part_in(
         display,
         dynamic: used.get(),
     })
+}
+
+/// The standard profile sizes and the entries of the `library/` files beside `path`.
+pub fn library_entries(path: &str, files: &Files) -> Vec<runmat_cad::model::library::LibraryEntry> {
+    use runmat_cad::model::library;
+    let base = format!("{}/", folder(path));
+    let mut out = library::standard_entries();
+    for (file, text) in files {
+        let Some(relative) = file.strip_prefix(&base) else {
+            continue;
+        };
+        let in_folder = |f: &str| {
+            relative
+                .strip_prefix(&format!("{f}/"))
+                .is_some_and(|rest| !rest.contains('/') && rest.ends_with(".part"))
+        };
+        if in_folder(library::FOLDER) || in_folder(library::PROFILES) {
+            out.extend(library::file_entries(relative, text));
+        }
+    }
+    out
 }
 
 /// The part's own setting problems in its regeneration's diagnostics: sheet-metal tables that
@@ -1036,6 +1076,9 @@ pub fn compile_json_known(
         match compile_part_in(path, text, configuration) {
             Ok(mut part) => {
                 crate::repairs::label_candidates(&mut part.projection["index"]["diagnostics"]);
+                // What the part's library panels search: standard sizes and the project's
+                // library files.
+                part.projection["index"]["library"] = json!(library_entries(path, files));
                 json!({
                     "projection": { "kind": "part", "data": part.projection },
                     "display": { "kind": "part", "data": part.display },

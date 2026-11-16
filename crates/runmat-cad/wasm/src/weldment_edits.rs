@@ -97,7 +97,10 @@ fn profile(kind: &str, size: &str, unit: &str) -> Result<Value, EditFailure> {
 
 /// The picked segments by sketch, in pick order: a line pick (`sketch.layout.bottom`) adds its
 /// line; a sketch pick adds every line in it that isn't construction.
-fn segments(values: &Values, picks: &Picks) -> Result<Vec<(String, Vec<String>)>, EditFailure> {
+pub(crate) fn segments(
+    values: &Values,
+    picks: &Picks,
+) -> Result<Vec<(String, Vec<String>)>, EditFailure> {
     let mut groups: Vec<(String, Vec<String>)> = Vec::new();
     let mut add =
         |sketch: String, entity: String| match groups.iter_mut().find(|(s, _)| *s == sketch) {

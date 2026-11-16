@@ -2319,6 +2319,7 @@ fn threads_embosses_ribs_curves_connectors_and_library_features() {
             args: [(InputName::new("h"), mm(8.0))].into_iter().collect(),
             bindings: Default::default(),
             mode: BodyMode::add(),
+            plane: None,
         }),
     ));
     let r = env.regen(&d2);
