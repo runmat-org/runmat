@@ -47,6 +47,8 @@ pub fn is_synchronous_access_unavailable(error: &io::Error) -> bool {
 
 /// Polls `future` once. A ready result is returned; a pending one fails with
 /// [`SynchronousAccessUnavailable`] for `operation` and the future is dropped.
+/// Native builds block on the provider instead, so only wasm and the tests call it.
+#[cfg_attr(not(any(target_arch = "wasm32", test)), allow(dead_code))]
 pub(crate) fn poll_once<T>(
     operation: &'static str,
     future: impl Future<Output = io::Result<T>>,
