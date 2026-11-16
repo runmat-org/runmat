@@ -359,6 +359,36 @@ fn find(document: &AssemblyDocument, name: &str) -> Result<usize, EditFailure> {
         .ok_or_else(|| model(format!("the assembly has no component `{name}`")))
 }
 
+/// After components `names` are deleted: the connectors on them (when no alternative of that
+/// name is left) and the mates that join those connectors go too, so nothing is left pointing at
+/// a component that is gone. Returns the summary's tail naming what went with them.
+fn drop_dangling(document: &mut AssemblyDocument, names: &[String]) -> String {
+    let gone: Vec<&String> = names
+        .iter()
+        .filter(|n| !document.occurrences.iter().any(|o| &o.name == *n))
+        .collect();
+    let connectors: Vec<String> = document
+        .connectors
+        .iter()
+        .filter(|c| c.occurrence.0.first().is_some_and(|s| gone.contains(&&s.name)))
+        .map(|c| c.name.clone())
+        .collect();
+    document.connectors.retain(|c| !connectors.contains(&c.name));
+    let mates: Vec<String> = document
+        .mates
+        .iter()
+        .filter(|m| connectors.contains(&m.a) || connectors.contains(&m.b))
+        .map(|m| m.name.clone())
+        .collect();
+    document.mates.retain(|m| !mates.contains(&m.name));
+    let with: Vec<String> = mates.into_iter().chain(connectors).collect();
+    if with.is_empty() {
+        String::new()
+    } else {
+        format!(" with {}", with.join(", "))
+    }
+}
+
 /// Component `occurrence`, which must carry override `index`.
 fn override_owner<'a>(
     document: &'a mut AssemblyDocument,
@@ -551,7 +581,8 @@ pub(super) fn edit(
                 let at = find(&document, name)?;
                 document.occurrences.remove(at);
             }
-            format!("Deleted {}", names.join(", "))
+            let dropped = drop_dangling(&mut document, &names);
+            format!("Deleted {}{dropped}", names.join(", "))
         }
         "assembly.suppress" => {
             let names = selected_names(&compiled, request)?;

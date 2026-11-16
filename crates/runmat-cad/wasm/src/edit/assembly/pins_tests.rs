@@ -172,3 +172,23 @@ fn properties_make_a_component_a_reference_and_back() {
     assert_eq!(out["ok"], true, "{out}");
     assert!(!out["files"][0]["text"].as_str().unwrap().contains("reference"), "{out}");
 }
+
+#[test]
+fn an_emptied_components_field_updates_every_component_whatever_is_selected() {
+    let mut files = files();
+    let block = uuid(RIG, &files, "block");
+    for part in ["block", "plate", "pin"] {
+        let path = format!("/p/{part}.part");
+        let ((store, _, change), _) =
+            crate::edit::release::release(&path, &files[&path], &files).unwrap();
+        files.insert(store, change.source);
+    }
+    let out = edit(
+        RIG,
+        &files,
+        json!({ "command": "assembly.update-pins", "values": { "to": "released", "components": [] }, "selection": [block] }),
+    );
+    assert_eq!(out["ok"], true, "{out}");
+    let text = out["files"][0]["text"].as_str().unwrap();
+    assert_eq!(text.matches("@ \"R1\"").count(), 4, "{text}");
+}

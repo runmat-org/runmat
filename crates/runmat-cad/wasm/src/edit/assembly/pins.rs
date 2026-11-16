@@ -14,15 +14,22 @@ use runmat_cad::assembly::model::AssemblyDocument;
 use runmat_cad::refs::XrefContext;
 use runmat_cad::syntax::edit::EditFailure;
 
+/// Whether the request names components: its Components field when it has one (an emptied
+/// field names none, whatever is still selected), else the selection.
+fn named(request: &EditRequest) -> bool {
+    match request.values.get("components") {
+        Some(_) => !crate::features::picks_of(&request.values, "components").is_empty(),
+        None => !request.selection.is_empty(),
+    }
+}
+
 /// The components a command names, or every component when it names none.
 fn chosen_or_all(
     document: &AssemblyDocument,
     compiled: &Compiled,
     request: &EditRequest,
 ) -> Result<Vec<String>, EditFailure> {
-    let named = !crate::features::picks_of(&request.values, "components").is_empty()
-        || !request.selection.is_empty();
-    if named {
+    if named(request) {
         return selected_names(compiled, request);
     }
     if document.occurrences.is_empty() {
@@ -89,8 +96,7 @@ pub(super) fn release(
     request: &EditRequest,
     others: &mut Vec<FileEdit>,
 ) -> Result<String, EditFailure> {
-    let named = !crate::features::picks_of(&request.values, "components").is_empty()
-        || !request.selection.is_empty();
+    let named = named(request);
     let mut targets: Vec<(String, String)> = Vec::new();
     if named {
         for name in selected_names(compiled, request)? {
