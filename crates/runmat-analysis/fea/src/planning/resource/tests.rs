@@ -97,6 +97,7 @@ fn input(partitioning: PartitioningPolicy) -> FeaResourcePlanningInput {
                         scalar: NumericalScalar::RealF64,
                         preconditioner: PreconditionerStorage::Diagonal,
                         transpose_index_bytes_upper_bound: ByteCount(0),
+                        preparation_bytes_upper_bound: ByteCount(0),
                         path: StaticSolvePath::ProvingFactorization,
                         admission: SolverAdmissionResourcePolicy {
                             dimension: Count(4),
@@ -1112,6 +1113,7 @@ fn understated_resident_bounds_are_rejected() {
             resident_bytes_upper_bound: ByteCount(1),
         },
         transpose_index_bytes_upper_bound: ByteCount(0),
+        preparation_bytes_upper_bound: ByteCount(0),
         path: StaticSolvePath::ProvingFactorization,
         admission: SolverAdmissionResourcePolicy {
             dimension: Count(4),
@@ -1169,6 +1171,7 @@ fn complex_solve_vectors_and_diagonal_storage_use_complex_width() {
         scalar: NumericalScalar::ComplexF64,
         preconditioner: PreconditionerStorage::Diagonal,
         transpose_index_bytes_upper_bound: ByteCount(0),
+        preparation_bytes_upper_bound: ByteCount(0),
         path: StaticSolvePath::ProvingFactorization,
         admission: SolverAdmissionResourcePolicy {
             dimension: Count(4),

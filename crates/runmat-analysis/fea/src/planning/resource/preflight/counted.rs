@@ -3,10 +3,11 @@
 //!
 //! The terms are the elastic rigidity multigrid plan's (the path a constrained budget selects):
 //! the topology, the stiffness, mass and damping patterns, the assembly contributions, the
-//! multigrid hierarchy, the solve vectors, the rigidity proof inventory and the recovered
-//! fields, each by the formula the mesh-based planner uses. Only the sparse pattern comes from
-//! counts: the node adjacency of a conforming tetrahedral mesh follows from its vertices,
-//! tetrahedra and boundary facets (Euler's relation). The factorization's fill is not
+//! multigrid hierarchy, the solve vectors, the solver's identity-constrained copy of the
+//! stiffness, the rigidity proof inventory and the recovered fields, each by the formula the
+//! mesh-based planner uses. Only the sparse pattern comes from counts: the node adjacency of a
+//! conforming tetrahedral mesh follows from its vertices, tetrahedra and boundary facets
+//! (Euler's relation). The factorization's fill is not
 //! estimated here; whether the proving factorization fits stays an execution-time decision.
 use runmat_meshing_core::SolidMeshCounts;
 
@@ -122,11 +123,11 @@ pub fn estimate_static_solid_from_counts(
         nodes,
         std::iter::repeat_n(width as usize, as_usize(elements)?),
     );
-    let solve = add(
-        add(vectors, multigrid, "counted solve")?,
-        proof,
-        "counted solve",
-    )?;
+    let prepared =
+        super::solve_workspace::identity_constrained_operator_bytes(dofs, stiffness_nonzeros)?;
+    let solve = [vectors, multigrid, proof, prepared]
+        .into_iter()
+        .try_fold(0, |sum, bytes| add(sum, bytes, "counted solve"))?;
     let recovery_values = add(
         mul(
             nodes,
