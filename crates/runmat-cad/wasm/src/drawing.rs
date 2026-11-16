@@ -42,8 +42,12 @@ use runmat_cad::refs::name::EntityName;
 use runmat_cad::refs::reference::Reference;
 use runmat_cad::syntax::parse_drawing_in;
 use serde_json::{json, Value};
+use std::collections::btree_map::Entry;
 use std::collections::{BTreeMap, BTreeSet};
 use std::rc::Rc;
+
+/// A grid line's plane as the sheet draws it: its anchor and the box it spans (mm).
+type GridPlane = ([f64; 3], [[f64; 3]; 2]);
 
 /// A part's PMI names: tolerances, sizes and locations (what a dimension's `pmi` may name), and datums.
 type PmiNames = (BTreeSet<String>, BTreeSet<String>, BTreeSet<String>);
@@ -522,7 +526,7 @@ pub fn compile_json_in(
         };
         for occurrence in paths {
             let key = values::scoped_key(file, &occurrence.to_string());
-            if let std::collections::btree_map::Entry::Vacant(slot) = models.scoped.entry(key) {
+            if let Entry::Vacant(slot) = models.scoped.entry(key) {
                 if let Some(s) = occurrences::scoped(display, &occurrence.to_string()) {
                     slot.insert(s);
                 }
@@ -821,9 +825,7 @@ pub fn compile_json_in(
     let mut cylinders = serde_json::Map::new();
     // Door swings by annotation id (leaf and arc, mm in the assembly), and grids' planes.
     let mut swings = serde_json::Map::new();
-    // Each grid's label points: where the text sits and the line it labels.
-    type GridTexts = BTreeMap<String, Vec<([f64; 3], [[f64; 3]; 2])>>;
-    let mut grid_texts: GridTexts = BTreeMap::new();
+    let mut grid_texts: BTreeMap<String, Vec<GridPlane>> = BTreeMap::new();
     // Level marks on datums: their height (mm), which the compile prints as the mark's text.
     let mut level_texts: BTreeMap<String, f64> = BTreeMap::new();
     for a in &document.annotations {

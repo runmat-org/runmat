@@ -218,6 +218,7 @@ impl Env {
     pub fn ctx(&self) -> RegenContext<'_> {
         RegenContext {
             kernel: &self.kernel,
+            tessellator: Some(&self.kernel),
             solver: &self.solver,
             units: &self.units,
             dynamic: &self.dynamic,

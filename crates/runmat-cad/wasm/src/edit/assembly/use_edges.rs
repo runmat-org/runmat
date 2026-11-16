@@ -18,13 +18,13 @@ use super::mate::resolve;
 use super::{model, parse_pick, Compiled, Entity};
 use crate::features::picks_of;
 use runmat_cad::assembly::model::AssemblyDocument;
-use runmat_cad::assembly::projection::{fit, in_plane};
 use runmat_cad::ids::SketchEntityId;
 use runmat_cad::model::datum::Frame;
 use runmat_cad::model::sketch::{
     PointRole, Sketch, SketchConstraint, SketchConstraintKind, SketchEntity, SketchGeometry,
     SketchProjection, SketchTarget,
 };
+use runmat_cad::sketch_conversion::{fit, in_plane};
 use runmat_cad::syntax::edit::EditFailure;
 use runmat_cad::value::ValueExpr;
 use serde_json::{Map, Value};
@@ -58,7 +58,11 @@ fn sketch_frame(compiled: &Compiled, id: &str) -> Result<Frame, EditFailure> {
     let drawn = compiled.display["sketches"]
         .as_array()
         .and_then(|all| all.iter().find(|s| s["id"] == id))
-        .ok_or_else(|| model(format!("`{id}` isn't drawn, so edges can't be projected onto it")))?;
+        .ok_or_else(|| {
+            model(format!(
+                "`{id}` isn't drawn, so edges can't be projected onto it"
+            ))
+        })?;
     let v = |k: &str| {
         let a = &drawn["frame"][k];
         [0, 1, 2].map(|i| a[i].as_f64().unwrap_or(0.0))
@@ -120,8 +124,12 @@ fn convert(
     let published = publisher
         .name_of(&picked.anchor)?
         .ok_or_else(|| model("the picked edge can't be published from its part"))?;
-    let points = edge_points(compiled, &uuid, body, edge)
-        .ok_or_else(|| model(format!("the picked edge on `{}` isn't drawn", picked.occurrence)))?;
+    let points = edge_points(compiled, &uuid, body, edge).ok_or_else(|| {
+        model(format!(
+            "the picked edge on `{}` isn't drawn",
+            picked.occurrence
+        ))
+    })?;
     let local: Vec<[f64; 2]> = points.iter().map(|p| in_plane(frame, *p)).collect();
     let geometry = fit(&local).ok_or_else(|| {
         model(format!(
@@ -130,7 +138,7 @@ fn convert(
         ))
     })?;
     Ok((
-        SketchProjection {
+        SketchProjection::Published {
             occurrence: picked.occurrence.clone(),
             published: published.as_str().to_owned(),
         },
@@ -193,7 +201,11 @@ pub(super) fn use_edges(
     publisher: &mut Publisher,
     values: &Values,
 ) -> Result<String, EditFailure> {
-    match values.get("type").and_then(Value::as_str).unwrap_or("project") {
+    match values
+        .get("type")
+        .and_then(Value::as_str)
+        .unwrap_or("project")
+    {
         "project" => {}
         other => {
             return Err(model(format!(
@@ -209,7 +221,10 @@ pub(super) fn use_edges(
     let (sketch, ids) = add_converted(document, compiled, publisher, values, &picks, false)?;
     Ok(format!(
         "Projected {} into {sketch}",
-        ids.iter().map(|e| e.0.as_str()).collect::<Vec<_>>().join(", ")
+        ids.iter()
+            .map(|e| e.0.as_str())
+            .collect::<Vec<_>>()
+            .join(", ")
     ))
 }
 
@@ -238,11 +253,18 @@ pub(super) fn offset(
         Value::from(
             curves
                 .into_iter()
-                .chain(converted.iter().map(|e| format!("sketch.{sketch_id}.{}", e.0)))
+                .chain(
+                    converted
+                        .iter()
+                        .map(|e| format!("sketch.{sketch_id}.{}", e.0)),
+                )
                 .collect::<Vec<_>>(),
         ),
     );
-    let distance = values.get("distance").and_then(Value::as_f64).unwrap_or(0.0);
+    let distance = values
+        .get("distance")
+        .and_then(Value::as_f64)
+        .unwrap_or(0.0);
     let sketch = open_sketch(document, &values)?.1;
     let before: Vec<SketchEntityId> = sketch.entities.iter().map(|e| e.id.clone()).collect();
     let summary = crate::edit::sketch::apply("sketch.offset", &values, sketch, &sketch_id)?;
@@ -271,7 +293,11 @@ fn entity(id: &SketchEntityId) -> SketchTarget {
 
 /// The relations that keep an offset copy on its converted edge.
 fn relate(sketch: &mut Sketch, source: &SketchEntityId, copy: &SketchEntityId, distance: f64) {
-    let Some(geometry) = sketch.entities.iter().find(|e| e.id == *copy).map(|e| e.geometry.clone())
+    let Some(geometry) = sketch
+        .entities
+        .iter()
+        .find(|e| e.id == *copy)
+        .map(|e| e.geometry.clone())
     else {
         return;
     };

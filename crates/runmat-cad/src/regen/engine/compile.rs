@@ -118,6 +118,13 @@ impl<'a, 'b> Run<'a, 'b> {
         match &f.kind {
             FeatureKind::Sketch(s) => {
                 let frame = self.plane(i, id, "on", &s.plane)?;
+                let converted;
+                let s = if s.entities.iter().any(|e| e.projected.is_some()) {
+                    converted = self.with_conversions(i, id, s, &frame)?;
+                    &converted
+                } else {
+                    s
+                };
                 let watch = Stopwatch::start(self.meter);
                 let solved = self.ctx.solver.solve(s, &self.ev, self.values);
                 self.meter.record(&UsageEvent::SketchSolve {

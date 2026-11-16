@@ -299,6 +299,8 @@ feature draft_check = mold.parting_line(body = feature.body.body, pull = origin.
 
 In every motion the neighboring faces extend or trim to meet the moved faces. Move face → Offset and Offset face write the same feature.
 
+**Instant 3D** (`direct.instant-3d`) drags a face in the view by its arrow, or takes a typed distance. When a feature dimension drives the face, Instant 3D changes the dimension: the end cap of a blind extrude (`feature.<f>.face.end`), or the extrude picked itself, changes the extrude's `distance` by the drag (twice the drag for a mid-plane extrude, which grows both ways). A literal depth is rewritten (`10 mm` dragged 3 mm becomes `13 mm`); a depth written as an expression gains `+ 3 mm`. A drag that would leave the depth at zero or less is refused. Any other face moves as a direct edit, `direct.move_faces(faces = [<face>], motion = offset(distance = <drag>))`, the same feature Pull writes.
+
 ```part fragment
 feature lift = direct.move_faces(faces = [feature.body.face.side(s1.l2)], motion = along(direction = { along = normal, plane = origin.xy }, distance = 16.59 mm))
 ```

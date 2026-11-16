@@ -142,6 +142,7 @@ fn compile_part(
     let values = MFunctions::new(&scope, &all, path, &runner);
     let ctx = RegenContext {
         kernel: kernel.as_ref(),
+        tessellator: Some(kernel.as_ref()),
         solver: &runmat_cad::sketch_solver::ConstraintSketchSolver,
         units: &runmat_cad::units::Units,
         dynamic: &values,
@@ -218,7 +219,9 @@ fn kernel_verdicts(
     for d in diagnostics {
         let verdict = matches!(
             d.code,
-            DiagCode::KernelNotSupported | DiagCode::KernelFailed | DiagCode::KernelHistoryIncomplete
+            DiagCode::KernelNotSupported
+                | DiagCode::KernelFailed
+                | DiagCode::KernelHistoryIncomplete
         );
         let follows = matches!(d.cause, Cause::Cascade { root } if ids.contains(&root));
         if verdict || follows {
