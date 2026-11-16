@@ -193,6 +193,18 @@ fn face_to_face_parallel_gives_minimum_and_normal_distance() {
         100.0,
     );
     assert_eq!(a.dimensions[0].label, "100.000 mm");
+    // The line runs along X between the two end faces, both ends on them.
+    let (from, to) = (a.dimensions[0].from, a.dimensions[0].to);
+    let ends = [from[0].min(to[0]), from[0].max(to[0])];
+    close(ends[0] * 1e3, 0.0);
+    close(ends[1] * 1e3, 100.0);
+    for i in 1..3 {
+        close(from[i] * 1e3, to[i] * 1e3);
+        assert!(
+            (0.0..=10.0 * MM).contains(&from[i]),
+            "{from:?} is off the faces"
+        );
+    }
 }
 
 #[test]
@@ -443,6 +455,13 @@ fn entities_across_components_follow_their_placement() {
     let boss_bottom = format!("occurrence:{boss}/{}", face(&sd, [0.0, 0.0, 0.0]));
     let a = rig("distance", &[block_top.clone(), boss_bottom.clone()]);
     close(value(&a, "Normal distance"), 20.0);
+    // The block's top (z = 10 mm, x ≤ 100 mm) and the boss's bottom (z = 30 mm, round about
+    // x = 150 mm) don't overlap seen along Z: the line joins their closest points, one on each.
+    let (from, to) = (a.dimensions[0].from, a.dimensions[0].to);
+    close(from[2] * 1e3, 10.0);
+    close(to[2] * 1e3, 30.0);
+    within(from[0] * 1e3, 100.0, 1e-6);
+    within(to[0] * 1e3, 140.0, 0.05);
     let rim = format!("occurrence:{boss}/{}", circle_edge(&sd, 8.0 * MM));
     let r = rig("radius", std::slice::from_ref(&rim));
     close(value(&r, "Radius"), 10.0);

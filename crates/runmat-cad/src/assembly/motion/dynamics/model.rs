@@ -78,6 +78,42 @@ pub struct MateLoad {
     pub constant: f64,
 }
 
+/// A driven mate of a kinematic study: the measure of its value, the constraints that hold the
+/// value (which the drive replaces), and the value's rate and acceleration from the drive law.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Driven {
+    pub mate: MateLoad,
+    pub rows: Vec<rc::ConstraintId>,
+    pub rate: f64,
+    pub acceleration: f64,
+}
+
+/// A body's motion at an instant, world axes: its centre of mass's position, velocity and
+/// acceleration, its angular velocity and angular acceleration.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct BodyRate {
+    pub center: [f64; 3],
+    pub velocity: [f64; 3],
+    pub acceleration: [f64; 3],
+    pub omega: [f64; 3],
+    pub alpha: [f64; 3],
+}
+
+impl BodyRate {
+    /// The velocity and acceleration of the body's point now at world `x`.
+    pub fn at(&self, x: [f64; 3]) -> ([f64; 3], [f64; 3]) {
+        let r = sub(x, self.center);
+        let w = self.omega;
+        (
+            add(self.velocity, cross(w, r)),
+            add(
+                add(self.acceleration, cross(self.alpha, r)),
+                cross(w, cross(w, r)),
+            ),
+        )
+    }
+}
+
 /// The mechanism: its constraint system, free bodies and loads.
 pub struct Model<'a> {
     pub sys: &'a rc::System,
@@ -636,6 +672,110 @@ impl<'a> Model<'a> {
         }
         let a = rotation(quat(q, &self.bodies[i].orientation));
         ([gen[0], gen[1], gen[2]], mat3_vec(&a, [gen[3], gen[4], gen[5]]))
+    }
+
+    /// The model of a kinematic study's pose: every free body of `sys` weighs alike, with its
+    /// centre at its frame's origin. A driven mechanism's velocities follow from its constraints
+    /// alone ([`Model::driven_rates`]), so mass doesn't enter them.
+    pub fn kinematic(sys: &'a rc::System, bodies: &[rc::EntityId]) -> Result<Model<'a>, String> {
+        let unit = BodyMass {
+            mass: 1.0,
+            center: [0.0; 3],
+            inertia: [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]],
+        };
+        let bodies: Vec<_> = bodies.iter().map(|&e| (e, unit)).collect();
+        Self::new(sys, &bodies, [0.0; 3], Vec::new())
+    }
+
+    /// The velocities `u` and their rates `u̇` of the solved pose `q` of a kinematic study, from
+    /// the constraint Jacobian (Haug 1989, ch. 3): the velocity equations `B u = 0` of every
+    /// mate row except the driven mates' own value rows, which the drives replace with the rate
+    /// of each mate's value, `ẋ = ṡ`; the acceleration equations `B u̇ = γ` with
+    /// `ẍ = s̈ − (∂ẋ/∂q) q̇`. `ṡ` and `s̈` come from the drive law, so nothing here differences
+    /// the solved poses; `γ` and the drive's own `(∂ẋ/∂q) q̇` take the same central difference
+    /// of the exact Jacobian along the motion as the dynamic study does.
+    pub fn driven_rates(
+        &self,
+        q: &[f64],
+        drives: &[Driven],
+    ) -> Result<(Vec<f64>, Vec<f64>), String> {
+        let n = self.dofs();
+        let (_, b, owners) = self.velocity_rows(q);
+        let keep: Vec<usize> = (0..owners.len())
+            .filter(|&r| !drives.iter().any(|d| d.rows.contains(&owners[r])))
+            .collect();
+        // `ẋ` is linear in `u`: its row is its value at each unit velocity.
+        let drive_row = |q: &[f64], d: &Driven| -> Vec<f64> {
+            (0..n)
+                .map(|j| {
+                    let mut e = vec![0.0; n];
+                    e[j] = 1.0;
+                    self.measure(q, &e, &d.mate).1
+                })
+                .collect()
+        };
+        let mut a: Vec<f64> = keep
+            .iter()
+            .flat_map(|&r| b[r * n..(r + 1) * n].iter().copied())
+            .collect();
+        for d in drives {
+            a.extend(drive_row(q, d));
+        }
+        let m = keep.len() + drives.len();
+        let solve = |rhs: &[f64]| -> Result<Vec<f64>, String> {
+            // The minimum-norm solution `Aᵀ (A Aᵀ)⁻¹ rhs`; a driven mechanism has one.
+            let mut s = vec![0.0; m * m];
+            for r in 0..m {
+                for c in 0..m {
+                    s[r * m + c] = (0..n).map(|k| a[r * n + k] * a[c * n + k]).sum();
+                }
+            }
+            let y =
+                solve_spd(&s, rhs, m).ok_or("the mechanism's velocity equations are singular")?;
+            Ok(mul_t(&a, &y, m, n))
+        };
+        let mut rhs = vec![0.0; m];
+        for (k, d) in drives.iter().enumerate() {
+            rhs[keep.len() + k] = d.rate;
+        }
+        let u = solve(&rhs)?;
+        let gamma = self.gamma(q, &u, owners.len());
+        let qd = self.q_dot(q, &u);
+        let size = qd.iter().fold(0.0_f64, |s, v| s.max(v.abs()));
+        let mut rhs: Vec<f64> = keep.iter().map(|&r| gamma[r]).collect();
+        for d in drives {
+            let curvature = if size == 0.0 {
+                0.0
+            } else {
+                let h = 1e-6 / size;
+                let at = |sign: f64| {
+                    let shifted: Vec<f64> =
+                        q.iter().zip(&qd).map(|(x, v)| x + sign * h * v).collect();
+                    self.measure(&shifted, &u, &d.mate).1
+                };
+                (at(1.0) - at(-1.0)) / (2.0 * h)
+            };
+            rhs.push(d.acceleration - curvature);
+        }
+        let udot = solve(&rhs)?;
+        if u.iter().chain(&udot).any(|v| !v.is_finite()) {
+            return Err("the mechanism's velocities aren't finite".into());
+        }
+        Ok((u, udot))
+    }
+
+    /// Body `i`'s motion at `(q, u, u̇)`, world axes.
+    pub fn body_motion(&self, q: &[f64], u: &[f64], udot: &[f64], i: usize) -> BodyRate {
+        let a = rotation(quat(q, &self.bodies[i].orientation));
+        let turn = |k: usize, x: &[f64]| mat3_vec(&a, [x[6 * k + 3], x[6 * k + 4], x[6 * k + 5]]);
+        BodyRate {
+            center: self.center(q, i),
+            velocity: self.center_velocity(u, i),
+            acceleration: [udot[6 * i], udot[6 * i + 1], udot[6 * i + 2]],
+            omega: turn(i, u),
+            // d/dt (A ω') = A ω̇' (ω × ω vanishes).
+            alpha: turn(i, udot),
+        }
     }
 
     /// Index of the free body with entity `e`.

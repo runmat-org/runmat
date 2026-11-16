@@ -1609,6 +1609,12 @@ export interface GeometryScenePickResult {
   normal?: [number, number, number];
   /** The owner nodes (bodies, assembly components) of what was hit, outermost first. */
   ownerNodeIds?: string[];
+  /**
+   * A face pick's planar face: the hit region's triangles in the hit triangle's plane, x, y, z
+   * of each corner in scene coordinates. Measure draws two parallel faces' normal distance
+   * between points on them. Absent for edge and point picks and instanced placements.
+   */
+  faceTriangles?: number[];
 }
 
 

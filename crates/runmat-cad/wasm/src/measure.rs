@@ -21,6 +21,7 @@
 
 mod distance;
 mod items;
+mod span;
 #[cfg(test)]
 mod tests;
 
@@ -195,15 +196,19 @@ fn point_of(d: &Direction) -> V3 {
     }
 }
 
-/// The normal distance of two parallel planes, with the foot of the first's point on the second.
-fn plane_gap(a: &Direction, b: &Direction) -> Option<(f64, V3, V3)> {
-    let (Direction::Plane(p, n), Direction::Plane(q, m)) = (*a, *b) else {
+/// The normal distance of two parallel planar items and where its line runs: along the normal,
+/// between a point on each item ([`span::normal_span`]).
+fn plane_gap(a: &Item, b: &Item) -> Option<(f64, V3, V3)> {
+    let (Some(Direction::Plane(p, n)), Some(Direction::Plane(q, m))) = (a.direction, b.direction)
+    else {
         return None;
     };
-    (dot(n, m).abs() >= PARALLEL).then(|| {
-        let d = dot(sub(p, q), m);
-        (d.abs(), p, sub(p, scale(m, d)))
-    })
+    if dot(n, m).abs() < PARALLEL {
+        return None;
+    }
+    let d = dot(sub(p, q), m);
+    let (from, to) = span::normal_span(&a.prims, &b.prims, m)?;
+    Some((d.abs(), from, to))
 }
 
 /// The distance between two parallel axes (cylinders, circular edges), with the foot of the
@@ -296,10 +301,7 @@ fn pair(
     rows.push(row("ΔY", mm(d[1].abs())));
     rows.push(row("ΔZ", mm(d[2].abs())));
     let mut summary = format!("Minimum distance {}", mm(n.distance));
-    let planes = match (&a.direction, &b.direction) {
-        (Some(x), Some(y)) => plane_gap(x, y).map(|g| ("Normal distance", g)),
-        _ => None,
-    };
+    let planes = plane_gap(a, b).map(|g| ("Normal distance", g));
     let axes = match (&a.circle, &b.circle) {
         (Some(x), Some(y)) => axis_gap(x, y).map(|g| ("Axis distance", g)),
         _ => None,

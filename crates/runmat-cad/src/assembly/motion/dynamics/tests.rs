@@ -14,7 +14,7 @@ use super::model::{BodyMass, Model, Sample};
 use super::STANDARD_GRAVITY as G;
 use crate::assembly::motion::kinematics::{run_study, MotionContext};
 use crate::assembly::resolve::{resolve, ResolveContext, ResolveRequest};
-use crate::assembly::source::{ConfiguredSummary, DefinitionSummary, MemorySource};
+use crate::assembly::source::{Aabb, ConfiguredSummary, DefinitionSummary, MemorySource};
 use crate::ids::FilePath;
 use crate::units::Units;
 use crate::value::NoDynamicValues;
@@ -222,6 +222,8 @@ fn hinge_run(text: &str, name: &str) -> (crate::assembly::motion::kinematics::Mo
                 mass: Some(if arm { m } else { 10.0 }),
                 center_of_mass: Some(if arm { [d, 0.0, 0.0] } else { [0.0; 3] }),
                 inertia: Some(if arm { inertia } else { box_inertia(10.0, [0.1; 3]) }),
+                // The arm's box centre, the tracked point, 30 mm out from the hinge.
+                bbox: arm.then_some(Aabb { min: [0.0, -0.02, -0.01], max: [0.06, 0.02, 0.01] }),
                 ..Default::default()
             },
         );
@@ -341,4 +343,82 @@ fn a_fast_swing_gets_frames_close_enough_for_a_smooth_trail() {
     );
     let (run, _) = hinge_run(&slow, "wound");
     assert_eq!(run.times.len(), 31, "{:?}", run.times.len());
+}
+
+const SWEEP: &str = "runmat 0.7\nstd 1\n\nassembly hinge {\n    use part block as base\n    use part arm as arm {\n        fixed = false\n    }\n    connector pivot = { occurrence = [{ name = base }], anchor = { anchor = origin } }\n    connector root = { occurrence = [{ name = arm }], anchor = { anchor = origin } }\n    mate hinge = { kind = { mate = revolute }, a = pivot, b = root }\n    motion sweep = { duration = 3 s, drives = [{ mate = hinge, from = 0 deg, to = 180 deg }], track = arm }\n    motion rise = { duration = 2 s, law = cycloidal, drives = [{ mate = hinge, from = 0 deg, to = 90 deg }], track = arm }\n}\n";
+
+/// A kinematic sweep at a constant 60°/s carries the arm's box centre, 30 mm from the hinge, at
+/// exactly ω r and ω² r at every frame, the first and last included: the rates come from the
+/// velocity and acceleration equations, not from differences of the frames.
+#[test]
+fn a_constant_sweep_reads_omega_r_at_every_frame() {
+    let (run, _) = hinge_run(SWEEP, "sweep");
+    let t = run.track.as_ref().expect("the arm is tracked");
+    let (w, r) = (PI / 3.0, 0.03);
+    assert!(t.velocity.len() > 30);
+    for (k, ((v, a), x)) in t
+        .velocity
+        .iter()
+        .zip(&t.acceleration)
+        .zip(&t.position)
+        .enumerate()
+    {
+        let speed = v.iter().map(|c| c * c).sum::<f64>().sqrt();
+        let acc = a.iter().map(|c| c * c).sum::<f64>().sqrt();
+        assert!((speed - w * r).abs() < 1e-9, "speed {speed} at frame {k}");
+        assert!(
+            (acc - w * w * r).abs() < 1e-7,
+            "acceleration {acc} at frame {k}"
+        );
+        assert!(
+            (t.angular_speed[k] - w).abs() < 1e-9,
+            "ω {} at frame {k}",
+            t.angular_speed[k]
+        );
+        // The velocity is tangent to the circle and turns the way the drive does.
+        let radial = x[0] * v[0] + x[1] * v[1] + x[2] * v[2];
+        assert!(radial.abs() < 1e-9, "radial speed {radial} at frame {k}");
+        let along = x[0] * v[1] - x[1] * v[0];
+        assert!(
+            (along - w * r * r).abs() < 1e-9,
+            "turn {along} at frame {k}"
+        );
+        // The acceleration points at the hinge.
+        let inward = -(x[0] * a[0] + x[1] * a[1] + x[2] * a[2]) / r;
+        assert!(
+            (inward - w * w * r).abs() < 1e-7,
+            "centripetal {inward} at frame {k}"
+        );
+    }
+}
+
+/// A cycloidal rise starts and ends at rest, and in between its rates are the drive law's own:
+/// `θ̇ = Δθ (1 − cos 2πτ) / T` and the arm's tangential acceleration `r θ̈`.
+#[test]
+fn a_cycloidal_rise_follows_its_law_exactly() {
+    let (run, _) = hinge_run(SWEEP, "rise");
+    let t = run.track.as_ref().expect("the arm is tracked");
+    let (span, duration, r) = (PI / 2.0, 2.0, 0.03);
+    for (k, (&time, v)) in run.times.iter().zip(&t.velocity).enumerate() {
+        let tau = time / duration;
+        let rate = span * (1.0 - (2.0 * PI * tau).cos()) / duration;
+        let speed = v.iter().map(|c| c * c).sum::<f64>().sqrt();
+        assert!(
+            (speed - rate * r).abs() < 1e-9,
+            "speed {speed} at frame {k}, want {}",
+            rate * r
+        );
+        let accel = span * 2.0 * PI * (2.0 * PI * tau).sin() / (duration * duration);
+        let a = t.acceleration[k];
+        let want = ((accel * r).powi(2) + (rate * rate * r).powi(2)).sqrt();
+        let got = a.iter().map(|c| c * c).sum::<f64>().sqrt();
+        assert!(
+            (got - want).abs() < 1e-7,
+            "acceleration {got} at frame {k}, want {want}"
+        );
+    }
+    assert!(
+        t.velocity[0].iter().all(|c| c.abs() < 1e-12),
+        "at rest at the start"
+    );
 }

@@ -46,6 +46,12 @@ pub struct GeometryScenePickResult {
     /// scene's `hidden_owner_node_ids` names them. Empty when the scene names none.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub owner_node_ids: Vec<String>,
+    /// A face pick's planar face: the triangles of the hit region (the hit chunk when it has no
+    /// regions) that lie in the hit triangle's plane, as x, y, z of each corner in scene
+    /// coordinates. Measure draws two parallel faces' normal distance between points on them.
+    /// Empty for edge and point picks and for instanced placements.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub face_triangles: Vec<f32>,
 }
 
 #[derive(Debug, Clone)]
@@ -205,7 +211,10 @@ impl GeometryScenePickIndex {
                 }
                 let (triangle_index, distance) = hit?;
                 let position = ray.origin + ray.direction * distance;
-                self.result_for_triangle(triangle_index, position, distance, None)
+                let mut result =
+                    self.result_for_triangle(triangle_index, position, distance, None)?;
+                result.face_triangles = self.planar_face(triangle_index);
+                Some(result)
             }
             GeometryScenePickMode::Edge | GeometryScenePickMode::Point => {
                 self.pick_screen_topology(&mut camera, screen_size, screen_pos, request.mode)
@@ -249,7 +258,31 @@ impl GeometryScenePickIndex {
                 .try_normalize()
                 .map(|n| n.to_array()),
             owner_node_ids: triangle.owner_node_ids.clone(),
+            face_triangles: Vec::new(),
         })
+    }
+
+    /// The hit triangle's planar face ([`GeometryScenePickResult::face_triangles`]).
+    fn planar_face(&self, index: usize) -> Vec<f32> {
+        let Some(hit) = self.triangles.get(index) else {
+            return Vec::new();
+        };
+        let Some(normal) = (hit.b - hit.a).cross(hit.c - hit.a).try_normalize() else {
+            return Vec::new();
+        };
+        let height = normal.dot(hit.a);
+        let tolerance = 1.0e-5 * self.scene_diagonal;
+        self.triangles
+            .iter()
+            .filter(|t| t.chunk_index == hit.chunk_index && t.region_id == hit.region_id)
+            .filter(|t| {
+                [t.a, t.b, t.c]
+                    .iter()
+                    .all(|p| (normal.dot(*p) - height).abs() <= tolerance)
+            })
+            .flat_map(|t| [t.a, t.b, t.c])
+            .flat_map(|p| p.to_array())
+            .collect()
     }
 
     fn pick_at(
