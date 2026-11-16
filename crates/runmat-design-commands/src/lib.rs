@@ -158,6 +158,16 @@ pub enum SelectKind {
     ExplodeStep,
     /// A name the assembly publishes (`publish:<name>`).
     Publish,
+    /// A configuration of the file (`configuration:<name>`).
+    Configuration,
+    /// A display state of the assembly (`display_state:<name>`).
+    DisplayState,
+    /// A space the assembly reserves (`envelope:<name>`).
+    Envelope,
+    /// A contact region between two components' faces (`contact:<name>`).
+    Contact,
+    /// An option or effectivity axis of the assembly's options (`option:<name>`).
+    ProductOption,
     // Drawing.
     Sheet,
     View,
@@ -215,6 +225,11 @@ impl SelectKind {
             Hole => "hole",
             ExplodeStep => "explode step",
             Publish => "published item",
+            Configuration => "configuration",
+            DisplayState => "display state",
+            Envelope => "envelope",
+            Contact => "contact region",
+            ProductOption => "option",
             Sheet => "sheet",
             View => "view",
             Annotation => "annotation",

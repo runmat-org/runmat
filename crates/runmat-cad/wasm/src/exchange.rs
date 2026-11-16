@@ -326,12 +326,12 @@ pub fn assembly_step_in(
         let Some(parent) = node.parent else {
             continue;
         };
-        if node.failed || node.represented_by_ancestor {
+        if node.failed || !runmat_cad::assembly::representation::exported(resolved, id) {
             continue;
         }
         let part = match node.definition.kind {
             DefinitionKind::Part => {
-                let file = node.definition.file.0.clone();
+                let file = node.source_key();
                 let key = (file.clone(), node.configuration.digest());
                 let index = match by_key.get(&key) {
                     Some(i) => *i,
@@ -383,9 +383,11 @@ pub fn assembly_step_in(
         let (definition, same_as) = match part {
             Some(_) => (None, None),
             None => {
-                let file = node.definition.file.0.clone();
-                let key = (file.clone(), node.configuration.digest());
-                (Some(stem(&file)), assemblies.get(&key).copied())
+                let key = (node.source_key(), node.configuration.digest());
+                (
+                    Some(stem(node.definition.file.as_str())),
+                    assemblies.get(&key).copied(),
+                )
             }
         };
         let at = occurrences.len() as u32;

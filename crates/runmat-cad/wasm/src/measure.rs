@@ -39,12 +39,41 @@ fn identity() -> Transform {
     Transform::translation([0.0; 3])
 }
 
+thread_local! {
+    /// The document units of the assembly being measured, while [`measure`] runs: its
+    /// readouts use them ([`runmat_cad::assembly::settings`]). `None`: millimeters.
+    static UNITS: std::cell::Cell<Option<runmat_cad::assembly::settings::UnitSystem>> =
+        const { std::cell::Cell::new(None) };
+}
+
+/// Sets [`UNITS`] for one measure, and clears them when dropped.
+struct ReadoutUnits;
+
+impl ReadoutUnits {
+    fn set(units: Option<runmat_cad::assembly::settings::UnitSystem>) -> Self {
+        UNITS.with(|u| u.set(units));
+        ReadoutUnits
+    }
+}
+
+impl Drop for ReadoutUnits {
+    fn drop(&mut self) {
+        UNITS.with(|u| u.set(None));
+    }
+}
+
 fn mm(m: f64) -> String {
-    format!("{:.3} mm", m * 1000.0)
+    match UNITS.with(std::cell::Cell::get) {
+        Some(u) => u.length(m),
+        None => format!("{:.3} mm", m * 1000.0),
+    }
 }
 
 fn mm2(m2: f64) -> String {
-    format!("{:.3} mm²", m2 * 1e6)
+    match UNITS.with(std::cell::Cell::get) {
+        Some(u) => u.area(m2),
+        None => format!("{:.3} mm²", m2 * 1e6),
+    }
 }
 
 fn deg(r: f64) -> String {
@@ -360,6 +389,7 @@ pub fn measure(
         .get("configuration")
         .and_then(Value::as_str)
         .filter(|c| !c.is_empty() && *c != "default");
+    let _units = ReadoutUnits::set(crate::analyze::document_units(path, text, files));
     let picks = picks_of(values, "items");
     if picks.is_empty() {
         return Err(

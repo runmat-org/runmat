@@ -693,3 +693,46 @@ fn freeze_unpublished(
         };
     }
 }
+
+/// `assembly.skeleton`: a skeleton part placed at the assembly's origin as a reference component
+/// (`reference = true`: drawn, picked and mated to, left out of the parts list, mass properties
+/// and interference). A new name creates the part beside the assembly, empty, for its layout
+/// sketches, planes and published frames; the name of a part already beside it places that one.
+pub(super) fn skeleton(
+    document: &mut AssemblyDocument,
+    files: &Files,
+    values: &Values,
+) -> Result<(String, Vec<FileEdit>), EditFailure> {
+    let name = text(values, "name").trim();
+    let name = if name.is_empty() { "skeleton.part" } else { name };
+    let file = if name.ends_with(".part") {
+        name.to_owned()
+    } else {
+        format!("{name}.part")
+    };
+    let folder = &document.path.0[..document.path.0.rfind('/').map_or(0, |i| i + 1)];
+    let existing = format!("{folder}{file}");
+    let (path, created_files) = if !file.contains('/') && files.contains_key(&existing) {
+        (existing, Vec::new())
+    } else {
+        let path = new_file(&document.path.0, &file, ".part", files)?;
+        let printed = print_part(&PartDocument::new(&path), &[]).map_err(EditFailure::Print)?;
+        (path.clone(), vec![created(path, printed)])
+    };
+    let occurrence_name = unused(
+        |n| document.occurrences.iter().any(|o| o.name == n),
+        &stem(&path),
+    );
+    let mut occurrence = Occurrence::new(&occurrence_name, DefinitionRef::part(&path, None));
+    occurrence.reference = true;
+    document.occurrences.push(occurrence);
+    let file_name = path.rsplit('/').next().unwrap_or(&path).to_owned();
+    Ok((
+        if created_files.is_empty() {
+            format!("Placed {file_name} as the skeleton {occurrence_name}")
+        } else {
+            format!("Created {file_name} as the skeleton {occurrence_name}")
+        },
+        created_files,
+    ))
+}
