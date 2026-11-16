@@ -270,6 +270,27 @@ describe("initRunMat wiring", () => {
     await session.dispose();
   });
 
+  it("previews a study's geometry through the typed WASM API as a plain object", async () => {
+    const payload = new Map<string, unknown>([
+      ["geometrySceneHandle", 21], ["sceneKind", "mesh"], ["format", "brep"],
+      ["regions", [new Map([["id", "mount"]])]],
+    ]);
+    const previewFeaStudyGeometry = vi.fn(async () => payload);
+    __internals.setNativeModuleOverride({
+      stringElementWireSchemaVersion: () => 1, default: async () => {},
+      initRunMat: async () => createMockNativeSession({ previewFeaStudyGeometry: previewFeaStudyGeometry as NativeSession["previewFeaStudyGeometry"] }),
+    } as NativeModule);
+    const session = await initRunMat({ enableGpu: false });
+    const revision = new Array<number>(32).fill(7) as FeaSourceCheckResult["revision"];
+    await expect(session.previewFeaStudyGeometry("/simulation/skid.fea", "skid_static", { maxTriangles: 1000 }, revision)).resolves.toEqual({
+      geometrySceneHandle: 21, sceneKind: "mesh", format: "brep", regions: [{ id: "mount" }],
+    });
+    expect(previewFeaStudyGeometry).toHaveBeenCalledWith("/simulation/skid.fea", "skid_static", { maxTriangles: 1000 }, revision);
+    await session.previewFeaStudyGeometry("/simulation/skid.fea", "skid_static");
+    expect(previewFeaStudyGeometry).toHaveBeenLastCalledWith("/simulation/skid.fea", "skid_static", null, null);
+    await session.dispose();
+  });
+
   it("delegates FEA source checks to the typed WASM API", async () => {
     const checkResult: FeaSourceCheckResult = {
       contract: "assessments_v1",

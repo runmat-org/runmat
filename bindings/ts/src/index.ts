@@ -1242,6 +1242,17 @@ export interface RunMatSessionHandle {
   workspaceSnapshot(): Promise<WorkspaceSnapshot>;
   inspectDataFile(path: string): Promise<WorkspaceEntry[]>;
   previewGeometry(path: string, budget?: GeometryPreviewBudget | null): Promise<GeometryPreviewResult>;
+  /**
+   * The geometry a study in `path` analyzes, with the study's materialized regions. With
+   * `checkedRevision`, the preview uses that checked product of `path`; otherwise it checks
+   * `path` first. Generated or derived geometry refuses in the browser.
+   */
+  previewFeaStudyGeometry(
+    path: string,
+    studyId: string,
+    budget?: GeometryPreviewBudget | null,
+    checkedRevision?: FeaSourceCheckResult["revision"] | null,
+  ): Promise<GeometryPreviewResult>;
   disposeGeometryPreview?(
     figureHandle?: number | null,
     geometrySceneHandle?: number | null,
@@ -1351,6 +1362,12 @@ interface RunMatNativeSession extends ProjectEntrypointSessionExports {
   workspaceSnapshot?: () => WorkspaceSnapshot;
   inspectDataFile?: (path: string) => WorkspaceEntry[] | Promise<WorkspaceEntry[]>;
   previewGeometry?: (path: string, budget?: GeometryPreviewBudget | null) => GeometryPreviewResult | Promise<GeometryPreviewResult>;
+  previewFeaStudyGeometry?: (
+    path: string,
+    studyId: string,
+    budget: GeometryPreviewBudget | null,
+    checkedRevision: FeaSourceCheckResult["revision"] | null,
+  ) => GeometryPreviewResult | Promise<GeometryPreviewResult>;
   disposeGeometryPreview?: (
     figureHandle?: number | null,
     geometrySceneHandle?: number | null,
@@ -2715,6 +2732,21 @@ class WebRunMatSession implements RunMatSessionHandle {
       throw new Error("The loaded runmat-wasm module does not expose previewGeometry yet.");
     }
     return normalizeWasmStructuredValue(await this.native.previewGeometry(path, budget ?? null)) as GeometryPreviewResult;
+  }
+
+  async previewFeaStudyGeometry(
+    path: string,
+    studyId: string,
+    budget?: GeometryPreviewBudget | null,
+    checkedRevision?: FeaSourceCheckResult["revision"] | null,
+  ): Promise<GeometryPreviewResult> {
+    this.ensureActive();
+    if (typeof this.native.previewFeaStudyGeometry !== "function") {
+      throw new Error("The loaded runmat-wasm module does not expose previewFeaStudyGeometry; rebuild the browser runtime assets.");
+    }
+    return normalizeWasmStructuredValue(
+      await this.native.previewFeaStudyGeometry(path, studyId, budget ?? null, checkedRevision ?? null),
+    ) as GeometryPreviewResult;
   }
 
   async disposeGeometryPreview(
