@@ -49,8 +49,8 @@ This file is generated from the command catalog.
 - `assembly.component-configuration`: Use another configuration of the component's file.
   - Required: `configuration` (text)
   - Runs on the `selection`: `occurrence`
-- `assembly.delete`: Delete components, mates, mate connectors, publishes, sketches, assembly features or sketch curves.
-  - Runs on the `selection`: `occurrence`, `mate`, `mate_connector`, `publish`, `motion_study`, `mate_position`, `sketch`, `feature`, `sketch_entity`, `sketch_point`
+- `assembly.delete`: Delete components, mates, mate connectors, publishes, sketches, assembly features, sketch curves, exploded views or explode steps.
+  - Runs on the `selection`: `occurrence`, `mate`, `mate_connector`, `publish`, `sketch`, `feature`, `sketch_entity`, `sketch_point`, `exploded_view`, `explode_step`
 - `assembly.edit-mate`: Change the mate's type, distance, angle, limits or alignment.
   - Required: `type` (one of `fasten`, `revolute`, `slider`, `cylindrical`, `planar`, `ball`, `parallel`, `distance`, `angle`, `tangent`, `pin_slot`, `gear`, `rack_pinion`, `screw`, `cam`, `width`, `symmetric`, `path`, `linear_coupler`, `hinge`, `universal_joint`, default `fasten`); `offset` (number in mm, default 0) when `type` is distance; `angle` (number in deg, default 0) when `type` is angle; `min` (number in deg, default -30) when `angle_limits` is true; `max` (number in deg, default 45) when `angle_limits` is true; `near` (number in mm, default 0) when `distance_limits` is true; `far` (number in mm, default 10) when `distance_limits` is true; `ratio` (number, default 1) when `type` is gear or linear_coupler; `pitch` (number in mm, default 1) when `type` is screw or rack_pinion; `radius` (number in mm, default 5) when `type` is tangent; `profile` (text) when `type` is cam
   - Optional: `angle_limits` (true or false, default false) when `type` is revolute or cylindrical or hinge; `distance_limits` (true or false, default false) when `type` is slider or cylindrical; `flip` (true or false, default false); `first2` (pick: mate connector or face or edge or vertex or plane or axis or point or component or sketch entity or sketch point) when `type` is width; `second2` (pick: mate connector or face or edge or vertex or plane or axis or point or component or sketch entity or sketch point) when `type` is width; `plane` (pick: mate connector or face or edge or vertex or plane or axis or point or component or sketch entity or sketch point) when `type` is symmetric; `path` (picks: edge) when `type` is path; `joint_point` (true or false, default true) when `type` is universal_joint
@@ -92,7 +92,7 @@ This file is generated from the command catalog.
 - `assembly.mirror`: Mirror components about a plane, as copies or as an opposite-hand part.
   - Required: `plane` (pick: plane or face); `components` (picks: component); `result` (one of `copy`, `opposite`, default `copy`); `opposite` (text) when `result` is opposite
 - `assembly.move`: Move components by dragging, with a triad or by aligning.
-  - Required: `mode` (one of `drag`, `triad`, `align`, default `drag`); `components` (picks: component); `dx` (number in mm, default 0) when `mode` is drag or triad; `dy` (number in mm, default 0) when `mode` is drag or triad; `dz` (number in mm, default 0) when `mode` is drag or triad; `rx` (number in deg, default 0) when `mode` is triad; `ry` (number in deg, default 0) when `mode` is triad; `rz` (number in deg, default 0) when `mode` is triad; `along` (pick: edge or axis or face) when `mode` is align
+  - Required: `mode` (one of `drag`, `triad`, `align`, default `drag`); `components` (picks: component); `dx` (number in mm, default 0) when `mode` is triad; `dy` (number in mm, default 0) when `mode` is triad; `dz` (number in mm, default 0) when `mode` is triad; `rx` (number in deg, default 0) when `mode` is triad; `ry` (number in deg, default 0) when `mode` is triad; `rz` (number in deg, default 0) when `mode` is triad; `along` (pick: edge or axis or face) when `mode` is align
   - Optional: `collisions` (true or false, default false)
 - `assembly.new-part`: Create a part inside the assembly, referencing its neighbors.
   - Required: `name` (text)
@@ -204,8 +204,6 @@ This file is generated from the command catalog.
 
 - `direct.delete-face`: Delete faces and heal the gap from the neighbors.
   - Required: `faces` (picks: face); `heal` (one of `heal`, `patch`, `leave`, default `heal`)
-- `direct.instant-3d`: Drag any face or dimension in the view to change it.
-  - Required: `target` (pick: face or dimension or feature); `value` (number in mm, default 0)
 - `direct.move-body`: Move or rotate bodies directly.
   - Required: `bodies` (picks: body); `dx` (number in mm, default 0); `dy` (number in mm, default 0); `dz` (number in mm, default 0); `angle` (number in deg, default 0)
   - Optional: `axis` (pick: axis or edge)
@@ -247,6 +245,8 @@ This file is generated from the command catalog.
 - `drawing.chain`: Dimension features end to end.
   - Required: `items` (picks: edge)
   - Optional: `at` (pick: point)
+- `drawing.check`: Check the drawing against its models and drafting rules, and list the findings.
+  - Required: `standard` (one of `sheet`, `iso`, `asme`, default `sheet`)
 - `drawing.datum`: Add a datum feature symbol.
   - Required: `label` (text); `attach` (pick: edge or annotation)
   - Optional: `at` (pick: point)
@@ -258,6 +258,10 @@ This file is generated from the command catalog.
 - `drawing.detail`: Enlarge a circled area of a view.
   - Required: `parent` (pick: view); `center` (pick: edge); `radius` (number in mm, default 5); `label` (text); `scale` (text)
   - Optional: `at` (pick: point)
+  - Runs on the `selection`: `view`
+- `drawing.edit-view`: Edit the view's scale, orientation, display style, label and place.
+  - Required: `scale` (text); `orientation` (one of `front`, `back`, `top`, `bottom`, `left`, `right`, `isometric`, `dimetric`, `trimetric`, default `front`); `display` (one of `hidden_removed`, `hidden_visible`, `shaded`, default `hidden_removed`)
+  - Optional: `label` (text); `at` (pick: point)
   - Runs on the `selection`: `view`
 - `drawing.export`: Export as PDF, DXF, DWG or SVG.
   - Required: `format` (one of `pdf`, `dxf`, `dwg`, `svg`, default `pdf`); `sheets` (one of `all`, `current`, default `all`)
@@ -352,6 +356,9 @@ This file is generated from the command catalog.
 
 ## `explode.` commands (`.assembly`)
 
+- `explode.auto`: A new exploded view pulled apart along the mates, outermost component first.
+  - Required: `spacing` (number in mm, default 20)
+  - Optional: `name` (text); `lines` (true or false, default true)
 - `explode.lines`: Draw lines showing how components move.
   - Optional: `steps` (picks: explode step)
 - `explode.new`: Create an exploded view.
@@ -402,32 +409,6 @@ This file is generated from the command catalog.
 - `mold.undercut`: Find faces that can't release in the pull direction.
   - Required: `direction` (pick: plane or face or axis)
 
-## `motion.` commands (`.assembly`)
-
-- `motion.animation`: Drive a mate through a range over time and play the solved motion.
-  - Required: `name` (text); `mate` (pick: mate); `quantity` (one of `angle`, `distance`, default `angle`); `from_angle` (number in deg, default 0) when `quantity` is angle; `to_angle` (number in deg, default 90) when `quantity` is angle; `from_distance` (number in mm, default 0) when `quantity` is distance; `to_distance` (number in mm, default 50) when `quantity` is distance; `duration` (number in s, default 4); `profile` (one of `linear`, `cycloidal`, default `linear`)
-  - Optional: `track` (pick: component)
-  - Runs on the `selection`: `motion_study`
-- `motion.basic`: Simulate gravity, springs and motors on the mechanism.
-  - Required: `name` (text); `duration` (number in s, default 2); `gravity` (one of `-z`, `-y`, `-x`, `+z`, `none`, default `-z`); `quantity` (one of `angle`, `distance`, default `angle`); `stiffness` (number in N*m/rad, default 0) when `quantity` is angle; `damping` (number in N*m*s/rad, default 0) when `quantity` is angle; `torque` (number in N*m, default 0) when `quantity` is angle; `stiffness_linear` (number in N/mm, default 0) when `quantity` is distance; `damping_linear` (number in N*s/m, default 0) when `quantity` is distance; `force` (number in N, default 0) when `quantity` is distance
-  - Optional: `mate` (pick: mate); `track` (pick: component)
-  - Runs on the `selection`: `motion_study`
-- `motion.collision`: Check a motion study for components that meet as they move.
-  - Required: `mode` (one of `stop`, `highlight`, default `stop`)
-  - Optional: `study` (pick: motion study); `components` (picks: component)
-  - Runs on the `selection`: `motion_study`
-- `motion.drag`: Drag a component through its remaining degrees of freedom.
-  - Required: `component` (pick: component); `dx` (number in mm, default 0); `dy` (number in mm, default 0); `dz` (number in mm, default 0)
-  - Optional: `collisions` (true or false, default true)
-- `motion.mate-controller`: Save named positions of mates and move the mechanism between them.
-  - Required: `name` (text); `action` (one of `save`, `move`, default `save`)
-  - Optional: `mates` (picks: mate) when `action` is save
-  - Runs on the `selection`: `mate_position`
-- `motion.to-fea`: Send a dynamic study's joint loads on one part, at one instant, to a new simulation.
-  - Required: `time` (number in s, default 0)
-  - Optional: `study` (text); `component` (pick: component)
-  - Runs on the `selection`: `motion_study`
-
 ## `part.` commands (`.part`)
 
 - `part.axis`: Add a reference axis.
@@ -477,9 +458,6 @@ This file is generated from the command catalog.
 - `part.draft`: Taper faces for molding by neutral plane, parting line or step.
   - Required: `type` (one of `neutral_plane`, `parting_line`, `step`, default `neutral_plane`); `faces` (picks: face); `neutral` (pick: plane or face) when `type` is neutral_plane; `parting` (picks: edge or curve) when `type` is parting_line or step; `angle` (number in deg, default 1)
   - Optional: `pull` (pick: plane or face) when `type` is parting_line or step; `flip` (true or false, default false)
-- `part.edit-sketch-plane`: Move the sketch to another plane or planar face.
-  - Required: `plane` (pick: plane or face)
-  - Runs on the `selection`: `sketch`
 - `part.emboss`: Raise or engrave a sketch or text on a face.
   - Required: `profile` (pick: sketch); `face` (pick: face); `depth` (number in mm, default 0.5); `mode` (one of `emboss`, `deboss`, default `emboss`)
 - `part.export-body`: Write the selected bodies to a STEP or STL file.

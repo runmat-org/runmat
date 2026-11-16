@@ -100,6 +100,8 @@ mod motion_tests;
 #[cfg(test)]
 mod to_fea_tests;
 #[cfg(test)]
+mod explode_auto_tests;
+#[cfg(test)]
 mod sketch_tests;
 #[cfg(test)]
 mod representation_tests;
@@ -599,6 +601,9 @@ pub(super) fn edit(
         "assembly.delete" | "assembly.suppress" if sketch::selected(request).next().is_some() => {
             sketch::delete_or_suppress(&mut document, request)?
         }
+        "assembly.delete" if explode::selected(&request.selection) => {
+            explode::delete(&mut document, &request.selection)?
+        }
         "assembly.delete" => {
             let names = selected_names(&compiled, request)?;
             for name in &names {
@@ -735,6 +740,7 @@ pub(super) fn edit(
             )?
         }
         "explode.lines" => explode::lines(&mut document, &request.values, &request.selection)?,
+        "explode.auto" => explode::auto(&mut document, &compiled, &request.values)?,
         "assembly.sketch" => {
             sketch::new_sketch(&mut document, &compiled, &mut publisher, &request.values)?
         }

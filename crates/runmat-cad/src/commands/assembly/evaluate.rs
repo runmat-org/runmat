@@ -144,11 +144,12 @@ pub(super) fn evaluate() -> Vec<CommandDescriptor> {
             "explode.auto",
             "Auto-explode",
             "explode-auto",
-            "Explode the assembly automatically from its mates.",
+            "A new exploded view pulled apart along the mates, outermost component first.",
         )
         .inputs(vec![
+            text("name", "Name", Some("Auto explode")).optional(),
             length("spacing", "Spacing", 20.0),
-            flag("fasteners", "Fasteners with their holes", true),
+            flag("lines", "Explode lines", true),
         ])
         .when(occurrences())
         .preview()
