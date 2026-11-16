@@ -85,10 +85,31 @@ pub(super) fn manage() -> Vec<CommandDescriptor> {
             "replace",
             P,
         )
-        .desc("Point a reference at another file or entity.")
+        .desc("Point the features that use a face, edge, body, plane or sketch at another one.")
+        .kw(&[
+            "re-reference",
+            "redirect",
+            "swap reference",
+            "edit reference",
+        ])
         .inputs(vec![
-            pick("reference", "Reference", &[K::Feature, K::Input]),
-            text("with", "Replace with", Some("other.part")),
+            pick(
+                "reference",
+                "Reference",
+                &[K::Face, K::Edge, K::Vertex, K::Body, K::Plane, K::Sketch],
+            )
+            .help("What the features use now; the summary lists every feature that uses it"),
+            pick(
+                "with",
+                "Replace with",
+                &[K::Face, K::Edge, K::Vertex, K::Body, K::Plane, K::Sketch],
+            ),
+            radio(
+                "scope",
+                "Replace",
+                &[("all", "Every use"), ("one", "In one feature")],
+            ),
+            pick("feature", "Feature", &[K::Feature, K::Sketch]).shown("scope", &["one"]),
         ])
         .edit(edit(EditOp::Edit, Section::Features).item("reference")),
         cmd("manage.freeze-bar", "Freeze bar", "freeze", P)

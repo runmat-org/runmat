@@ -15,7 +15,10 @@
 //!   an assembly places them where they sit.
 //! - `manage.document-settings`, `sheet-metal.gauge`, `sheet-metal.bend-table` ([`settings`]):
 //!   the part's units, standard and general tolerance, and its sheet bodies' gauge and bend rule.
+//! - `manage.replace-reference` ([`replace`]): the features that use a face, edge, body, plane
+//!   or sketch use another one; the summary lists every use and what the rebuild broke.
 
+mod replace;
 pub(super) mod settings;
 pub(super) mod split;
 
@@ -436,6 +439,7 @@ pub(super) fn edit(
         "manage.appearance" => appearance(path, text, request, picks),
         "manage.equations" => equations(path, text, request),
         "part.body-promote" => promote(path, text, request, picks),
+        "manage.replace-reference" => replace::replace_reference(path, text, request, picks),
         _ => return None,
     })
 }

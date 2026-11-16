@@ -422,6 +422,8 @@ This file is generated from the command catalog.
   - Optional: `bodies` (picks: body or part)
   - Runs on the `selection`: `body`, `part`
 - `manage.release`: Save this part as its next released revision, for assemblies to pin to.
+- `manage.replace-reference`: Point the features that use a face, edge, body, plane or sketch at another one.
+  - Required: `reference` (pick: face or edge or vertex or body or plane or sketch); `with` (pick: face or edge or vertex or body or plane or sketch); `scope` (one of `all`, `one`, default `all`); `feature` (pick: feature or sketch) when `scope` is one
 - `manage.split-to-files`: Save bodies as separate parts and an assembly.
   - Optional: `bodies` (picks: body); `assembly` (true or false, default true)
 
