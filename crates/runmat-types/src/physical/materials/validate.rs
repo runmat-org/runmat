@@ -56,7 +56,7 @@ pub fn validate_material(material: &Material) -> Result<(), MaterialDefect> {
         }
     }
     for (name, citation) in material.property_citations() {
-        if citation.source.trim().is_empty() || !citations::ALL.iter().any(|listed| *listed == citation) {
+        if citation.source.trim().is_empty() || !citations::ALL.contains(&citation) {
             return Err(MaterialDefect::Citation(name));
         }
     }

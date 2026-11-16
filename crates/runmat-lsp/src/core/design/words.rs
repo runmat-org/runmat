@@ -234,23 +234,32 @@ fn string_hover(
 
 pub(super) fn material_hover(m: &runmat_types::physical::materials::Material) -> String {
     let mut rows = vec![
-        format!("- Density: {} kg/m³", format_number(m.mass_density)),
-        format!("- Young's modulus: {} GPa", format_number(m.youngs_modulus / 1e9)),
+        format!("- Density: {} kg/m³", format_number(m.mass_density.si())),
+        format!("- Young's modulus: {} GPa", format_number(m.youngs_modulus.si() / 1e9)),
     ];
+    let mut cited = vec![m.mass_density.citation, m.youngs_modulus.citation];
     if let Some(y) = m.yield_strength {
-        rows.push(format!("- Yield strength: {} MPa", format_number(y / 1e6)));
+        rows.push(format!("- Yield strength: {} MPa", format_number(y.si() / 1e6)));
+        cited.push(y.citation);
     }
-    rows.push(format!("- Poisson's ratio: {}", format_number(m.poisson_ratio)));
+    rows.push(format!("- Poisson's ratio: {}", format_number(m.poisson_ratio.si())));
     rows.push(format!(
         "- Thermal conductivity: {} W/(m·K)",
-        format_number(m.conductivity)
+        format_number(m.conductivity.si())
     ));
+    cited.extend([m.poisson_ratio.citation, m.conductivity.citation]);
+    let mut sources: Vec<&str> = Vec::new();
+    for citation in cited {
+        if !sources.contains(&citation.source) {
+            sources.push(citation.source);
+        }
+    }
     format!(
-        "**{}** · material `{}`\n\n{}\n\nSource: {}",
+        "**{}** · material `{}`\n\n{}\n\nSources: {}",
         m.label,
         m.id,
         rows.join("\n"),
-        m.source
+        sources.join("; ")
     )
 }
 
