@@ -6,8 +6,9 @@ use std::sync::Arc;
 
 #[test]
 fn dataset_receiver_retains_session_and_original_filesystem_across_evaluations() {
+    // Lock order: the provider override first, then the GC test context (as every core test).
+    let _serial = fs::provider_override_lock();
     runmat_gc::gc_test_context(|| {
-        let _serial = fs::provider_override_lock();
         let selected_root = std::path::Path::new("/selected-data-workspace");
         let replacement_root = std::path::Path::new("/replacement-data-workspace");
         let original = Arc::new(fs::MemoryFsProvider::with_current_dir(selected_root));
