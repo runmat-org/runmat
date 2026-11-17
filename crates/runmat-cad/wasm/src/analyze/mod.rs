@@ -282,6 +282,9 @@ fn mm(m: f64) -> String {
     format!("{:.2}", m * 1000.0)
 }
 
+/// What a results cell says for a value that is unknown (a mass without a density).
+const UNKNOWN: &str = "unknown";
+
 /// The unit system a part's or an assembly's settings name ([`runmat_cad::assembly::settings`]);
 /// `None` without settings.
 pub fn document_units(
@@ -318,13 +321,14 @@ fn mass_analysis(
     report: &MassReport,
     units: Option<runmat_cad::assembly::settings::Readout>,
 ) -> Analysis {
-    let t = &report.total;
-    let c = t.center;
-    // kg·mm², the unit drawings and data sheets quote.
-    let i = |r: usize, k: usize| format!("{:.1}", t.inertia[r][k] * 1e6);
-    let mut summary = match units {
+    let volume = |v: f64| match units {
+        Some(u) => u.volume(v),
+        None => format!("{:.1} cm³", v * 1e6),
+    };
+    let summary = match (&report.total, units) {
         // In the document's units.
-        Some(u) => {
+        (Some(t), Some(u)) => {
+            let c = t.center;
             let l = |v: f64| u.number(u.length_value(v), 6);
             let mi = |r: usize, k: usize| {
                 let s = u.inertia(t.inertia[r][k]);
@@ -345,21 +349,29 @@ fn mass_analysis(
                 u.length_unit()
             )
         }
-        None => format!(
-            "{} · {:.1} cm³ · CG ({}, {}, {}) mm · Ixx {} Iyy {} Izz {} kg·mm² about the CG",
-            g(t.mass),
-            t.volume * 1e6,
-            mm(c[0]),
-            mm(c[1]),
-            mm(c[2]),
-            i(0, 0),
-            i(1, 1),
-            i(2, 2)
+        (Some(t), None) => {
+            let c = t.center;
+            // kg·mm², the unit drawings and data sheets quote.
+            let i = |r: usize, k: usize| format!("{:.1}", t.inertia[r][k] * 1e6);
+            format!(
+                "{} · {:.1} cm³ · CG ({}, {}, {}) mm · Ixx {} Iyy {} Izz {} kg·mm² about the CG",
+                g(t.mass),
+                report.volume * 1e6,
+                mm(c[0]),
+                mm(c[1]),
+                mm(c[2]),
+                i(0, 0),
+                i(1, 1),
+                i(2, 2)
+            )
+        }
+        // No density is assumed: mass, CG and inertia stay unknown, and the summary says why.
+        (None, _) => format!(
+            "Mass, CG and inertia unknown · {} · {}",
+            volume(report.volume),
+            report.unknown.as_deref().unwrap_or("a part has no density")
         ),
     };
-    if !report.complete() {
-        summary += &format!(" · incomplete: {} without mass", report.problems.len());
-    }
     let rows = report
         .parts
         .iter()
@@ -376,7 +388,7 @@ fn mass_analysis(
                         Some(u) => u.density(d),
                         None => format!("{d:.0} kg/m³"),
                     })
-                    .unwrap_or_else(|| "—".into()),
+                    .unwrap_or_else(|| UNKNOWN.into()),
                 match units {
                     Some(u) => u.volume(p.volume),
                     None => format!("{:.2} cm³", p.volume * 1e6),
@@ -386,7 +398,7 @@ fn mass_analysis(
                         Some(u) => u.mass(m),
                         None => g(m),
                     })
-                    .unwrap_or_else(|| "—".into()),
+                    .unwrap_or_else(|| UNKNOWN.into()),
             ],
             items: p.item.iter().cloned().collect(),
             severity: p.mass.is_none().then_some("warning"),
@@ -549,6 +561,7 @@ pub fn analyze(
                 crate::runtime::regenerate_part_in(path, text, configuration, &Default::default())
                     .map_err(|d| d.first().map(|d| d.message.clone()).unwrap_or_default())?;
             let mut rows = Vec::new();
+            let mut problems = Vec::new();
             let mut members = 0;
             for (feature, record) in &part.result.state.records {
                 let runmat_cad::regen::records::FeatureRecord::Weldment { cut_list, .. } = record
@@ -557,6 +570,13 @@ pub fn analyze(
                 };
                 for r in cut_list {
                     members += r.quantity;
+                    if r.mass_per_member.is_none() {
+                        problems.push(format!(
+                            "{feature} item {}: mass unknown: {}",
+                            r.item,
+                            runmat_cad::model::materials::no_density_reason(r.material.as_deref())
+                        ));
+                    }
                     rows.push(Row {
                         cells: vec![
                             r.item.to_string(),
@@ -569,10 +589,10 @@ pub fn analyze(
                             format!("{} mm", mm(r.length)),
                             format!("{:.1}°", r.start_angle.to_degrees()),
                             format!("{:.1}°", r.end_angle.to_degrees()),
-                            r.mass_per_member.map(g).unwrap_or_else(|| "—".into()),
+                            r.mass_per_member.map(g).unwrap_or_else(|| UNKNOWN.into()),
                         ],
                         items: vec![format!("feature:{feature}")],
-                        severity: None,
+                        severity: r.mass_per_member.is_none().then_some("warning"),
                         legend: None,
                         reference: None,
                     });
@@ -601,7 +621,7 @@ pub fn analyze(
                 .map(String::from)
                 .to_vec(),
                 rows,
-                problems: Vec::new(),
+                problems,
                 data: Value::Null,
                 colors: None,
                 settings: Vec::new(),
@@ -796,7 +816,11 @@ pub fn analyze(
             let plural = |n: usize| if n == 1 { "" } else { "s" };
             let mut summary = format!(
                 "{} · {} part{}",
-                g(found.mass.total.mass),
+                found
+                    .mass
+                    .total
+                    .as_ref()
+                    .map_or_else(|| "mass unknown".to_owned(), |t| g(t.mass)),
                 found.mass.parts.len(),
                 plural(found.mass.parts.len())
             );

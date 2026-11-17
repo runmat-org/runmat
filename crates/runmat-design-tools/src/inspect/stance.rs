@@ -245,6 +245,20 @@ fn hull(mut points: Vec<[f64; 2]>) -> Vec<[f64; 2]> {
     lower
 }
 
+/// Where the centre of mass stands over the support; only when the centre of mass is known.
+struct Support {
+    com: V3,
+    /// Of the centre of mass above the ground, m.
+    height: f64,
+    inside: bool,
+    /// The centre of mass's least margin to an edge (negative outside), m.
+    margin: f64,
+    /// The tip-over angle over the nearest edge, radians, when inside.
+    tip: Option<f64>,
+    edges: Vec<(f64, Value)>,
+    least_side: Option<String>,
+}
+
 /// The distance from `c` to the segment `a`–`b`.
 fn to_segment(c: [f64; 2], a: [f64; 2], b: [f64; 2]) -> f64 {
     let d = [b[0] - a[0], b[1] - a[1]];
@@ -385,13 +399,12 @@ pub(crate) fn stance(
         .collect();
     let lowest = rows.first().map(|(c, o)| (*c, o.path.clone()));
 
-    // The centre of mass, from each part's material.
+    // The centre of mass, from each part's material. With a part's density unknown it is
+    // unknown too, and the support check says so instead of placing a guessed centre.
     let mass = runmat_cad_wasm::mass::assembly_mass(path, text, files, None)
         .map_err(|e| ToolError::new("not_compiled", format!("mass properties: {e}")))?;
     notes.extend(mass.problems.iter().map(|p| format!("mass: {p}")));
-    let com = mass.total.center;
-    let height = dot(com, g.up) - ground;
-    let c = g.flat(com);
+    let com = mass.total.as_ref().map(|t| t.center);
 
     // The support: the contact points on the ground, as a convex outline.
     let touching: Vec<[f64; 2]> = contact_points
@@ -407,47 +420,60 @@ pub(crate) fn stance(
         })
         .sum::<f64>()
         / 2.0;
-    let mut edges = Vec::new();
-    let (inside, margin) = if outline.len() >= 3 && area > 1e-6 {
-        let mut least = f64::INFINITY;
-        for i in 0..outline.len() {
-            let (a, b) = (outline[i], outline[(i + 1) % outline.len()]);
-            let d = [b[0] - a[0], b[1] - a[1]];
-            let len = (d[0] * d[0] + d[1] * d[1]).sqrt();
-            if len < 1e-9 {
-                continue;
+    let support = com.map(|com| {
+        let height = dot(com, g.up) - ground;
+        let c = g.flat(com);
+        let mut edges = Vec::new();
+        let (inside, margin) = if outline.len() >= 3 && area > 1e-6 {
+            let mut least = f64::INFINITY;
+            for i in 0..outline.len() {
+                let (a, b) = (outline[i], outline[(i + 1) % outline.len()]);
+                let d = [b[0] - a[0], b[1] - a[1]];
+                let len = (d[0] * d[0] + d[1] * d[1]).sqrt();
+                if len < 1e-9 {
+                    continue;
+                }
+                // Counter-clockwise: the outward normal is the edge turned clockwise.
+                let n = [d[1] / len, -d[0] / len];
+                let m = (a[0] - c[0]) * n[0] + (a[1] - c[1]) * n[1];
+                least = least.min(m);
+                edges.push((
+                    m,
+                    json!({
+                        "side": g.side(n),
+                        "length_mm": mm(len),
+                        "margin_mm": mm(m),
+                        "tip_angle_deg": deg(m.atan2(height.max(1e-9))),
+                    }),
+                ));
             }
-            // Counter-clockwise: the outward normal is the edge turned clockwise.
-            let n = [d[1] / len, -d[0] / len];
-            let m = (a[0] - c[0]) * n[0] + (a[1] - c[1]) * n[1];
-            least = least.min(m);
-            edges.push((
-                m,
-                json!({
-                    "side": g.side(n),
-                    "length_mm": mm(len),
-                    "margin_mm": mm(m),
-                    "tip_angle_deg": deg(m.atan2(height.max(1e-9))),
-                }),
-            ));
-        }
-        (least > 0.0, least)
-    } else {
-        // A line or a point holds nothing up across it.
-        let least = match outline.len() {
-            0 => f64::INFINITY,
-            1 => to_segment(c, outline[0], outline[0]),
-            _ => (0..outline.len())
-                .map(|i| to_segment(c, outline[i], outline[(i + 1) % outline.len()]))
-                .fold(f64::INFINITY, f64::min),
+            (least > 0.0, least)
+        } else {
+            // A line or a point holds nothing up across it.
+            let least = match outline.len() {
+                0 => f64::INFINITY,
+                1 => to_segment(c, outline[0], outline[0]),
+                _ => (0..outline.len())
+                    .map(|i| to_segment(c, outline[i], outline[(i + 1) % outline.len()]))
+                    .fold(f64::INFINITY, f64::min),
+            };
+            (false, -least)
         };
-        (false, -least)
-    };
-    edges.sort_by(|a, b| a.0.total_cmp(&b.0));
-    let tip = inside.then(|| margin.atan2(height.max(1e-9)));
-    let least_side = edges
-        .first()
-        .map(|e| e.1["side"].as_str().unwrap_or("").to_owned());
+        edges.sort_by(|a, b| a.0.total_cmp(&b.0));
+        let tip = inside.then(|| margin.atan2(height.max(1e-9)));
+        let least_side = edges
+            .first()
+            .map(|e| e.1["side"].as_str().unwrap_or("").to_owned());
+        Support {
+            com,
+            height,
+            inside,
+            margin,
+            tip,
+            edges,
+            least_side,
+        }
+    });
 
     // Stance against the overall size (every component's box).
     let extent = |pts: &mut dyn Iterator<Item = [f64; 2]>| {
@@ -492,18 +518,36 @@ pub(crate) fn stance(
             findings.push(json!({ "severity": "warning", "message": format!("{name} clears the ground by only {} mm (at least {MIN_CLEARANCE_MM} mm)", mm(*clear)) }));
         }
     }
-    if !inside {
-        let side = least_side
-            .clone()
-            .map(|s| format!(" past its {s} edge"))
-            .unwrap_or_default();
-        findings.push(json!({ "severity": "error", "message": if outline.len() < 3 || area <= 1e-6 {
-            format!("the contact set touches the ground along a line or at a point, so the assembly tips over; the centre of mass is {} mm off it", mm(-margin))
-        } else {
-            format!("the centre of mass falls {} mm outside the support{side}, so the assembly tips over", mm(-margin))
-        } }));
-    } else if let Some(t) = tip.filter(|t| deg(*t) < MIN_TIP_DEG) {
-        findings.push(json!({ "severity": "error", "message": format!("it tips over its {} edge after leaning {}° (needs at least {MIN_TIP_DEG}°): widen or lengthen the support there", least_side.clone().unwrap_or_default(), deg(t)) }));
+    match &support {
+        None => {
+            findings.push(json!({ "severity": "error", "message": format!(
+                "the centre of mass is unknown, so the stance can't be checked: {}",
+                mass.unknown.as_deref().unwrap_or("a part has no density")
+            ) }));
+        }
+        Some(Support {
+            inside: false,
+            margin,
+            least_side,
+            ..
+        }) => {
+            let side = least_side
+                .clone()
+                .map(|s| format!(" past its {s} edge"))
+                .unwrap_or_default();
+            findings.push(json!({ "severity": "error", "message": if outline.len() < 3 || area <= 1e-6 {
+                format!("the contact set touches the ground along a line or at a point, so the assembly tips over; the centre of mass is {} mm off it", mm(-margin))
+            } else {
+                format!("the centre of mass falls {} mm outside the support{side}, so the assembly tips over", mm(-margin))
+            } }));
+        }
+        Some(Support {
+            tip, least_side, ..
+        }) => {
+            if let Some(t) = tip.filter(|t| deg(*t) < MIN_TIP_DEG) {
+                findings.push(json!({ "severity": "error", "message": format!("it tips over its {} edge after leaning {}° (needs at least {MIN_TIP_DEG}°): widen or lengthen the support there", least_side.clone().unwrap_or_default(), deg(t)) }));
+            }
+        }
     }
     let ok = findings.iter().all(|f| f["severity"] != "error");
 
@@ -514,15 +558,15 @@ pub(crate) fn stance(
         ),
         None => "no other component".to_owned(),
     };
-    let support_text = if inside {
-        format!(
+    let support_text = match &support {
+        None => "centre of mass unknown".to_owned(),
+        Some(sp) if sp.inside => format!(
             "centre of mass inside the support, {} mm from its {} edge (tips at {}°)",
-            mm(margin),
-            least_side.clone().unwrap_or_default(),
-            tip.map_or(0.0, deg)
-        )
-    } else {
-        format!("centre of mass {} mm outside the support", mm(-margin))
+            mm(sp.margin),
+            sp.least_side.clone().unwrap_or_default(),
+            sp.tip.map_or(0.0, deg)
+        ),
+        Some(sp) => format!("centre of mass {} mm outside the support", mm(-sp.margin)),
     };
     let summary = format!(
         "Standing on {}: {clearance_text}; {support_text}; stance {} × {} mm ({a} × {b}) against {} × {} mm overall.",
@@ -544,19 +588,28 @@ pub(crate) fn stance(
             "components": clearance_rows,
             "required_mm": MIN_CLEARANCE_MM,
         },
-        "center_of_mass": {
-            "point_mm": [mm(com[0]), mm(com[1]), mm(com[2])],
-            "height_mm": mm(height),
-            "mass_kg": (mass.total.mass * 1e4).round() / 1e4,
-            "complete": mass.complete(),
+        "center_of_mass": match (&support, &mass.total) {
+            (Some(sp), Some(total)) => json!({
+                "point_mm": [mm(sp.com[0]), mm(sp.com[1]), mm(sp.com[2])],
+                "height_mm": mm(sp.height),
+                "mass_kg": (total.mass * 1e4).round() / 1e4,
+                "complete": true,
+            }),
+            _ => json!({
+                "point_mm": null,
+                "height_mm": null,
+                "mass_kg": null,
+                "complete": false,
+                "unknown": mass.unknown,
+            }),
         },
         "support": {
             "corners_mm": outline.iter().map(|p| [mm(p[0]), mm(p[1])]).collect::<Vec<_>>(),
-            "com_inside": inside,
-            "min_margin_mm": mm(margin),
-            "min_tip_angle_deg": tip.map(deg),
+            "com_inside": support.as_ref().map(|sp| sp.inside),
+            "min_margin_mm": support.as_ref().map(|sp| mm(sp.margin)),
+            "min_tip_angle_deg": support.as_ref().and_then(|sp| sp.tip.map(deg)),
             "required_tip_angle_deg": MIN_TIP_DEG,
-            "edges": edges.into_iter().map(|e| e.1).collect::<Vec<_>>(),
+            "edges": support.map(|sp| sp.edges.into_iter().map(|e| e.1).collect::<Vec<_>>()).unwrap_or_default(),
         },
         "stance": {
             format!("{a}_mm"): mm(support_size[0]),
