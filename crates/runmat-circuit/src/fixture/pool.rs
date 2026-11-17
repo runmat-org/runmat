@@ -23,7 +23,7 @@ fn unit(pool: &mut Pool, name: &str, pins: &[(&str, PinType)]) -> crate::ids::Uu
 }
 
 /// The standard fixture pool. Part names (MPNs) used by the fixtures:
-/// `R0402-10K`, `C0402-100N`, `C0805-10U`, `L1210-4U7`, `LED0603-G`, `OPA4171`, `TPS62130`,
+/// `R0402-10K`, `R0603-10K`, `C0402-100N`, `C0805-10U`, `L1210-4U7`, `LED0603-G`, `OPA4171`, `TPS62130`,
 /// `USB4105`, `TMP117`, `XTAL-3225`, `MCU-QFN32`, `FPGA-BGA256`, `HDR-2x05`.
 pub fn standard_pool() -> Pool {
     use PinType::*;
@@ -33,6 +33,14 @@ pub fn standard_pool() -> Pool {
     let c = make::simple_entity(&mut p, "C", "C", &two);
     let l = make::simple_entity(&mut p, "L", "L", &two);
     let led = make::simple_entity(&mut p, "LED", "D", &[("A", Passive), ("K", Passive)]);
+    // A resistor's, capacitor's or inductor's two terminals are interchangeable (Swap pins);
+    // an LED's aren't.
+    for e in [r, c, l] {
+        let unit = p.entities[&e].gates[0].unit;
+        for pin in &mut p.units.get_mut(&unit).expect("just added").pins {
+            pin.swap_group = 1;
+        }
+    }
     let pk = |p: &mut Pool, s: &str| p.add_package(footprint::from_string(s).unwrap());
     let r0402 = pk(&mut p, "R0402");
     let c0402 = pk(&mut p, "C0402");
@@ -48,6 +56,11 @@ pub fn standard_pool() -> Pool {
     let pr = make::part_by_name(&mut p, "R0402-10K", "Generic", r, r0402);
     set_q(&mut p, pr, "resistance", 10e3, Dim::RESISTANCE, 1.0);
     set_q(&mut p, pr, "power_rating", 0.0625, Dim::POWER, 0.0);
+    // The same 10 kΩ in the next chip size up, for a footprint change that keeps the value.
+    let r0603 = pk(&mut p, "R0603");
+    let pr6 = make::part_by_name(&mut p, "R0603-10K", "Generic", r, r0603);
+    set_q(&mut p, pr6, "resistance", 10e3, Dim::RESISTANCE, 1.0);
+    set_q(&mut p, pr6, "power_rating", 0.1, Dim::POWER, 0.0);
     let pc = make::part_by_name(&mut p, "C0402-100N", "Generic", c, c0402);
     set_q(&mut p, pc, "capacitance", 100e-9, Dim::CAPACITANCE, 10.0);
     set_q(&mut p, pc, "voltage_rating", 16.0, Dim::VOLTAGE, 0.0);

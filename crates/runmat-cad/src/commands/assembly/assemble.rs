@@ -190,10 +190,10 @@ pub(super) fn assemble(conn: &[SelectKind]) -> Vec<CommandDescriptor> {
             ),
             picks("components", "Components", &[K::Occurrence]),
             offset("dx", "Delta X", 0.0)
-                .shown("mode", &["triad"])
+                .shown("mode", &["drag", "triad"])
                 .drag(Manipulator::Triad),
-            offset("dy", "Delta Y", 0.0).shown("mode", &["triad"]),
-            offset("dz", "Delta Z", 0.0).shown("mode", &["triad"]),
+            offset("dy", "Delta Y", 0.0).shown("mode", &["drag", "triad"]),
+            offset("dz", "Delta Z", 0.0).shown("mode", &["drag", "triad"]),
             angle("rx", "Rotate X", 0.0).shown("mode", &["triad"]),
             angle("ry", "Rotate Y", 0.0).shown("mode", &["triad"]),
             angle("rz", "Rotate Z", 0.0).shown("mode", &["triad"]),
@@ -271,11 +271,13 @@ pub(super) fn assemble(conn: &[SelectKind]) -> Vec<CommandDescriptor> {
             "assembly.copy-with-mates",
             "Copy with mates",
             "copy",
-            "Copy components with their mates, picking new references.",
+            "Copy components with their connectors and mates; each mate to an outside reference takes the next picked new reference.",
         )
         .inputs(vec![
             picks("components", "Components", &[K::Occurrence]),
-            picks("references", "New references", conn),
+            picks("references", "New references", conn).optional().help(
+                "One pick per mate end outside the copy, in the order the mates are listed; a mate without one keeps its original reference.",
+            ),
         ])
         .when(selected(&[K::Occurrence]))
         .edit(edit(EditOp::Add, Section::Occurrences).item("copy")),

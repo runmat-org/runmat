@@ -112,8 +112,15 @@ pub struct ViewRequest {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct RenderInput {
-    /// Workspace path of the `.part` or `.assembly`.
+    /// Workspace path of the `.part`, `.assembly` or `.drawing`.
     pub path: String,
+    /// Drawings: the sheet to draw (its name, `"1"`); the first sheet when absent.
+    #[serde(default)]
+    pub sheet: Option<String>,
+    /// Drawings: one view of the sheet (`front`, `iso`) to frame with its dimensions and
+    /// callouts, so its figures read; the whole sheet when absent.
+    #[serde(default)]
+    pub frame: Option<String>,
     #[serde(flatten)]
     pub view: ViewRequest,
 }
@@ -127,8 +134,9 @@ pub struct RenderOutput {
     pub png_base64: String,
     pub width: u32,
     pub height: u32,
-    /// `gpu` (the Desktop's wgpu renderer, headless) or `cpu_reference` (its CPU rasterizer,
-    /// used when no GPU adapter is available; see `notes`).
+    /// `gpu` (the Desktop's wgpu renderer, headless), `cpu_reference` (its CPU rasterizer,
+    /// used when no GPU adapter is available; see `notes`), or for a drawing `sheet` (the
+    /// sheet's layout drawn line by line, as the Desktop's sheet draws it).
     pub renderer: String,
     /// The camera used, so a client can ask for a nearby view.
     pub camera: Value,

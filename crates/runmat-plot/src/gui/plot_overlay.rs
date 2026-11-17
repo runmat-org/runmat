@@ -553,6 +553,14 @@ impl PlotOverlay {
                 x_h *= keep;
             }
         }
+        if has_x_label {
+            // The x label sits below the tick labels (`x_label_center_y`); a short axes gives
+            // up plot height for it rather than drawing the label over the ticks.
+            let need = Self::x_label_clearance(x_tick_label_height, scale)
+                + 2.0 * Self::x_label_half_height(scale)
+                - x_gap;
+            x_h = x_h.max(need.min((outer_h - title_h - title_gap - x_gap - 1.0).max(0.0)));
+        }
 
         let plot_rect = Rect::from_min_max(
             egui::pos2(outer.min.x + y_w, outer.min.y + title_h + title_gap),
@@ -1470,6 +1478,8 @@ impl PlotOverlay {
                     {
                         self.draw_x_label_in_rect(
                             ui,
+                            plot_renderer,
+                            i,
                             panel_layout.x_label_rect,
                             x_label,
                             config.font_scale,
@@ -1640,6 +1650,8 @@ impl PlotOverlay {
                 {
                     self.draw_x_label_in_rect(
                         ui,
+                        plot_renderer,
+                        0,
                         panel_layout.x_label_rect,
                         x_label,
                         config.font_scale,
@@ -1718,6 +1730,15 @@ impl PlotOverlay {
             ui.ctx(),
             centered_plot_rect,
             &annotations,
+            config.font_scale,
+        );
+        // Measured values sit on their dimension lines, which the renderer draws in the model.
+        let dimensions = plot_renderer
+            .geometry_screen_dimensions([centered_plot_rect.width(), centered_plot_rect.height()]);
+        self.cad_overlay.render_dimension_labels(
+            ui.ctx(),
+            centered_plot_rect,
+            &dimensions,
             config.font_scale,
         );
 
@@ -3446,11 +3467,54 @@ impl PlotOverlay {
         }
     }
 
-    fn draw_x_label_in_rect(&self, ui: &mut egui::Ui, rect: Rect, label: &str, scale: f32) {
+    /// How far below the plot box the x tick labels reach: they are centered `15 * scale`
+    /// below it, `tick_label_height` tall, plus a small gap.
+    fn x_label_clearance(tick_label_height: f32, scale: f32) -> f32 {
+        15.0 * scale + tick_label_height * 0.5 + 2.0 * scale
+    }
+
+    fn x_label_half_height(scale: f32) -> f32 {
+        // The 14 pt label font's line height is about 1.2 em.
+        14.0 * scale * 0.6
+    }
+
+    /// The x label's center: low in its band, and always below the axes' tick labels.
+    fn x_label_center_y(
+        &self,
+        plot_renderer: &PlotRenderer,
+        axes_index: usize,
+        rect: Rect,
+        scale: f32,
+    ) -> f32 {
+        let angle = plot_renderer.overlay_x_tick_label_rotation_for_axes(axes_index);
+        let width = self.estimate_x_axis_max_tick_label_width(plot_renderer, axes_index, scale);
+        let (_, tick_label_height) = Self::rotated_text_extent(width, 13.0 * scale, angle);
+        Self::x_label_center_in(rect, tick_label_height, scale)
+    }
+
+    fn x_label_center_in(rect: Rect, tick_label_height: f32, scale: f32) -> f32 {
+        let below_ticks = rect.min.y
+            + Self::x_label_clearance(tick_label_height, scale)
+            + Self::x_label_half_height(scale);
+        below_ticks.max(rect.max.y - rect.height() * 0.24)
+    }
+
+    fn draw_x_label_in_rect(
+        &self,
+        ui: &mut egui::Ui,
+        plot_renderer: &PlotRenderer,
+        axes_index: usize,
+        rect: Rect,
+        label: &str,
+        scale: f32,
+    ) {
         let scale = scale.max(0.75);
         let text_color = self.theme_text_color();
         ui.painter().text(
-            Pos2::new(rect.center().x, rect.max.y - rect.height() * 0.24),
+            Pos2::new(
+                rect.center().x,
+                self.x_label_center_y(plot_renderer, axes_index, rect, scale),
+            ),
             Align2::CENTER_CENTER,
             label,
             FontId::proportional(14.0 * scale),
@@ -3898,6 +3962,25 @@ mod positioned_axes_tests {
     use crate::core::Camera;
     use egui::{pos2, vec2, Rect};
     use glam::Vec3;
+
+    #[test]
+    fn the_x_label_sits_below_the_tick_labels_in_a_short_band() {
+        // A stacked time plot's bottom axes: a band squeezed to 30 px under the plot box.
+        let (scale, tick_h) = (1.0, 13.0);
+        let tick_bottom = 15.0 * scale + tick_h * 0.5;
+        let short = Rect::from_min_size(pos2(0.0, 100.0), vec2(400.0, 30.0));
+        let center = PlotOverlay::x_label_center_in(short, tick_h, scale);
+        let label_top = center - PlotOverlay::x_label_half_height(scale);
+        assert!(
+            label_top >= 100.0 + tick_bottom,
+            "label top {label_top} over ticks"
+        );
+
+        // A roomy band keeps the label where it always sat, low in the band.
+        let tall = Rect::from_min_size(pos2(0.0, 100.0), vec2(400.0, 60.0));
+        let center = PlotOverlay::x_label_center_in(tall, tick_h, scale);
+        assert_eq!(center, 160.0 - 60.0 * 0.24);
+    }
 
     #[test]
     fn default_plot_toolbar_preserves_full_available_width() {

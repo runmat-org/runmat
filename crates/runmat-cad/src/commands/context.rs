@@ -98,7 +98,7 @@ pub(super) fn add(catalog: &mut Catalog) {
         .when(selected(&[K::Occurrence]))
         .edit(edit(EditOp::Set, Section::Occurrences).item("configuration")),
         cmd("assembly.show-mates", "Show mates", "mate", A)
-            .desc("Highlight the component's mates and list them in Properties.")
+            .desc("Show the mates that hold the component in the Outline, filtered to it.")
             .when(selected_one(&[K::Occurrence]))
             .edit(view_action("show_mates")),
         cmd("assembly.flip-mate", "Flip", "flip", A)

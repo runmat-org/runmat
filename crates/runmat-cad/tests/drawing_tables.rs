@@ -365,6 +365,7 @@ fn top_view() -> View {
         exploded: None,
         title: None,
         centerlines: true,
+        tangent_edges: None,
     }
 }
 

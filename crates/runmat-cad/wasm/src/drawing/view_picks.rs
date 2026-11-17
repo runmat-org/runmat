@@ -286,6 +286,7 @@ pub fn broken_out(
     let mut out = ViewLines {
         visible: clip(&parent.visible, &poly, false),
         hidden: clip(&parent.hidden, &poly, false),
+        tangent: clip(&parent.tangent, &poly, false),
         centers: parent.centers.clone(),
         hatch: Vec::new(),
         hatch_symbols: Vec::new(),

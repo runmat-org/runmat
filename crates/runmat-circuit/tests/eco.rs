@@ -742,6 +742,7 @@ fn deterministic_and_grouped_projection() {
         design: "io".into(),
         variant: None,
         variants: vec![],
+        variant_fittings: Default::default(),
         hierarchy: vec![],
         components: vec![],
         nets: vec![],

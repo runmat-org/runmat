@@ -103,7 +103,7 @@ pub(super) fn lower(
         _ => None,
     };
     let outputs =
-        super::output::lower_outputs(context.bound, declaration, cross_section, diagnostics);
+        super::output::lower_outputs(context.bound, &sequence.steps, declaration, cross_section, diagnostics);
     reject_formulation_setting(declaration, diagnostics);
     let assessments = super::assessment::lower_assessments(context.bound, declaration, diagnostics);
     let displays = super::display::lower_displays(

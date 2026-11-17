@@ -15,6 +15,8 @@ mod annotations;
 mod edge_stroke;
 #[cfg(test)]
 mod highlight_tests;
+#[cfg(test)]
+mod dimension_tests;
 mod instances;
 mod paint;
 mod pick;
@@ -37,6 +39,8 @@ use paint::{RegionPaint, HOVER_PAINT, SELECTED_PAINT};
 
 const SECTION_DISTANCE_EPSILON: f32 = 1.0e-6;
 const GEOMETRY_SELECTED_REGION_COLOR: [f32; 4] = [0.98, 0.45, 0.12, 1.0];
+/// A measured dimension's color when the host gives none: the selection color.
+pub const GEOMETRY_DIMENSION_COLOR: [f32; 4] = GEOMETRY_SELECTED_REGION_COLOR;
 const GEOMETRY_HOVER_REGION_COLOR: [f32; 4] = [0.43, 0.78, 1.0, 1.0];
 const GEOMETRY_MATERIAL_REGION_COLOR: [f32; 4] = [0.38, 0.58, 0.96, 0.92];
 const GEOMETRY_BOUNDARY_REGION_COLOR: [f32; 4] = [0.22, 0.82, 0.52, 0.96];
@@ -225,6 +229,7 @@ impl GeometryScene {
         nodes.extend(self.section_cap_nodes(presentation, &cap_sources));
         nodes.extend(self.annotation_nodes(presentation));
         nodes.extend(self.topology_selection_nodes(presentation));
+        nodes.extend(self.dimension_nodes(presentation));
         nodes
     }
 
@@ -272,6 +277,10 @@ pub struct GeometryScenePresentation {
     pub region_highlights: Vec<GeometrySceneRegionHighlight>,
     #[serde(default)]
     pub region_annotations: Vec<GeometrySceneRegionAnnotation>,
+    /// Measured dimensions drawn in the model: a line between two scene points with its value
+    /// at the middle (Measure's distances). They draw over the model, as study symbols do.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub dimensions: Vec<GeometrySceneDimension>,
     #[serde(default)]
     pub display_mode: GeometrySceneDisplayMode,
     #[serde(default = "default_edge_overlay_enabled")]
@@ -322,6 +331,7 @@ impl Default for GeometryScenePresentation {
             region_colors: Vec::new(),
             region_highlights: Vec::new(),
             region_annotations: Vec::new(),
+            dimensions: Vec::new(),
             display_mode: GeometrySceneDisplayMode::Shaded,
             edge_overlay_enabled: true,
             show_grid: None,
@@ -534,6 +544,25 @@ pub struct GeometrySceneRegionAnnotation {
     pub direction: Option<[f32; 3]>,
     #[serde(default)]
     pub size: Option<f32>,
+}
+
+/// A dimension in the model: the line from `from` to `to` (scene coordinates) with dots at its
+/// ends, and `label` (the measured value) at its middle.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GeometrySceneDimension {
+    pub from: [f32; 3],
+    pub to: [f32; 3],
+    pub label: String,
+    /// Line, dot and label-border color; unset draws the selection color.
+    #[serde(default)]
+    pub color: Option<[f32; 4]>,
+    /// Extension lines, each `[point on the measured item, dimension-line end]`: they carry a
+    /// dimension line that stands off its item back to the item's outline. Drawn thinner than
+    /// the dimension line, with a small gap at the item and a short run past the line's end
+    /// (ISO 129-1).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub extension_lines: Vec<[[f32; 3]; 2]>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]

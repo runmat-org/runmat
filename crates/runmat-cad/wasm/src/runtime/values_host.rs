@@ -62,6 +62,14 @@ pub fn run_calls(
     )
 }
 
+/// The text of the workspace file `reference` names from `path` ([`super::resolve_path`]),
+/// through the thread's host. `None` without a host or without the file.
+pub(crate) fn host_file(path: &str, reference: &str) -> Option<String> {
+    let host = HOST.with(|h| h.borrow().clone())?;
+    let full = super::resolve_path(path, reference, &host.files);
+    host.files.get(&full).cloned()
+}
+
 /// The evaluator for the document at `path`: `.m` calls through the thread's host, if any.
 pub(crate) fn with_evaluator<R>(path: &str, f: impl FnOnce(&dyn DynamicValueEvaluator) -> R) -> R {
     match HOST.with(|h| h.borrow().clone()) {
@@ -135,7 +143,10 @@ pub fn compile_json_with_values(
             return super::assembly_stages::compile_parts(path, text, files);
         }
         crate::drawing::progress::with_stage(stage, || {
-            super::compile_json_known(path, text, files, configuration.as_deref(), &known)
+            crate::representation::with_requested(
+                crate::representation::requested_in(options),
+                || super::compile_json_known(path, text, files, configuration.as_deref(), &known),
+            )
         })
     });
     let pending = pending.borrow();

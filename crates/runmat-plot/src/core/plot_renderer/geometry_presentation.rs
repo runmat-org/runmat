@@ -131,6 +131,48 @@ impl PlotRenderer {
             })
             .collect()
     }
+    /// Where each measured dimension's value draws: the screen point of its line's middle.
+    /// A dimension whose middle is behind the camera or off screen draws no value.
+    #[cfg(feature = "egui-overlay")]
+    pub(crate) fn geometry_screen_dimensions(
+        &self,
+        viewport_size: [f32; 2],
+    ) -> Vec<GeometryScreenDimension> {
+        if self.last_geometry_scene.is_none() || viewport_size[0] <= 0.0 || viewport_size[1] <= 0.0
+        {
+            return Vec::new();
+        }
+        let mut camera = self.camera().clone();
+        let view_projection = camera.view_proj_matrix();
+        self.geometry_presentation
+            .dimensions
+            .iter()
+            .filter(|dimension| !dimension.label.trim().is_empty())
+            .filter_map(|dimension| {
+                let middle = (glam::Vec3::from_array(dimension.from)
+                    + glam::Vec3::from_array(dimension.to))
+                    * 0.5;
+                let clip = view_projection * middle.extend(1.0);
+                if !clip.is_finite() || clip.w <= 0.0 {
+                    return None;
+                }
+                let ndc = clip.truncate() / clip.w;
+                if !(-1.0..=1.0).contains(&ndc.x) || !(-1.0..=1.0).contains(&ndc.y) {
+                    return None;
+                }
+                Some(GeometryScreenDimension {
+                    position: [
+                        (ndc.x + 1.0) * 0.5 * viewport_size[0],
+                        (1.0 - ndc.y) * 0.5 * viewport_size[1],
+                    ],
+                    color: dimension
+                        .color
+                        .unwrap_or(crate::geometry_scene::GEOMETRY_DIMENSION_COLOR),
+                    label: dimension.label.trim().to_string(),
+                })
+            })
+            .collect()
+    }
     /// Draws the 3-D views with perspective or as a parallel projection. Framing is kept: the
     /// parallel view's height is the perspective view's height at the target.
     pub fn set_geometry_projection(

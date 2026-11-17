@@ -91,6 +91,7 @@ pub(super) fn diff_pair(project: &Project, request: &EditRequest) -> Result<Edit
     })
     .map_err(failure)?;
     Ok(EditOutput {
+        report: None,
         summary,
         files: vec![file_change(&layout.path, &layout.text, change)],
     })
@@ -172,6 +173,7 @@ pub(super) fn tune_length(
     })
     .map_err(failure)?;
     Ok(EditOutput {
+        report: None,
         summary,
         files: vec![file_change(&layout.path, &layout.text, change)],
     })
@@ -223,6 +225,7 @@ pub(super) fn tune_group(
     })
     .map_err(failure)?;
     Ok(EditOutput {
+        report: None,
         summary,
         files: vec![file_change(&layout.path, &layout.text, change)],
     })

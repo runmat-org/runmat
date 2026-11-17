@@ -1545,7 +1545,8 @@ fn delete_face_heals_a_pocket_and_a_dimension_edit_is_recorded() {
         FeatureKind::Extrude(Extrude {
             profile: ProfileRef::sketch("s_pocket").into(),
             extent: Extent::Blind { distance: mm(4.0) },
-            reverse: true,
+            // A cut from a sketch on a face goes into the body by default (DEFECTS-072).
+            reverse: false,
             mode: BodyMode::cut(),
             from: Default::default(),
             second: None,
@@ -2319,6 +2320,7 @@ fn threads_embosses_ribs_curves_connectors_and_library_features() {
             args: [(InputName::new("h"), mm(8.0))].into_iter().collect(),
             bindings: Default::default(),
             mode: BodyMode::add(),
+            plane: None,
         }),
     ));
     let r = env.regen(&d2);

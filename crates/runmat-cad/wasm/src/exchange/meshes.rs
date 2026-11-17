@@ -93,10 +93,10 @@ pub fn assembly_meshes_with(
     };
     let mut prototype_of: BTreeMap<(String, String), usize> = BTreeMap::new();
     for (id, node) in resolved.nodes.iter().enumerate() {
-        if node.failed || node.represented_by_ancestor {
+        if node.failed || !runmat_cad::assembly::representation::exported(resolved, id as u32) {
             continue;
         }
-        let file = node.definition.file.0.clone();
+        let file = node.source_key();
         let key = (file.clone(), node.configuration.digest());
         let prototype = match prototype_of.get(&key) {
             Some(p) => *p,
@@ -129,7 +129,7 @@ pub fn assembly_meshes_with(
                     _ => continue,
                 };
                 out.prototypes.push(MeshPrototype {
-                    file: file.clone(),
+                    file: node.definition.file.0.clone(),
                     configuration: (node.configuration != ConfigKey::default())
                         .then(|| node.configuration.name.as_ref().map(|c| c.to_string()))
                         .flatten(),

@@ -127,6 +127,18 @@ view a_a = section(from = front, plane = feature.body.face.start, label = A, she
 view b = detail(from = a_a, center = feature.body.face.end, radius = 20 mm, label = B, sheet = "1", model = { part = bracket }, at = [300, 100], scale = [2, 1], display = hidden_lines)
 ```
 
+### Edit a view
+
+Edit view (`drawing.edit-view`, on a view's right-click menu) opens the selected view's properties in one panel and writes them into its `view` line:
+
+- **Scale:** `1:2`, `2:1`, or `sheet` to draw at the sheet's scale. A projected view that drew at its parent's scale changes with it, so views in projection keep one scale (ISO 5456-2).
+- **Orientation:** a standard view's orientation. A projected, section, detail or auxiliary view looks the way its parent sets, so change the parent instead.
+- **Display:** hidden lines removed (`visible_lines`), hidden lines visible (`hidden_lines`) or shaded.
+- **Label:** a section's, detail's or auxiliary view's letter, or the title printed under any other view (`title = "REAR ELEVATION"`). An empty label gives a view back the title its kind prints.
+- **Place at:** click the sheet to move the view's center there.
+
+The panel starts with the view's current values, and the sheet previews the edit while it is open. Dimensions and annotations name their view, so they move and scale with it. Undo and redo restore the view's line as it was.
+
 ## Annotations
 
 `annotation <name> = <kind>(…, view, at)`:
@@ -218,6 +230,20 @@ The sheet, the PDF and the DXF break notes at the same words. Each line is its o
 ## Laid out for you
 
 The Auto-drawing command (`drawing.auto`) writes a drawing for a part or an assembly: three orthographic views, a section through the first hole, overall dimensions, hole callouts and tables, at the largest scale that fits the chosen sheet (A4 to A2, ANSI B or D). Fasteners are left out of assembly views. Auto-balloon numbers an assembly view's occurrences against its BOM table. The result is an ordinary `.drawing` to edit.
+
+## Check a drawing
+
+Check drawing (`drawing.check`, on the Drawing tab) compiles the drawing, lays out its sheets and lists what it finds in the results under the sheet. Selecting a finding selects the view, annotation, table or sheet it names. The Standard field picks the scale rules: the sheets' own standard, ISO or ASME.
+
+| Rule | Finds |
+|---|---|
+| Reference | An annotation whose model references no longer resolve, such as a dimension to a face the part lost, and the drawing's own reference errors (an error). |
+| Model | A view whose model file is missing, doesn't compile or builds no solid, so the sheet draws no model lines for it and the view is out of date with its model (an error). |
+| Title block | An empty title-block field, such as a material the part doesn't set, and a title block without a title or an identification number (ISO 7200). |
+| Overlap | Views or tables that overlap each other, annotation texts drawn over each other, and what the layout reports: a view or table with no room, views closer than the standard gap, a projected view out of line with its parent. |
+| Scale | A sheet or view scale outside the preferred scales (ISO 5455: 1, 2 and 5 times a power of ten; inch ASME sheets also allow 1:4, 1:8 and 1:16, and feet-and-inches sheets the architectural scales 1:12 to 1:384), a projected view at a different scale from its parent, and a detail view no larger than its parent. |
+
+Errors list first, then warnings, then notes. A note is something the layout settled itself, such as a view it moved clear of the notes.
 
 ## Exports
 

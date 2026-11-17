@@ -10,7 +10,7 @@
 //!     no-ERC statements (a `connect` left with one end goes too), and its footprint from the
 //!     board, so the schematic and the board agree at once. Update board does the rest of the
 //!     board's clean-up (copper left on a net that no longer exists).
-//!   - Tracks, vias, pours, keepouts and rooms go from the `.circuit.layout`.
+//!   - Tracks, vias, pours, keepouts, rooms and design rules go from the `.circuit.layout`.
 
 use super::edit::{failure, EditError, EditOutput, EditRequest};
 use super::set_property::{circuit_change, own_component};
@@ -18,7 +18,8 @@ use super::*;
 use crate::ir::Endpoint;
 use crate::syntax::board_edit::{self, BoardEdit};
 
-pub(super) const COMMANDS: &[&str] = &["circuit.edit-value", "circuit.rename-net", "circuit.delete"];
+pub(super) const COMMANDS: &[&str] =
+    &["circuit.edit-value", "circuit.rename-net", "circuit.delete"];
 
 pub(super) fn run(project: &Project, request: &EditRequest) -> Result<EditOutput, EditError> {
     match request.command.as_str() {
@@ -65,15 +66,17 @@ fn delete(project: &Project, request: &EditRequest) -> Result<EditOutput, EditEr
     let mut components = Vec::new();
     let mut board_items = Vec::new();
     let mut rooms = Vec::new();
+    let mut rules = Vec::new();
     for id in &request.selection {
         let (kind, key) = id.split_once(':').unwrap_or(("", id.as_str()));
         match kind {
             "component" => components.push(key.to_owned()),
             "track" | "via" | "zone" | "pour" | "keepout" => board_items.push(id.clone()),
             "room" => rooms.push(key.to_owned()),
+            "rule" => rules.push(key.to_owned()),
             _ => {
                 return Err(EditError::new(format!(
-                    "`{id}` can't be deleted here; select components, tracks, vias, pours, keepouts or rooms"
+                    "`{id}` can't be deleted here; select components, tracks, vias, pours, keepouts, rooms or rules"
                 )))
             }
         }
@@ -97,7 +100,7 @@ fn delete(project: &Project, request: &EditRequest) -> Result<EditOutput, EditEr
         }
         None => Vec::new(),
     };
-    if !footprints.is_empty() || !board_items.is_empty() || !rooms.is_empty() {
+    if !footprints.is_empty() || !board_items.is_empty() || !rooms.is_empty() || !rules.is_empty() {
         let layout = project.layout_or_err()?;
         let board = layout.parsed.board.as_ref().expect("read");
         let mut items = footprints;
@@ -113,6 +116,16 @@ fn delete(project: &Project, request: &EditRequest) -> Result<EditOutput, EditEr
                     return Err(format!("the board has no room `{room}`"));
                 }
             }
+            for rule in &rules {
+                if rule == "limits" {
+                    return Err("the board's limits are its fabrication minimums; set them with Board house".into());
+                }
+                let before = b.rules.len();
+                b.rules.retain(|r| &r.id != rule);
+                if b.rules.len() == before {
+                    return Err(format!("the board has no rule `{rule}`"));
+                }
+            }
             if !items.is_empty() {
                 board_edit::apply_board_edit(b, sites, &BoardEdit::Delete { items: items.clone() })?;
             }
@@ -125,9 +138,13 @@ fn delete(project: &Project, request: &EditRequest) -> Result<EditOutput, EditEr
         if !rooms.is_empty() {
             said.push(format!("room {}", rooms.join(", ")));
         }
+        if !rules.is_empty() {
+            said.push(format!("rule {}", rules.join(", ")));
+        }
         files.push(file_change(&layout.path, &layout.text, change));
     }
     Ok(EditOutput {
+        report: None,
         summary: format!("Deleted {}", said.join(" and ")),
         files,
     })
@@ -176,7 +193,8 @@ fn delete_components(
             continue;
         }
         def.components.retain(|c| c.name != local);
-        let ours = |e: &Endpoint| matches!(e, Endpoint::Pin { component, .. } if *component == local);
+        let ours =
+            |e: &Endpoint| matches!(e, Endpoint::Pin { component, .. } if *component == local);
         for connection in &mut def.connections {
             connection.ends.retain(|e| !ours(e));
         }

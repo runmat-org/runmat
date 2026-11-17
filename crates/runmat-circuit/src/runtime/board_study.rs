@@ -78,6 +78,7 @@ pub(super) fn run(
     );
     let text = study_text(board, &source, &layout_name, physics).map_err(EditError::new)?;
     Ok(EditOutput {
+        report: None,
         summary: format!("New {} study {name} on {layout_name}", label(physics)),
         files: vec![FileChange {
             path,

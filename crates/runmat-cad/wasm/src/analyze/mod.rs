@@ -27,6 +27,8 @@
 //! - `evaluate.dfm`: the part checked by a process's rule pack, and a company pack
 //!   ([`dfm`]).
 //! - `evaluate.cost`: the part's cost from the shop's rates you enter ([`cost`]).
+//! - `drawing.check`: a drawing against its models and drafting rules: references, models,
+//!   title block, overlaps and scales ([`drawing_check`]).
 //! - `sketch.check`: a part's or an assembly's sketch checked for the feature it will make
 //!   ([`sketch_check`]).
 //! - `view.measure`: distances, angles, radii, lengths and areas between picks, with dimensions
@@ -39,10 +41,15 @@
 //! The assembly Evaluate tab's `assembly.mass-properties`, `assembly.interference` and
 //! `assembly.clearance` run the same checks. On assemblies only:
 //!
+//! - `assembly.visualization`: part occurrences sorted by mass, volume, cost or count and
+//!   colored by it ([`visualization`]).
 //! - `assembly.interface-check`: each mate's connectors, attachments and publishes against what
 //!   the definitions publish now ([`interfaces`]).
 //! - `assembly.hole-alignment`, `assembly.hole-check`: holes in different parts that meet and
 //!   whether they line up; the check adds each fastener's hole fit and grip ([`holes`]).
+//!
+//! - `motion.collision`: interference at every solved frame of a motion study
+//!   ([`motion_collision`]).
 //!
 //! `values.configuration` names the active configuration. Rows name occurrences by path in
 //! `items`, so selecting a row selects them.
@@ -52,12 +59,15 @@ mod cost;
 mod curvature;
 mod deviation;
 mod dfm;
+pub mod drawing_check;
 mod field;
 mod holes;
 mod interfaces;
+mod motion_collision;
 mod section_properties;
 mod sketch_check;
 mod thickness;
+mod visualization;
 mod zebra;
 
 use crate::mass::{assembly_mass, part_mass, MassReport};
@@ -121,12 +131,19 @@ pub struct Analysis {
     pub field: Option<field::SurfaceField>,
 }
 
-/// A dimension on the model: a line between two points (model units, metres) with its value.
+/// A dimension on the model: a line between two points (model units, metres) with its value, in
+/// the renderer's dimension shape (runmat-plot `GeometrySceneDimension`).
 #[derive(Clone, Debug, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct ModelDimension {
     pub from: [f64; 3],
     pub to: [f64; 3],
     pub label: String,
+    /// Lines joining a dimension-line end that stands off its item to that item's outline, each
+    /// `[point on the item, dimension-line end]` (a normal distance between faces that don't
+    /// overlap seen along the normal).
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub extension_lines: Vec<[[f64; 3]; 2]>,
 }
 
 /// An arrow on the model: from `origin` along the unit `direction`, `length` long (model
@@ -265,22 +282,81 @@ fn mm(m: f64) -> String {
     format!("{:.2}", m * 1000.0)
 }
 
-fn mass_analysis(report: &MassReport) -> Analysis {
+/// The unit system a part's or an assembly's settings name ([`runmat_cad::assembly::settings`]);
+/// `None` without settings.
+pub fn document_units(
+    path: &str,
+    text: &str,
+    files: &Files,
+) -> Option<runmat_cad::assembly::settings::UnitSystem> {
+    document_readout(path, text, files).map(|r| r.units)
+}
+
+/// How a part's or an assembly's readouts show values: its settings' units, decimals and
+/// general tolerance. `None` without settings.
+pub fn document_readout(
+    path: &str,
+    text: &str,
+    files: &Files,
+) -> Option<runmat_cad::assembly::settings::Readout> {
+    let settings = if path.ends_with(".assembly") {
+        let scope = crate::runtime::module_scope(path, text, files);
+        runmat_cad::syntax::parse_assembly_in(path, text, &scope)
+            .document?
+            .settings
+    } else if path.ends_with(".part") {
+        runmat_cad::syntax::parse_part(path, text)
+            .document?
+            .settings
+    } else {
+        None
+    };
+    settings.map(|s| s.readout())
+}
+
+fn mass_analysis(
+    report: &MassReport,
+    units: Option<runmat_cad::assembly::settings::Readout>,
+) -> Analysis {
     let t = &report.total;
     let c = t.center;
     // kg·mm², the unit drawings and data sheets quote.
     let i = |r: usize, k: usize| format!("{:.1}", t.inertia[r][k] * 1e6);
-    let mut summary = format!(
-        "{} · {:.1} cm³ · CG ({}, {}, {}) mm · Ixx {} Iyy {} Izz {} kg·mm² about the CG",
-        g(t.mass),
-        t.volume * 1e6,
-        mm(c[0]),
-        mm(c[1]),
-        mm(c[2]),
-        i(0, 0),
-        i(1, 1),
-        i(2, 2)
-    );
+    let mut summary = match units {
+        // In the document's units.
+        Some(u) => {
+            let l = |v: f64| u.number(u.length_value(v), 6);
+            let mi = |r: usize, k: usize| {
+                let s = u.inertia(t.inertia[r][k]);
+                s.split(' ').next().unwrap_or_default().to_owned()
+            };
+            format!(
+                "{} · {} · CG ({}, {}, {}) {} · Ixx {} Iyy {} Izz {} {}·{}² about the CG",
+                u.mass(t.mass),
+                u.volume(t.volume),
+                l(c[0]),
+                l(c[1]),
+                l(c[2]),
+                u.length_unit(),
+                mi(0, 0),
+                mi(1, 1),
+                mi(2, 2),
+                u.mass_unit(),
+                u.length_unit()
+            )
+        }
+        None => format!(
+            "{} · {:.1} cm³ · CG ({}, {}, {}) mm · Ixx {} Iyy {} Izz {} kg·mm² about the CG",
+            g(t.mass),
+            t.volume * 1e6,
+            mm(c[0]),
+            mm(c[1]),
+            mm(c[2]),
+            i(0, 0),
+            i(1, 1),
+            i(2, 2)
+        ),
+    };
     if !report.complete() {
         summary += &format!(" · incomplete: {} without mass", report.problems.len());
     }
@@ -296,10 +372,21 @@ fn mass_analysis(report: &MassReport) -> Analysis {
                     .map(runmat_cad::drawing::bom_table::material_name)
                     .unwrap_or_else(|| "—".into()),
                 p.density
-                    .map(|d| format!("{d:.0} kg/m³"))
+                    .map(|d| match units {
+                        Some(u) => u.density(d),
+                        None => format!("{d:.0} kg/m³"),
+                    })
                     .unwrap_or_else(|| "—".into()),
-                format!("{:.2} cm³", p.volume * 1e6),
-                p.mass.map(g).unwrap_or_else(|| "—".into()),
+                match units {
+                    Some(u) => u.volume(p.volume),
+                    None => format!("{:.2} cm³", p.volume * 1e6),
+                },
+                p.mass
+                    .map(|m| match units {
+                        Some(u) => u.mass(m),
+                        None => g(m),
+                    })
+                    .unwrap_or_else(|| "—".into()),
             ],
             items: p.item.iter().cloned().collect(),
             severity: p.mass.is_none().then_some("warning"),
@@ -351,7 +438,7 @@ pub fn analyze(
             } else {
                 part_mass(path, text, configuration)?
             };
-            Ok(mass_analysis(&report))
+            Ok(mass_analysis(&report, document_readout(path, text, files)))
         }
         "evaluate.interference"
         | "evaluate.clearance"
@@ -768,6 +855,9 @@ pub fn analyze(
         }
         "evaluate.cost" if !assembly => cost::cost(path, text, configuration, &request.values),
         "evaluate.dfm" if !assembly => dfm::dfm(path, text, files, configuration, &request.values),
+        "drawing.check" if path.ends_with(".drawing") => {
+            drawing_check::analysis(path, text, files, &request.values)
+        }
         "sketch.check" => sketch_check::sketch_check(
             path,
             text,
@@ -777,6 +867,17 @@ pub fn analyze(
             &request.selection,
         ),
         "view.measure" => crate::measure::measure(path, text, files, &request.values),
+        "assembly.visualization" if assembly => {
+            visualization::visualization(path, text, files, configuration, &request.values)
+        }
+        "motion.collision" if assembly => motion_collision::collision(
+            path,
+            text,
+            files,
+            configuration,
+            &request.values,
+            &request.selection,
+        ),
         "assembly.interface-check" if assembly => {
             interfaces::interface_check(path, text, files, configuration, &request.values)
         }

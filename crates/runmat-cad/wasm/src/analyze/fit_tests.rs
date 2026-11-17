@@ -39,7 +39,7 @@ fn holes_that_line_up_are_aligned_and_an_offset_one_is_listed_with_its_dimension
     assert_eq!(out["data"]["pairs"], 1, "{out}");
     assert_eq!(out["data"]["misaligned"], 0, "{out}");
     assert!(out["rows"][0]["cells"][3].as_str().unwrap().starts_with("Aligned"), "{out}");
-    assert!(out["dimensions"].as_array().map_or(true, Vec::is_empty), "{out}");
+    assert!(out["dimensions"].as_array().is_none_or(Vec::is_empty), "{out}");
 
     let out = run(STACK, &files(30.5), "assembly.hole-alignment", json!({ "tolerance": 0.1 }));
     assert_eq!(out["data"]["misaligned"], 1, "{out}");

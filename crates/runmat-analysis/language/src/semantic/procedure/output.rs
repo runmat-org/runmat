@@ -3,7 +3,7 @@ use std::collections::BTreeSet;
 use runmat_analysis_core::{
     AuthoredExtremaTiePolicy, AuthoredFieldProjection, AuthoredOutput, AuthoredOutputExpression,
     AuthoredPrincipalSelection, AuthoredRegionSource, AuthoredSeriesReduction,
-    AuthoredSpatialReduction, AuthoredVectorComponent, FieldLocation, Position,
+    AuthoredSpatialReduction, AuthoredVectorComponent, FieldLocation, Position, ProcedureStep,
 };
 
 use crate::{
@@ -14,14 +14,20 @@ use crate::{
 use super::lower;
 
 mod fields;
+mod line_parameter;
 mod policy;
+mod published;
 mod series;
 
 pub(crate) use fields::{field_location, field_reference_type};
+use line_parameter::line_parameter;
+pub use published::FIELD_LOCATION_CODE;
+pub use published::{step_field_admission, step_published_fields, StepFieldRefusal};
 use series::{checked_series_weighting, interpolation_positions, series_domain, series_sampling};
 
 pub(super) fn lower_outputs(
     bound: &BoundFeaProgram,
+    steps: &[ProcedureStep],
     declaration: &CheckedFeaDeclaration,
     section: Option<&runmat_geometry_core::CrossSectionDefinition>,
     diagnostics: &mut Vec<FeaDiagnostic>,
@@ -46,7 +52,9 @@ pub(super) fn lower_outputs(
             };
             let expression = match line_parameter(declaration, value, section, diagnostics) {
                 Some(lowered) => lowered?,
-                None => lower_expression(bound, declaration, value, &available, diagnostics)?,
+                None => {
+                    lower_expression(bound, steps, declaration, value, &available, diagnostics)?
+                }
             };
             available.insert(name.as_str());
             Some(AuthoredOutput {
@@ -60,6 +68,7 @@ pub(super) fn lower_outputs(
 
 fn lower_expression(
     bound: &BoundFeaProgram,
+    steps: &[ProcedureStep],
     declaration: &CheckedFeaDeclaration,
     expression: &CheckedExpression,
     available: &BTreeSet<&str>,
@@ -72,20 +81,35 @@ fn lower_expression(
             {
                 let (quantity, _) = field_reference_type(quantity_name)?;
                 let location = field_location(location_name)?;
-                if location == runmat_analysis_core::FieldLocation::Mode {
-                    // No procedure publishes mode-located fields; every run would reject it.
-                    super::lower::error(
-                        declaration,
-                        expression.span,
-                        crate::semantic::pending::with_pending(
-                            format!(
-                                "no procedure publishes mode-located fields (`field.mode.{quantity_name}`) yet"
+                // The one admission rule Simulation setup's `outputs` choices also read. A step
+                // that isn't in the sequence is reported when the outputs attach.
+                if let Some(step) = steps.iter().find(|step| step.step_id.0 == *step_id) {
+                    let reference = format!("field.{location_name}.{quantity_name}");
+                    if let Err(refusal) =
+                        step_field_admission(step.family, step.procedure, &reference)
+                    {
+                        let message = refusal.message(step_id, &reference);
+                        match refusal {
+                            StepFieldRefusal::Location(_) => {
+                                diagnostics.push(FeaDiagnostic::error(
+                                    FIELD_LOCATION_CODE,
+                                    message,
+                                    crate::FeaDiagnosticPhase::Lowering,
+                                    Some(crate::FeaDiagnosticLocation {
+                                        path: declaration.module.clone(),
+                                        span: expression.span,
+                                    }),
+                                ))
+                            }
+                            _ => super::lower::error(
+                                declaration,
+                                expression.span,
+                                message,
+                                diagnostics,
                             ),
-                            Some(crate::semantic::pending::OUTPUT_MODE_LOCATION),
-                        ),
-                        diagnostics,
-                    );
-                    return None;
+                        }
+                        return None;
+                    }
                 }
                 Some(AuthoredOutputExpression::AnalysisField {
                     step_id: step_id.clone(),
@@ -124,6 +148,7 @@ fn lower_expression(
                     },
                     source: Box::new(lower_expression(
                         bound,
+                        steps,
                         declaration,
                         source,
                         available,
@@ -161,6 +186,7 @@ fn lower_expression(
                     projection: AuthoredFieldProjection::Component(component),
                     source: Box::new(lower_expression(
                         bound,
+                        steps,
                         declaration,
                         source,
                         available,
@@ -197,6 +223,7 @@ fn lower_expression(
                     projection: AuthoredFieldProjection::Principal(which),
                     source: Box::new(lower_expression(
                         bound,
+                        steps,
                         declaration,
                         source,
                         available,
@@ -231,6 +258,7 @@ fn lower_expression(
                 Some(AuthoredOutputExpression::Recovery {
                     source: Box::new(lower_expression(
                         bound,
+                        steps,
                         declaration,
                         source,
                         available,
@@ -289,6 +317,7 @@ fn lower_expression(
                     },
                     source: Box::new(lower_expression(
                         bound,
+                        steps,
                         declaration,
                         source,
                         available,
@@ -413,6 +442,7 @@ fn lower_expression(
                     reduction: AuthoredSpatialReduction::NormalFlux,
                     source: Box::new(lower_expression(
                         bound,
+                        steps,
                         declaration,
                         source,
                         available,
@@ -439,6 +469,7 @@ fn lower_expression(
                 Some(AuthoredOutputExpression::SpatialSelection {
                     source: Box::new(lower_expression(
                         bound,
+                        steps,
                         declaration,
                         source,
                         available,
@@ -462,6 +493,7 @@ fn lower_expression(
                 Some(AuthoredOutputExpression::Interpolation {
                     source: Box::new(lower_expression(
                         bound,
+                        steps,
                         declaration,
                         source,
                         available,
@@ -486,6 +518,7 @@ fn lower_expression(
                 Some(AuthoredOutputExpression::Sampling {
                     source: Box::new(lower_expression(
                         bound,
+                        steps,
                         declaration,
                         source,
                         available,
@@ -549,6 +582,7 @@ fn lower_expression(
                     reduction,
                     source: Box::new(lower_expression(
                         bound,
+                        steps,
                         declaration,
                         source,
                         available,
@@ -565,80 +599,6 @@ fn lower_expression(
         },
         _ => invalid(declaration, expression, diagnostics),
     }
-}
-
-/// A line parameter of an `electromagnetic line_parameters` step, `analysis.<step>.<name>` or
-/// `analysis.<step>.<name>.<trace>`, resolved against the study's cross-section. `None` when
-/// `expression` is not a line-parameter reference; `Some(None)` after a located error.
-fn line_parameter(
-    declaration: &CheckedFeaDeclaration,
-    expression: &CheckedExpression,
-    section: Option<&runmat_geometry_core::CrossSectionDefinition>,
-    diagnostics: &mut Vec<FeaDiagnostic>,
-) -> Option<Option<AuthoredOutputExpression>> {
-    let CheckedExpressionKind::Reference(path) = &expression.kind else {
-        return None;
-    };
-    let [analysis, step_id, name, rest @ ..] = path.as_slice() else {
-        return None;
-    };
-    if analysis != "analysis" || rest.len() > 1 {
-        return None;
-    }
-    let quantity = runmat_analysis_core::ObservationQuantity::from_line_parameter_name(name)?;
-    let mut fail = |message: String| {
-        lower::error(declaration, expression.span, message, diagnostics);
-        Some(None)
-    };
-    let Some(section) = section else {
-        return fail(format!(
-            "`{name}` is a line parameter: it is published by an `electromagnetic line_parameters` analysis on a `cross_section` geometry"
-        ));
-    };
-    let signals = section
-        .traces
-        .iter()
-        .filter(|trace| trace.role == runmat_geometry_core::CrossSectionTraceRole::Signal)
-        .map(|trace| trace.name.as_str())
-        .collect::<Vec<_>>();
-    let conductor = match (quantity.line_parameter_scope()?, rest) {
-        (runmat_analysis_core::LineParameterScope::Conductor, [trace]) => {
-            if !signals.contains(&trace.as_str()) {
-                return fail(format!(
-                    "`{trace}` is not a signal trace of the study's cross-section; its signal traces are {}",
-                    signals
-                        .iter()
-                        .map(|name| format!("`{name}`"))
-                        .collect::<Vec<_>>()
-                        .join(", ")
-                ));
-            }
-            Some(trace.clone())
-        }
-        (runmat_analysis_core::LineParameterScope::Conductor, _) => {
-            return fail(format!(
-                "`{name}` is a per-line value: name the signal trace, `analysis.{step_id}.{name}.<trace>`"
-            ))
-        }
-        (runmat_analysis_core::LineParameterScope::Pair, []) if signals.len() != 2 => {
-            return fail(format!(
-                "`{name}` is a pair value: the cross-section needs exactly two signal traces, and it has {}",
-                signals.len()
-            ))
-        }
-        (_, []) => None,
-        (_, _) => {
-            return fail(format!(
-                "`{name}` is a value of the whole section: write `analysis.{step_id}.{name}` without a trace"
-            ))
-        }
-    };
-    Some(Some(AuthoredOutputExpression::LineParameter {
-        step_id: step_id.clone(),
-        quantity,
-        conductor,
-        signal_conductors: signals.len(),
-    }))
 }
 
 fn positional_or_named<'a>(
