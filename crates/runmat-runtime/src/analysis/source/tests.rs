@@ -646,6 +646,92 @@ fn filesystem_host_retains_normalized_ap242_exchange_facts() {
     );
 }
 
+// With the exact geometry backend a STEP file's face names are checked: a misspelled name is
+// refused with the names the file carries, and a correct one checks. Without the backend the
+// names are unknown, and each `select name` region gets a located diagnostic saying so.
+#[test]
+fn select_name_on_a_step_file_is_checked_or_flagged_unconfirmed() {
+    let _filesystem = runmat_filesystem::provider_override_lock();
+    let temporary = tempdir().unwrap();
+    fs::write(
+        temporary.path().join("bar.step"),
+        include_bytes!("../../../../runmat-geometry/io/tests/fixtures/named-faces.step"),
+    )
+    .unwrap();
+    let check = |name: &str| {
+        let path = temporary.path().join("main.fea");
+        let source = format!(
+            "geometry bar {{ file = \"./bar.step\"\n    region support : face {{ select name \"{name}\"; expect exactly_one }}\n}}\n"
+        );
+        check_fea_source_in_root(temporary.path(), &path, source).unwrap()
+    };
+    let misspelled = check("Fixed face");
+    let messages = misspelled
+        .diagnostics
+        .iter()
+        .map(|diagnostic| diagnostic.message.as_str())
+        .collect::<Vec<_>>();
+    #[cfg(feature = "occt-native")]
+    {
+        assert!(
+            messages.contains(
+                &"region `support` selects face name \"Fixed face\", which `bar.step` does not carry; named faces: \"Fixed end\", \"Loaded end\""
+            ),
+            "{messages:#?}"
+        );
+        let admitted = check("Fixed end");
+        assert!(
+            !admitted.diagnostics.iter().any(|diagnostic| {
+                diagnostic.message.contains("Fixed end")
+                    || diagnostic.code == "fea.semantic.geometry_names_unconfirmed"
+            }),
+            "{:#?}",
+            admitted.diagnostics
+        );
+    }
+    #[cfg(not(feature = "occt-native"))]
+    assert!(
+        misspelled.diagnostics.iter().any(|diagnostic| {
+            diagnostic.code == "fea.semantic.geometry_names_unconfirmed"
+                && diagnostic.location.is_some()
+                && diagnostic.message.contains("\"Fixed face\"")
+                && diagnostic
+                    .message
+                    .contains("cannot be confirmed without the exact geometry backend")
+        }),
+        "{messages:#?}"
+    );
+}
+
+// The exact backend reads no names from a mesh file: a `select name` region on it is flagged
+// at the geometry as unconfirmed instead of passing silently.
+#[test]
+fn select_name_on_a_mesh_file_is_flagged_unconfirmed() {
+    let _filesystem = runmat_filesystem::provider_override_lock();
+    let temporary = tempdir().unwrap();
+    fs::write(
+        temporary.path().join("tetra.obj"),
+        b"v 0 0 0\nv 1 0 0\nv 0 1 0\nv 0 0 1\nf 1 2 3\nf 1 4 2\nf 1 3 4\nf 2 4 3\n",
+    )
+    .unwrap();
+    let path = temporary.path().join("main.fea");
+    let checked = check_fea_source_in_root(
+        temporary.path(),
+        &path,
+        "geometry tetra { file = \"./tetra.obj\"; units = m\n    region base : face { select name \"base\"; expect exactly_one }\n}\n",
+    )
+    .unwrap();
+    assert!(
+        checked.diagnostics.iter().any(|diagnostic| {
+            diagnostic.code == "fea.semantic.geometry_names_unconfirmed"
+                && diagnostic.location.is_some()
+                && diagnostic.message.contains("\"base\"")
+        }),
+        "{:#?}",
+        checked.diagnostics
+    );
+}
+
 #[test]
 fn checked_study_realizes_shared_case_membership_without_duplicate_actions() {
     let _filesystem = runmat_filesystem::provider_override_lock();

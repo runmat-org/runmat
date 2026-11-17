@@ -83,6 +83,7 @@ fn check_planning(order: ElementOrder, consumer: Consumer) {
             capabilities: vec![
                 GeometryInspectionCapability::Topology,
                 GeometryInspectionCapability::PersistentIds,
+                GeometryInspectionCapability::AuthoredNames,
             ],
             exchange: None,
             resolved_units: None,

@@ -190,12 +190,18 @@ fn inspect_uncached(
             ));
         }
     };
+    let mut capabilities = capabilities(&imported.asset, exchange.as_ref(), exact_topology);
+    // Authored names come only from the exact import. Without it (no exact backend on this
+    // host) the names are unknown, and the check says it cannot confirm `select name` regions.
+    if exact_topology {
+        capabilities.push(GeometryInspectionCapability::AuthoredNames);
+    }
     Ok(GeometryInspection {
         preview_extent_m: preview_extent_m(&imported.asset),
         preview_measure: runmat_geometry_core::PreviewMeasure::measure(&imported.asset),
         content_digest,
         topology_digest,
-        capabilities: capabilities(&imported.asset, exchange.as_ref(), exact_topology),
+        capabilities,
         exchange,
         resolved_units: Some(units),
         authored_names,
