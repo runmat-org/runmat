@@ -93,6 +93,9 @@ fn shown(v: [f64; 3], places: i32) -> String {
     format!("[{}, {}, {}]", c(v[0]), c(v[1]), c(v[2]))
 }
 
+/// One mate's load: the mate, the point, the force and the moment about the point.
+pub(crate) type JointLoad = (String, [f64; 3], [f64; 3], [f64; 3]);
+
 /// The loads on one part at one frame of a dynamic study, in the part's own axes: what Results
 /// to .fea hands over. Points in mm; everything else SI.
 #[derive(Clone, Debug)]
@@ -103,7 +106,7 @@ pub(crate) struct Handoff {
     /// The frame's time (s).
     pub time: f64,
     /// Each mate's load: the mate, the point, the force and the moment about the point.
-    pub joints: Vec<(String, [f64; 3], [f64; 3], [f64; 3])>,
+    pub joints: Vec<JointLoad>,
     pub gravity: [f64; 3],
     pub mass: f64,
     /// The centre of mass (mm).
@@ -371,7 +374,7 @@ pub(crate) fn handoff(
 fn world_transform(world: &Value) -> Vec<f64> {
     let rotation: Vec<f64> = world["rotation"]
         .as_array()
-        .map(|rows| rows.iter().flat_map(|r| vec3(r)).collect())
+        .map(|rows| rows.iter().flat_map(vec3).collect())
         .unwrap_or_else(|| vec![1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0]);
     let mut out = rotation;
     out.extend(vec3(&world["translation"]));
