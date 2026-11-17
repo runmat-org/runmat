@@ -11,7 +11,6 @@ use runmat_meshing_core::{MeshingRequestSettings, PlatformBuildIdentity, StableD
 use serde::Deserialize;
 
 const MAX_REQUEST_BYTES: usize = 64 << 20;
-const MAX_GEOMETRY_MEMORY_BYTES: u64 = 512 << 20;
 const INVENTORY: ObjectInventoryLimits = ObjectInventoryLimits {
     max_objects: 100_000,
     max_object_bytes: 64 << 20,
@@ -72,7 +71,7 @@ pub fn execute(
             // The surrounding owned-worker JS host validates the original
             // parent delegation before this call and before returning bytes.
             let ceilings = runmat_meshing_core::MeshingExecutionCeilings::for_host(
-                MAX_GEOMETRY_MEMORY_BYTES,
+                request_memory_bytes(),
                 &request.settings.limits,
             );
             let platform = browser_platform(profile.kernel_abi);
@@ -127,10 +126,8 @@ pub fn execute(
         } => {
             settings.validate().map_err(|e| e.to_string())?;
             let _progress = progress.map(crate::progress::MeshingProgressBridge::install);
-            // The browser host admits at most MAX_GEOMETRY_MEMORY_BYTES; a mesh that needs more
-            // stops at this ceiling with a typed meshing resource failure.
             let ceilings = runmat_meshing_core::MeshingExecutionCeilings::for_host(
-                MAX_GEOMETRY_MEMORY_BYTES,
+                request_memory_bytes(),
                 &settings.limits,
             );
             // Validate the complete transferred inventory before retaining copies.
@@ -159,6 +156,14 @@ pub fn execute(
             .map_err(|e| e.to_string().into())
         }
     }
+}
+
+/// The memory one meshing request may use: what this module can still grow into, measured
+/// when the request starts ([`crate::memory`]). A mesh that needs more stops at this ceiling
+/// with a typed meshing resource failure. Browser requests carry no admitted memory budget, so
+/// the measured headroom is the ceiling.
+fn request_memory_bytes() -> u64 {
+    crate::memory::meshing_memory_bytes(crate::memory::HostMemory::measure(), None)
 }
 
 fn browser_platform(kernel_abi: String) -> PlatformBuildIdentity {

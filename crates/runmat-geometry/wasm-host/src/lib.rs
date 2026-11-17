@@ -99,6 +99,7 @@ pub unsafe extern "C" fn runmat_occt_exact_free(value: *mut c_char) {
 
 pub mod cad;
 pub mod execution;
+pub mod memory;
 pub mod progress;
 /// Caller supplies bounded NUL-terminated UTF-8 JSON. The response is freed with
 /// runmat_occt_exact_free, just like the import ABI.
