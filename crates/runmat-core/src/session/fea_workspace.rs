@@ -206,11 +206,11 @@ impl RunMatSession {
                         &geometry.logical_path,
                     )
                     .map_err(|error| error.to_string())?;
-                    match runmat_runtime::geometry::design_source::design_geometry(
-                        &path,
-                        None,
-                        &runmat_runtime::geometry::design_source::CapturedDesignFiles(&captured),
-                    ) {
+                    match runmat_runtime::geometry::design_source::captured_design_geometry(
+                        &path, &captured,
+                    )
+                    .await
+                    {
                         Ok(bytes) => prepared.add_geometry(geometry.logical_path, bytes)?,
                         Err(error) => prepared.add_geometry_failure(geometry.logical_path, error),
                     }

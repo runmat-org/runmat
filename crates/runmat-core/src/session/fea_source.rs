@@ -71,12 +71,8 @@ impl CheckedFeaSessionSource {
         // from the same view as every other source.
         if design_source::is_design_geometry(&path.to_string_lossy()) {
             return match self.captured_sources() {
-                Some(files) => design_source::design_geometry(
-                    path,
-                    None,
-                    &design_source::CapturedDesignFiles(files),
-                ),
-                None => design_source::read_design_geometry(path),
+                Some(files) => design_source::captured_design_geometry(path, files).await,
+                None => design_source::read_design_geometry_async(path).await,
             };
         }
         match self.captured_sources() {
@@ -200,7 +196,7 @@ impl RunMatSession {
                     .map_err(|error| error.to_string())?;
             if design_source::is_design_geometry(request.logical_path.as_str()) {
                 // An evaluation failure is reported at the geometry's `file =` by the check.
-                match design_source::read_design_geometry(&physical_path) {
+                match design_source::read_design_geometry_async(&physical_path).await {
                     Ok(bytes) => prepared.add_geometry(request.logical_path, bytes)?,
                     Err(error) => prepared.add_geometry_failure(request.logical_path, error),
                 }
@@ -410,3 +406,7 @@ async fn read_source(path: &Path, label: &str) -> Result<Vec<u8>, String> {
         .await
         .map_err(|error| format!("cannot read {label} {}: {error}", path.display()))
 }
+
+#[cfg(test)]
+#[path = "fea_source_tests.rs"]
+mod tests;
