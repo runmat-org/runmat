@@ -38,6 +38,7 @@ use crate::library::Pool;
 use std::collections::{BTreeMap, BTreeSet};
 
 mod support;
+pub(crate) use support::Placer;
 mod compare;
 mod back;
 mod apply;

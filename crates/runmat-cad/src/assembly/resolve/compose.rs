@@ -539,6 +539,7 @@ impl<'a, 'b> Resolver<'a, 'b> {
             dof: None,
             representation: rep,
             represented_by_ancestor: parent_by_ancestor,
+            reference: o.reference || self.nodes[parent as usize].reference,
             material,
             properties,
             part_number,

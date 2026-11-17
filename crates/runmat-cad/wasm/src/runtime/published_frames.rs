@@ -5,7 +5,7 @@
 //! ([`super::published_paths`]), whose frame the assembly reads from the chain.
 
 use super::RegeneratedPart;
-use crate::edit::assembly::frames::{cross, face_frame, FrameKind};
+use crate::edit::assembly::frames::{cross, mesh_frame, FrameKind};
 use runmat_cad::assembly::source::PublishedGeometry;
 use runmat_cad::ids::PublishName;
 use runmat_cad::model::datum::Frame;
@@ -47,7 +47,15 @@ pub(super) fn published_frames(part: &RegeneratedPart) -> BTreeMap<PublishName, 
                 match entity.kind {
                     TopoKind::Face => {
                         let face = display.faces.iter().find(|f| f.index as usize == index)?;
-                        let f = face_frame(&serde_json::to_value(face).ok()?)?;
+                        // Read from the mesh itself: serializing it would, under the host's
+                        // framed calls, write it out as bytes beside the JSON.
+                        let p: Vec<[f64; 3]> = face
+                            .positions
+                            .chunks_exact(3)
+                            .map(|c| [c[0], c[1], c[2]].map(f64::from))
+                            .collect();
+                        let t: Vec<usize> = face.triangles.iter().map(|&i| i as usize).collect();
+                        let f = mesh_frame(&p, &t)?;
                         let frame = Frame {
                             origin: f.origin,
                             x: f.x,

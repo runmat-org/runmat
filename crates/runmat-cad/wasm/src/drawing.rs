@@ -42,8 +42,12 @@ use runmat_cad::refs::name::EntityName;
 use runmat_cad::refs::reference::Reference;
 use runmat_cad::syntax::parse_drawing_in;
 use serde_json::{json, Value};
+use std::collections::btree_map::Entry;
 use std::collections::{BTreeMap, BTreeSet};
 use std::rc::Rc;
+
+/// A grid line's plane as the sheet draws it: its anchor and the box it spans (mm).
+type GridPlane = ([f64; 3], [[f64; 3]; 2]);
 
 /// A part's PMI names: tolerances, sizes and locations (what a dimension's `pmi` may name), and datums.
 type PmiNames = (BTreeSet<String>, BTreeSet<String>, BTreeSet<String>);
@@ -508,24 +512,23 @@ pub fn compile_json_in(
             }
             | K::Grids { occurrence, .. } => {
                 let key = values::scoped_key(file, &occurrence.to_string());
-                if !models.published.contains_key(&key) {
-                    let datums = occurrences::file_of(display, &occurrence.to_string())
+                models.published.entry(key).or_insert_with(|| {
+                    occurrences::file_of(display, &occurrence.to_string())
                         .map(|part| {
                             let assembly = resolve_path(path, file, files);
                             published_datums(&resolve_path(&assembly, &part, files), files)
                         })
-                        .unwrap_or_default();
-                    models.published.insert(key, datums);
-                }
+                        .unwrap_or_default()
+                });
                 Vec::new()
             }
             _ => Vec::new(),
         };
         for occurrence in paths {
             let key = values::scoped_key(file, &occurrence.to_string());
-            if !models.scoped.contains_key(&key) {
+            if let Entry::Vacant(slot) = models.scoped.entry(key) {
                 if let Some(s) = occurrences::scoped(display, &occurrence.to_string()) {
-                    models.scoped.insert(key, s);
+                    slot.insert(s);
                 }
             }
         }
@@ -551,10 +554,12 @@ pub fn compile_json_in(
     let mut hlr = serde_json::Map::new();
     // A view's lines: exact on the part's kernel when it projects, else from the display.
     // `hidden`: whether the view draws hidden lines (a view that doesn't keeps none).
+    // `tangent`: how the view draws tangent edges (`crate::hlr::tangent_edges`).
     let lines_of = |file: &str,
                     display: &Value,
                     axes: &crate::hlr::Axes,
-                    hidden: bool|
+                    hidden: bool,
+                    tangent: runmat_cad::drawing::TangentEdges|
      -> crate::hlr::ViewLines {
         exact
             .get(file)
@@ -566,7 +571,7 @@ pub fn compile_json_in(
                     .iter()
                     .map(|b| (&b.handle, runmat_cad::regen::kernel::Transform::IDENTITY))
                     .collect();
-                crate::hlr::exact::view_lines(part.kernel.as_ref(), &bodies, display, axes)
+                crate::hlr::exact::view_lines(part.kernel.as_ref(), &bodies, display, axes, tangent)
             })
             .unwrap_or_else(|| crate::hlr::view_lines_drawn(display, axes, hidden))
     };
@@ -601,6 +606,7 @@ pub fn compile_json_in(
             }
             let shows_hidden =
                 !matches!(view["display"].as_str(), Some("visible_lines" | "shaded"));
+            let tangent = crate::hlr::tangent_edges(&views, name);
             let project = || -> Value {
                 // The occurrences the view leaves out (`exclude`), and everything under them.
                 let excluded: Vec<String> = document
@@ -664,6 +670,7 @@ pub fn compile_json_in(
                                     display,
                                     &parent_axes,
                                     shows_hidden,
+                                    tangent,
                                 ))
                                 .unwrap_or(Value::Null),
                             ),
@@ -725,9 +732,14 @@ pub fn compile_json_in(
                             .and_then(|r| view_picks::auxiliary_axes(display, &parent_axes, &r))
                             .unwrap_or(parent_axes);
                         drawn_in = Some(axes);
-                        let mut lines =
-                            serde_json::to_value(lines_of(file, display, &axes, shows_hidden))
-                                .unwrap_or(Value::Null);
+                        let mut lines = serde_json::to_value(lines_of(
+                            file,
+                            display,
+                            &axes,
+                            shows_hidden,
+                            tangent,
+                        ))
+                        .unwrap_or(Value::Null);
                         if let Value::Object(o) = &mut lines {
                             o.insert("picks".into(), view_picks::picks(display, &axes));
                         }
@@ -735,7 +747,8 @@ pub fn compile_json_in(
                     }
                     // A broken-out section: the parent's lines with the cut inside its boundary.
                     Some("broken_out") => {
-                        let parent_lines = lines_of(file, display, &parent_axes, shows_hidden);
+                        let parent_lines =
+                            lines_of(file, display, &parent_axes, shows_hidden, tangent);
                         let cut = document
                             .views
                             .iter()
@@ -767,9 +780,14 @@ pub fn compile_json_in(
                     _ => {
                         let axes = crate::hlr::axes(crate::hlr::orientation(&views, name, 0));
                         drawn_in = Some(axes);
-                        let mut lines =
-                            serde_json::to_value(lines_of(file, display, &axes, shows_hidden))
-                                .unwrap_or(Value::Null);
+                        let mut lines = serde_json::to_value(lines_of(
+                            file,
+                            display,
+                            &axes,
+                            shows_hidden,
+                            tangent,
+                        ))
+                        .unwrap_or(Value::Null);
                         // What a click on each line means (the face it shows edge-on, or the edge).
                         if let Value::Object(o) = &mut lines {
                             o.insert("picks".into(), view_picks::picks(display, &axes));
@@ -793,6 +811,11 @@ pub fn compile_json_in(
                 };
                 let scale = ratio(&view["scale"]).or(sheet_scale).unwrap_or(1.0);
                 crate::hlr::thin::thin(&mut entry, scale, shows_hidden);
+                // How it drew tangent edges, its own setting or its orientation's default, so the
+                // view's Properties show what the sheet draws.
+                if let Value::Object(o) = &mut entry {
+                    o.insert("tangent_edges".into(), tangent.word().into());
+                }
                 entry
             };
             let entry = match key {
@@ -822,7 +845,7 @@ pub fn compile_json_in(
     let mut cylinders = serde_json::Map::new();
     // Door swings by annotation id (leaf and arc, mm in the assembly), and grids' planes.
     let mut swings = serde_json::Map::new();
-    let mut grid_texts: BTreeMap<String, Vec<([f64; 3], [[f64; 3]; 2])>> = BTreeMap::new();
+    let mut grid_texts: BTreeMap<String, Vec<GridPlane>> = BTreeMap::new();
     // Level marks on datums: their height (mm), which the compile prints as the mark's text.
     let mut level_texts: BTreeMap<String, f64> = BTreeMap::new();
     for a in &document.annotations {

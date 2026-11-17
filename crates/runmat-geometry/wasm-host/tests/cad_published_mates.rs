@@ -154,3 +154,87 @@ fn a_concentric_mate_follows_the_hole_when_the_plate_is_edited() {
         "the pin follows the hole: {moved:?}\n{edited}"
     );
 }
+
+/// `call` as the Desktop makes it: framed, with each mesh array of 16 values or more written as
+/// bytes beside the JSON and referenced from it.
+fn call_framed(function: &str, args: &[&str]) -> Value {
+    let request = json!({ "fn": function, "args": args });
+    let (text, _bytes) = runmat_geometry_wasm_host::cad::call_framed(&request.to_string());
+    serde_json::from_str(&text).expect("json")
+}
+
+/// The planar face of `path` whose points all lie at height `z`: its pick.
+fn flat_face(out: &Value, path: &str, z: f64) -> String {
+    let prototype = occurrence(out, path)["prototype"].as_u64().unwrap() as usize;
+    let body = &out["display"]["data"]["prototypes"][prototype]["part"]["bodies"][0];
+    let face = body["faces"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|f| {
+            let p: Vec<f64> = f["positions"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .filter_map(Value::as_f64)
+                .collect();
+            p.chunks(3).all(|q| (q[2] - z).abs() < 1e-7)
+        })
+        .unwrap_or_else(|| panic!("no face at z = {z} on {path}"));
+    format!(
+        "occurrence:{}/face:{}:{}",
+        uuid(out, path),
+        body["index"],
+        face["index"]
+    )
+}
+
+/// A plate's top face has a hole through it (an inner loop), so its mesh is more than a few
+/// points: the Desktop's framed calls carry it as bytes beside the JSON. A coincident mate on it
+/// publishes the face, and the assembly reads the published face's plane from the part's mesh.
+#[test]
+fn a_mate_on_a_drilled_face_reads_its_plane_in_framed_calls() {
+    let mut files = json!({ "/p/plate.part": plate(10.0, false), "/p/pin.part": PIN });
+    let before = compile(RIG, &files);
+    let top = flat_face(&before, "plate", 0.010);
+    let bottom = flat_face(&before, "pin", 0.0);
+    let request = json!({ "command": "assembly.mate", "values": { "type": "coincident", "first": [top], "second": [bottom] } });
+    let out = call_framed(
+        "edit",
+        &[
+            "/p/rig.assembly",
+            RIG,
+            &files.to_string(),
+            &request.to_string(),
+        ],
+    );
+    assert_eq!(out["ok"], true, "{out}");
+    let changed = out["files"].as_array().unwrap();
+    let text = changed[0]["text"].as_str().unwrap().to_owned();
+    for f in &changed[1..] {
+        files[f["path"].as_str().unwrap()] = f["text"].clone();
+    }
+    let part = files["/p/plate.part"].as_str().unwrap().to_owned();
+    assert!(part.contains("publish mate_face1 = "), "{part}");
+    let compiled = call_framed(
+        "compile",
+        &["/p/rig.assembly", &text, &files.to_string(), "{}"],
+    );
+    let errors: Vec<&Value> = compiled["diagnostics"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter(|d| d["severity"] == "error")
+        .collect();
+    assert!(errors.is_empty(), "{errors:?}\n{text}\n{part}");
+    let t: Vec<f64> = occurrence(&compiled, "pin")["transform"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|v| v.as_f64().unwrap())
+        .collect();
+    assert!(
+        (t[11] - 0.010).abs() < 1e-6,
+        "the pin sits on the plate's top: {t:?}\n{text}"
+    );
+}

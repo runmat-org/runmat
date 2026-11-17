@@ -102,6 +102,64 @@ impl GeometryScene {
         )]
     }
 
+    /// Measure's dimensions: each a haloed line between its two points with a dot at each end,
+    /// drawn over the model so a dimension behind a wall still reads. The value draws at the
+    /// line's middle in the overlay (`PlotRenderer::geometry_screen_dimensions`).
+    pub(super) fn dimension_nodes(
+        &self,
+        presentation: &GeometryScenePresentation,
+    ) -> Vec<SceneNode> {
+        if presentation.dimensions.is_empty() {
+            return Vec::new();
+        }
+        let mut strokes = Vec::new();
+        for dimension in &presentation.dimensions {
+            let color = dimension.color.unwrap_or(GEOMETRY_DIMENSION_COLOR);
+            let (from, to) = (
+                Vec3::from_array(dimension.from),
+                Vec3::from_array(dimension.to),
+            );
+            if !from.is_finite() || !to.is_finite() {
+                continue;
+            }
+            // Touching items measure zero: the dots alone mark where.
+            append_selection_edge(&mut strokes, from, to, color);
+            append_selection_point(&mut strokes, from, color);
+            append_selection_point(&mut strokes, to, color);
+            for [on, end] in &dimension.extension_lines {
+                let (on, end) = (Vec3::from_array(*on), Vec3::from_array(*end));
+                if !on.is_finite() || !end.is_finite() {
+                    continue;
+                }
+                let run = end - on;
+                let length = run.length();
+                if length <= 1.0e-8 {
+                    continue;
+                }
+                let along = run / length;
+                let gap = extension_gap(self.bounds).min(length * 0.25);
+                // The thin annotation stroke (narrower than the dimension line's).
+                append_stroke(
+                    &mut strokes,
+                    on + along * gap,
+                    end + along * gap,
+                    color,
+                    0.0,
+                );
+            }
+        }
+        if strokes.is_empty() {
+            return Vec::new();
+        }
+        vec![self.annotation_node(
+            "Measure dimensions",
+            "__geometry_measure:dimensions",
+            self.chunks.len() + 3,
+            PipelineType::AnnotationStroke,
+            strokes,
+        )]
+    }
+
     pub(super) fn annotation_nodes(
         &self,
         presentation: &GeometryScenePresentation,
@@ -529,6 +587,12 @@ struct AnnotationFrame {
     normal: Vec3,
     tangent: Vec3,
     bitangent: Vec3,
+}
+
+/// An extension line's gap at the measured item, and its run past the dimension line: about
+/// 1% of the scene's size.
+fn extension_gap(bounds: BoundingBox) -> f32 {
+    annotation_arrow_length(bounds) * 0.12
 }
 
 fn annotation_arrow_length(bounds: BoundingBox) -> f32 {

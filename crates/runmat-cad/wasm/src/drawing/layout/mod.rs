@@ -148,7 +148,7 @@ impl Std {
             "visible" => Some(self.visible),
             "hidden" | "benddown" => Some(self.hidden),
             "center" | "bendup" => Some(self.center),
-            "dimink" | "hatch" => Some(self.thin),
+            "dimink" | "hatch" | "tangent" => Some(self.thin),
             "thick" => Some(self.thick),
             "frame" => Some(self.visible * 0.7),
             _ => None,

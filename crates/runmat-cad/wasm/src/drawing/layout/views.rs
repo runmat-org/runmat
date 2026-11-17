@@ -41,6 +41,8 @@ pub struct ViewPlan {
     pub scale: f64,
     pub edges: Vec<Vec<f64>>,
     pub hidden: Vec<Vec<f64>>,
+    /// Tangent edges drawn as thin continuous lines (ISO 128-2 type 01.1).
+    pub tangent: Vec<Vec<f64>>,
     pub show_hidden: bool,
     /// Whether it draws center marks and centerlines (`centerlines = false` turns them off).
     pub centerlines: bool,
@@ -215,15 +217,18 @@ pub fn measure(ctx: &mut Ctx<'_>) -> Vec<ViewPlan> {
             runs("visible")
         };
         let mut hidden = runs("hidden");
+        let mut tangent = runs("tangent");
         let detail = xy(&seam["detail"]["center"]).zip(seam["detail"]["radius"].as_f64());
         let (cx, cy, w, h) = if let Some((c, r)) = detail {
             edges = clip_to_circle(&edges, c, r);
             hidden = clip_to_circle(&hidden, c, r);
+            tangent = clip_to_circle(&tangent, c, r);
             (c[0], c[1], 2.0 * r * scale, 2.0 * r * scale)
         } else {
             let pts = edges
                 .iter()
                 .chain(&hidden)
+                .chain(&tangent)
                 .flat_map(|e| e.chunks_exact(2).map(|p| [p[0], p[1]]).collect::<Vec<_>>());
             let (mut lo, mut hi) = ([f64::MAX; 2], [f64::MIN; 2]);
             for p in pts {
@@ -321,6 +326,7 @@ pub fn measure(ctx: &mut Ctx<'_>) -> Vec<ViewPlan> {
             scale,
             edges,
             hidden,
+            tangent,
             show_hidden: display != Some("visible_lines") && display != Some("shaded"),
             centerlines: view["centerlines"] != false,
             cx,
@@ -596,6 +602,10 @@ pub fn draw(ctx: &mut Ctx<'_>, plans: &[ViewPlan]) {
             for e in &v.hidden {
                 out.push(prim(&v.id, "view", "Views", "hidden", line(place(e))));
             }
+        }
+        // Tangent edges in the thin continuous line, under the visible edges.
+        for e in &v.tangent {
+            out.push(prim(&v.id, "view", "Views", "tangent", line(place(e))));
         }
         for e in &v.edges {
             out.push(prim(&v.id, "view", "Views", "visible", line(place(e))));

@@ -57,6 +57,7 @@ fn regenerate_configured_watched(
     let watched = crate::runtime::part_cache::Watched::new(&NoDynamicValues, used);
     let ctx = RegenContext {
         kernel: kernel.as_ref(),
+        tessellator: Some(kernel.as_ref()),
         solver: &ConstraintSketchSolver,
         units: &Units,
         dynamic: &watched,

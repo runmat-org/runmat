@@ -4,22 +4,36 @@ use crate::FeaType;
 use crate::PhysicalDimension;
 use runmat_analysis_core::{FieldLocation, ObservationQuantity};
 
+/// The field locations' `.fea` spellings (`field.<location>.<quantity>`). [`field_location`]
+/// reads it, and so does every host that names a location ([`location_name`]).
+pub(crate) const FIELD_LOCATIONS: &[(&str, FieldLocation)] = &[
+    ("node", FieldLocation::Node),
+    ("cell", FieldLocation::Cell),
+    ("element", FieldLocation::Element),
+    ("integration_point", FieldLocation::IntegrationPoint),
+    ("face", FieldLocation::Face),
+    ("edge", FieldLocation::Edge),
+    ("interface", FieldLocation::Interface),
+    ("connector", FieldLocation::Connector),
+    ("constraint", FieldLocation::Constraint),
+    ("reference_point", FieldLocation::ReferencePoint),
+    ("mode", FieldLocation::Mode),
+    ("global", FieldLocation::Global),
+];
+
 pub(crate) fn field_location(name: &str) -> Option<FieldLocation> {
-    Some(match name {
-        "node" => FieldLocation::Node,
-        "cell" => FieldLocation::Cell,
-        "element" => FieldLocation::Element,
-        "integration_point" => FieldLocation::IntegrationPoint,
-        "face" => FieldLocation::Face,
-        "edge" => FieldLocation::Edge,
-        "interface" => FieldLocation::Interface,
-        "connector" => FieldLocation::Connector,
-        "constraint" => FieldLocation::Constraint,
-        "reference_point" => FieldLocation::ReferencePoint,
-        "mode" => FieldLocation::Mode,
-        "global" => FieldLocation::Global,
-        _ => return None,
-    })
+    FIELD_LOCATIONS
+        .iter()
+        .find(|(spelling, _)| *spelling == name)
+        .map(|(_, location)| *location)
+}
+
+/// The `.fea` spelling of `location`, when it has one.
+pub(crate) fn location_name(location: FieldLocation) -> Option<&'static str> {
+    FIELD_LOCATIONS
+        .iter()
+        .find(|(_, known)| *known == location)
+        .map(|(spelling, _)| *spelling)
 }
 
 pub(crate) fn field_reference_type(name: &str) -> Option<(ObservationQuantity, FeaType)> {

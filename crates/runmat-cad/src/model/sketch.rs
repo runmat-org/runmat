@@ -2,6 +2,7 @@
 
 use crate::ids::{ConstraintId, SketchEntityId};
 use crate::model::datum::PlaneRef;
+use crate::refs::reference::Reference;
 use crate::value::ValueExpr;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
@@ -23,20 +24,57 @@ pub struct SketchEntity {
     pub geometry: SketchGeometry,
     #[serde(default)]
     pub construction: bool,
-    /// Converted geometry (Convert entities, Offset of a component edge): re-read from what it
-    /// was converted from on each regeneration and held fixed by the solver. The written
-    /// geometry is its last position.
+    /// Converted geometry (Use edges, Offset of a component edge): re-read from what it was
+    /// converted from on each regeneration and held fixed by the solver. The written geometry
+    /// is its last position.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub projected: Option<SketchProjection>,
 }
 
-/// Where a converted entity's geometry comes from: an edge set that component `occurrence`
-/// (a dotted occurrence path in the assembly) publishes as `published`, projected onto the
-/// sketch's plane. In the file: `from = published(occurrence = upper, name = upper_e1)`.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub struct SketchProjection {
-    pub occurrence: String,
-    pub published: String,
+/// Where a converted entity's geometry comes from, read again on every regeneration and
+/// carried onto the sketch's plane along its normal.
+///
+/// In an assembly: an edge set a component publishes. In a part: one of the part's own edges or
+/// faces, as it stands when the sketch regenerates (features before the sketch only).
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case", tag = "from")]
+pub enum SketchProjection {
+    /// The edges component `occurrence` (a dotted occurrence path in the assembly) publishes as
+    /// `published`. In the file: `from = published(occurrence = upper, name = upper_e1)`.
+    Published {
+        occurrence: String,
+        published: String,
+    },
+    /// A part edge projected onto the sketch plane: `from = project(<edge>)`.
+    Project { edge: Reference },
+    /// One outline chain of a curved face seen along the sketch normal (where the surface turns
+    /// edge-on): `from = silhouette(<face>, chain = 0)`.
+    Silhouette {
+        face: Reference,
+        #[serde(default)]
+        chain: u32,
+    },
+    /// One chain of the curve where a face crosses the sketch plane:
+    /// `from = intersection(<face>, chain = 0)`.
+    Intersection {
+        face: Reference,
+        #[serde(default)]
+        chain: u32,
+    },
+    /// A part edge offset `distance` across planar face `face` (into the face for a positive
+    /// distance), then projected: `from = offset_on_surface(<edge>, face = <face>, distance = 2 mm)`.
+    OffsetOnSurface {
+        edge: Reference,
+        face: Reference,
+        distance: ValueExpr,
+    },
+}
+
+impl SketchProjection {
+    /// Whether this source is one an assembly sketch reads (a published edge set).
+    pub fn is_published(&self) -> bool {
+        matches!(self, SketchProjection::Published { .. })
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -543,7 +581,8 @@ impl SolvedSketch {
         text: &str,
     ) -> Vec<Vec<runmat_geometry_kernel::op::ProfileSegment>> {
         use runmat_types::font::{layout, Anchor, CAP};
-        let (Some(at), Some(t)) = (self.point(entity, PointRole::At), self.texts.get(entity)) else {
+        let (Some(at), Some(t)) = (self.point(entity, PointRole::At), self.texts.get(entity))
+        else {
             return Vec::new();
         };
         if t.height.is_nan() || t.height <= 0.0 {

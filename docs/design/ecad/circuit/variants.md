@@ -11,4 +11,6 @@ variant lite = { overrides = { D1 = not_fitted } }
 variant field = { base = lite, overrides = { R1 = fitted } }
 ```
 
+In the Desktop, right-click components and choose Fitted to set them fitted, not fitted or fitted with an alternate part in a variant. The panel acts on the variant being viewed, or on the circuit's only variant; name another in Variant. When the file declares the variant, Fitted writes its `overrides` by component path. Otherwise Fitted writes the `variants` of the component's own statement. Choosing Fitted again removes the override.
+
 The fabrication outputs write the BOM and pick-and-place file of each variant you choose. See [Fabrication outputs and netlists](/docs/ecad/fabrication).

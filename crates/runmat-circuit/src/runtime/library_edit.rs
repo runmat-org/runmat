@@ -233,6 +233,7 @@ pub(super) fn place(project: &Project, request: &EditRequest) -> Result<EditOutp
         )));
     }
     Ok(EditOutput {
+        report: None,
         summary: format!("placed {designator} ({}) on sheet {}", part.mpn, sheet.name),
         files: vec![file_change(
             &project.circuit_path,

@@ -190,6 +190,8 @@ pub enum BendRuleValue {
     Allowance {
         value: f64,
     },
+    /// DIN 6935's K-factor for the bend's radius and thickness.
+    Din6935,
 }
 
 /// Bend allowance for one bend (`angle` unsigned, radians).
@@ -208,6 +210,7 @@ pub fn bend_allowance(rule: &BendRuleValue, t: f64, r: f64, angle: f64) -> Resul
                 table.name, t, r
             )
         })?,
+        BendRuleValue::Din6935 => a * (r + super::tables::din6935_k(r, t) * t),
         BendRuleValue::Allowance { value } => value * a / (PI / 2.0),
         BendRuleValue::Deduction { value } => {
             2.0 * outside_setback(t, r, a) - value * a / (PI / 2.0)

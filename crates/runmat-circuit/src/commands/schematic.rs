@@ -580,6 +580,7 @@ pub(super) fn add(c: &mut Catalog) {
                 K::Zone,
                 K::Keepout,
                 K::Room,
+                K::Rule,
             ]))
             .on(&[
                 K::Component,
@@ -589,6 +590,7 @@ pub(super) fn add(c: &mut Catalog) {
                 K::Zone,
                 K::Keepout,
                 K::Room,
+                K::Rule,
             ])
             .edit(edit(EditOp::Remove, Section::Components)),
     ]);

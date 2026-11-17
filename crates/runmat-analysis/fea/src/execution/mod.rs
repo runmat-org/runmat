@@ -62,6 +62,8 @@ mod fluid;
 pub(crate) use fluid::coupled_fluid_field_definition_inventory;
 #[cfg(test)]
 pub(crate) use fluid::tests::authored as fluid_test_workload;
+#[cfg(test)]
+mod source_field_locations_tests;
 pub use fluid::{
     fluid_native_field_definition_inventory, fluid_native_field_definitions,
     fluid_receipt_encoding_profile, FluidCoupling, FluidIntervalEvidence, FluidNumericalReceipt,

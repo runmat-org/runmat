@@ -213,8 +213,7 @@ fn material_completions(before: &str) -> Option<Vec<CompletionItem>> {
         return None;
     }
     Some(
-        runmat_types::physical::materials::MATERIALS
-            .iter()
+        runmat_types::physical::materials::materials()
             .map(|m| CompletionItem {
                 label: if quoted { m.label.to_string() } else { m.id.to_string() },
                 kind: Some(CompletionItemKind::CONSTANT),

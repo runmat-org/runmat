@@ -288,6 +288,41 @@ pub(super) fn add(catalog: &mut Catalog) {
                 ],
             )],
         ),
+        // A part's analysis representation: a defeatured one's thresholds are edited here and
+        // rebuilt at once; a mid-surface or beam shows its kind only.
+        item(
+            K::Representation,
+            &[Part],
+            "Representation",
+            vec![section(
+                "Representation",
+                vec![
+                    shown(text("name", "Name", None), "name"),
+                    shown(text("kind", "Kind", None), "kind"),
+                    prop(
+                        length("max_fillet", "Fillets up to", 2.0).shown("kind", &["defeatured"]),
+                        Section::Configurations,
+                        "max_fillet",
+                    ),
+                    prop(
+                        length("max_hole", "Holes up to", 3.0).shown("kind", &["defeatured"]),
+                        Section::Configurations,
+                        "max_hole",
+                    ),
+                    prop(
+                        length("max_chamfer", "Chamfers up to", 1.0).shown("kind", &["defeatured"]),
+                        Section::Configurations,
+                        "max_chamfer",
+                    ),
+                    prop(
+                        flag("keep_regions", "Keep named regions", true)
+                            .shown("kind", &["defeatured"]),
+                        Section::Configurations,
+                        "keep_regions",
+                    ),
+                ],
+            )],
+        ),
         item(
             K::Occurrence,
             &[Assembly],
@@ -308,12 +343,7 @@ pub(super) fn add(catalog: &mut Catalog) {
                             choice(
                                 "representation",
                                 "Representation",
-                                &[
-                                    ("full", "Full"),
-                                    ("display", "Display only"),
-                                    ("envelope", "Envelope"),
-                                    ("defeatured", "Defeatured"),
-                                ],
+                                &crate::assembly::model::Representation::offered_choices(),
                             ),
                             Section::Occurrences,
                             "representation",
@@ -323,6 +353,13 @@ pub(super) fn add(catalog: &mut Catalog) {
                             flag("flexible", "Flexible", false),
                             Section::Occurrences,
                             "flexible",
+                        ),
+                        prop(
+                            flag("reference", "Reference", false).help(
+                                "Drawn and mated to, but left out of the parts list, mass and interference.",
+                            ),
+                            Section::Occurrences,
+                            "reference",
                         ),
                         shown(text("pin", "Pinned revision", None), "revision"),
                         shown(count("dof", "Degrees of freedom", 0, 0), "dof"),
@@ -403,9 +440,9 @@ pub(super) fn add(catalog: &mut Catalog) {
                             "tangent_edges",
                             "Tangent edges",
                             &[
-                                ("visible", "Visible"),
-                                ("font", "With font"),
-                                ("removed", "Removed"),
+                                ("thin", "Thin lines"),
+                                ("show", "Visible lines"),
+                                ("hide", "Hidden"),
                             ],
                         ),
                         Section::Views,

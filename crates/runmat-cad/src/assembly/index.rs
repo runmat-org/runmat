@@ -88,6 +88,9 @@ pub struct OccurrenceRow {
     pub origin: NodeOrigin,
     pub world: Transform,
     pub representation: Representation,
+    /// A reference component (a skeleton): left out of the parts list, mass and interference.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub reference: bool,
     pub pose: PoseStatus,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub dof: Option<u32>,
@@ -245,6 +248,21 @@ pub struct AssemblyIndex {
     /// What the top assembly publishes, in document order.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub publishes: Vec<crate::assembly::interface_rows::PublishRow>,
+    /// The top assembly's configuration it was compiled in (`None`: as written).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub configuration: Option<String>,
+    /// The top assembly's configurations, then its display states, in document order.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub configurations: Vec<crate::assembly::configuration_rows::ConfigurationRow>,
+    /// The top assembly's envelopes, in document order.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub envelopes: Vec<crate::assembly::envelope_rows::EnvelopeRow>,
+    /// The top assembly's contact regions, in document order.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub contacts: Vec<crate::assembly::contact_rows::ContactRow>,
+    /// The top assembly's option and effectivity axes, in document order.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub options: Vec<crate::assembly::option_rows::OptionRow>,
 }
 
 /// One assembly feature: its type, sketch and components, whether its tool builds, and its
@@ -568,6 +586,7 @@ pub fn build_assembly_index(
             origin: n.origin.clone(),
             world: n.world,
             representation: n.representation,
+            reference: n.reference,
             pose: n.pose,
             dof: n.dof,
             material: n.material.clone(),
@@ -630,6 +649,14 @@ pub fn build_assembly_index(
         operations: operation_rows(tree, top.as_deref()),
         connectors: crate::assembly::interface_rows::connector_rows(tree, top.as_deref()),
         publishes: crate::assembly::interface_rows::publish_rows(tree, top.as_deref()),
+        configuration: tree.configuration.as_ref().map(|c| c.as_str().to_owned()),
+        configurations: crate::assembly::configuration_rows::configuration_rows(
+            tree,
+            top.as_deref(),
+        ),
+        envelopes: crate::assembly::envelope_rows::envelope_rows(tree, top.as_deref()),
+        contacts: crate::assembly::contact_rows::contact_rows(top.as_deref()),
+        options: crate::assembly::option_rows::option_rows(top.as_deref()),
     }
 }
 
