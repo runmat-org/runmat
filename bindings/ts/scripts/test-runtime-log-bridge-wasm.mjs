@@ -84,6 +84,13 @@ assert.ok(seen.spans.includes("runmat.execute"), `runmat.execute span reached th
 assert.ok(seen.spans.includes("runtime.compile"), "the core compile span reached the trace feed");
 assert.equal(seen.ends, seen.spans.length, "every span that began also ended");
 assert.equal(seen.started, 0, "info lines stay out of the log feed at the warn level");
+// Each span arrives once, under its own id, with its fields as a plain object.
+const begins = traces.filter((event) => event.ph === "B");
+assert.equal(new Set(begins.map((event) => event.spanId)).size, begins.length, "every span has its own id");
+const executeBegin = begins.find((event) => event.name === "runtime.execute");
+assert.equal(begins.filter((event) => event.name === "runtime.execute").length, 1, "the async execute span arrives once");
+assert.equal(Object.getPrototypeOf(executeBegin.args), Object.prototype, "span args are a plain object");
+assert.ok(Number(executeBegin.args.input_len) > 0, "span fields reach the trace feed");
 
 // 2. setLogFilter raises the log feed's level.
 native.setLogFilter("info");
