@@ -67,7 +67,8 @@ pub(super) async fn execute_case(
         settings,
     )
     .map_err(|error| error.to_string())?;
-    let ceilings = crate::machine_capacity::meshing_execution_ceilings(&request.limits);
+    let ceilings = crate::machine_capacity::meshing_execution_ceilings(&request.limits)
+        .map_err(|error| error.to_string())?;
     let solved =
         solve_cross_section_with_mesh(&section, digest, request).map_err(|e| e.to_string())?;
     if let Some(observer) = &options.mesh_observer {

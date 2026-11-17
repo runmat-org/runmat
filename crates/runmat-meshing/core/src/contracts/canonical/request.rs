@@ -284,14 +284,16 @@ impl MeshingExecutionCeilings {
     /// Ceilings from the run's admitted budget: `memory_bytes` of resident memory and
     /// `wall_time_ms` of wall time (`None` when the run is admitted no wall-time budget). A
     /// fixed hour or a host-load snapshot is not a budget: a finished mesh on a loaded host must
-    /// not be rejected for taking longer than an unrelated constant.
+    /// not be rejected for taking longer than an unrelated constant. The memory, scratch and
+    /// artifact ceilings equal the admitted memory exactly; no floor raises them above it, so a
+    /// zero budget yields ceilings that fail [`Self::validate`].
     pub fn for_run_budget(
         memory_bytes: u64,
         wall_time_ms: Option<u64>,
         limits: &MeshingSizeLimits,
     ) -> Self {
         const WORK_PER_ELEMENT: u64 = 100_000;
-        let memory = memory_bytes.max(Self::PORTABLE_DEFAULT.maximum_memory_bytes);
+        let memory = memory_bytes;
         let work = limits
             .maximum_elements
             .saturating_mul(WORK_PER_ELEMENT)
