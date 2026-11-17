@@ -557,6 +557,12 @@ pub struct GeometrySceneDimension {
     /// Line, dot and label-border color; unset draws the selection color.
     #[serde(default)]
     pub color: Option<[f32; 4]>,
+    /// Extension lines, each `[point on the measured item, dimension-line end]`: they carry a
+    /// dimension line that stands off its item back to the item's outline. Drawn thinner than
+    /// the dimension line, with a small gap at the item and a short run past the line's end
+    /// (ISO 129-1).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub extension_lines: Vec<[[f32; 3]; 2]>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]

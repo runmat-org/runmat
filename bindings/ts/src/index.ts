@@ -1585,7 +1585,12 @@ export interface GeometrySceneDimensionState {
   to: [number, number, number];
   label: string;
   /** RGBA 0..1 for the line, its end dots and the label border; unset uses the selection color. */
-  color?: [number, number, number, number] | null;
+  color?: [number, number, number, number] | null;  /**
+   * Extension lines, each `[point on the measured item, dimension-line end]`: they carry a
+   * dimension line that stands off its item back to the item's outline. Drawn thinner than the
+   * dimension line, with a small gap at the item (ISO 129-1).
+   */
+  extensionLines?: [[number, number, number], [number, number, number]][];
 }
 
 export type GeometrySceneTopologySelectionState =

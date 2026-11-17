@@ -166,7 +166,12 @@ fn row(quantity: &str, value: String) -> Row {
 }
 
 fn line(from: V3, to: V3, label: String) -> ModelDimension {
-    ModelDimension { from, to, label }
+    ModelDimension {
+        from,
+        to,
+        label,
+        extension_lines: Vec::new(),
+    }
 }
 
 /// The angle between two directions, as people read it: between lines or planes 0° to 90°,
@@ -196,9 +201,10 @@ fn point_of(d: &Direction) -> V3 {
     }
 }
 
-/// The normal distance of two parallel planar items and where its line runs: along the normal,
-/// between a point on each item ([`span::normal_span`]).
-fn plane_gap(a: &Item, b: &Item) -> Option<(f64, V3, V3)> {
+/// The normal distance of two parallel planar items and its drawing: the dimension line along the
+/// normal between their planes, with extension lines to an item it stands off
+/// ([`span::normal_span`]).
+fn plane_gap(a: &Item, b: &Item) -> Option<(f64, span::Span)> {
     let (Some(Direction::Plane(p, n)), Some(Direction::Plane(q, m))) = (a.direction, b.direction)
     else {
         return None;
@@ -207,8 +213,7 @@ fn plane_gap(a: &Item, b: &Item) -> Option<(f64, V3, V3)> {
         return None;
     }
     let d = dot(sub(p, q), m);
-    let (from, to) = span::normal_span(&a.prims, &b.prims, m)?;
-    Some((d.abs(), from, to))
+    Some((d.abs(), span::normal_span(&a.prims, &b.prims, m)?))
 }
 
 /// The distance between two parallel axes (cylinders, circular edges), with the foot of the
@@ -303,19 +308,36 @@ fn pair(
     let mut summary = format!("Minimum distance {}", mm(n.distance));
     let planes = plane_gap(a, b).map(|g| ("Normal distance", g));
     let axes = match (&a.circle, &b.circle) {
-        (Some(x), Some(y)) => axis_gap(x, y).map(|g| ("Axis distance", g)),
+        (Some(x), Some(y)) => axis_gap(x, y).map(|(g, from, to)| {
+            (
+                "Axis distance",
+                (
+                    g,
+                    span::Span {
+                        from,
+                        to,
+                        extension_lines: Vec::new(),
+                    },
+                ),
+            )
+        }),
         _ => None,
     };
     // Two parallel circles report both: how far apart their planes are and their axes.
-    if let (Some(_), Some((name, (g, ..)))) = (planes, axes) {
-        rows.push(row(name, mm(g)));
+    if let (Some(_), Some((name, (g, _)))) = (&planes, &axes) {
+        rows.push(row(name, mm(*g)));
     }
     let gap = planes.or(axes);
     match gap {
-        Some((name, (g, from, to))) => {
+        Some((name, (g, span))) => {
             rows.push(row(name, mm(g)));
             summary += &format!(" · {} {}", name.to_lowercase(), mm(g));
-            dims.push(line(from, to, mm(g)));
+            dims.push(ModelDimension {
+                from: span.from,
+                to: span.to,
+                label: mm(g),
+                extension_lines: span.extension_lines,
+            });
         }
         None => dims.push(line(n.a, n.b, mm(n.distance))),
     }

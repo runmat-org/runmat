@@ -456,12 +456,26 @@ fn entities_across_components_follow_their_placement() {
     let a = rig("distance", &[block_top.clone(), boss_bottom.clone()]);
     close(value(&a, "Normal distance"), 20.0);
     // The block's top (z = 10 mm, x ≤ 100 mm) and the boss's bottom (z = 30 mm, round about
-    // x = 150 mm) don't overlap seen along Z: the line joins their closest points, one on each.
-    let (from, to) = (a.dimensions[0].from, a.dimensions[0].to);
+    // x = 150 mm) don't overlap seen along Z. The dimension line stands straight up at the
+    // boss's nearest point (x = 140 mm), as long as its label; an extension line in the block's
+    // top plane runs back to the block's edge at x = 100 mm.
+    let dim = &a.dimensions[0];
+    let (from, to) = (dim.from, dim.to);
     close(from[2] * 1e3, 10.0);
     close(to[2] * 1e3, 30.0);
-    within(from[0] * 1e3, 100.0, 1e-4);
+    within(from[0] * 1e3, 140.0, 0.05);
     within(to[0] * 1e3, 140.0, 0.05);
+    close(from[0] * 1e3, to[0] * 1e3);
+    close(from[1] * 1e3, to[1] * 1e3);
+    close(norm(sub(to, from)) * 1e3, 20.0);
+    assert_eq!(dim.extension_lines.len(), 1, "{dim:?}");
+    let [on, end] = dim.extension_lines[0];
+    assert_eq!(end, from);
+    within(on[0] * 1e3, 100.0, 1e-4);
+    close(on[1] * 1e3, from[1] * 1e3);
+    close(on[2] * 1e3, 10.0);
+    let out = serde_json::to_value(dim).unwrap();
+    assert!(out["extensionLines"].is_array(), "{out}");
     let rim = format!("occurrence:{boss}/{}", circle_edge(&sd, 8.0 * MM));
     let r = rig("radius", std::slice::from_ref(&rim));
     close(value(&r, "Radius"), 10.0);

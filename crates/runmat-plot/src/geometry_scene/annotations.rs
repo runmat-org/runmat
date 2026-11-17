@@ -126,6 +126,27 @@ impl GeometryScene {
             append_selection_edge(&mut strokes, from, to, color);
             append_selection_point(&mut strokes, from, color);
             append_selection_point(&mut strokes, to, color);
+            for [on, end] in &dimension.extension_lines {
+                let (on, end) = (Vec3::from_array(*on), Vec3::from_array(*end));
+                if !on.is_finite() || !end.is_finite() {
+                    continue;
+                }
+                let run = end - on;
+                let length = run.length();
+                if length <= 1.0e-8 {
+                    continue;
+                }
+                let along = run / length;
+                let gap = extension_gap(self.bounds).min(length * 0.25);
+                // The thin annotation stroke (narrower than the dimension line's).
+                append_stroke(
+                    &mut strokes,
+                    on + along * gap,
+                    end + along * gap,
+                    color,
+                    0.0,
+                );
+            }
         }
         if strokes.is_empty() {
             return Vec::new();
@@ -566,6 +587,12 @@ struct AnnotationFrame {
     normal: Vec3,
     tangent: Vec3,
     bitangent: Vec3,
+}
+
+/// An extension line's gap at the measured item, and its run past the dimension line: about
+/// 1% of the scene's size.
+fn extension_gap(bounds: BoundingBox) -> f32 {
+    annotation_arrow_length(bounds) * 0.12
 }
 
 fn annotation_arrow_length(bounds: BoundingBox) -> f32 {
