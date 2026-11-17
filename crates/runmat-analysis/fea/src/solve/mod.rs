@@ -8,6 +8,8 @@ pub(crate) use affine::{
 pub mod backend;
 pub mod buckling;
 pub mod certificate;
+mod cholesky_factor;
+pub(crate) use cholesky_factor::CholeskyFactor;
 pub(crate) mod convergence;
 pub mod dynamics;
 pub mod fixed_point;

@@ -15,7 +15,6 @@ mod mixed_structural;
 mod moment_projection;
 pub(crate) mod nonlinear_solid;
 pub mod physical_fields;
-mod reduced_material_summary;
 mod solid_matrix;
 mod solid_properties;
 pub(crate) mod solid_recovery;
@@ -25,6 +24,7 @@ mod solver_solid_boundary;
 mod structural_inputs;
 pub use structural_inputs::StructuralLoadKind;
 mod structural_loads;
+mod synthetic_material;
 mod transient_basis;
 pub(crate) use transient_basis::PreparedStructuralTransientBasis;
 pub(crate) mod thermoelastic_load;
@@ -72,7 +72,6 @@ use self::{
 };
 use crate::physics::structural::topology::explicit_target_node_indices as structural_target_nodes;
 use moment_projection::project_moment;
-use reduced_material_summary::structural_material_summary;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(crate) enum StructuralCapacityPhase {
@@ -199,7 +198,6 @@ pub struct AssemblySummary {
     /// are carried by the constraint channel and never overwrite this load authority.
     pub physical_load: Vec<f64>,
     pub load_count: usize,
-    pub structural_material: StructuralMaterialSummary,
     pub thermo_mechanical: Option<ThermoMechanicalAssemblySummary>,
     pub electro_thermal: Option<ElectroThermalAssemblySummary>,
     pub operator: AssembledRealSystem,
@@ -322,6 +320,10 @@ pub enum StructuralAssemblyError {
         region_id: String,
     },
     InvalidMaterialCoverage(String),
+    SyntheticMaterial {
+        capability: runmat_analysis_core::MaterialCapability,
+        undeclared_material_id: Option<String>,
+    },
     ExplicitTopologyIdentity(String),
     InvalidConstraintPlan(String),
     InvalidLoadPlan(String),
@@ -473,6 +475,20 @@ impl fmt::Display for StructuralAssemblyError {
             Self::InvalidMaterialCoverage(message) => {
                 write!(f, "explicit structural material coverage is invalid: {message}")
             }
+            Self::SyntheticMaterial {
+                capability,
+                undeclared_material_id: Some(material_id),
+            } => write!(
+                f,
+                "material `{material_id}` does not declare required `{capability:?}` capability; no model material declares it for the mesh-free structural operator"
+            ),
+            Self::SyntheticMaterial {
+                capability,
+                undeclared_material_id: None,
+            } => write!(
+                f,
+                "the mesh-free structural operator requires a material with `{capability:?}` capability; the model declares no materials"
+            ),
             Self::ExplicitTopologyIdentity(message) => write!(
                 f,
                 "explicit structural topology identity could not be derived: {message}"
@@ -671,20 +687,6 @@ impl fmt::Display for SolverMeshRegionMappingError {
             ),
         }
     }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
-pub struct StructuralMaterialSummary {
-    #[serde(with = "runmat_types::physical::canonical_scalar")]
-    pub youngs_modulus_pa: runmat_types::physical::YoungsModulus,
-    #[serde(with = "runmat_types::physical::canonical_scalar")]
-    pub poisson_ratio: runmat_types::physical::PoissonRatio,
-    #[serde(with = "runmat_types::physical::canonical_scalar")]
-    #[serde(default)]
-    pub density_kg_per_m3: runmat_types::physical::MassDensity,
-    pub lame_lambda_pa: f64,
-    #[serde(with = "runmat_types::physical::canonical_scalar")]
-    pub shear_modulus_pa: runmat_types::physical::ShearModulus,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -981,49 +983,12 @@ where
         .map(|plan| plan.reference_points.len())
         .unwrap_or(0);
     let dof_count = mesh_dof_count + reference_point_count * 6;
-    let avg_youngs_modulus = mean(model.materials.iter().filter_map(|material| {
-        material
-            .require_mechanical()
-            .ok()
-            .map(|mechanical| mechanical.youngs_modulus_pa.canonical_value())
-    }))
-    .unwrap_or(1.0e9);
-    let avg_poisson_ratio = mean(model.materials.iter().filter_map(|material| {
-        material
-            .require_mechanical()
-            .ok()
-            .map(|mechanical| mechanical.poisson_ratio.canonical_value())
-    }))
-    .unwrap_or(0.3);
-    let avg_reference_temperature_k = mean(model.materials.iter().filter_map(|material| {
-        material
-            .thermal
-            .as_ref()
-            .map(|thermal| thermal.reference_temperature_k.canonical_value())
-    }))
-    .unwrap_or(293.15);
-    let shear_modulus_pa = avg_youngs_modulus / (2.0 * (1.0 + avg_poisson_ratio));
-    let avg_density_kg_per_m3 = mean(model.materials.iter().filter_map(|material| {
-        material
-            .mass_density_kg_per_m3
-            .map(|quantity| quantity.canonical_value())
-    }))
-    .unwrap_or(7850.0);
-    let lame_lambda_pa = avg_youngs_modulus * avg_poisson_ratio
-        / ((1.0 + avg_poisson_ratio) * (1.0 - 2.0 * avg_poisson_ratio));
-    let structural_material = StructuralMaterialSummary {
-        youngs_modulus_pa: runmat_types::physical::YoungsModulus::new(avg_youngs_modulus),
-        poisson_ratio: runmat_types::physical::PoissonRatio::new(avg_poisson_ratio),
-        density_kg_per_m3: runmat_types::physical::MassDensity::new(avg_density_kg_per_m3),
-        lame_lambda_pa,
-        shear_modulus_pa: runmat_types::physical::ShearModulus::new(shear_modulus_pa),
-    };
-    let stiffness_base = (avg_youngs_modulus / 2.0e3).max(1.0e5);
-
     let mut stiffness_diag = vec![0.0; dof_count];
     let mut stiffness_upper = vec![0.0; dof_count.saturating_sub(1)];
     let mut mass_diag = vec![0.0; dof_count];
     if solid_topology.is_none() {
+        let stiffness_base =
+            (synthetic_material::mean_youngs_modulus_pa(model)? / 2.0e3).max(1.0e5);
         for i in 0..mesh_dof_count {
             let factor = 1.0 + (i as f64) * 0.05;
             stiffness_diag[i] = stiffness_base * factor;
@@ -1194,25 +1159,31 @@ where
         .clamp(0.0, 0.05);
         let thermal_load_scale =
             (context.applied_temperature_delta_k.canonical_value() / 50.0).clamp(-2.0, 2.0);
-        let constitutive_temperature_factor = if model.materials.is_empty() {
-            (-(2.5e-4) * context.applied_temperature_delta_k.canonical_value()).clamp(-0.25, 0.25)
-        } else {
-            let response = mean(model.materials.iter().filter_map(|material| {
-                material.thermal.as_ref().map(|thermal| {
-                    let adjusted_delta = context.applied_temperature_delta_k.canonical_value()
-                        + (context.reference_temperature_k.canonical_value()
-                            - thermal.reference_temperature_k.canonical_value())
-                        + (avg_reference_temperature_k
-                            - thermal.reference_temperature_k.canonical_value())
-                            * 0.1;
-                    thermal.modulus_temp_coeff_per_k.canonical_value() * adjusted_delta
-                })
-            }))
-            .unwrap_or(-(2.5e-4) * context.applied_temperature_delta_k.canonical_value());
-            response.clamp(-0.25, 0.25)
+        let delta_k = context.applied_temperature_delta_k.canonical_value();
+        let thermal_materials = model
+            .materials
+            .iter()
+            .filter_map(|material| material.thermal.as_ref())
+            .collect::<Vec<_>>();
+        let reference_k = |thermal: &&runmat_analysis_core::MaterialThermalModel| {
+            thermal.reference_temperature_k.canonical_value()
         };
+        // When no material declares thermal properties, the synthetic operator keeps its
+        // nominal modulus-temperature slope.
+        let constitutive_temperature_factor = match mean(thermal_materials.iter().map(reference_k))
+        {
+            Some(avg_reference_temperature_k) => mean(thermal_materials.iter().map(|thermal| {
+                let adjusted_delta = delta_k
+                    + (context.reference_temperature_k.canonical_value() - reference_k(thermal))
+                    + (avg_reference_temperature_k - reference_k(thermal)) * 0.1;
+                thermal.modulus_temp_coeff_per_k.canonical_value() * adjusted_delta
+            }))
+            .unwrap_or_default(),
+            None => -(2.5e-4) * delta_k,
+        }
+        .clamp(-0.25, 0.25);
         let constitutive_poisson_coupling =
-            (0.6 + avg_poisson_ratio.clamp(0.0, 0.49)).clamp(0.6, 1.2);
+            (0.6 + synthetic_material::mean_poisson_ratio(model)?.clamp(0.0, 0.49)).clamp(0.6, 1.2);
         let modulus_temperature_scale = (1.0
             + constitutive_temperature_factor * constitutive_poisson_coupling)
             .clamp(0.72, 1.15);
@@ -1673,7 +1644,6 @@ where
         constraint_matrix: constraint_matrix.clone(),
         affine_constraint_reduction,
         load_count: excitations.len(),
-        structural_material,
         thermo_mechanical,
         electro_thermal,
         operator: {
@@ -2835,24 +2805,6 @@ mod tests {
         assert_eq!(recovered_material.poisson_ratio.canonical_value(), -0.25);
         assert_eq!(
             recovered_material.density_kg_per_m3.canonical_value(),
-            0.125
-        );
-        assert_eq!(
-            summary
-                .structural_material
-                .youngs_modulus_pa
-                .canonical_value(),
-            0.5
-        );
-        assert_eq!(
-            summary.structural_material.poisson_ratio.canonical_value(),
-            -0.25
-        );
-        assert_eq!(
-            summary
-                .structural_material
-                .density_kg_per_m3
-                .canonical_value(),
             0.125
         );
         assert_eq!(

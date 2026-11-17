@@ -333,7 +333,8 @@ pub(super) fn collect_semantic_state_fields(
         .collect()
 }
 
-/// Bind an in-process study state to its admitted mesh, or its explicit synthetic model.
+/// Bind an in-process study state to its admitted mesh, or to its authored model when the study
+/// solves without a solid mesh (explicit beam/shell elements or a non-structural family).
 pub(super) fn in_process_study_topology_digest(
     prepared: &super::PreparedStudySequence,
 ) -> Result<runmat_execution::Digest, OperationErrorEnvelope> {

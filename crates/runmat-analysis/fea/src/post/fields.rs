@@ -29,7 +29,7 @@ pub use catalog::{
     StructuralLinearFieldQuantity,
 };
 use edge::edge_strain_tensor;
-use scalars::{recover_strain_energy_density, recover_stress, recover_von_mises};
+use scalars::recover_von_mises;
 use state::{
     recover_displacement, recover_reaction_force, recover_reaction_moment, recover_rotation,
     rotation_shape, structural_displacement_node_count,
@@ -305,23 +305,9 @@ async fn recover_deformation_result_fields_with_capacity<A>(
         .await?;
         let element_count = strain_recovery.element_count;
         let strain_values = strain_recovery.values;
-        let stress_values = match strain_recovery.stress {
-            Some(stress) => stress,
-            None => {
-                measured(
-                    owner,
-                    UsageCategory::Solve,
-                    tensor_work(&strain_values, 17)?,
-                    || {
-                        Ok::<_, StructuralFieldRecoveryError>(recover_stress(
-                            &strain_values,
-                            summary.structural_material,
-                        ))
-                    },
-                )
-                .await?
-            }
-        };
+        let stress_values = strain_recovery
+            .stress
+            .ok_or_else(continuum_without_solid_recovery)?;
         let von_mises_values = measured(
             owner,
             UsageCategory::Solve,
@@ -349,23 +335,9 @@ async fn recover_deformation_result_fields_with_capacity<A>(
             || Ok::<_, StructuralFieldRecoveryError>(recover_von_mises(&nodal_stress_values)),
         )
         .await?;
-        let strain_energy_density_values = match strain_recovery.strain_energy_density {
-            Some(energy) => energy,
-            None => {
-                measured(
-                    owner,
-                    UsageCategory::Solve,
-                    tensor_work(&strain_values, 12)?,
-                    || {
-                        Ok::<_, StructuralFieldRecoveryError>(recover_strain_energy_density(
-                            &strain_values,
-                            &stress_values,
-                        ))
-                    },
-                )
-                .await?
-            }
-        };
+        let strain_energy_density_values = strain_recovery
+            .strain_energy_density
+            .ok_or_else(continuum_without_solid_recovery)?;
         let integration_point_strain = strain_recovery.integration_point_strain;
         let integration_point_stress = strain_recovery.integration_point_stress;
         Some((
@@ -514,6 +486,14 @@ async fn recover_deformation_result_fields_with_capacity<A>(
 
 fn publishes_continuum_fields(summary: &AssemblySummary) -> bool {
     !summary.structural_solid_recovery.is_empty()
+}
+
+/// Continuum stress and energy come only from solid element recovery, which owns each element's
+/// material; no model-wide material summary stands in for it.
+fn continuum_without_solid_recovery() -> StructuralFieldRecoveryError {
+    StructuralFieldRecoveryError::InvalidPhysicalLayout {
+        reason: "continuum stress requires solid element recovery".into(),
+    }
 }
 
 /// Moves formulation-owned spatial fields with stable physical semantics into the observation
