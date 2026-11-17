@@ -28,6 +28,34 @@ fn mass_properties_of_a_part_list_its_material_and_mass() {
     assert_eq!(refused["ok"], false);
 }
 
+/// No density is assumed: an unknown material's mass, CG and inertia read "unknown" in the
+/// summary and the row, and the problem names the part and the material it looked for.
+#[test]
+fn mass_properties_of_an_unknown_material_are_unknown() {
+    let text = "runmat 0.7\nstd 1\n\npart block {\n    sketch s1 on origin.xy {\n        l1 = line(start = [0 mm, 0 mm], end = [100 mm, 0 mm])\n        l2 = line(start = [100 mm, 0 mm], end = [100 mm, 10 mm])\n        l3 = line(start = [100 mm, 10 mm], end = [0 mm, 10 mm])\n        l4 = line(start = [0 mm, 10 mm], end = [0 mm, 0 mm])\n    }\n    feature body = extrude(profile = sketch.s1, distance = 10 mm)\n    output block = { body = feature.body.body, material = \"material.unobtainium\" }\n}\n";
+    let out: Value = serde_json::from_str(&analyze_json(
+        "/p/block.part",
+        text,
+        &Files::new(),
+        &json!({ "command": "evaluate.mass-properties" }).to_string(),
+    ))
+    .unwrap();
+    assert_eq!(out["ok"], true, "{out}");
+    let summary = out["summary"].as_str().unwrap();
+    assert!(
+        summary.starts_with("Mass, CG and inertia unknown · 10.0 cm³ · /p/block.part: mass unknown: no density is known for material `material.unobtainium`"),
+        "{summary}"
+    );
+    let cells = &out["rows"][0]["cells"];
+    assert_eq!((&cells[3], &cells[5]), (&json!("unknown"), &json!("unknown")), "{out}");
+    assert_eq!(out["rows"][0]["severity"], "warning");
+    assert!(
+        out["problems"][0].as_str().unwrap().contains("`material.unobtainium`"),
+        "{out}"
+    );
+    assert!(out["data"]["total"].is_null(), "{out}");
+}
+
 /// A 200 × 100 mm frame of 20 mm square tube, mitred, written by the printer.
 pub(crate) fn frame() -> String {
     use runmat_cad::ids::{FeatureId, SketchEntityId};

@@ -141,6 +141,9 @@ pub(super) fn add(catalog: &mut Catalog) {
         section(
             "Mass",
             vec![
+                // Its density and where it came from, or "Unknown" with the reason: no density
+                // is assumed, so a part without one has an unknown mass.
+                shown(text("density", "Density", None), "density"),
                 shown(qty("mass", "Mass", "mass", None), "mass"),
                 shown(qty("volume", "Volume", "length", None), "volume"),
                 shown(qty("area", "Surface area", "area", None), "area"),
