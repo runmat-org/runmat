@@ -868,7 +868,7 @@ pub(super) fn add(catalog: &mut Catalog) {
             "drawing.edit-view",
             "Edit view",
             "edit",
-            "Edit the view's scale, orientation, display style, label and place.",
+            "Edit the view's scale, orientation, display style, tangent edges, label and place.",
         )
         .inputs(vec![
             text("scale", "Scale", Some("sheet")),
@@ -896,6 +896,17 @@ pub(super) fn add(catalog: &mut Catalog) {
                     ("shaded", "Shaded"),
                 ],
             ),
+            // Unset, a pictorial view draws them thin and an orthographic one hides them.
+            choice(
+                "tangent_edges",
+                "Tangent edges",
+                &[
+                    ("thin", "Thin lines"),
+                    ("show", "Visible lines"),
+                    ("hide", "Hidden"),
+                ],
+            )
+            .optional(),
             text("label", "Label", Some("FRONT VIEW")).optional(),
             pick("at", "Place at", &[K::Point]).optional(),
         ])

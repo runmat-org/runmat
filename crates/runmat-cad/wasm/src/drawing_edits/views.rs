@@ -153,6 +153,7 @@ fn child(parent: &View, name: String, kind: ViewKind, at: [f64; 2]) -> View {
         exploded: None,
         title: None,
         centerlines: true,
+        tangent_edges: None,
     }
 }
 
@@ -224,6 +225,7 @@ pub fn edit(
                             exploded: None,
                             title: None,
                             centerlines: true,
+                            tangent_edges: None,
                         }
                     };
                 // A first view sits low left (room for dimensions under it and the title block

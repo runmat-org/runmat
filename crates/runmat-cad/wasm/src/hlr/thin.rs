@@ -30,8 +30,10 @@ pub fn thin(entry: &mut Value, scale: f64, hidden: bool) {
     let tol = SHEET_TOLERANCE / scale.max(1e-9);
     // A grid at most a quarter of the tolerance: 1 µm in model mm at 1:2 to 2:1.
     let grid = 10f64.powf((tol / 4.0).log10().floor());
-    if let Some(Value::Array(lines)) = o.get_mut("visible") {
-        *lines = runs_out(thin_runs(runs_in(lines), tol, grid));
+    for key in ["visible", "tangent"] {
+        if let Some(Value::Array(lines)) = o.get_mut(key) {
+            *lines = runs_out(thin_runs(runs_in(lines), tol, grid));
+        }
     }
     if let Some(Value::Array(lines)) = o.get_mut("hidden") {
         *lines = if hidden {

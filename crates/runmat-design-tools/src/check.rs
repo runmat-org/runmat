@@ -382,78 +382,91 @@ fn check_assembly(path: &str, text: &str, files: &Files, out: &mut CheckOutput) 
     }
 }
 
+/// A drawing's check is the Desktop's Check drawing (`drawing.check`, runmat-cad-wasm
+/// `analyze::drawing_check`): one set of rules, so the agent and the sheet's findings agree.
+/// Its findings (references, models, title block, overlaps, scales and what the layout found)
+/// come as diagnostics on the item each names. Syntax errors in the drawing itself come first,
+/// with their ranges; a drawing that doesn't read is checked no further.
 fn check_drawing(path: &str, text: &str, files: &Files, out: &mut CheckOutput) {
-    let compiled: Value =
-        serde_json::from_str(&runmat_cad_wasm::drawing::compile_json(path, text, files))
-            .unwrap_or(Value::Null);
     let locator = Locator::new(text);
-    for d in compiled["diagnostics"].as_array().into_iter().flatten() {
-        let file = d["path"].as_str().unwrap_or(path);
-        let start = d["start"].as_u64().unwrap_or(0) as usize;
-        let end = d["end"].as_u64().unwrap_or(0) as usize;
+    let parsed = runmat_cad::syntax::parse_drawing_in(
+        path,
+        text,
+        &runmat_cad_wasm::runtime::module_scope(path, text, files),
+    );
+    for d in parsed
+        .diagnostics
+        .iter()
+        .filter(|_| parsed.document.is_none())
+    {
         out.diagnostics.push(DesignDiagnostic {
             id: None,
-            severity: d["severity"].as_str().unwrap_or("error").to_owned(),
+            severity: "error".into(),
             code: None,
-            message: d["message"].as_str().unwrap_or_default().to_owned(),
+            message: d.message.clone(),
             cause: "root".into(),
             root: None,
             subject: None,
             failed_features: Vec::new(),
-            range: Some(locator.range_utf16(file, start, end)),
+            range: Some(locator.range(path, d.span.start, d.span.end)),
             repairs: Vec::new(),
         });
     }
-    let data = &compiled["projection"]["data"];
-    if let Ok(diags) = serde_json::from_value::<Vec<CadDiagnostic>>(data["diagnostics"].clone()) {
-        let parsed = runmat_cad::syntax::parse_drawing(path, text);
-        let mut report = runmat_cad::diagnostics::DiagnosticReport { diagnostics: diags };
-        report.attach_spans(&parsed.spans);
-        out.diagnostics.extend(cad_diagnostics(
-            path,
-            text,
-            &report.diagnostics,
-            &BTreeMap::new(),
-        ));
-    }
-    // What the layout found on each sheet (a note with no room, a view that doesn't fit, a
-    // repeated dimension) is a warning on the item, so a drawing that overprints never checks
-    // clean.
-    for (sheet, layout) in data["layouts"].as_object().into_iter().flatten() {
-        for f in layout["findings"].as_array().into_iter().flatten() {
-            let item = f["item"].as_str().unwrap_or("");
-            let name = item.rsplit(':').next().unwrap_or(item);
-            let declared = ["annotation", "table", "view"]
-                .iter()
-                .find_map(|w| text.find(&format!("{w} {name} =")));
-            let range = declared.map(|start| {
-                let end = text[start..].find('\n').map_or(text.len(), |e| start + e);
-                locator.range_utf16(path, start, end)
-            });
-            out.diagnostics.push(DesignDiagnostic {
-                id: None,
-                severity: "warning".into(),
-                code: f["code"].as_str().map(str::to_owned),
-                message: format!(
-                    "sheet {sheet}: {}",
-                    f["message"].as_str().unwrap_or_default()
-                ),
-                cause: "root".into(),
-                root: None,
-                subject: None,
-                failed_features: Vec::new(),
-                range,
-                repairs: Vec::new(),
-            });
+    let Some(document) = parsed.document else {
+        return;
+    };
+    match runmat_cad_wasm::analyze::drawing_check::findings(
+        path,
+        text,
+        files,
+        &serde_json::Map::new(),
+    ) {
+        Ok((found, _)) => {
+            for f in found {
+                // The item's declaration: `view side =`, `annotation height =`, `sheet "1" =`.
+                let declared = f.item.split_once(':').and_then(|(kind, name)| {
+                    let quoted = format!("{kind} \"{name}\" =");
+                    text.find(&format!("{kind} {name} ="))
+                        .or_else(|| text.find(&quoted))
+                });
+                let range = declared.map(|start| {
+                    let end = text[start..].find('\n').map_or(text.len(), |e| start + e);
+                    locator.range(path, start, end)
+                });
+                out.diagnostics.push(DesignDiagnostic {
+                    id: None,
+                    severity: f.severity.to_owned(),
+                    code: Some(format!(
+                        "drawing.{}",
+                        f.rule.to_lowercase().replace(' ', "_")
+                    )),
+                    message: format!("{}: {}", f.rule, f.message),
+                    cause: "root".into(),
+                    root: None,
+                    subject: (!f.item.is_empty()).then(|| f.item.clone()),
+                    failed_features: Vec::new(),
+                    range,
+                    repairs: Vec::new(),
+                });
+            }
         }
+        Err(e) => out.diagnostics.push(DesignDiagnostic {
+            id: None,
+            severity: "error".into(),
+            code: None,
+            message: format!("the drawing check didn't run: {e}"),
+            cause: "root".into(),
+            root: None,
+            subject: None,
+            failed_features: Vec::new(),
+            range: None,
+            repairs: Vec::new(),
+        }),
     }
-    let len = |v: &Value| v.as_array().map_or(0, Vec::len);
+    out.counts.insert("sheets".into(), document.sheets.len());
+    out.counts.insert("views".into(), document.views.len());
     out.counts
-        .insert("sheets".into(), len(&data["document"]["sheets"]));
-    out.counts
-        .insert("views".into(), len(&data["document"]["views"]));
-    out.counts
-        .insert("annotations".into(), len(&data["document"]["annotations"]));
+        .insert("annotations".into(), document.annotations.len());
 }
 
 fn check_circuit(path: &str, text: &str, files: &Files, out: &mut CheckOutput) {

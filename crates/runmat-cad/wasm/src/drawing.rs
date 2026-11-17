@@ -554,10 +554,12 @@ pub fn compile_json_in(
     let mut hlr = serde_json::Map::new();
     // A view's lines: exact on the part's kernel when it projects, else from the display.
     // `hidden`: whether the view draws hidden lines (a view that doesn't keeps none).
+    // `tangent`: how the view draws tangent edges (`crate::hlr::tangent_edges`).
     let lines_of = |file: &str,
                     display: &Value,
                     axes: &crate::hlr::Axes,
-                    hidden: bool|
+                    hidden: bool,
+                    tangent: runmat_cad::drawing::TangentEdges|
      -> crate::hlr::ViewLines {
         exact
             .get(file)
@@ -569,7 +571,7 @@ pub fn compile_json_in(
                     .iter()
                     .map(|b| (&b.handle, runmat_cad::regen::kernel::Transform::IDENTITY))
                     .collect();
-                crate::hlr::exact::view_lines(part.kernel.as_ref(), &bodies, display, axes)
+                crate::hlr::exact::view_lines(part.kernel.as_ref(), &bodies, display, axes, tangent)
             })
             .unwrap_or_else(|| crate::hlr::view_lines_drawn(display, axes, hidden))
     };
@@ -604,6 +606,7 @@ pub fn compile_json_in(
             }
             let shows_hidden =
                 !matches!(view["display"].as_str(), Some("visible_lines" | "shaded"));
+            let tangent = crate::hlr::tangent_edges(&views, name);
             let project = || -> Value {
                 // The occurrences the view leaves out (`exclude`), and everything under them.
                 let excluded: Vec<String> = document
@@ -667,6 +670,7 @@ pub fn compile_json_in(
                                     display,
                                     &parent_axes,
                                     shows_hidden,
+                                    tangent,
                                 ))
                                 .unwrap_or(Value::Null),
                             ),
@@ -728,9 +732,14 @@ pub fn compile_json_in(
                             .and_then(|r| view_picks::auxiliary_axes(display, &parent_axes, &r))
                             .unwrap_or(parent_axes);
                         drawn_in = Some(axes);
-                        let mut lines =
-                            serde_json::to_value(lines_of(file, display, &axes, shows_hidden))
-                                .unwrap_or(Value::Null);
+                        let mut lines = serde_json::to_value(lines_of(
+                            file,
+                            display,
+                            &axes,
+                            shows_hidden,
+                            tangent,
+                        ))
+                        .unwrap_or(Value::Null);
                         if let Value::Object(o) = &mut lines {
                             o.insert("picks".into(), view_picks::picks(display, &axes));
                         }
@@ -738,7 +747,8 @@ pub fn compile_json_in(
                     }
                     // A broken-out section: the parent's lines with the cut inside its boundary.
                     Some("broken_out") => {
-                        let parent_lines = lines_of(file, display, &parent_axes, shows_hidden);
+                        let parent_lines =
+                            lines_of(file, display, &parent_axes, shows_hidden, tangent);
                         let cut = document
                             .views
                             .iter()
@@ -770,9 +780,14 @@ pub fn compile_json_in(
                     _ => {
                         let axes = crate::hlr::axes(crate::hlr::orientation(&views, name, 0));
                         drawn_in = Some(axes);
-                        let mut lines =
-                            serde_json::to_value(lines_of(file, display, &axes, shows_hidden))
-                                .unwrap_or(Value::Null);
+                        let mut lines = serde_json::to_value(lines_of(
+                            file,
+                            display,
+                            &axes,
+                            shows_hidden,
+                            tangent,
+                        ))
+                        .unwrap_or(Value::Null);
                         // What a click on each line means (the face it shows edge-on, or the edge).
                         if let Value::Object(o) = &mut lines {
                             o.insert("picks".into(), view_picks::picks(display, &axes));
@@ -796,6 +811,11 @@ pub fn compile_json_in(
                 };
                 let scale = ratio(&view["scale"]).or(sheet_scale).unwrap_or(1.0);
                 crate::hlr::thin::thin(&mut entry, scale, shows_hidden);
+                // How it drew tangent edges, its own setting or its orientation's default, so the
+                // view's Properties show what the sheet draws.
+                if let Value::Object(o) = &mut entry {
+                    o.insert("tangent_edges".into(), tangent.word().into());
+                }
                 entry
             };
             let entry = match key {

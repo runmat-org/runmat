@@ -440,9 +440,9 @@ pub(super) fn add(catalog: &mut Catalog) {
                             "tangent_edges",
                             "Tangent edges",
                             &[
-                                ("visible", "Visible"),
-                                ("font", "With font"),
-                                ("removed", "Removed"),
+                                ("thin", "Thin lines"),
+                                ("show", "Visible lines"),
+                                ("hide", "Hidden"),
                             ],
                         ),
                         Section::Views,
