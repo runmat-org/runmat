@@ -1,5 +1,6 @@
 use std::collections::{BTreeMap, HashSet};
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 use serde_json::json;
 use tower_lsp::lsp_types::{Diagnostic, DiagnosticSeverity, NumberOrString, Position, Range, Url};
@@ -51,7 +52,7 @@ pub(super) async fn workspace_analyses(
             .collect::<Vec<_>>();
         (
             state.workspace_roots.clone(),
-            source_overlays,
+            Arc::new(source_overlays),
             state.compat_mode,
             open_documents,
         )
@@ -62,9 +63,7 @@ pub(super) async fn workspace_analyses(
     let mut scan_roots = workspace_roots.clone();
     if scan_roots.is_empty() {
         for path in source_overlays.keys() {
-            if let Some(project) =
-                super::ProjectContext::discover_from_source_name_async(path.to_str()).await
-            {
+            if let Some(project) = super::ProjectContext::discover_from_source_name(path.to_str()) {
                 scan_roots.extend(project.manifest_path().parent().map(Path::to_path_buf));
                 break;
             }
@@ -96,23 +95,26 @@ pub(super) async fn workspace_analyses(
         if open_paths.contains(&path) {
             continue;
         }
-        let source = runmat_filesystem::read_to_string_async(&path)
-            .await
-            .map_err(|error| {
-                format!(
-                    "rename cannot inspect FEA source {}: {error}",
-                    path.display()
-                )
-            })?;
-        let analysis =
-            analyze_fea_source(&source, &path, &workspace_roots, &source_overlays, compat)
-                .await
-                .map_err(|error| {
-                    format!(
-                        "rename cannot verify FEA source {}: {error}",
-                        path.display()
-                    )
-                })?;
+        let source = runmat_filesystem::read_to_string(&path).map_err(|error| {
+            format!(
+                "rename cannot inspect FEA source {}: {error}",
+                path.display()
+            )
+        })?;
+        let analysis = check_study(
+            source,
+            path.clone(),
+            workspace_roots.clone(),
+            source_overlays.clone(),
+            compat,
+        )
+        .await
+        .map_err(|error| {
+            format!(
+                "rename cannot verify FEA source {}: {error}",
+                path.display()
+            )
+        })?;
         analyses.push(analysis);
     }
     Ok(analyses)
@@ -134,12 +136,12 @@ async fn reanalyze_document(server: &RunMatLanguageServer, uri: &Url) {
         (
             document.text.clone(),
             state.workspace_roots.clone(),
-            source_overlays,
+            Arc::new(source_overlays),
             state.compat_mode,
         )
     };
     let result = match uri.to_file_path() {
-        Ok(path) => analyze_fea_source(&text, &path, &roots, &source_overlays, compat).await,
+        Ok(path) => check_study(text.clone(), path, roots, source_overlays, compat).await,
         Err(()) => Err("FEA language tooling requires a file-backed document".to_string()),
     };
     let (analysis, error) = match result {
@@ -171,6 +173,32 @@ async fn reanalyze_document(server: &RunMatLanguageServer, uri: &Url) {
         .client
         .publish_diagnostics(uri.clone(), diagnostics, None)
         .await;
+}
+
+/// Checks the study at `path` with the shared [`analyze_fea_source`] on a blocking thread.
+///
+/// The check reads through the `runmat_filesystem` provider, whose futures are not `Send` (a
+/// browser provider awaits JavaScript promises). The native server's request handlers must stay
+/// `Send`, so it drives the check to completion off the async runtime and awaits only the
+/// thread's result.
+async fn check_study(
+    source: String,
+    path: PathBuf,
+    workspace_roots: Vec<PathBuf>,
+    source_overlays: Arc<BTreeMap<PathBuf, String>>,
+    compat: crate::core::analysis::CompatMode,
+) -> Result<FeaDocumentAnalysis, String> {
+    tokio::task::spawn_blocking(move || {
+        futures::executor::block_on(analyze_fea_source(
+            &source,
+            &path,
+            &workspace_roots,
+            &source_overlays,
+            compat,
+        ))
+    })
+    .await
+    .map_err(|error| format!("the FEA check stopped: {error}"))?
 }
 
 fn workspace_fea_paths(roots: &[PathBuf]) -> Result<Vec<PathBuf>, String> {

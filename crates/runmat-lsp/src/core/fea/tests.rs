@@ -495,3 +495,32 @@ fn the_deepest_workspace_root_holding_the_study_wins() {
     assert_eq!(fea_source_root(&study, &roots, None), simulation);
     assert_eq!(fea_source_root(&study, &roots[..1], None), project);
 }
+
+/// A study in `simulation/` may mesh a part in another folder of the project: the path climbs
+/// out of the study's folder but stays inside the project root. One more `..` leaves the root.
+#[test]
+fn a_study_in_a_subfolder_meshes_a_part_elsewhere_in_the_project() {
+    let (_temporary, project, study) = project_with_study_folder();
+    let body = project.join("mechanical").join("body");
+    std::fs::create_dir_all(&body).unwrap();
+    std::fs::write(body.join("landing_skid.part"), "part landing_skid {}\n").unwrap();
+    let escapes = |part: &str| {
+        let source = format!("geometry skid {{\n    file = \"{part}\"\n    units = mm\n}}\n");
+        let analysis = check_in_roots(&source, &study, std::slice::from_ref(&project)).unwrap();
+        let diagnostics = analysis.diagnostics(&source);
+        let escaped = diagnostics.iter().any(|diagnostic| {
+            diagnostic.code
+                == Some(lsp_types::NumberOrString::String(
+                    "fea.inspection.invalid_geometry_path".into(),
+                ))
+                && diagnostic
+                    .message
+                    .contains("escapes the declared source root")
+        });
+        (escaped, diagnostics)
+    };
+    let (escaped, diagnostics) = escapes("../mechanical/body/landing_skid.part");
+    assert!(!escaped, "{diagnostics:#?}");
+    let (escaped, diagnostics) = escapes("../../mechanical/body/landing_skid.part");
+    assert!(escaped, "{diagnostics:#?}");
+}

@@ -11,7 +11,6 @@ use runmat_types::physical::{
 };
 
 use super::design::{design_dialect, DesignDocumentAnalysis, DesignFiles, DesignValues};
-use super::fea::FeaDocumentAnalysis;
 use super::position::position_to_offset;
 
 const LAYOUT: &str =

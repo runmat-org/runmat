@@ -26,7 +26,8 @@ const STEEL: &str = r#"material steel {
 }
 "#;
 
-/// `/cloud/project/materials.fea` and `/cloud/outside.fea`, above the project.
+/// `/cloud/project/materials.fea`, a part under `/cloud/project/mechanical/`, and
+/// `/cloud/outside.fea`, above the project.
 fn cloud_files() -> Arc<MemoryFsProvider> {
     let provider = MemoryFsProvider::new();
     provider
@@ -37,6 +38,12 @@ fn cloud_files() -> Arc<MemoryFsProvider> {
         .unwrap();
     provider
         .write_project_path("/materials.fea", STEEL.as_bytes())
+        .unwrap();
+    provider
+        .write_project_path(
+            "/cloud/project/mechanical/body/landing_skid.part",
+            b"part landing_skid {}\n",
+        )
         .unwrap();
     Arc::new(provider)
 }
@@ -133,6 +140,53 @@ fn without_roots_a_cloud_study_resolves_from_the_provider_root() {
             refused(&analysis, source),
             "{:#?}",
             analysis.diagnostics(source)
+        );
+    });
+}
+
+/// A study at `simulation/skid.fea` that meshes `../mechanical/body/landing_skid.part`.
+fn skid_study(part: &str) -> String {
+    format!("geometry skid {{\n    file = \"{part}\"\n    units = mm\n}}\n")
+}
+
+/// Whether the study's geometry `file =` was refused as escaping its source root.
+fn geometry_escapes(analysis: &FeaDocumentAnalysis, source: &str) -> bool {
+    analysis.diagnostics(source).iter().any(|diagnostic| {
+        diagnostic.code
+            == Some(NumberOrString::String(
+                "fea.inspection.invalid_geometry_path".into(),
+            ))
+            && diagnostic
+                .message
+                .contains("escapes the declared source root")
+    })
+}
+
+#[test]
+fn a_study_in_a_subfolder_meshes_a_part_elsewhere_in_the_project() {
+    with_cloud_files(|| {
+        let source = skid_study("../mechanical/body/landing_skid.part");
+        let analysis = check(
+            &source,
+            "/cloud/project/simulation/skid.fea",
+            &[PathBuf::from("/cloud/project")],
+        );
+        assert!(
+            !geometry_escapes(&analysis, &source),
+            "{:#?}",
+            analysis.diagnostics(&source)
+        );
+
+        let source = skid_study("../../mechanical/body/landing_skid.part");
+        let analysis = check(
+            &source,
+            "/cloud/project/simulation/skid.fea",
+            &[PathBuf::from("/cloud/project")],
+        );
+        assert!(
+            geometry_escapes(&analysis, &source),
+            "{:#?}",
+            analysis.diagnostics(&source)
         );
     });
 }

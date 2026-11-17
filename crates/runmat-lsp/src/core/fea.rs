@@ -309,9 +309,9 @@ fn filesystem_root(path: &Path) -> PathBuf {
 /// Every file the study reads (imported modules, imported `.m` functions, geometry, the project
 /// manifest) comes from `source_overlays` (open editor buffers) or else through the installed
 /// `runmat_filesystem` provider, so a host that installs a project provider (a cloud project's
-/// virtual paths) gets that project's files. Reads use the provider's async API; only a native
-/// server's part and assembly regeneration reads synchronously, through the same provider.
-/// Relative paths resolve within the folder `fea_source_root` picks.
+/// virtual paths) gets that project's files. Every read uses the provider's async API, the
+/// files of a part or assembly the study meshes included. Relative paths resolve within the
+/// folder `fea_source_root` picks.
 pub async fn analyze_fea_source(
     source: &str,
     physical_path: &Path,
@@ -319,7 +319,9 @@ pub async fn analyze_fea_source(
     source_overlays: &BTreeMap<PathBuf, String>,
     compat: super::analysis::CompatMode,
 ) -> Result<FeaDocumentAnalysis, String> {
-    let project = enclosing_project(physical_path).await;
+    let project =
+        super::project::ProjectContext::discover_from_source_name_async(physical_path.to_str())
+            .await;
     let source_root = fea_source_root(physical_path, workspace_roots, project.as_ref());
     let mut prepared =
         prepare_fea_snapshot(source, physical_path, &source_root, source_overlays).await?;
@@ -342,8 +344,11 @@ pub async fn analyze_fea_source(
         if runmat_runtime::geometry::design_source::is_design_geometry(
             request.logical_path.as_str(),
         ) {
-            // A regeneration failure is reported by the check at the geometry's `file =`.
-            match design_geometry(&path).await {
+            // A regeneration failure is reported by the check at the geometry's `file =`. An
+            // open editor buffer stands in for the design's own file.
+            let text = source_overlays.get(&path).map(String::as_bytes);
+            match runmat_runtime::geometry::design_source::design_geometry_async(&path, text).await
+            {
                 Ok(bytes) => prepared.add_geometry(request.logical_path, bytes)?,
                 Err(error) => prepared.add_geometry_failure(request.logical_path, error),
             }
@@ -354,18 +359,6 @@ pub async fn analyze_fea_source(
     prepared
         .check(facts.functions, facts.profiles)
         .map(|checked| FeaDocumentAnalysis::from_checked(checked, facts.function_sources))
-}
-
-/// The frozen project that holds the study. The browser server checks studies without project
-/// facts; its host names the project's root with `setWorkspaceRoots`.
-#[cfg(not(target_arch = "wasm32"))]
-async fn enclosing_project(path: &Path) -> Option<super::project::ProjectContext> {
-    super::project::ProjectContext::discover_from_source_name_async(path.to_str()).await
-}
-
-#[cfg(target_arch = "wasm32")]
-async fn enclosing_project(_path: &Path) -> Option<super::project::ProjectContext> {
-    None
 }
 
 /// The study's module graph, with each module read from `source_overlays` or else through the
@@ -405,22 +398,6 @@ pub(crate) async fn prepare_fea_snapshot(
         }
     }
     snapshot.prepare()
-}
-
-/// The exact geometry of the part or assembly at `path`. A native server regenerates it on the
-/// in-process kernel, reading the design's files through the provider; the browser server has no
-/// design kernel.
-#[cfg(not(target_arch = "wasm32"))]
-async fn design_geometry(path: &Path) -> Result<Vec<u8>, String> {
-    runmat_runtime::geometry::design_source::read_design_geometry(path)
-}
-
-#[cfg(target_arch = "wasm32")]
-async fn design_geometry(path: &Path) -> Result<Vec<u8>, String> {
-    Err(format!(
-        "the browser language server cannot regenerate design geometry `{}`",
-        path.display()
-    ))
 }
 
 fn token_at(syntax: &FeaSyntaxModule, source: &str, position: &Position) -> Option<FeaToken> {

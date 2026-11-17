@@ -92,7 +92,8 @@ runmat_thread_local! {
 
 runmat_thread_local! {
     /// The folders a `.fea` study's relative paths may reach, as the host supplied them with
-    /// `setWorkspaceRoots`. Empty means the filesystem root, as in the runtime check.
+    /// `setWorkspaceRoots`. Empty means the enclosing project's folder, else the filesystem
+    /// root, as in the runtime check.
     static WORKSPACE_ROOTS: RefCell<Vec<PathBuf>> = const { RefCell::new(Vec::new()) };
 }
 
@@ -529,7 +530,8 @@ pub fn set_design_pending(uri: String, paths: JsValue) -> Result<JsValue, JsValu
 /// `file =`) may reach. A study resolves within the deepest root that holds it, so with the
 /// project root set, `simulation/x.fea` may read `../part.part` but not a file above the project.
 /// `uris` is an array of `file://` folder URIs (the LSP `rootUri` and `workspaceFolders`); an
-/// empty array restores the default, the filesystem root `/`, which the runtime check also uses.
+/// empty array restores the default: the folder of the frozen project that holds the study, else
+/// the filesystem root `/`, which the runtime check also uses.
 /// The host checks open `.fea` documents again (`analyze_document`) after a change.
 #[wasm_bindgen(js_name = "setWorkspaceRoots")]
 pub fn set_workspace_roots(uris: JsValue) -> Result<JsValue, JsValue> {
