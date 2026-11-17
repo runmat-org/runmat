@@ -4,6 +4,8 @@
 use std::sync::{Arc, Mutex};
 
 use runmat_analysis_execution::ImportedSourceMeshingRequest;
+use runmat_analysis_fea::progress::meshing::{MESHING_OPERATION, STAGE_METADATA};
+use runmat_analysis_fea::progress::rate::UNIT_METADATA;
 use runmat_analysis_fea::{FeaProgressEvent, FeaProgressPhase, FeaProgressStatus};
 use runmat_cad::regen::kernel::{ExchangeDocument, ExchangeFormat, ExchangePart};
 use runmat_cad_wasm::runtime::regenerate_part;
@@ -89,7 +91,7 @@ fn mesh_request(step: Vec<u8>) -> String {
 }
 
 fn unit(event: &FeaProgressEvent) -> &str {
-    event.metadata.get("unit").map(String::as_str).unwrap_or("")
+    event.metadata.get(UNIT_METADATA).map(String::as_str).unwrap_or("")
 }
 
 #[test]
@@ -113,13 +115,19 @@ fn a_mesh_request_sends_live_counts_while_it_meshes() {
     for event in &events {
         assert_eq!(event.phase, FeaProgressPhase::MeshPrep);
         assert_eq!(event.status, FeaProgressStatus::Advanced);
-        assert_eq!(event.operation, "fea.meshing");
+        assert_eq!(event.operation, MESHING_OPERATION);
     }
     let faces: Vec<_> = events
         .iter()
         .filter(|e| unit(e) == "surface_faces")
         .collect();
     assert!(!faces.is_empty(), "no face counts: {events:?}");
+    for event in &faces {
+        assert_eq!(
+            event.metadata.get(STAGE_METADATA).map(String::as_str),
+            Some("surface_mesh")
+        );
+    }
     // Counts across the two face partitions add up and never go backwards.
     for pair in faces.windows(2) {
         assert!(pair[1].current >= pair[0].current, "{faces:?}");
