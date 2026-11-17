@@ -346,6 +346,7 @@ jobs:
           npm test
           npm run test:pinned-wasm
           npm run test:fea-assessments:wasm
+          npm run test:log-bridge:wasm
 
       - name: Accept exact browser product in Chrome workers
         env:
