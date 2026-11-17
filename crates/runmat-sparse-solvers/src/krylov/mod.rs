@@ -204,6 +204,8 @@ pub struct SyncOps<'a, T: Scalar> {
     pub operator: &'a dyn LinearOperator<T>,
     pub preconditioner: Option<&'a dyn Preconditioner<T>>,
     pub control: SolveControl<'a>,
+    /// Trace spans of this solve's iteration batches.
+    batches: crate::trace::IterationBatches,
 }
 
 impl<T: Scalar> KrylovOps<T> for SyncOps<'_, T> {
@@ -246,6 +248,7 @@ impl<T: Scalar> KrylovOps<T> for SyncOps<'_, T> {
     }
     async fn checkpoint(&mut self, iteration: usize, relative_residual: f64) -> SolverResult<()> {
         self.control.check()?;
+        self.batches.observe(iteration, relative_residual);
         self.control
             .report_iteration(ProgressPhase::Krylov, iteration, relative_residual);
         Ok(())
@@ -280,6 +283,7 @@ pub fn minres<T: Scalar>(
         operator,
         preconditioner,
         control,
+        batches: Default::default(),
     };
     block_on(minres_async(&mut ops, b, x, options, &mut work))
 }
@@ -299,6 +303,7 @@ pub fn bicgstab<T: Scalar>(
         operator,
         preconditioner,
         control,
+        batches: Default::default(),
     };
     block_on(bicgstab_async(&mut ops, b, x, options, &mut work))
 }

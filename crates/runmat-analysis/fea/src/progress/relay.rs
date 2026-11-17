@@ -6,7 +6,10 @@
 //! the phase's last count and message and adds `heartbeat = "true"` and `elapsedMs` (time since
 //! the phase started). A host can then tell a phase that is still working from one that stopped
 //! reporting. Native hosts call [`ProgressRelay::spawn_heartbeat`] to send heartbeats from a
-//! background thread; a browser host calls `heartbeat` from its own timer.
+//! background thread; a browser host calls `heartbeat` from its own timer, every
+//! [`HEARTBEAT_POLL_INTERVAL`](crate::progress::rate::HEARTBEAT_POLL_INTERVAL). TypeScript
+//! reads that interval as `FEA_PROGRESS_HEARTBEAT_POLL_INTERVAL_MS` from the generated FEA
+//! contracts.
 use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex};
 
@@ -137,7 +140,7 @@ impl ProgressRelay {
             .name("runmat-fea-progress-heartbeat".into())
             .spawn(move || {
                 while let Err(std::sync::mpsc::RecvTimeoutError::Timeout) =
-                    stopped.recv_timeout(HEARTBEAT_POLL_INTERVAL)
+                    stopped.recv_timeout(super::rate::HEARTBEAT_POLL_INTERVAL)
                 {
                     relay.heartbeat();
                 }
@@ -149,10 +152,6 @@ impl ProgressRelay {
         }
     }
 }
-
-/// How often the heartbeat thread checks for a quiet phase.
-#[cfg(not(target_arch = "wasm32"))]
-const HEARTBEAT_POLL_INTERVAL: std::time::Duration = std::time::Duration::from_millis(250);
 
 /// Stops the heartbeat thread when dropped.
 #[cfg(not(target_arch = "wasm32"))]

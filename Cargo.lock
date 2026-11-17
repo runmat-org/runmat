@@ -9291,6 +9291,7 @@ dependencies = [
  "thiserror 1.0.69",
  "tokio",
  "tracing",
+ "tracing-subscriber",
  "url",
  "uuid",
  "wasm-bindgen",
@@ -9381,6 +9382,7 @@ dependencies = [
  "runmat-cpu-execution",
  "runmat-simulation-usage",
  "thiserror 1.0.69",
+ "tracing",
 ]
 
 [[package]]
