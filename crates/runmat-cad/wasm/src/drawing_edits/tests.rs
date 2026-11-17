@@ -576,3 +576,46 @@ fn sheet_picks_parse_as_the_desktop_names_them() {
     assert!(parse_pick("point:x,1").is_err());
     assert!(parse_pick("not a reference (").is_err());
 }
+
+/// Standard 3 view on an empty sheet: the views land where the layout keeps them, so the new
+/// sheet has no findings (the starter's spacing once left two "view moved" notes on Sheet 1).
+#[test]
+fn standard_three_view_leaves_no_layout_findings() {
+    // The Desktop's UI flows draw this 80 x 50 x 10 mm plate.
+    const PLATE: &str = "runmat 0.7\nstd 1\n\npart plate {\n    sketch sketch1 on origin.xy {\n        l1 = line(start = [0 mm, 0 mm], end = [80 mm, 0 mm])\n        l2 = line(start = [80 mm, 0 mm], end = [80 mm, 50 mm])\n        l3 = line(start = [80 mm, 50 mm], end = [0 mm, 50 mm])\n        l4 = line(start = [0 mm, 50 mm], end = [0 mm, 0 mm])\n    }\n    feature extrude1 = extrude(profile = sketch.sketch1, distance = 10 mm)\n}\n";
+    for (model, scale, projection) in [
+        ("plate.part", "1:2", "third"),
+        ("bracket.part", "1:2", "third"),
+        ("bracket.part", "1:1", "third"),
+        ("bracket.part", "1:2", "first"),
+    ] {
+        let mut b = Bench::new();
+        b.files.insert("/p/plate.part".to_owned(), PLATE.to_owned());
+        b.run(
+            "drawing.standard-3",
+            json!({ "model": model, "scale": scale, "projection": projection }),
+            &[],
+        );
+        // The projected views draw at the front view's scale, as projected views do.
+        let d = b.document();
+        let front = d.view("front").unwrap().scale;
+        assert_eq!(
+            d.view("top").unwrap().scale,
+            front,
+            "{model} {scale}: top's scale"
+        );
+        assert_eq!(
+            d.view("right").unwrap().scale,
+            front,
+            "{model} {scale}: right's scale"
+        );
+        let out = b.compiled();
+        let sheet = &out["projection"]["data"]["layouts"]["1"];
+        assert_eq!(
+            sheet["findings"],
+            json!([]),
+            "{model} {scale} {projection}: findings on a new sheet\n{}",
+            b.text
+        );
+    }
+}

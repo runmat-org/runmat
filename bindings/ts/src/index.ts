@@ -1,5 +1,6 @@
 export { physicalLengthUnit, physicalLengthUnitName, isPhysicalLengthUnit, resolvedSourceLengthUnit, sourceLengthUnitLabel, PHYSICAL_LENGTH_UNITS } from "./physical.js";
 export type { LengthUnit, LengthUnitEvidence } from "./physical.js";
+import type { LengthUnit } from "./physical.js";
 import { resolveNativeRuntimeSettings, editNativeUserRuntimeSettings } from "./settings.js";
 import type { HostRuntimeSettings, ResolvedRuntimeSettings, UserRuntimeSettingsEdit, RuntimeSettingsNativeExports, PreparedClusterProgram } from "./settings.js";
 export type { HostRuntimeSettings, ResolvedRuntimeSettings, RuntimeSettingsConfig, RuntimeSettingSource, UserRuntimeSettingsEdit, SettingsJsonValue, PreparedClusterProgram } from "./settings.js";
@@ -1195,7 +1196,8 @@ export interface GeometryAssetSummary {
   source: GeometrySourceSummary;
   sourceGeometry: GeometrySourceGeometrySummary;
   tessellationProfile: GeometryTessellationProfileSummary;
-  units: string;
+  /** The length unit of the preview's coordinates (scene positions, mesh bounds, picks); null when the source's physical scale is unresolved. */
+  coordinateUnits: LengthUnit | null;
   meshes: GeometryMeshSummary[];
   mappingSummary: GeometryRegionMappingSummary;
   cad: GeometryCadSummary;
@@ -1240,6 +1242,17 @@ export interface RunMatSessionHandle {
   workspaceSnapshot(): Promise<WorkspaceSnapshot>;
   inspectDataFile(path: string): Promise<WorkspaceEntry[]>;
   previewGeometry(path: string, budget?: GeometryPreviewBudget | null): Promise<GeometryPreviewResult>;
+  /**
+   * The geometry a study in `path` analyzes, with the study's materialized regions. With
+   * `checkedRevision`, the preview uses that checked product of `path`; otherwise it checks
+   * `path` first. Generated or derived geometry refuses in the browser.
+   */
+  previewFeaStudyGeometry(
+    path: string,
+    studyId: string,
+    budget?: GeometryPreviewBudget | null,
+    checkedRevision?: FeaSourceCheckResult["revision"] | null,
+  ): Promise<GeometryPreviewResult>;
   disposeGeometryPreview?(
     figureHandle?: number | null,
     geometrySceneHandle?: number | null,
@@ -1349,6 +1362,12 @@ interface RunMatNativeSession extends ProjectEntrypointSessionExports {
   workspaceSnapshot?: () => WorkspaceSnapshot;
   inspectDataFile?: (path: string) => WorkspaceEntry[] | Promise<WorkspaceEntry[]>;
   previewGeometry?: (path: string, budget?: GeometryPreviewBudget | null) => GeometryPreviewResult | Promise<GeometryPreviewResult>;
+  previewFeaStudyGeometry?: (
+    path: string,
+    studyId: string,
+    budget: GeometryPreviewBudget | null,
+    checkedRevision: FeaSourceCheckResult["revision"] | null,
+  ) => GeometryPreviewResult | Promise<GeometryPreviewResult>;
   disposeGeometryPreview?: (
     figureHandle?: number | null,
     geometrySceneHandle?: number | null,
@@ -1561,6 +1580,8 @@ export interface GeometryScenePresentationState {
   hoveredRegionId?: string | null;
   regionHighlights?: GeometrySceneRegionHighlightState[];
   regionAnnotations?: GeometrySceneRegionAnnotationState[];
+  /** Measured dimensions the renderer draws in the model: a line with its value at the middle. */
+  dimensions?: GeometrySceneDimensionState[];
   displayMode?: GeometrySceneDisplayMode;
   edgeOverlayEnabled?: boolean;
   showGrid?: boolean;
@@ -1574,6 +1595,20 @@ export interface GeometryScenePresentationState {
   edgeWidthPx?: number | null;
   /** The 3D view's projection: with perspective, or parallel (orthographic). Unset keeps it. */
   projection?: "perspective" | "orthographic" | null;
+}
+
+/** A dimension in the model: a line between two scene points, with `label` at its middle. */
+export interface GeometrySceneDimensionState {
+  from: [number, number, number];
+  to: [number, number, number];
+  label: string;
+  /** RGBA 0..1 for the line, its end dots and the label border; unset uses the selection color. */
+  color?: [number, number, number, number] | null;  /**
+   * Extension lines, each `[point on the measured item, dimension-line end]`: they carry a
+   * dimension line that stands off its item back to the item's outline. Drawn thinner than the
+   * dimension line, with a small gap at the item (ISO 129-1).
+   */
+  extensionLines?: [[number, number, number], [number, number, number]][];
 }
 
 export type GeometrySceneTopologySelectionState =
@@ -1593,8 +1628,16 @@ export interface GeometryScenePickResult {
   vertexIndices?: [number, number, number];
   barycentricCoordinates?: [number, number, number];
   topologySelection?: GeometrySceneTopologySelectionState;
+  /** Unit normal of the hit triangle in scene coordinates; absent for a degenerate triangle. */
+  normal?: [number, number, number];
   /** The owner nodes (bodies, assembly components) of what was hit, outermost first. */
   ownerNodeIds?: string[];
+  /**
+   * A face pick's planar face: the hit region's triangles in the hit triangle's plane, x, y, z
+   * of each corner in scene coordinates. Measure draws two parallel faces' normal distance
+   * between points on them. Absent for edge and point picks and instanced placements.
+   */
+  faceTriangles?: number[];
 }
 
 
@@ -2689,6 +2732,21 @@ class WebRunMatSession implements RunMatSessionHandle {
       throw new Error("The loaded runmat-wasm module does not expose previewGeometry yet.");
     }
     return normalizeWasmStructuredValue(await this.native.previewGeometry(path, budget ?? null)) as GeometryPreviewResult;
+  }
+
+  async previewFeaStudyGeometry(
+    path: string,
+    studyId: string,
+    budget?: GeometryPreviewBudget | null,
+    checkedRevision?: FeaSourceCheckResult["revision"] | null,
+  ): Promise<GeometryPreviewResult> {
+    this.ensureActive();
+    if (typeof this.native.previewFeaStudyGeometry !== "function") {
+      throw new Error("The loaded runmat-wasm module does not expose previewFeaStudyGeometry; rebuild the browser runtime assets.");
+    }
+    return normalizeWasmStructuredValue(
+      await this.native.previewFeaStudyGeometry(path, studyId, budget ?? null, checkedRevision ?? null),
+    ) as GeometryPreviewResult;
   }
 
   async disposeGeometryPreview(

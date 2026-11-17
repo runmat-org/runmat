@@ -360,6 +360,14 @@ fn collect_registry_source_files(
     for entry in entries {
         let path = entry.path();
         let label = label_dir.join(entry.file_name());
+        // These unit-test sources are excluded from the published crate. They
+        // do not register builtins in a normal Wasm build, so including them
+        // would make the registry identity depend on repository-only files.
+        let name = entry.file_name();
+        let name = name.to_string_lossy();
+        if name == "tests" || name == "tests.rs" || name.ends_with("_tests.rs") {
+            continue;
+        }
         if path.is_dir() {
             collect_registry_source_files(&path, &label, inputs);
             continue;
@@ -385,4 +393,44 @@ fn wasm_registry_fingerprint(inputs: &[(String, PathBuf)]) -> String {
         hash.update(&bytes);
     }
     format!("sha256:{}", hex::encode(hash.finalize()))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn registry_identity_uses_production_sources_without_packaged_out_tests() {
+        let unique = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let root = env::temp_dir().join(format!("runmat-registry-{}-{unique}", std::process::id()));
+        let runtime = root.join("runmat-runtime");
+        let builtins = runtime.join("src/builtins");
+        fs::create_dir_all(builtins.join("math/tests")).unwrap();
+        fs::create_dir_all(root.join("runmat-macros/src")).unwrap();
+        fs::write(root.join("runmat-macros/src/lib.rs"), "macro input").unwrap();
+        fs::write(builtins.join("math/production.rs"), "production input").unwrap();
+        let inputs = wasm_registry_fingerprint_inputs(&runtime);
+        let fingerprint = wasm_registry_fingerprint(&inputs);
+        for path in ["tests.rs", "math/owner_tests.rs", "math/tests/fixture.rs"] {
+            fs::write(builtins.join(path), "repository-only test").unwrap();
+        }
+        fs::write(
+            builtins.join("generated_wasm_registry.rs"),
+            "generated output",
+        )
+        .unwrap();
+        let packaged_inputs = wasm_registry_fingerprint_inputs(&runtime);
+        assert_eq!(inputs, packaged_inputs);
+        assert_eq!(fingerprint, wasm_registry_fingerprint(&packaged_inputs));
+        fs::write(
+            builtins.join("math/production.rs"),
+            "changed production input",
+        )
+        .unwrap();
+        assert_ne!(fingerprint, wasm_registry_fingerprint(&packaged_inputs));
+        fs::remove_dir_all(root).unwrap();
+    }
 }

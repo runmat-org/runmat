@@ -1,6 +1,6 @@
 ---
-description: Build a product family in RunMat MCAD. Give one part several configurations with their own sizes, suppressed features and part numbers, make left- and right-hand versions, place each configuration in an assembly, and export and draw every member of the family.
-keywords: [product family, configurations, design table, dash numbers, part numbers, suppress feature, left hand, right hand, opposite hand, mirror, family of parts]
+description: Build a product family in RunMat MCAD. Give one part several configurations with their own sizes, suppressed features and part numbers, make left- and right-hand versions, place each configuration in an assembly, give the assembly its own configurations and display states, and export and draw every member of the family.
+keywords: [product family, configurations, design table, dash numbers, part numbers, suppress feature, left hand, right hand, opposite hand, mirror, family of parts, assembly configuration, display state]
 ---
 # Product families and configurations
 
@@ -109,6 +109,35 @@ runmat design export angle_bracket.part --format step --all-configurations --out
 `--all-configurations` writes one STEP file per member. A drawing's title block reads the part number and description of the configuration it shows, so the same `.drawing` exported as DXF with `--all-configurations` writes every sheet once per member, each with its own part number.
 
 To try a size without adding a member, use a run instead: `design.inspect` with `set` regenerates the part at the given input values and leaves the file unchanged. See [Scripting and sweeps](/docs/mcad/scripting).
+
+## 6. Configurations and display states of an assembly
+
+An assembly has configurations of its own. Each one sets some of the assembly's inputs and can suppress components. A display state changes only what the view shows: it hides components and leaves the BOM, mass properties and studies as they are.
+
+```assembly file=rack.assembly
+runmat 0.7
+std 1
+
+assembly rack {
+    input spacing : length = 50 mm
+    use part angle_bracket as first
+    use part angle_bracket as second {
+        placement = { placement = offset, offset = { translation = [0 mm, input.spacing, 0 mm] } }
+    }
+    use part angle_bracket as spare {
+        placement = { placement = offset, offset = { translation = [0 mm, 150 mm, 0 mm] } }
+    }
+
+    configuration wide = { overrides = { spacing = 90 mm }, suppress = [spare] }
+    display_state no_spare = { hidden = [spare] }
+}
+```
+
+In this example, `wide` moves the second bracket to 90 mm and drops the spare from the assembly, its BOM and its mass. `no_spare` keeps the spare in the assembly and hides it in the view.
+
+To add or change one in the Desktop, run **Configurations and display states** (Manage tab). Choose **Configuration** or **Display state** and give it a name. A configuration takes its input values as `spacing = 90 mm, depth = 20 mm`, and each name must be one of the assembly's inputs. Pick the components it suppresses in **Suppressed components**. A display state takes **Hidden components** instead. Giving the name of an existing configuration or display state changes it in place.
+
+The Outline lists both kinds under **Configurations**. To edit one, open the Configurations command from its row. To remove one, delete its row. The document bar's **Configuration** menu switches the active configuration: the view, BOM, checks and exports follow it, and its row reads `(active)`. To apply a display state, run **Display state** from its row; **Visibility > Show all** shows every component again.
 
 ## Next
 

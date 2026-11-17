@@ -81,10 +81,30 @@ pub fn orientation<'a>(views: &'a Value, name: &str, depth: usize) -> &'a str {
     }
 }
 
+/// How the view `name` draws tangent edges: its own `tangent_edges`, else the default for its
+/// orientation (its own, or the one it is drawn from): thin in a pictorial view, hidden in an
+/// orthographic one ([`runmat_cad::drawing::TangentEdges::default_for`]).
+pub fn tangent_edges(views: &Value, name: &str) -> runmat_cad::drawing::TangentEdges {
+    use runmat_cad::drawing::{Orientation, TangentEdges};
+    let own = views
+        .as_array()
+        .and_then(|v| v.iter().find(|v| v["name"] == name))
+        .and_then(|v| serde_json::from_value::<TangentEdges>(v["tangent_edges"].clone()).ok());
+    own.unwrap_or_else(|| {
+        let orientation =
+            serde_json::from_value::<Orientation>(Value::from(orientation(views, name, 0)))
+                .unwrap_or(Orientation::Front);
+        TangentEdges::default_for(orientation)
+    })
+}
+
 #[derive(Clone, Debug, Default, PartialEq, Serialize)]
 pub struct ViewLines {
     pub visible: Vec<Vec<f64>>,
     pub hidden: Vec<Vec<f64>>,
+    /// Visible tangent edges a view draws as thin lines (`tangent_edges = thin`).
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub tangent: Vec<Vec<f64>>,
     /// Center marks and centerlines of holes, bosses and shafts.
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub centers: Vec<Center>,

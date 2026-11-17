@@ -113,6 +113,7 @@ pub(crate) struct RProjected {
     pub kind: u8,
     pub entity: u32,
     pub visible: bool,
+    pub smooth: bool,
     pub points: Vec<f64>,
 }
 
@@ -264,6 +265,7 @@ mod backend {
                     kind: p.kind,
                     entity: p.entity,
                     visible: p.visible,
+                    smooth: p.smooth,
                     points: p.points,
                 })
                 .collect(),
@@ -4475,6 +4477,7 @@ impl ExactQueries for OcctKernel {
                     }
                 },
                 visible: p.visible,
+                smooth: p.smooth,
                 polyline: p.points.chunks(2).map(|c| [c[0], c[1]]).collect(),
             })
             .collect())

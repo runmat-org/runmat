@@ -433,7 +433,8 @@ fn build_drive(
             }
         }
     }
-    let solved = sparse_direct::solve_real(free.len(), &entries, &rhs).map_err(invalid)?;
+    let solved = sparse_direct::solve_real(free.len(), &entries, &rhs, POTENTIAL_WORKSPACE)
+        .map_err(invalid)?;
     if solved.relative_residual > 1e-9 {
         return Err(MaxwellError::NotConverged(format!(
             "terminal unit potential residual {:e}",
@@ -561,7 +562,8 @@ fn closure_current(
             rhs[row] = -value;
         }
     }
-    let solved = sparse_direct::solve_real(free.len(), &entries, &rhs).map_err(invalid)?;
+    let solved = sparse_direct::solve_real(free.len(), &entries, &rhs, POTENTIAL_WORKSPACE)
+        .map_err(invalid)?;
     if solved.relative_residual > 1e-9 {
         return Err(MaxwellError::NotConverged(format!(
             "terminal closure potential residual {:e}",
@@ -588,6 +590,10 @@ fn closure_current(
         .filter(|value| value.vector != [0.0; 3])
         .collect())
 }
+
+/// Planning, the admitted solve and cold validation share this (admitted) LU policy.
+const POTENTIAL_WORKSPACE: runmat_sparse_solvers::direct::DirectWorkspacePolicy =
+    runmat_sparse_solvers::direct::DirectWorkspacePolicy::CallerOwned;
 
 fn dot(a: [f64; 3], b: [f64; 3]) -> f64 {
     a[0] * b[0] + a[1] * b[1] + a[2] * b[2]

@@ -85,6 +85,7 @@ fn part_pass(path: &str, text: &str) -> Value {
     };
     let ctx = RegenContext {
         kernel: kernel.as_ref(),
+        tessellator: Some(kernel.as_ref()),
         solver: &ConstraintSketchSolver,
         units: &Units,
         dynamic: &NoDynamicValues,
@@ -128,7 +129,7 @@ fn part_pass(path: &str, text: &str) -> Value {
         "slowest": features.iter().take(6).map(|(id, kind, ms)| json!([id, kind, (ms * 10.0).round() / 10.0])).collect::<Vec<_>>(),
         "triangles": triangles,
         "level_triangles": level_triangles,
-        "volume_m3": mass.as_ref().map(|m| m.total.volume),
+        "volume_m3": mass.as_ref().map(|m| m.volume),
         "bounds": display.bounds.as_ref().map(|b| json!({ "min": b.min, "max": b.max })),
         "errors": result.diagnostics.diagnostics.iter().filter(|d| d.severity == runmat_cad::diagnostics::Severity::Error).map(|d| d.message.clone()).collect::<Vec<_>>(),
     })

@@ -118,9 +118,59 @@ pub(super) fn weldments() -> Vec<CommandDescriptor> {
             .when(has(Facet::Weldments))
             .edit(analyze("cut_list")),
         cmd("weldment.profile-library", "Profile library", "library", P)
-            .desc("Browse and add structural profiles.")
-            .inputs(vec![text("library", "Library", Some("company/profiles"))])
-            .edit(edit(EditOp::Set, Section::Settings).item("profile_library")),
+            .desc(
+                "Place members in a standard size or a project profile, or save a sketch as a \
+                 custom profile.",
+            )
+            .kw(&[
+                "weldment",
+                "profile",
+                "ipe",
+                "hea",
+                "heb",
+                "pipe",
+                "schedule 40",
+                "custom profile",
+            ])
+            .inputs(vec![
+                radio(
+                    "action",
+                    "Action",
+                    &[("place", "Place members"), ("save", "Save sketch as profile")],
+                ),
+                suggested_text("profile", "Profile", Some("IPE 200"), Suggest::Profiles)
+                    .help("A standard size (IPE, HEA, HEB, NPS Sch 40), a project profile, or sketch.<name> in this part")
+                    .shown("action", &["place"]),
+                picks("segments", "Path segments", &[K::SketchEntity, K::Sketch])
+                    .shown("action", &["place"]),
+                choice(
+                    "material",
+                    "Material",
+                    &[
+                        ("s235", "Steel S235"),
+                        ("al_6061", "Aluminum 6061"),
+                        ("stainless_304", "Stainless 304"),
+                    ],
+                )
+                .shown("action", &["place"]),
+                choice(
+                    "corner",
+                    "Corner treatment",
+                    &[
+                        ("miter", "Miter"),
+                        ("butt1", "Butt (first)"),
+                        ("butt2", "Butt (second)"),
+                        ("none", "None"),
+                    ],
+                )
+                .shown("action", &["place"]),
+                angle("rotation", "Rotation", 0.0).shown("action", &["place"]),
+                pick("sketch", "Profile sketch", &[K::Sketch]).shown("action", &["save"]),
+                text("name", "Profile name", Some("z_rail")).shown("action", &["save"]),
+            ])
+            .when(has(Facet::Sketches))
+            .preview()
+            .edit(add_feature_variant("weldment", "weldment", "structural_member")),
     ]
 }
 

@@ -25,8 +25,11 @@ use crate::geom::{Coord, Point};
 use crate::layer_set::CopperIndex;
 use crate::layout::{Board, FabLimits, ItemId, Layer, NetId, ViaKind};
 use crate::library::PadKind;
-use runmat_rules::{AttrValue, Cascade, Dim, ItemGraph, PairCascade, PairRule, PseudoArg, Quantity, Rule, Schema, Selector, SelectorError, SourceKey, SourceOrder};
 use crate::units::RegistryUnits;
+use runmat_rules::{
+    AttrValue, Cascade, Dim, ItemGraph, PairCascade, PairRule, PseudoArg, Quantity, Rule, Schema,
+    Selector, SelectorError, SourceKey, SourceOrder,
+};
 use std::collections::{BTreeMap, BTreeSet};
 
 /// Item key in the board graph.
@@ -139,6 +142,9 @@ pub mod props {
     pub const SPOKE_WIDTH: &str = "spoke_width";
     pub const SPOKE_MIN: &str = "spoke_min";
     pub const ZONE_CONNECT: &str = "zone_connect";
+    /// How far a pad's solder-mask opening grows past the pad (negative shrinks it); a pad's
+    /// own mask margin wins, and 0.05 mm is the default under every rule.
+    pub const MASK_EXPANSION: &str = "mask_expansion";
     // Pair properties.
     pub const CLEARANCE: &str = "clearance";
     pub const HOLE_TO_HOLE: &str = "hole_to_hole";
@@ -146,6 +152,20 @@ pub mod props {
     pub const COURTYARD_CLEARANCE: &str = "courtyard_clearance";
     pub const EDGE_CLEARANCE: &str = "edge_clearance";
 }
+
+/// The kinds of rule Rules writes (`board.rules`), each with the property its value sets.
+/// Clearance and silk are pair properties, written `between` the selection and everything.
+pub const RULE_KINDS: &[(&str, &str)] = &[
+    ("clearance", props::CLEARANCE),
+    ("width", props::TRACK_WIDTH),
+    ("via", props::VIA_DIAMETER),
+    ("diff_pair", props::DIFF_GAP),
+    ("length", props::LENGTH_MAX),
+    ("impedance", props::IMPEDANCE),
+    ("plane", props::THERMAL_GAP),
+    ("mask", props::MASK_EXPANSION),
+    ("silk", props::SILK_CLEARANCE),
+];
 
 /// Whether `prop` is a pair property (a clearance between two items).
 pub fn is_pair_property(prop: &str) -> bool {
@@ -749,6 +769,7 @@ impl BoardRules {
         single.register_property(props::SPOKE_WIDTH, true, None);
         single.register_property(props::SPOKE_MIN, true, Some(RuleValue::Int(2)));
         single.register_property(props::ZONE_CONNECT, true, None);
+        single.register_property(props::MASK_EXPANSION, false, None);
         pair.set_default(props::CLEARANCE, RuleValue::Len(limits.min_clearance));
         pair.set_default(props::HOLE_TO_HOLE, RuleValue::Len(limits.min_hole_to_hole));
         pair.set_default(

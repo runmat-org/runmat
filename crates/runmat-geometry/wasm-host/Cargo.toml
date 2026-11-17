@@ -22,6 +22,7 @@ serde_json = { workspace = true }
 base64 = "0.22"
 
 runmat-analysis-execution = { workspace = true, features = ["occt-native"] }
+runmat-analysis-fea = { workspace = true }
 runmat-execution = { workspace = true }
 runmat-execution-artifact = { workspace = true }
 runmat-meshing-core = { workspace = true }

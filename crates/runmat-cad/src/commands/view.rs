@@ -47,11 +47,19 @@ pub(super) fn add(catalog: &mut Catalog) {
                 ],
             )])
             .edit(view_action("visibility")),
-        cmd("view.configuration", "Configuration", "configuration", &[Part])
+        cmd("view.configuration", "Configuration", "configuration", CAD_3D)
         .desc("Switch the active configuration.")
         .kw(&["config", "variant", "design table"])
         .inputs(vec![text("configuration", "Configuration", None)])
         .edit(view_action("configuration")),
+        cmd("view.display-state", "Display state", "visibility", &[Assembly])
+            .desc("Apply a display state: hide the components it hides and show the rest.")
+            .kw(&["display state", "hide", "show"])
+            .inputs(vec![text("state", "Display state", None)
+                .optional()
+                .help("Its name; empty applies the selected display state's row.")])
+            .on(&[K::DisplayState])
+            .edit(view_action("display_state")),
         cmd("view.front", "Front", "view-front", VIEW_3D)
             .desc("Look at the model from the front.")
             .edit(view_action("front")),
@@ -117,6 +125,16 @@ pub(super) fn add(catalog: &mut Catalog) {
         )])
         .edit(view_action("representation")),
         cmd(
+            "view.part-representation",
+            "Representation",
+            "representation",
+            &[Part],
+        )
+        .desc("Draw one of the part's analysis representations (defeatured, mid-surface, beam), or the full design.")
+        .kw(&["rep", "defeatured", "midsurface", "beam", "idealization"])
+        .inputs(vec![text("representation", "Representation", Some("full"))])
+        .edit(view_action("representation")),
+        cmd(
             "view.working-set",
             "Working set",
             "working-set",
@@ -133,8 +151,12 @@ pub(super) fn add(catalog: &mut Catalog) {
             .desc("Pick the product options and effectivity the assembly shows.")
             .kw(&["effectivity", "variant", "serial", "msn"])
             .inputs(vec![
-                text("options", "Options", Some("engine=b")),
-                text("effectivity", "Effectivity", Some("MSN 42")).optional(),
+                text("options", "Options", Some("engine=b")).optional().help(
+                    "Each option and the value to show, as `engine=b, cabin=lux`; options left out keep theirs.",
+                ),
+                text("effectivity", "Effectivity", Some("MSN 42")).optional().help(
+                    "The serial number to show, as `MSN 42` (or `LOT 3`).",
+                ),
             ])
             .edit(edit(EditOp::Set, Section::Options).item("active")),
     ];

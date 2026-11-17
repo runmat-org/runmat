@@ -175,7 +175,6 @@ impl<'a> PreparedStructuralTransientBasis<'a> {
             affine_constraint_reduction: forcing.affine_constraint_reduction,
             physical_load: forcing.physical_load,
             load_count: excitations.len(),
-            structural_material: self.initial.structural_material,
             thermo_mechanical: self.initial.thermo_mechanical.clone(),
             electro_thermal: self.initial.electro_thermal.clone(),
             operator,

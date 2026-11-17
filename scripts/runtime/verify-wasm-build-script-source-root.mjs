@@ -27,6 +27,9 @@ function sourceInputs(root) {
     for (const entry of entries) {
       const path = join(directory, entry.name);
       const label = `${labelDirectory}/${entry.name}`;
+      if (entry.name === "tests" || entry.name === "tests.rs" || entry.name.endsWith("_tests.rs")) {
+        continue;
+      }
       if (statSync(path).isDirectory()) {
         collect(path, label);
       } else if (entry.name.endsWith(".rs") && entry.name !== "generated_wasm_registry.rs") {

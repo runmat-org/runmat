@@ -74,6 +74,8 @@ pub(crate) mod bridge {
         kind: u8,
         entity: u32,
         visible: bool,
+        /// A model edge between two tangent (G1) faces, off the outline under this view.
+        smooth: bool,
         /// x, y pairs in the view frame.
         points: Vec<f64>,
     }

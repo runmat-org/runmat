@@ -444,7 +444,7 @@ where
                 b,
                 Some(&x),
                 tol,
-                Some(factor.as_ref()),
+                super::CholeskyFactor::Reuse(factor.as_ref()),
                 before_capacity,
             )
             .await
@@ -649,7 +649,7 @@ fn solve_prepared_operator_system(
         plan,
         strategy,
         block_size: 1,
-        factor: factor.as_deref(),
+        factor: super::CholeskyFactor::of(factor.as_deref(), admission),
         device,
     })
     .map_err(ScopedSpmvError::Usage)?;

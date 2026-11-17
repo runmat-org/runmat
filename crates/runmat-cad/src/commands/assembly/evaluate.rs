@@ -87,18 +87,19 @@ pub(super) fn evaluate() -> Vec<CommandDescriptor> {
             "assembly.visualization",
             "Assembly visualization",
             "visualization",
-            "Sort and color components by mass, cost or another property.",
+            "Sort and color components by mass, volume, cost or count.",
         )
         .inputs(vec![choice(
             "by",
             "Sort by",
             &[
                 ("mass", "Mass"),
+                ("volume", "Volume"),
                 ("cost", "Cost"),
-                ("rebuild", "Rebuild time"),
                 ("count", "Count"),
             ],
-        )])
+        )
+        .help("Cost reads each component's `cost` property, else its part's.")])
         .when(occurrences())
         .edit(analyze("visualization")),
         // Explode.
@@ -143,11 +144,12 @@ pub(super) fn evaluate() -> Vec<CommandDescriptor> {
             "explode.auto",
             "Auto-explode",
             "explode-auto",
-            "Explode the assembly automatically from its mates.",
+            "A new exploded view pulled apart along the mates, outermost component first.",
         )
         .inputs(vec![
+            text("name", "Name", Some("Auto explode")).optional(),
             length("spacing", "Spacing", 20.0),
-            flag("fasteners", "Fasteners with their holes", true),
+            flag("lines", "Explode lines", true),
         ])
         .when(occurrences())
         .preview()
@@ -166,32 +168,29 @@ pub(super) fn evaluate() -> Vec<CommandDescriptor> {
             "assembly.contacts",
             "Contact regions",
             "contact",
-            "Find touching faces between components and name them as contact regions.",
+            "Find touching faces between components and name them as contact regions; on a region's row, change whether it is bonded.",
         )
         .inputs(vec![
-            length("tolerance", "Gap tolerance", 0.05),
+            length("tolerance", "Gap tolerance", 0.05).help(
+                "Faces closer than this, facing each other and overlapping, are in contact.",
+            ),
             flag("bonded", "Treat as bonded", true),
         ])
         .when(occurrences())
+        .on(&[K::Contact])
         .edit(edit(EditOp::Add, Section::Regions).item("contact")),
         asm(
             "assembly.representation",
             "Representation per component",
             "representation",
-            "Choose each component's representation for studies.",
+            "Draw and check components as their full model or as their envelope box.",
         )
         .inputs(vec![
             picks("components", "Components", &[K::Occurrence]),
             choice(
                 "representation",
                 "Representation",
-                &[
-                    ("full", "Full"),
-                    ("envelope", "Envelope"),
-                    ("defeatured", "Defeatured"),
-                    ("mid_surface", "Mid-surface"),
-                    ("beam", "Beam"),
-                ],
+                &crate::assembly::model::Representation::offered_choices(),
             ),
         ])
         .when(selected(&[K::Occurrence]))

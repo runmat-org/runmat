@@ -1,0 +1,89 @@
+//! Metals: structural steels, aluminum, stainless steel, titanium and copper, each row one exact
+//! grade. No row carries a modulus temperature coefficient yet: the library takes one only from
+//! ASME BPVC Section II Part D's TM tables for the material group, or MMPDS for 6061-T6 and
+//! Ti-6Al-4V, read and cited for that exact grade. Until then a thermal preload study's check
+//! asks the person for it.
+use super::super::citations::{self as c};
+use super::super::{Cited, Material, MaterialCategory};
+
+const GPA: f64 = 1.0e9;
+const MPA: f64 = 1.0e6;
+const ROOM: Cited<crate::physical::kind::Temperature> = Cited::new(293.15, &c::ROOM_TEMPERATURE_20_C);
+
+const fn structural_steel(id: &'static str, label: &'static str, yield_mpa: f64) -> Material {
+    Material {
+        id,
+        label,
+        category: MaterialCategory::Metal,
+        mass_density: Cited::new(7850.0, &c::EN_1991_1_1_TABLE_A_4),
+        youngs_modulus: Cited::new(210.0 * GPA, &c::EN_1993_1_1_3_2_6),
+        poisson_ratio: Cited::new(0.3, &c::EN_1993_1_1_3_2_6),
+        expansion_coefficient: Cited::new(12.0e-6, &c::EN_1993_1_1_3_2_6),
+        conductivity: Cited::new(45.0, &c::EN_1993_1_2_3_4_1),
+        specific_heat: Cited::new(600.0, &c::EN_1993_1_2_3_4_1),
+        property_temperature: ROOM,
+        modulus_temperature_coefficient: None,
+        yield_strength: Some(Cited::new(yield_mpa * MPA, &c::EN_1993_1_1_TABLE_3_1)),
+    }
+}
+
+pub const MATERIALS: &[Material] = &[
+    structural_steel("steel_s275", "Structural steel S275", 275.0),
+    structural_steel("steel_s355", "Structural steel S355", 355.0),
+    Material {
+        id: "aluminum_6061_t6",
+        label: "Aluminum 6061-T6 (UNS A96061)",
+        category: MaterialCategory::Metal,
+        mass_density: Cited::new(2700.0, &c::ASM_HANDBOOK_VOL_2),
+        youngs_modulus: Cited::new(68.9 * GPA, &c::ASM_HANDBOOK_VOL_2),
+        poisson_ratio: Cited::new(0.33, &c::ASM_HANDBOOK_VOL_2),
+        expansion_coefficient: Cited::new(23.6e-6, &c::ASM_HANDBOOK_VOL_2),
+        conductivity: Cited::new(167.0, &c::ASM_HANDBOOK_VOL_2),
+        specific_heat: Cited::new(896.0, &c::ASM_HANDBOOK_VOL_2),
+        property_temperature: ROOM,
+        modulus_temperature_coefficient: None,
+        yield_strength: Some(Cited::new(276.0 * MPA, &c::ASM_HANDBOOK_VOL_2)),
+    },
+    Material {
+        id: "stainless_304",
+        label: "Stainless steel 304 (UNS S30400), annealed",
+        category: MaterialCategory::Metal,
+        mass_density: Cited::new(7900.0, &c::ATI_304_DATASHEET),
+        youngs_modulus: Cited::new(193.0 * GPA, &c::ASM_HANDBOOK_VOL_1),
+        poisson_ratio: Cited::new(0.29, &c::ASM_HANDBOOK_VOL_1),
+        expansion_coefficient: Cited::new(17.3e-6, &c::ASM_HANDBOOK_VOL_1),
+        conductivity: Cited::new(16.2, &c::ASM_HANDBOOK_VOL_1),
+        specific_heat: Cited::new(500.0, &c::ASM_HANDBOOK_VOL_1),
+        property_temperature: ROOM,
+        modulus_temperature_coefficient: None,
+        yield_strength: Some(Cited::new(205.0 * MPA, &c::ASTM_A240)),
+    },
+    Material {
+        id: "titanium_ti6al4v",
+        label: "Titanium Ti-6Al-4V (UNS R56400), annealed",
+        category: MaterialCategory::Metal,
+        mass_density: Cited::new(4430.0, &c::ASM_HANDBOOK_VOL_2),
+        youngs_modulus: Cited::new(113.8 * GPA, &c::ASM_HANDBOOK_VOL_2),
+        poisson_ratio: Cited::new(0.342, &c::ASM_HANDBOOK_VOL_2),
+        expansion_coefficient: Cited::new(8.6e-6, &c::ASM_HANDBOOK_VOL_2),
+        conductivity: Cited::new(6.7, &c::ASM_HANDBOOK_VOL_2),
+        specific_heat: Cited::new(526.3, &c::ASM_HANDBOOK_VOL_2),
+        property_temperature: ROOM,
+        modulus_temperature_coefficient: None,
+        yield_strength: Some(Cited::new(880.0 * MPA, &c::ASM_HANDBOOK_VOL_2)),
+    },
+    Material {
+        id: "copper_c11000",
+        label: "Copper C11000 (annealed)",
+        category: MaterialCategory::Metal,
+        mass_density: Cited::new(8890.0, &c::NBS_CIRCULAR_31_COPPER_DENSITY),
+        youngs_modulus: Cited::new(115.0 * GPA, &c::ASM_HANDBOOK_VOL_2),
+        poisson_ratio: Cited::new(0.31, &c::ASM_HANDBOOK_VOL_2),
+        expansion_coefficient: Cited::new(17.0e-6, &c::ASM_HANDBOOK_VOL_2),
+        conductivity: Cited::new(388.0, &c::ASM_HANDBOOK_VOL_2),
+        specific_heat: Cited::new(385.0, &c::ASM_HANDBOOK_VOL_2),
+        property_temperature: ROOM,
+        modulus_temperature_coefficient: None,
+        yield_strength: None,
+    },
+];

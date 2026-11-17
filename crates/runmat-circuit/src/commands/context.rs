@@ -35,24 +35,34 @@ pub(super) fn add(catalog: &mut Catalog) {
             .edit(edit(EditOp::Set, Section::Components).item("value")),
         cmd("circuit.swap-pins", "Swap pins/gates", "swap", CIRCUIT)
             .desc("Swap equivalent pins or gates to shorten routes; the schematic follows.")
-            .inputs(vec![radio(
-                "swap",
-                "Swap",
-                &[("pins", "Pins"), ("gates", "Gates")],
-            )])
+            .inputs(vec![
+                radio("swap", "Swap", &[("pins", "Pins"), ("gates", "Gates")]),
+                text("pins", "Pins", Some("1, 2"))
+                    .help("Two pins of one gate with the same swap group in the part.")
+                    .shown("swap", &["pins"]),
+                text("gates", "Gates", Some("A, B"))
+                    .help("Two gates with the same swap group in the part.")
+                    .shown("swap", &["gates"]),
+            ])
             .when(selected_one(one))
             .edit(edit(EditOp::Set, Section::Components).item("swap")),
         cmd("circuit.fitted", "Fitted", "variant", CIRCUIT)
             .desc("Fit, leave out or substitute the component in the current variant.")
-            .inputs(vec![choice(
-                "fitting",
-                "In this variant",
-                &[
-                    ("fitted", "Fitted"),
-                    ("not_fitted", "Not fitted"),
-                    ("alternate", "Alternate part"),
-                ],
-            )])
+            .inputs(vec![
+                choice(
+                    "fitting",
+                    "In this variant",
+                    &[
+                        ("fitted", "Fitted"),
+                        ("not_fitted", "Not fitted"),
+                        ("alternate", "Alternate part"),
+                    ],
+                ),
+                text("part", "Alternate part", Some("C0805-10U")).shown("fitting", &["alternate"]),
+                text("variant", "Variant", Some("lite"))
+                    .optional()
+                    .help("Empty: the variant being viewed, or the circuit's only variant."),
+            ])
             .when(selected(one))
             .edit(edit(EditOp::Set, Section::Components).item("fitting")),
         cmd(
@@ -66,7 +76,8 @@ pub(super) fn add(catalog: &mut Catalog) {
         .edit(view_action("locate")),
         cmd("circuit.net-class", "Net class", "net-class", CIRCUIT)
             .desc("Put the nets in a net class; its rules apply on the board.")
-            .inputs(vec![text("class", "Net class", Some("power"))])
+            .inputs(vec![text("class", "Net class", Some("power"))
+                .help("A class the circuit doesn't have yet is added; default takes the nets out of their class.")])
             .when(selected(&[K::Net]))
             .edit(edit(EditOp::Set, Section::Nets).item("class")),
         cmd("circuit.rename-net", "Rename", "rename", CIRCUIT)
@@ -106,7 +117,7 @@ pub(super) fn add(catalog: &mut Catalog) {
         "change-part",
         "Change part",
         "replace",
-        vec![labeled("circuit.change-part", "From the pool…")],
+        vec![labeled("circuit.change-part", "Change part…")],
     );
     let footprint = menu(
         "footprint",
@@ -183,6 +194,22 @@ pub(super) fn add(catalog: &mut Catalog) {
                 ],
                 vec![c("simulate.probe-pin")],
                 vec![c("design.copy-reference")],
+            ],
+        ),
+        // A design rule: edit it in Rules (the panel starts from what it writes), or delete it.
+        context_menu(
+            K::Rule,
+            CIRCUIT,
+            &[
+                "board.rules",
+                "design.show-source",
+                "design.copy-reference",
+                "circuit.delete",
+            ],
+            vec![
+                vec![c("board.rules")],
+                vec![c("design.show-source"), c("design.copy-reference")],
+                vec![c("circuit.delete")],
             ],
         ),
         context_menu(

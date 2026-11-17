@@ -888,6 +888,36 @@
       ]
     },
     {
+      "id": "mcad-motion",
+      "route": "/docs/mcad/assembly/motion",
+      "title": "Motion studies",
+      "summary": "Reference for motion studies in a RunMat assembly. Drive a revolute, slider, cylindrical, distance or angle mate through a range over time, play the solved motion, plot speed and acceleration, and check the motion for collisions.",
+      "keywords": [
+        "motion study",
+        "animation",
+        "mechanism",
+        "drive a mate",
+        "kinematics",
+        "collision detection",
+        "speed plot",
+        "acceleration"
+      ],
+      "group": "MCAD reference",
+      "order": 7,
+      "narrative": "docs/design/mcad/assembly/motion.md",
+      "examples": [],
+      "related_topics": [
+        {
+          "title": "Occurrences and mates",
+          "href": "/docs/mcad/assembly/mates"
+        },
+        {
+          "title": "Exploded views",
+          "href": "/docs/mcad/assembly/exploded-views"
+        }
+      ]
+    },
+    {
       "id": "mcad-drawings",
       "route": "/docs/mcad/drawing/views-and-annotations",
       "title": "Drawing views and annotations",

@@ -62,8 +62,14 @@ fn set_imports(files: &runtime::Files) {
 }
 
 /// Installs OCCT as the runtime's kernel (once per process; later calls do nothing). Each
-/// kernel it makes reads imported STEP files from the current request's files.
+/// kernel it makes reads imported STEP files from the current request's files. The part cache
+/// keeps a quarter of this module's measured maximum memory ([`crate::memory`]).
 pub fn install_occt() {
+    if let Some(memory) = crate::memory::HostMemory::measure() {
+        runtime::part_cache::set_budget_bytes(
+            usize::try_from(memory.maximum_bytes / 4).unwrap_or(usize::MAX),
+        );
+    }
     kernel::install("occt", || {
         let mut k = OcctKernel::new();
         k.imports = IMPORTS.lock().unwrap_or_else(|e| e.into_inner()).clone();
@@ -88,6 +94,16 @@ pub fn call(request: &str) -> String {
     };
     let a = &request.args;
     match request.function.as_str() {
+        // This module's memory, measured in the module: what the page sizes its helper hosts
+        // and part store by.
+        "hostMemory" => {
+            let memory = crate::memory::HostMemory::measure();
+            serde_json::json!({
+                "maximumBytes": memory.map(|m| m.maximum_bytes),
+                "inUseBytes": memory.map(|m| m.in_use_bytes),
+            })
+            .to_string()
+        }
         "dependencies" => {
             let deps = runtime::dependencies(arg(a, 0), arg(a, 1));
             serde_json::to_string(&deps).unwrap_or_else(|_| "[]".into())

@@ -9,7 +9,7 @@ use runmat_analysis_language::{
 use runmat_types::{OperationParameter, OperationParameterArity};
 
 use super::super::analysis::{
-    analyze_document_with_compat_and_source, semantic_document_facts, CompatMode,
+    analyze_document_with_compat_and_source_async, semantic_document_facts, CompatMode,
 };
 use super::super::project::ProjectContext;
 
@@ -19,21 +19,23 @@ pub(crate) struct FeaProjectFacts {
     pub function_sources: BTreeMap<LogicalSourcePath, Arc<str>>,
 }
 
-pub(crate) fn resolve_project_facts(
+/// Facts for the study's imported `.m` functions and the project's execution profiles. Files
+/// come from `source_overlays` (open editor buffers) or else through the provider's async API.
+pub(crate) async fn resolve_project_facts(
     source_root: &Path,
     requests: &[FunctionRequest],
-    entry_path: &Path,
+    project: Option<&ProjectContext>,
     compat: CompatMode,
     source_overlays: &BTreeMap<PathBuf, String>,
 ) -> Result<FeaProjectFacts, String> {
-    let project = ProjectContext::discover_from_source_name(entry_path.to_str());
     if !requests.is_empty() && project.is_none() {
         return Err("imported `.m` functions require an enclosing frozen RunMat project".into());
     }
-    let profiles = match &project {
+    let profiles = match project {
         Some(project) => {
             let manifest =
-                runmat_config::project::load_project_manifest(project.manifest_path())
+                runmat_config::project::load_project_manifest_async(project.manifest_path())
+                    .await
                     .map_err(|error| format!("cannot load project execution profiles: {error}"))?;
             remote_execution_profile_facts(
                 manifest
@@ -50,7 +52,7 @@ pub(crate) fn resolve_project_facts(
     let mut function_sources = BTreeMap::new();
     for request in requests {
         let path = physical_path(source_root, &request.module_path)?;
-        let project = project.as_ref().ok_or_else(|| {
+        let project = project.ok_or_else(|| {
             "imported `.m` functions require an enclosing frozen RunMat project".to_string()
         })?;
         if !project.contains_visible_source(&path) {
@@ -61,11 +63,14 @@ pub(crate) fn resolve_project_facts(
         }
         let source = match source_overlays.get(&path) {
             Some(source) => source.clone(),
-            None => runmat_filesystem::read_to_string(&path).map_err(|error| {
-                format!("cannot read imported function {}: {error}", path.display())
-            })?,
+            None => runmat_filesystem::read_to_string_async(&path)
+                .await
+                .map_err(|error| {
+                    format!("cannot read imported function {}: {error}", path.display())
+                })?,
         };
-        let document = analyze_document_with_compat_and_source(&source, compat, path.to_str());
+        let document =
+            analyze_document_with_compat_and_source_async(&source, compat, path.to_str()).await;
         functions.push(function_facts(request, &source, &document)?);
         function_sources.insert(request.module_path.clone(), Arc::<str>::from(source));
     }

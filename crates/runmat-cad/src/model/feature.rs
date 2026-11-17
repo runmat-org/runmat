@@ -1076,6 +1076,13 @@ impl FeatureKind {
                             ptrs.extend(stroke.iter());
                         }
                     }
+                    if let Some(crate::model::sketch::SketchProjection::OffsetOnSurface {
+                        distance,
+                        ..
+                    }) = &e.projected
+                    {
+                        ptrs.push(distance);
+                    }
                 }
                 for c in &s.constraints {
                     match &c.kind {
@@ -1173,7 +1180,24 @@ impl FeatureKind {
             list(out, "targets", m.targets());
         }
         match self {
-            FeatureKind::Sketch(s) => plane(&mut out, "on", &s.plane),
+            FeatureKind::Sketch(s) => {
+                use crate::model::sketch::SketchProjection as P;
+                plane(&mut out, "on", &s.plane);
+                for e in &s.entities {
+                    let name = format!("entities.{}.from", e.id.0);
+                    match &e.projected {
+                        Some(P::Project { edge }) => out.push((name, edge)),
+                        Some(P::Silhouette { face, .. } | P::Intersection { face, .. }) => {
+                            out.push((name, face))
+                        }
+                        Some(P::OffsetOnSurface { edge, face, .. }) => {
+                            out.push((name.clone(), edge));
+                            out.push((format!("{name}.face"), face));
+                        }
+                        Some(P::Published { .. }) | None => {}
+                    }
+                }
+            }
             FeatureKind::Plane(p) => match p {
                 PlaneDef::Offset { base, .. } => plane(&mut out, "base", base),
                 PlaneDef::Angle { base, axis: a, .. } => {

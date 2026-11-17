@@ -11,7 +11,8 @@
 //! cut, intersect or a new body, sketch-plane or offset start, draft and thin walls),
 //! `part.delete`, `part.suppress`, `part.unsuppress` (in the active configuration when
 //! `values.configuration` names one), `part.move-up` and `part.move-down`; Properties and
-//! configuration commands ([`configuration`]); `simulate.publish` ([`publish`]); Rename and the
+//! configuration commands ([`configuration`]); `simulate.publish` ([`publish`]); `simulate.region`
+//! ([`simulate`]); Rename and the
 //! rollback bar ([`history`]). While the model is rolled back, an added feature goes in at the
 //! bar.
 //! Sketches: `part.sketch` and the sketch tools ([`sketch`]).
@@ -22,8 +23,11 @@
 pub(crate) mod assembly;
 mod configuration;
 mod history;
+mod library;
 mod manage;
 mod publish;
+pub(crate) mod release;
+mod simulate;
 pub(crate) mod sketch;
 
 use crate::runtime::Files;
@@ -176,6 +180,43 @@ fn part_edit(
             })?;
             Ok((change, format!("Deleted {}", summary.join(", "))))
         }
+        "part.delete"
+            if selected.is_empty()
+                && request
+                    .selection
+                    .iter()
+                    .any(|id| id.starts_with("region:") || id.starts_with("representation:")) =>
+        {
+            // Regions and analysis representations, from their Outline rows.
+            let ids = request.selection.clone();
+            let change = edit_part(text, path, |document| {
+                for id in &ids {
+                    if let Some(name) = id.strip_prefix("region:") {
+                        let at = document
+                            .regions
+                            .iter()
+                            .position(|r| r.name.as_str() == name)
+                            .ok_or_else(|| model(format!("the part has no region `{name}`")))?;
+                        document.regions.remove(at);
+                    } else if let Some(name) = id.strip_prefix("representation:") {
+                        let at = document
+                            .representations
+                            .iter()
+                            .position(|r| r.name == name)
+                            .ok_or_else(|| {
+                                model(format!("the part has no representation `{name}`"))
+                            })?;
+                        document.representations.remove(at);
+                    }
+                }
+                Ok(())
+            })?;
+            let names: Vec<&str> = ids
+                .iter()
+                .filter_map(|id| id.split_once(':').map(|(_, n)| n))
+                .collect();
+            Ok((change, format!("Deleted {}", names.join(", "))))
+        }
         "part.delete" => {
             need_one()?;
             let change = edit_part(text, path, |document| {
@@ -280,6 +321,48 @@ fn part_edit(
         }
         "part.rollback-here" | "part.rollback-end" => history::rollback(path, text, request),
         "repair.repair" => crate::repairs::repair_part(path, text, &request.values),
+        "simulate.region" => {
+            let parsed = parse_part(path, text);
+            let document = parsed
+                .document
+                .ok_or(EditFailure::Invalid(parsed.diagnostics))?;
+            simulate::region(
+                path,
+                text,
+                &request.values,
+                &request.selection,
+                &crate::picks::Picks::new(&document, path, text),
+            )
+        }
+        "simulate.defeature" | "simulate.representation" => {
+            let kind = if request.command == "simulate.defeature" {
+                "defeatured"
+            } else {
+                text_value(&request.values, "kind")
+            };
+            if kind == "full" {
+                // The design itself: nothing to write; the Desktop draws it again.
+                return Ok((
+                    SourceChange {
+                        source: text.to_owned(),
+                        edits: Vec::new(),
+                        reprinted: false,
+                    },
+                    "Showing the full design".to_owned(),
+                ));
+            }
+            let parsed = parse_part(path, text);
+            let document = parsed
+                .document
+                .ok_or(EditFailure::Invalid(parsed.diagnostics))?;
+            simulate::representation(
+                path,
+                text,
+                &request.values,
+                &crate::picks::Picks::new(&document, path, text),
+                kind,
+            )
+        }
         "simulate.publish" => {
             let parsed = parse_part(path, text);
             let document = parsed
@@ -300,12 +383,18 @@ fn part_edit(
                 .ok_or(EditFailure::Invalid(parsed.diagnostics))?;
             let picks = crate::picks::Picks::new(&document, path, text);
             let values = sketch::with_selection(&request.values, &request.selection);
-            if let Some(result) = sketch::sketch_edit(path, text, command, &values, &picks)
-            {
+            if let Some(result) = sketch::sketch_edit(path, text, command, &values, &picks) {
                 return result;
             }
             if let Some(result) = manage::edit(path, text, request, &picks) {
                 return result;
+            }
+            if command == "direct.instant-3d" {
+                if let Some(result) =
+                    crate::direct_edits::instant_dimension(path, text, &values, &document)
+                {
+                    return result;
+                }
             }
             // Extrude, revolve and sweep add one feature per profile picked.
             if let Some(kinds) =
@@ -430,6 +519,10 @@ pub fn edit(
     if request.command == "study.new" && (path.ends_with(".part") || path.ends_with(".assembly")) {
         return Ok(study_handoff(path));
     }
+    // Results to .fea writes nothing either: it hands a dynamic study's joint loads to the same guide.
+    if request.command == "motion.to-fea" && path.ends_with(".assembly") {
+        return assembly::to_fea::handoff(path, text, files, &request.values, &request.selection);
+    }
     let (change, summary) = if path.ends_with(".drawing") {
         match request.command.as_str() {
             "drawing.auto" => crate::drawing::auto::auto(path, text, files, &request.values)?,
@@ -477,6 +570,36 @@ pub fn edit(
             files: out,
             summary,
         });
+    } else if let Some(result) = manage::settings::edit(path, text, files, request) {
+        // The part's document settings, gauge and bend rule: they read the project's tables.
+        result?
+    } else if let Some(result) = library::edit(path, text, files, request) {
+        // The profile and part libraries: they read the project's library folder, and saving a
+        // profile writes a file there.
+        let done = result?;
+        let mut out: Vec<FileChange> = done
+            .created
+            .into_iter()
+            .map(|(p, t)| {
+                let change = SourceChange {
+                    edits: vec![runmat_design_syntax::edit::TextEdit::replace(
+                        runmat_types::Span { start: 0, end: 0 },
+                        t.clone(),
+                    )],
+                    source: t,
+                    reprinted: true,
+                };
+                file_change(&p, "", change)
+            })
+            .collect();
+        if let Some(own) = done.own {
+            let own = history::insert_at_bar(path, text, own)?;
+            out.insert(0, file_change(path, text, own));
+        }
+        return Ok(EditOutput {
+            files: out,
+            summary: done.summary,
+        });
     } else if request.command == "manage.split-to-files" {
         // New part files and an assembly beside this part, which stays as it is.
         let parsed = parse_part(path, text);
@@ -490,6 +613,14 @@ pub fn edit(
                 .map(|(p, old, change)| file_change(&p, &old, change))
                 .collect(),
             summary,
+        });
+    } else if request.command == "manage.release" {
+        // The part's text as its next released revision, in the release store beside it.
+        let ((store, old, change), revision) = release::release(path, text, files)?;
+        let name = path.rsplit('/').next().unwrap_or(path);
+        return Ok(EditOutput {
+            files: vec![file_change(&store, &old, change)],
+            summary: format!("Released {name} as {revision}"),
         });
     } else if request.command == "repair.repair" {
         // Pins and publishes can change other files.
@@ -521,10 +652,13 @@ pub fn edit(
         let (change, summary) = part_edit(path, text, request)?;
         (history::insert_at_bar(path, text, change)?, summary)
     };
-    Ok(EditOutput {
-        files: vec![file_change(path, text, change)],
-        summary,
-    })
+    // A command that writes nothing (Representation › Full) returns no file.
+    let files = if change.edits.is_empty() && !change.reprinted && change.source == text {
+        Vec::new()
+    } else {
+        vec![file_change(path, text, change)]
+    };
+    Ok(EditOutput { files, summary })
 }
 
 /// `edit` as JSON.
@@ -563,12 +697,26 @@ mod tests {
     #[test]
     fn new_study_on_a_part_or_assembly_hands_off_to_simulation_setup() {
         for path in ["/p/plate.part", "/p/frame.assembly"] {
-            let out = run(path, PLATE, json!({ "command": "study.new", "values": { "physics": "structural" } }));
+            let out = run(
+                path,
+                PLATE,
+                json!({ "command": "study.new", "values": { "physics": "structural" } }),
+            );
             assert_eq!(out["ok"], true, "{out}");
-            assert_eq!(out["files"], json!([]), "the CAD dispatcher writes no study");
+            assert_eq!(
+                out["files"],
+                json!([]),
+                "the CAD dispatcher writes no study"
+            );
             let summary = out["summary"].as_str().unwrap();
-            assert!(summary.contains("Simulation setup guide (simulation_setup)"), "{summary}");
-            assert!(summary.ends_with(&format!("start it on {path}")), "{summary}");
+            assert!(
+                summary.contains("Simulation setup guide (simulation_setup)"),
+                "{summary}"
+            );
+            assert!(
+                summary.ends_with(&format!("start it on {path}")),
+                "{summary}"
+            );
         }
     }
 

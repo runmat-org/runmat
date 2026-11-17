@@ -5,6 +5,8 @@
 //! segment's curve id: faces are tagged `member/profile-curve`, ends by ordinal, so references
 //! survive re-sketching, re-ordering and profile changes that keep curve ids.
 
+pub mod standard;
+
 use crate::ids::{FeatureId, SketchEntityId};
 use crate::model::visit::{Params, Visit};
 use crate::refs::Reference;
@@ -51,6 +53,15 @@ pub enum MemberProfile<T = ValueExpr> {
     },
     RoundBar {
         diameter: T,
+    },
+    /// A size from a published table ([`standard`]): `standard(designation = "IPE 200")`.
+    Standard {
+        designation: String,
+    },
+    /// The closed region of a sketch in this part, its origin on the member's path:
+    /// `sketch_region(sketch = z_rail)`. A project's custom profiles are copied in as sketches.
+    SketchRegion {
+        sketch: FeatureId,
     },
 }
 
@@ -112,6 +123,12 @@ impl<T> MemberProfile<T> {
             P::RoundBar { diameter } => P::RoundBar {
                 diameter: f("diameter", diameter)?,
             },
+            P::Standard { designation } => P::Standard {
+                designation: designation.clone(),
+            },
+            P::SketchRegion { sketch } => P::SketchRegion {
+                sketch: sketch.clone(),
+            },
         })
     }
 
@@ -140,7 +157,69 @@ impl<T> MemberProfile<T> {
             } => vec![depth, flange, web, flange_thickness],
             P::FlatBar { width, thickness } => vec![width, thickness],
             P::RoundBar { diameter } => vec![diameter],
+            P::Standard { .. } | P::SketchRegion { .. } => Vec::new(),
         }
+    }
+}
+
+/// Lengths in millimetres as a fabricator writes them: `20`, `1.5`, `60.3`.
+pub(crate) fn mm_text(v: f64) -> String {
+    let s = format!("{:.2}", v * 1000.0);
+    s.trim_end_matches('0').trim_end_matches('.').to_string()
+}
+
+/// A plane section's area and second moments about its centroid (m², m⁴): `ixx` = ∫ y² dA
+/// (about the x axis), `iyy` = ∫ x² dA.
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+pub struct SectionProperties {
+    pub area: f64,
+    pub centroid: [f64; 2],
+    pub ixx: f64,
+    pub iyy: f64,
+    pub ixy: f64,
+}
+
+/// The section an outline bounds: its first loop is the outside, the others holes, whatever
+/// direction each runs.
+pub fn outline_section(outline: &ProfileOutline) -> SectionProperties {
+    let mut m = [0.0; 6];
+    for (k, lp) in outline.iter().enumerate() {
+        let pts: Vec<[f64; 2]> = lp.iter().map(|(_, p)| *p).collect();
+        let lm = crate::evaluate::section::polygon_moments(&pts);
+        // Outside counts positive, holes negative, however the loop runs.
+        let sign = if (lm[0] >= 0.0) == (k == 0) {
+            1.0
+        } else {
+            -1.0
+        };
+        for (acc, v) in m.iter_mut().zip(lm) {
+            *acc += sign * v;
+        }
+    }
+    let area = m[0];
+    let c = [m[1] / area, m[2] / area];
+    SectionProperties {
+        area,
+        centroid: c,
+        ixx: m[4] - area * c[1] * c[1],
+        iyy: m[3] - area * c[0] * c[0],
+        ixy: m[5] - area * c[0] * c[1],
+    }
+}
+
+impl SectionProperties {
+    /// `A = 28.48 cm², Ixx = 1943 cm⁴, Iyy = 142.4 cm⁴`, for summaries.
+    pub fn text(&self) -> String {
+        let sig = |v: f64| {
+            let digits = (4 - (v.abs().max(1e-30).log10().floor() as i32 + 1)).max(0) as usize;
+            format!("{v:.digits$}")
+        };
+        format!(
+            "A = {} cm², Ixx = {} cm⁴, Iyy = {} cm⁴",
+            sig(self.area * 1e4),
+            sig(self.ixx * 1e8),
+            sig(self.iyy * 1e8)
+        )
     }
 }
 
@@ -175,16 +254,25 @@ impl ProfileSizes {
             } => 2.0 * flange * flange_thickness + (depth - 2.0 * flange_thickness) * web,
             MemberProfile::FlatBar { width, thickness } => width * thickness,
             MemberProfile::RoundBar { diameter } => PI / 4.0 * diameter * diameter,
+            MemberProfile::Standard { ref designation } => standard::lookup(designation)
+                .map(|s| s.shape.area())
+                .unwrap_or(0.0),
+            // Regeneration integrates the sketch's region ([`crate::evaluate::section`]).
+            MemberProfile::SketchRegion { .. } => 0.0,
         }
+    }
+
+    /// The section's area and second moments from its outline, finely sampled; `None` for a
+    /// sketch region, which regeneration integrates from the solved sketch.
+    pub fn section(&self) -> Option<SectionProperties> {
+        let outline = self.outline(1024);
+        (!outline.is_empty()).then(|| outline_section(&outline))
     }
 
     /// The cut list's description: the family and its sizes in millimetres, as a fabricator
     /// orders the stock (`Square tube 20 × 20 × 2`, `Pipe ⌀21.3 × 2.6`).
     pub fn description(&self) -> String {
-        fn mm(v: f64) -> String {
-            let s = format!("{:.2}", v * 1000.0);
-            s.trim_end_matches('0').trim_end_matches('.').to_string()
-        }
+        let mm = mm_text;
         match *self {
             MemberProfile::RectTube {
                 width,
@@ -232,6 +320,11 @@ impl ProfileSizes {
                 format!("Flat bar {} × {}", mm(width), mm(thickness))
             }
             MemberProfile::RoundBar { diameter } => format!("Round bar ⌀{}", mm(diameter)),
+            MemberProfile::Standard { ref designation } => match standard::lookup(designation) {
+                Some(s) => format!("{}{}", s.designation, s.shape.stock()),
+                None => designation.clone(),
+            },
+            MemberProfile::SketchRegion { ref sketch } => format!("Profile {sketch}"),
         }
     }
 
@@ -316,6 +409,10 @@ impl ProfileSizes {
                     (id("bottom_left_toe"), [-f, -h + tf]),
                 ]]
             }
+            MemberProfile::Standard { ref designation } => standard::lookup(designation)
+                .map(|s| s.shape.outline(segments))
+                .unwrap_or_default(),
+            MemberProfile::SketchRegion { .. } => Vec::new(),
         }
     }
 }
@@ -400,6 +497,9 @@ impl Params for WeldmentFeature {
             WeldmentFeature::StructuralMember { groups } => {
                 for g in groups {
                     v.feature(&g.sketch);
+                    if let MemberProfile::SketchRegion { sketch } = &g.profile {
+                        v.feature(sketch);
+                    }
                     v.value(&g.rotation);
                     for size in g.profile.sizes() {
                         v.value(size);
