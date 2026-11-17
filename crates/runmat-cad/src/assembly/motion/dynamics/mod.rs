@@ -451,7 +451,7 @@ pub(super) fn run_dynamic(
     run.energy = energy;
     run.reactions = reactions;
     set_moving(run, base);
-    run.track = track(study, base, run, ctx, dt);
+    run.track = track(study, base, run, ctx, dt, None);
 }
 
 /// Every how many of `states` (steps of `h`) a study that doesn't set its rate takes a frame:

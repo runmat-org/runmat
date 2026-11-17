@@ -102,6 +102,15 @@ pub(crate) struct GeometryScreenAnnotation {
     pub vector_extent: Option<[[f32; 2]; 2]>,
 }
 
+/// A measured dimension's value placed on screen at the middle of its line.
+#[cfg(feature = "egui-overlay")]
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) struct GeometryScreenDimension {
+    pub position: [f32; 2],
+    pub color: [f32; 4],
+    pub label: String,
+}
+
 #[derive(Clone, Debug, PartialEq)]
 struct AxesViewContract {
     rows: usize,

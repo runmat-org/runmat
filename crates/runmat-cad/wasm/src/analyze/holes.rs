@@ -341,6 +341,7 @@ pub fn hole_check(
                 from,
                 to: foot,
                 label: mm(m.offset),
+                extension_lines: Vec::new(),
             });
             (format!("Off by {}{sizes}", mm(m.offset)), Some("error"))
         } else {

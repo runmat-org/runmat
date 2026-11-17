@@ -7,13 +7,19 @@
 //! of time. At each sample time `t_k` the position problem `Φ(q, t_k) = 0` is solved by the mate
 //! solver (`runmat-constraint`: damped Newton steps with a Levenberg–Marquardt fallback), started
 //! from the pose solved at `t_{k-1}` so the mechanism stays on its assembly branch (continuation).
-//! Velocity and acceleration come from differentiating the solved positions: second-order central
-//! differences inside the run, and second-order one-sided differences at its ends.
+//! Velocity and acceleration come from each solved pose's velocity and acceleration equations
+//! (Haug 1989, §3.4): the mates' exact constraint Jacobian with each driven mate's value moving
+//! at the drive law's exact rate ([`super::dynamics::model::Model::driven_rates`]). Only a
+//! study the velocity equations can't take (a driven distance or angle mate, a mate with its own
+//! unknowns) differences the solved positions instead: second-order central differences inside
+//! the run, second-order one-sided differences at its ends.
 //!
 //! A sample whose solve fails (a drive past what the mechanism can reach, a conflict) ends the
 //! run there; the frames before it stand and the failure is reported.
 
+use super::dynamics::model::{BodyRate, Driven, MateLoad, MateMeasure, Model};
 use super::{MotionDrive, MotionStudy, DEFAULT_RATE, MAX_FRAMES};
+use crate::assembly::model::DefinitionRef;
 use crate::assembly::model::{
     AssemblyDocument, MateKind, OffsetExpr, Placement, RotationExpr, TargetExpr,
 };
@@ -23,7 +29,6 @@ use crate::assembly::resolve::{
 use crate::assembly::source::{
     ConfigKey, ConfiguredSummary, DefinitionSummary, DesignSource, SourceError,
 };
-use crate::assembly::model::DefinitionRef;
 use crate::ids::{FilePath, PartitionName, RevisionId};
 use crate::regen::kernel::Transform;
 use crate::units::Dimension;
@@ -328,8 +333,8 @@ pub(super) fn frame_failure(tree: &ResolvedAssembly, base: &ResolvedAssembly) ->
 }
 
 /// Second-order derivative estimates of samples `x` spaced `h` apart: central differences inside,
-/// three-point one-sided differences at the ends (first derivative); the second derivative takes
-/// the three-point stencil, its end values from the neighbouring stencil.
+/// one-sided differences of the same order at the ends (three points for the first derivative,
+/// four for the second; three-point runs take the middle's second derivative throughout).
 fn derivatives(x: &[f64], h: f64) -> (Vec<f64>, Vec<f64>) {
     let n = x.len();
     if n < 2 || h <= 0.0 {
@@ -347,8 +352,13 @@ fn derivatives(x: &[f64], h: f64) -> (Vec<f64>, Vec<f64>) {
     }
     d1[0] = (-3.0 * x[0] + 4.0 * x[1] - x[2]) / (2.0 * h);
     d1[n - 1] = (3.0 * x[n - 1] - 4.0 * x[n - 2] + x[n - 3]) / (2.0 * h);
-    d2[0] = d2[1];
-    d2[n - 1] = d2[n - 2];
+    if n >= 4 {
+        d2[0] = (2.0 * x[0] - 5.0 * x[1] + 4.0 * x[2] - x[3]) / (h * h);
+        d2[n - 1] = (2.0 * x[n - 1] - 5.0 * x[n - 2] + 4.0 * x[n - 3] - x[n - 4]) / (h * h);
+    } else {
+        d2[0] = d2[1];
+        d2[n - 1] = d2[n - 2];
+    }
     (d1, d2)
 }
 
@@ -449,6 +459,12 @@ pub fn run_study(
                 .map(|c| (i, c))
         })
         .collect();
+    let keep = ResolveRequest {
+        keep_mate_system: true,
+        ..ctx.request.clone()
+    };
+    // Each frame's bodies' motion from the drives' exact rates; None once a frame can't give it.
+    let mut rates: Option<Vec<Vec<(NodeId, BodyRate)>>> = Some(Vec::new());
     let mut frame_doc = doc.clone();
     for k in 0..count {
         let t = h * k as f64;
@@ -466,7 +482,7 @@ pub fn run_study(
             source: &overlay,
             ..*ctx.resolve
         };
-        let tree = resolve(&base.top, ctx.request, &fctx);
+        let tree = resolve(&base.top, &keep, &fctx);
         let same = tree.nodes.len() == base.nodes.len()
             && tree.nodes.iter().zip(&base.nodes).all(|(a, b)| a.uuid == b.uuid);
         let failure = if same {
@@ -487,10 +503,92 @@ pub fn run_study(
         }
         run.times.push(t);
         run.frames.push(tree.nodes.iter().map(|n| n.world).collect());
+        if let Some(all) = &mut rates {
+            match frame_rates(doc, &tree, &drives, study.profile, t / duration, duration) {
+                Some(r) => all.push(r),
+                None => rates = None,
+            }
+        }
     }
     set_moving(&mut run, base);
-    run.track = track(study, base, &run, ctx, h);
+    run.track = track(study, base, &run, ctx, h, rates.as_deref());
     run
+}
+
+/// Every free body's motion at a solved frame (`tau` of the way through a study of `duration`),
+/// from its velocity and acceleration equations with the drives' exact rates. None when a drive
+/// moves a value those equations don't measure (a distance or angle mate), the mechanism has
+/// unknowns besides rigid bodies, or the equations are singular.
+fn frame_rates(
+    doc: &AssemblyDocument,
+    tree: &ResolvedAssembly,
+    drives: &[Drive],
+    profile: super::MotionProfile,
+    tau: f64,
+    duration: f64,
+) -> Option<Vec<(NodeId, BodyRate)>> {
+    use runmat_constraint as rc;
+    let system = tree.mate_system.as_deref()?;
+    if !system.held_pass.is_empty() {
+        return None;
+    }
+    let free: Vec<_> = system.bodies.iter().filter(|b| !b.ground).collect();
+    let entities: Vec<_> = free.iter().map(|b| b.entity).collect();
+    let model = Model::kinematic(&system.system, &entities).ok()?;
+    let mut driven = Vec::new();
+    for d in drives {
+        let mate = &doc.mates[d.mate];
+        let rows = system.mates.iter().find(|m| m.name == mate.name)?;
+        let measure = match (&mate.kind, d.quantity) {
+            (MateKind::Revolute { .. } | MateKind::Cylindrical { .. }, DriveQuantity::Angle) => {
+                MateMeasure::Angle
+            }
+            (MateKind::Slider { .. } | MateKind::Cylindrical { .. }, DriveQuantity::Length) => {
+                MateMeasure::Length
+            }
+            _ => return None,
+        };
+        // The constraint that holds the driven value, which the drive replaces.
+        let held: Vec<_> = rows
+            .constraints
+            .iter()
+            .copied()
+            .filter(|&c| match &system.system.constraint(c).constraint {
+                rc::ConstraintKindRecord::User(rc::Constraint::Mate(m)) => matches!(
+                    (m, measure),
+                    (rc::Mate::Angle { .. }, MateMeasure::Angle)
+                        | (rc::Mate::Distance { .. }, MateMeasure::Length)
+                ),
+                _ => false,
+            })
+            .collect();
+        if held.is_empty() {
+            return None;
+        }
+        let span = d.to - d.from;
+        driven.push(Driven {
+            mate: MateLoad {
+                a: rows.a,
+                b: rows.b,
+                measure,
+                stiffness: 0.0,
+                damping: 0.0,
+                free: 0.0,
+                constant: 0.0,
+            },
+            rows: held,
+            rate: span * profile.rate(tau) / duration,
+            acceleration: span * profile.curvature(tau) / (duration * duration),
+        });
+    }
+    let q = &system.values;
+    let (u, udot) = model.driven_rates(q, &driven).ok()?;
+    Some(
+        free.iter()
+            .enumerate()
+            .map(|(i, b)| (b.node, model.body_motion(q, &u, &udot, i)))
+            .collect(),
+    )
 }
 
 /// What moves: nodes whose world pose differs from the first frame's, top-most only.
@@ -515,13 +613,16 @@ pub(super) fn set_moving(run: &mut MotionRun, base: &ResolvedAssembly) {
     }
 }
 
-/// The tracked occurrence: the study's `track`, else the first moving top-level occurrence.
+/// The tracked occurrence: the study's `track`, else the first moving top-level occurrence. Its
+/// velocity, acceleration and angular speed come from `rates` (each frame's bodies' motion) when
+/// the study has them, else from differences of the frames `h` apart.
 pub(super) fn track(
     study: &MotionStudy,
     base: &ResolvedAssembly,
     run: &MotionRun,
     ctx: &MotionContext<'_>,
     h: f64,
+    rates: Option<&[Vec<(NodeId, BodyRate)>]>,
 ) -> Option<Track> {
     let node = match &study.track {
         Some(path) => (0..base.nodes.len() as NodeId).find(|&n| base.path(n) == *path)?,
@@ -542,6 +643,37 @@ pub(super) fn track(
         .iter()
         .map(|f| f[node as usize].apply(centre))
         .collect();
+    if let Some(rates) = rates.filter(|r| r.len() == position.len()) {
+        // The body the occurrence rides on: itself or its nearest ancestor among the bodies.
+        let mut velocity = Vec::with_capacity(position.len());
+        let mut acceleration = Vec::with_capacity(position.len());
+        let mut angular_speed = Vec::with_capacity(position.len());
+        for (frame, &x) in rates.iter().zip(&position) {
+            let mut cur = Some(node);
+            let body = loop {
+                let Some(c) = cur else { break None };
+                if let Some((_, r)) = frame.iter().find(|(n, _)| *n == c) {
+                    break Some(r);
+                }
+                cur = base.node(c).parent;
+            };
+            let (v, a, w) = body.map_or(([0.0; 3], [0.0; 3], 0.0), |r| {
+                let (v, a) = r.at(x);
+                (v, a, r.omega.iter().map(|c| c * c).sum::<f64>().sqrt())
+            });
+            velocity.push(v);
+            acceleration.push(a);
+            angular_speed.push(w);
+        }
+        return Some(Track {
+            occurrence: base.path(node),
+            node,
+            position,
+            velocity,
+            acceleration,
+            angular_speed,
+        });
+    }
     let mut velocity = vec![[0.0; 3]; position.len()];
     let mut acceleration = vec![[0.0; 3]; position.len()];
     for axis in 0..3 {
@@ -587,6 +719,21 @@ mod tests {
         for (k, (v, a)) in v.iter().zip(&a).enumerate() {
             assert!((v - 6.0 * k as f64 * h).abs() < 1e-9, "v[{k}] = {v}");
             assert!((a - 6.0).abs() < 1e-6, "a[{k}] = {a}");
+        }
+    }
+
+    #[test]
+    fn end_differences_are_second_order_too() {
+        // A cubic: second-order stencils leave errors of order h² (the third derivative's
+        // terms), the same at the ends as inside, where copying the neighbour's value was off by
+        // 6h.
+        let h = 0.01;
+        let x: Vec<f64> = (0..11).map(|k| (k as f64 * h).powi(3)).collect();
+        let (v, a) = derivatives(&x, h);
+        for (k, (v, a)) in v.iter().zip(&a).enumerate() {
+            let t = k as f64 * h;
+            assert!((v - 3.0 * t * t).abs() < 3e-4, "v[{k}] = {v}");
+            assert!((a - 6.0 * t).abs() < 1e-6 + 12.0 * h * h, "a[{k}] = {a}");
         }
     }
 

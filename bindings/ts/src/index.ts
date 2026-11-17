@@ -1562,6 +1562,8 @@ export interface GeometryScenePresentationState {
   hoveredRegionId?: string | null;
   regionHighlights?: GeometrySceneRegionHighlightState[];
   regionAnnotations?: GeometrySceneRegionAnnotationState[];
+  /** Measured dimensions the renderer draws in the model: a line with its value at the middle. */
+  dimensions?: GeometrySceneDimensionState[];
   displayMode?: GeometrySceneDisplayMode;
   edgeOverlayEnabled?: boolean;
   showGrid?: boolean;
@@ -1575,6 +1577,20 @@ export interface GeometryScenePresentationState {
   edgeWidthPx?: number | null;
   /** The 3D view's projection: with perspective, or parallel (orthographic). Unset keeps it. */
   projection?: "perspective" | "orthographic" | null;
+}
+
+/** A dimension in the model: a line between two scene points, with `label` at its middle. */
+export interface GeometrySceneDimensionState {
+  from: [number, number, number];
+  to: [number, number, number];
+  label: string;
+  /** RGBA 0..1 for the line, its end dots and the label border; unset uses the selection color. */
+  color?: [number, number, number, number] | null;  /**
+   * Extension lines, each `[point on the measured item, dimension-line end]`: they carry a
+   * dimension line that stands off its item back to the item's outline. Drawn thinner than the
+   * dimension line, with a small gap at the item (ISO 129-1).
+   */
+  extensionLines?: [[number, number, number], [number, number, number]][];
 }
 
 export type GeometrySceneTopologySelectionState =
@@ -1594,8 +1610,16 @@ export interface GeometryScenePickResult {
   vertexIndices?: [number, number, number];
   barycentricCoordinates?: [number, number, number];
   topologySelection?: GeometrySceneTopologySelectionState;
+  /** Unit normal of the hit triangle in scene coordinates; absent for a degenerate triangle. */
+  normal?: [number, number, number];
   /** The owner nodes (bodies, assembly components) of what was hit, outermost first. */
   ownerNodeIds?: string[];
+  /**
+   * A face pick's planar face: the hit region's triangles in the hit triangle's plane, x, y, z
+   * of each corner in scene coordinates. Measure draws two parallel faces' normal distance
+   * between points on them. Absent for edge and point picks and instanced placements.
+   */
+  faceTriangles?: number[];
 }
 
 

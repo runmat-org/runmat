@@ -131,12 +131,19 @@ pub struct Analysis {
     pub field: Option<field::SurfaceField>,
 }
 
-/// A dimension on the model: a line between two points (model units, metres) with its value.
+/// A dimension on the model: a line between two points (model units, metres) with its value, in
+/// the renderer's dimension shape (runmat-plot `GeometrySceneDimension`).
 #[derive(Clone, Debug, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct ModelDimension {
     pub from: [f64; 3],
     pub to: [f64; 3],
     pub label: String,
+    /// Lines joining a dimension-line end that stands off its item to that item's outline, each
+    /// `[point on the item, dimension-line end]` (a normal distance between faces that don't
+    /// overlap seen along the normal).
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub extension_lines: Vec<[[f64; 3]; 2]>,
 }
 
 /// An arrow on the model: from `origin` along the unit `direction`, `length` long (model

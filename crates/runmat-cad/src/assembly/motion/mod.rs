@@ -10,9 +10,9 @@
 //! ```
 //!
 //! [`kinematics::run_study`] solves the mechanism's position at each sample time (the mate solve
-//! of [`crate::assembly::resolve`], warm-started from the previous sample), and differentiates
-//! the positions for velocity and acceleration. Nothing is interpolated between poses: every
-//! frame the Desktop plays is a solved pose.
+//! of [`crate::assembly::resolve`], warm-started from the previous sample), and solves each
+//! pose's velocity and acceleration equations with the drive law's exact rates. Nothing is
+//! interpolated between poses: every frame the Desktop plays is a solved pose.
 //!
 //! Named mate positions ([`MatePosition`], `position open = { values = [{ mate = hinge, value =
 //! 90 deg }] }`) save values for a set of driving mates, so the mechanism can be stepped between
@@ -46,6 +46,26 @@ impl MotionProfile {
             MotionProfile::Linear => tau,
             MotionProfile::Cycloidal => {
                 tau - (2.0 * std::f64::consts::PI * tau).sin() / (2.0 * std::f64::consts::PI)
+            }
+        }
+    }
+
+    /// The rise's rate, `ds/dτ`.
+    pub fn rate(self, tau: f64) -> f64 {
+        let tau = tau.clamp(0.0, 1.0);
+        match self {
+            MotionProfile::Linear => 1.0,
+            MotionProfile::Cycloidal => 1.0 - (2.0 * std::f64::consts::PI * tau).cos(),
+        }
+    }
+
+    /// The rise's second derivative, `d²s/dτ²`.
+    pub fn curvature(self, tau: f64) -> f64 {
+        let tau = tau.clamp(0.0, 1.0);
+        match self {
+            MotionProfile::Linear => 0.0,
+            MotionProfile::Cycloidal => {
+                2.0 * std::f64::consts::PI * (2.0 * std::f64::consts::PI * tau).sin()
             }
         }
     }
