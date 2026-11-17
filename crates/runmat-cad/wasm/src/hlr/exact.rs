@@ -7,6 +7,7 @@
 //! and a hidden run under a visible line is left to the visible line.
 
 use super::{Axes, ViewLines};
+use runmat_cad::drawing::TangentEdges;
 use runmat_cad::model::datum::Frame;
 use runmat_cad::regen::kernel::{BodyHandle, ExactQueries, Placed, ProjectionRequest, Transform};
 use serde_json::Value;
@@ -17,11 +18,17 @@ const MM_PER_M: f64 = 1000.0;
 
 /// The view's lines of `bodies` (each at its world transform, kernel metres) projected under
 /// `axes`, or `None` when the kernel has no exact projection (the reference test double).
+///
+/// `tangent` says what becomes of tangent edges (between faces that meet tangent-continuously,
+/// off the outline): drawn as visible and hidden edges (`show`), as thin lines where visible
+/// (`thin`, in [`ViewLines::tangent`]; a hidden one isn't drawn), or left out (`hide`). The
+/// rule is the same for every edge: a hole's rounded rim and a plate's rounded corner alike.
 pub fn view_lines(
     queries: &dyn ExactQueries,
     bodies: &[(&BodyHandle, Transform)],
     display: &Value,
     axes: &Axes,
+    tangent: TangentEdges,
 ) -> Option<ViewLines> {
     let placed: Vec<Placed<'_>> = bodies
         .iter()
@@ -39,13 +46,14 @@ pub fn view_lines(
             z: super::cross(axes.u, axes.v),
         },
         hidden: true,
-        smooth: false,
+        smooth: tangent != TangentEdges::Hide,
         // 0.01 mm chord deviation: well under a 0.18 mm line at any sheet scale up to 10:1.
         tolerance: 1.0e-5,
     };
     let curves = queries.project(&placed, &request).ok()?;
     let mut out = ViewLines::default();
     let mut seen: BTreeSet<(bool, Vec<i64>)> = BTreeSet::new();
+    let mut thin: Vec<Vec<f64>> = Vec::new();
     let mut ordered: Vec<_> = curves.into_iter().collect();
     // Visible runs first, so a hidden copy of a visible line is recognised.
     ordered.sort_by_key(|c| !c.visible);
@@ -58,6 +66,12 @@ pub fn view_lines(
         if pts.len() < 4 {
             continue;
         }
+        if curve.smooth && tangent == TangentEdges::Thin {
+            if curve.visible {
+                thin.push(pts);
+            }
+            continue;
+        }
         let key = line_key(&pts);
         if seen.contains(&(true, key.clone())) || seen.contains(&(curve.visible, key.clone())) {
             continue;
@@ -67,6 +81,13 @@ pub fn view_lines(
             out.visible.push(pts);
         } else {
             out.hidden.push(pts);
+        }
+    }
+    // A thin tangent line that a visible line already draws (an outline along it) draws once,
+    // as the visible line.
+    for pts in thin {
+        if !seen.contains(&(true, line_key(&pts))) {
+            out.tangent.push(pts);
         }
     }
     super::merge_overlaps(&mut out);

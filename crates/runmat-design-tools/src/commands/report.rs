@@ -115,7 +115,15 @@ pub fn run(path: &str, text: &str, files: &Files, request: &RunRequest) -> Value
         settings.push(format!("Configuration: {c}"));
     }
     match request.command.as_str() {
-        "assembly.bom" => bom(tree, source, request, settings),
+        "assembly.bom" => {
+            // In the assembly's document units, each line's mass.
+            let masses = runmat_cad_wasm::analyze::document_units(path, text, files).map(|u| {
+                let report =
+                    runmat_cad_wasm::mass::assembly_mass(path, text, files, configuration).ok();
+                (u, report)
+            });
+            bom(tree, source, request, settings, masses)
+        }
         "assembly.where-used" => where_used(tree, request, settings),
         other => {
             super::mark_unhandled();
@@ -124,18 +132,55 @@ pub fn run(path: &str, text: &str, files: &Files, request: &RunRequest) -> Value
     }
 }
 
+/// The mass of one of a BOM line's units in `units`: the parts at or under its first
+/// occurrence path; "—" when any of them has no mass.
+fn line_mass(
+    paths: &[String],
+    units: runmat_cad::assembly::settings::UnitSystem,
+    report: Option<&runmat_cad_wasm::mass::MassReport>,
+) -> String {
+    let (Some(report), Some(first)) = (report, paths.first()) else {
+        return "—".into();
+    };
+    let under = format!("{first}/");
+    let mut total = 0.0;
+    let mut found = false;
+    for p in report
+        .parts
+        .iter()
+        .filter(|p| &p.path == first || p.path.starts_with(&under))
+    {
+        match p.mass {
+            Some(m) => {
+                total += m;
+                found = true;
+            }
+            None => return "—".into(),
+        }
+    }
+    if found {
+        units.mass(total)
+    } else {
+        "—".into()
+    }
+}
+
 fn bom(
     tree: &ResolvedAssembly,
     source: &dyn DesignSource,
     request: &RunRequest,
     mut settings: Vec<String>,
+    masses: Option<(
+        runmat_cad::assembly::settings::UnitSystem,
+        Option<runmat_cad_wasm::mass::MassReport>,
+    )>,
 ) -> Value {
     let kind = request
         .values
         .get("type")
         .and_then(Value::as_str)
         .unwrap_or("top");
-    let columns = [
+    let mut columns = vec![
         "Item",
         "Part number",
         "File",
@@ -144,6 +189,14 @@ fn bom(
         "Material",
         "Qty",
     ];
+    if masses.is_some() {
+        columns.push("Mass each");
+    }
+    let mass_cell = |paths: &[String]| -> Option<String> {
+        masses
+            .as_ref()
+            .map(|(u, report)| line_mass(paths, *u, report.as_ref()))
+    };
     let (label, rows, data) = match kind {
         "parts" => {
             let bom = flat_bom(tree, Some(source), &BomOptions::default());
@@ -163,18 +216,17 @@ fn bom(
                         .iter()
                         .filter_map(|p| path_ids.get(p).cloned())
                         .collect();
-                    row(
-                        vec![
-                            (i + 1).to_string(),
-                            r.item.part_number.clone().unwrap_or_else(|| "—".into()),
-                            file_name(&r.item.definition),
-                            kind_label(&r.item.kind).into(),
-                            r.item.configuration.clone(),
-                            material(&r.item),
-                            r.quantity.to_string(),
-                        ],
-                        items,
-                    )
+                    let mut cells = vec![
+                        (i + 1).to_string(),
+                        r.item.part_number.clone().unwrap_or_else(|| "—".into()),
+                        file_name(&r.item.definition),
+                        kind_label(&r.item.kind).into(),
+                        r.item.configuration.clone(),
+                        material(&r.item),
+                        r.quantity.to_string(),
+                    ];
+                    cells.extend(mass_cell(&r.paths));
+                    row(cells, items)
                 })
                 .collect::<Vec<_>>();
             let data = serde_json::to_value(&bom).unwrap_or(Value::Null);
@@ -202,18 +254,17 @@ fn bom(
                         .map(u32::to_string)
                         .collect::<Vec<_>>()
                         .join(".");
-                    row(
-                        vec![
-                            item,
-                            r.item.part_number.clone().unwrap_or_else(|| "—".into()),
-                            file_name(&r.item.definition),
-                            kind_label(&r.item.kind).into(),
-                            r.item.configuration.clone(),
-                            material(&r.item),
-                            r.quantity.to_string(),
-                        ],
-                        members(tree, &r.parent, &r.item),
-                    )
+                    let mut cells = vec![
+                        item,
+                        r.item.part_number.clone().unwrap_or_else(|| "—".into()),
+                        file_name(&r.item.definition),
+                        kind_label(&r.item.kind).into(),
+                        r.item.configuration.clone(),
+                        material(&r.item),
+                        r.quantity.to_string(),
+                    ];
+                    cells.extend(mass_cell(&r.paths));
+                    row(cells, members(tree, &r.parent, &r.item))
                 })
                 .collect::<Vec<_>>();
             let data = serde_json::to_value(&shown).unwrap_or(Value::Null);

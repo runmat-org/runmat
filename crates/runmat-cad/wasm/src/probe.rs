@@ -211,7 +211,7 @@ pub fn probe(path: &str, text: &str, files: &Files, rays: &[Ray]) -> Result<Vec<
                 continue;
             }
             let occurrence = resolved.path(id as u32);
-            let file = node.definition.file.0.clone();
+            let file = node.source_key();
             let key = crate::evaluate::content_key(&file, &node.configuration.digest(), files);
             // The world box, when an interference check already knows it, skips a body the ray misses.
             let world_box = key
@@ -308,7 +308,7 @@ pub fn placed_parts(
         {
             continue;
         }
-        let file = node.definition.file.0.clone();
+        let file = node.source_key();
         let Some(document) = resolution.documents.get(&file) else {
             continue;
         };

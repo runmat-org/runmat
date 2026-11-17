@@ -2206,6 +2206,13 @@ fn draw_textured_image(canvas: &mut Canvas, render_data: &RenderData, axes: &Axe
     true
 }
 
+/// The 8 × 8 bitmap the CPU rasterizer sets `ch` in (one byte per row, top row first, bit 0 the
+/// leftmost column), from the basic Latin and Latin-1 sets; `None` for a character neither has.
+pub fn glyph_bitmap(ch: char) -> Option<[u8; 8]> {
+    use font8x8::LATIN_FONTS;
+    BASIC_FONTS.get(ch).or_else(|| LATIN_FONTS.get(ch))
+}
+
 pub fn encode_png_bytes(width: u32, height: u32, rgba: &[u8]) -> Result<Vec<u8>, String> {
     use image::{ImageBuffer, ImageFormat, Rgba};
 

@@ -139,7 +139,10 @@ async fn edges_draw_at_their_css_pixel_width_on_the_gpu() {
 
 /// A saved geometry image (an FEA snapshot poster) through the exporter, with or without the
 /// live view's edge presentation, decoded back to RGBA.
-async fn poster(presentation: Option<&GeometryScenePresentation>, pixels_per_point: f32) -> Vec<u8> {
+async fn poster(
+    presentation: Option<&GeometryScenePresentation>,
+    pixels_per_point: f32,
+) -> Vec<u8> {
     use runmat_plot::export::image::{ImageExportSettings, ImageExporter};
     let mut exporter = ImageExporter::with_settings(ImageExportSettings {
         width: WIDTH,

@@ -30,7 +30,22 @@ pub struct PresenceFrame {
     pub target: Option<PresenceTarget>,
     pub revision: String,
     pub pointers: Vec<PresencePointer>,
+    /// Host-owned vertical lines at a data x, such as a playhead on a time
+    /// plot. They draw under the pointers on the same overlay.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub guides: Vec<PresenceGuide>,
 }
+/// A vertical line across one 2-D axes at data `x`. A guide outside the
+/// visible x range draws nothing.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct PresenceGuide {
+    pub axes: String,
+    pub x: f64,
+    pub color: [u8; 3],
+}
+/// Guide stroke width in logical pixels.
+pub const GUIDE_STROKE: f32 = 2.0;
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "camelCase", deny_unknown_fields)]
 pub enum PresenceTarget {
@@ -43,6 +58,11 @@ impl PresenceFrame {
     pub fn validate(&self) -> bool {
         self.revision.len() <= 160
             && self.pointers.len() <= 32
+            && self.guides.len() <= 32
+            && self
+                .guides
+                .iter()
+                .all(|guide| guide.axes.len() <= 160 && guide.x.is_finite())
             && self.pointers.iter().all(|pointer| {
                 pointer.opacity.is_finite()
                     && (0.0..=1.0).contains(&pointer.opacity)
@@ -172,6 +192,37 @@ impl PresenceProjection {
             y,
         })
     }
+    /// Where `guide` draws on this axes: the line's x, top and bottom in
+    /// logical pixels. The stroke stays inside the plot box, so a guide at the
+    /// x limit sits half a stroke in from the border.
+    pub fn guide_line(&self, guide: &PresenceGuide) -> Option<[f32; 3]> {
+        if !self.valid() || self.is_3d || guide.axes != self.axes || !guide.x.is_finite() {
+            return None;
+        }
+        let u = if let Some([left, right, _, _]) = self.data_bounds {
+            if self.x_log {
+                (guide.x.log10() - left.log10()) / (right.log10() - left.log10())
+            } else {
+                (guide.x - left) / (right - left)
+            }
+        } else {
+            let x = if self.x_log { guide.x.log10() } else { guide.x };
+            let point = self.view_projection * Vec3::new(x as f32, 0.0, 0.0).extend(1.0);
+            if !point.is_finite() || point.w <= 0.0 {
+                return None;
+            }
+            ((point.x / point.w + 1.0) / 2.0) as f64
+        };
+        // Bounds arithmetic can land a hair outside [0, 1] at the limits.
+        const SLACK: f64 = 1e-9;
+        if !u.is_finite() || !(-SLACK..=1.0 + SLACK).contains(&u) {
+            return None;
+        }
+        let half = GUIDE_STROKE / 2.0;
+        let x = (self.rect[0] + u.clamp(0.0, 1.0) as f32 * self.rect[2])
+            .clamp(self.rect[0] + half, self.rect[0] + self.rect[2] - half);
+        Some([x, self.rect[1], self.rect[1] + self.rect[3]])
+    }
     pub fn project(&self, pointer: &PointerPosition) -> Option<[f32; 2]> {
         if !self.valid() {
             return None;
@@ -247,6 +298,18 @@ pub fn render_presence(
         egui::Order::Foreground,
         egui::Id::new("collaborator_pointers"),
     ));
+    for guide in &frame.guides {
+        let color = egui::Color32::from_rgb(guide.color[0], guide.color[1], guide.color[2]);
+        for [x, top, bottom] in projections
+            .iter()
+            .filter_map(|projection| projection.guide_line(guide))
+        {
+            painter.line_segment(
+                [egui::pos2(x, top), egui::pos2(x, bottom)],
+                egui::Stroke::new(GUIDE_STROKE, color),
+            );
+        }
+    }
     let mut labels = 0;
     for pointer in &frame.pointers {
         let Some(pixel) = projections
@@ -344,6 +407,82 @@ mod tests {
             x_log: false,
             y_log: false,
         }
+    }
+    fn guide(axes: &str, x: f64) -> PresenceGuide {
+        PresenceGuide {
+            axes: axes.into(),
+            x,
+            color: [37, 99, 235],
+        }
+    }
+    #[test]
+    fn a_guide_draws_at_its_data_x_on_its_own_axes_only() {
+        let view = PresenceProjection {
+            data_bounds: Some([0.0, 4.0, -1.0, 1.0]),
+            ..projection()
+        };
+        // rect x 40, width 400: x = 1 of [0, 4] is a quarter of the way in.
+        assert_eq!(
+            view.guide_line(&guide("axes:0", 1.0)),
+            Some([140.0, 30.0, 230.0])
+        );
+        // At the limits the 2 px stroke stays inside the box.
+        assert_eq!(
+            view.guide_line(&guide("axes:0", 0.0)),
+            Some([41.0, 30.0, 230.0])
+        );
+        assert_eq!(
+            view.guide_line(&guide("axes:0", 4.0)),
+            Some([439.0, 30.0, 230.0])
+        );
+        assert_eq!(view.guide_line(&guide("axes:0", 4.5)), None);
+        assert_eq!(view.guide_line(&guide("axes:1", 1.0)), None);
+        let resized = PresenceProjection {
+            rect: [80.0, 60.0, 800.0, 400.0],
+            ..view.clone()
+        };
+        assert_eq!(
+            resized.guide_line(&guide("axes:0", 1.0)),
+            Some([280.0, 60.0, 460.0])
+        );
+        let three_d = PresenceProjection {
+            is_3d: true,
+            ..view
+        };
+        assert_eq!(three_d.guide_line(&guide("axes:0", 1.0)), None);
+    }
+    #[test]
+    fn presence_frames_carry_guides_and_still_refuse_unknown_fields() {
+        let frame: PresenceFrame = serde_json::from_str(
+            r#"{"revision":"r","pointers":[],"guides":[{"axes":"axes:0","x":0.5,"color":[1,2,3]}]}"#,
+        )
+        .expect("frame with guides");
+        assert_eq!(
+            frame.guides,
+            vec![PresenceGuide {
+                axes: "axes:0".into(),
+                x: 0.5,
+                color: [1, 2, 3]
+            }]
+        );
+        assert!(frame.validate());
+        let without: PresenceFrame = serde_json::from_str(r#"{"revision":"r","pointers":[]}"#)
+            .expect("frame without guides");
+        assert!(without.guides.is_empty());
+        assert!(!serde_json::to_string(&without).unwrap().contains("guides"));
+        assert!(serde_json::from_str::<PresenceFrame>(
+            r#"{"revision":"r","pointers":[],"cursor":1}"#
+        )
+        .is_err());
+        assert!(serde_json::from_str::<PresenceFrame>(
+            r#"{"revision":"r","pointers":[],"guides":[{"axes":"axes:0","x":0.5,"color":[1,2,3],"width":4}]}"#
+        )
+        .is_err());
+        let too_many = PresenceFrame {
+            guides: vec![guide("axes:0", 0.0); 33],
+            ..without
+        };
+        assert!(!too_many.validate());
     }
     #[test]
     fn axes_round_trip_uses_actual_padding_and_resizes_without_drift() {

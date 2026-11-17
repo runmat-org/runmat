@@ -10,6 +10,7 @@
 //! - [`lock`]: stable item ids and rename aliases.
 //! - [`merge`]: re-resolution after merge (redirected and broken references).
 //! - [`values`]: published plain values read across files through the catalog.
+//! - [`release_store`]: the released revisions of a design file, kept in the project.
 
 pub mod history;
 pub mod label;
@@ -19,6 +20,7 @@ pub mod name;
 pub mod naming;
 pub mod publish;
 pub mod reference;
+pub mod release_store;
 pub mod resolve;
 pub mod values;
 

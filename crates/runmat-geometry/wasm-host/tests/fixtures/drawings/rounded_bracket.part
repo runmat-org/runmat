@@ -1,0 +1,62 @@
+runmat 0.7
+std 1
+
+// Concept bracket: 50 mm legs, 60 mm wide, 5 mm thick.
+part bracket {
+    sketch angle_profile on origin.xy {
+        bottom = line(start = [0 mm, 0 mm], end = [50 mm, 0 mm])
+        toe = line(start = [50 mm, 0 mm], end = [50 mm, 5 mm])
+        inner_bottom = line(start = [50 mm, 5 mm], end = [5 mm, 5 mm])
+        inner_upright = line(start = [5 mm, 5 mm], end = [5 mm, 50 mm])
+        top = line(start = [5 mm, 50 mm], end = [0 mm, 50 mm])
+        back = line(start = [0 mm, 50 mm], end = [0 mm, 0 mm])
+    }
+    feature body = extrude(profile = sketch.angle_profile, distance = 60 mm)
+    feature bottom_holes = hole(
+        face = feature.body.face.side(angle_profile.bottom),
+        at = { a = point(25 mm, 0 mm, 15 mm), b = point(25 mm, 0 mm, 30 mm), c = point(25 mm, 0 mm, 45 mm) },
+        diameter = 6.5 mm, through_all
+    )
+    feature back_holes = hole(
+        face = feature.body.face.side(angle_profile.back),
+        at = { a = point(0 mm, 25 mm, 15 mm), b = point(0 mm, 25 mm, 30 mm), c = point(0 mm, 25 mm, 45 mm) },
+        diameter = 6.5 mm, through_all
+    )
+    // Round the bracket perimeter, inside corner, and both rims of every hole.
+    feature edge_rounds = fillet(
+        edges = [
+            edges_between(feature.body.face.side(angle_profile.bottom), feature.body.face.side(angle_profile.toe)),
+            edges_between(feature.body.face.side(angle_profile.toe), feature.body.face.side(angle_profile.inner_bottom)),
+            edges_between(feature.body.face.side(angle_profile.inner_bottom), feature.body.face.side(angle_profile.inner_upright)),
+            edges_between(feature.body.face.side(angle_profile.inner_upright), feature.body.face.side(angle_profile.top)),
+            edges_between(feature.body.face.side(angle_profile.top), feature.body.face.side(angle_profile.back)),
+            edges_between(feature.body.face.side(angle_profile.back), feature.body.face.side(angle_profile.bottom)),
+            edges_between(feature.body.face.start, feature.body.face.side(angle_profile.bottom)),
+            edges_between(feature.body.face.start, feature.body.face.side(angle_profile.toe)),
+            edges_between(feature.body.face.start, feature.body.face.side(angle_profile.inner_bottom)),
+            edges_between(feature.body.face.start, feature.body.face.side(angle_profile.inner_upright)),
+            edges_between(feature.body.face.start, feature.body.face.side(angle_profile.top)),
+            edges_between(feature.body.face.start, feature.body.face.side(angle_profile.back)),
+            edges_between(feature.body.face.end, feature.body.face.side(angle_profile.bottom)),
+            edges_between(feature.body.face.end, feature.body.face.side(angle_profile.toe)),
+            edges_between(feature.body.face.end, feature.body.face.side(angle_profile.inner_bottom)),
+            edges_between(feature.body.face.end, feature.body.face.side(angle_profile.inner_upright)),
+            edges_between(feature.body.face.end, feature.body.face.side(angle_profile.top)),
+            edges_between(feature.body.face.end, feature.body.face.side(angle_profile.back)),
+            edges_between(feature.bottom_holes.face.wall(a), feature.body.face.side(angle_profile.bottom)),
+            edges_between(feature.bottom_holes.face.wall(b), feature.body.face.side(angle_profile.bottom)),
+            edges_between(feature.bottom_holes.face.wall(c), feature.body.face.side(angle_profile.bottom)),
+            edges_between(feature.bottom_holes.face.wall(a), feature.body.face.side(angle_profile.inner_bottom)),
+            edges_between(feature.bottom_holes.face.wall(b), feature.body.face.side(angle_profile.inner_bottom)),
+            edges_between(feature.bottom_holes.face.wall(c), feature.body.face.side(angle_profile.inner_bottom)),
+            edges_between(feature.back_holes.face.wall(a), feature.body.face.side(angle_profile.back)),
+            edges_between(feature.back_holes.face.wall(b), feature.body.face.side(angle_profile.back)),
+            edges_between(feature.back_holes.face.wall(c), feature.body.face.side(angle_profile.back)),
+            edges_between(feature.back_holes.face.wall(a), feature.body.face.side(angle_profile.inner_upright)),
+            edges_between(feature.back_holes.face.wall(b), feature.body.face.side(angle_profile.inner_upright)),
+            edges_between(feature.back_holes.face.wall(c), feature.body.face.side(angle_profile.inner_upright))
+        ],
+        radius = 0.5 mm
+    )
+    output bracket = { body = feature.body.body, material = "material.aluminum_6061" }
+}

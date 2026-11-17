@@ -24,7 +24,8 @@ pub struct ProjectionRequest {
     pub frame: Frame,
     /// Also report hidden edges (flagged not visible).
     pub hidden: bool,
-    /// Report smooth (tangent-continuous) edges between faces.
+    /// Report smooth (tangent-continuous) edges between faces. They come flagged `smooth`, so a
+    /// drawing can draw them in their own line type (tangent edges).
     pub smooth: bool,
     /// Largest chord deviation of a polyline from its curve (m).
     pub tolerance: f64,
@@ -45,6 +46,11 @@ pub enum ProjectedSource {
 pub struct ProjectedCurve {
     pub source: ProjectedSource,
     pub visible: bool,
+    /// A model edge between two faces that meet tangent-continuously (G1 or better) and that
+    /// isn't on the outline under this view: a fillet's boundary, a hole rim rounded into its
+    /// wall. Only reported when the request asks for `smooth` edges.
+    #[serde(default)]
+    pub smooth: bool,
     pub polyline: Vec<[f64; 2]>,
 }
 

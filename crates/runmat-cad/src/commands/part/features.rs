@@ -492,12 +492,23 @@ pub(super) fn features() -> Vec<CommandDescriptor> {
             .when(bodies_exist())
             .preview()
             .edit(add_feature("emboss").variant("wrap", "true")),
-        cmd("part.library", "Library feature", "library", P)
-            .desc("Insert a feature definition from your library or a company pack.")
-            .kw(&["feature def", "pack", "reuse"])
+        cmd("part.library", "Library", "library", P)
+            .desc("Insert a feature or part from the project's library folder.")
+            .kw(&["feature def", "library part", "reuse", "insert part"])
             .inputs(vec![
-                text("definition", "Definition", Some("pack/standard_slot")),
-                pick("placement", "Placement", &[K::Face, K::Plane, K::Point, K::MateConnector]),
+                suggested_text(
+                    "definition",
+                    "Library item",
+                    Some("library/fixtures.part#feature_def.slot"),
+                    Suggest::Library,
+                )
+                .help("A feature_def or a part in library/ beside this part"),
+                pick("placement", "Placement", &[K::Face, K::Plane])
+                    .help("The face or plane a feature sits on; a part inserts at the origin")
+                    .optional(),
+                text("args", "Inputs", Some("width = 8 mm, depth = 3 mm"))
+                    .help("Input values for the item; others keep their defaults")
+                    .optional(),
             ])
             .preview()
             .edit(add_feature("library")),

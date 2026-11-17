@@ -117,7 +117,7 @@ sketch outline on origin.xy {
 - The edges are read as a line when they run straight, as a circle when they close on one radius, as an arc on one radius, and otherwise as a spline through them.
 - The published name must be one connected chain of edges. An edge set that projects to a single point (an edge along the sketch's normal) is reported on the sketch.
 
-**Use edges** (`sketch.use-edges`, type Project) writes these entities for you. Open a sketch, click **Use edges > Project edges**, and pick one or more component edges in the view. Each edge is published from its part (`publish mate_edge1 = entities(kind = edge, ...)`, the same entry a mate writes) and comes into the sketch as a converted line, circle, arc or spline. Intersection curve, Silhouette edges and Offset on surface aren't built yet; picking one of them reports that by name.
+**Use edges** (`sketch.use-edges`, type Project) writes these entities for you. Open a sketch, click **Use edges > Project edges**, and pick one or more component edges in the view. Each edge is published from its part (`publish mate_edge1 = entities(kind = edge, ...)`, the same entry a mate writes) and comes into the sketch as a converted line, circle, arc or spline. In an assembly sketch, Use edges projects component edges only; Intersection, Silhouette and Offset on surface work in part sketches (see [Converted edges](/docs/mcad/part/sketches#converted-edges-use-edges)), and an assembly sketch reports them by name.
 
 **Offset of a component edge:** in **Offset**, a click on a component's edge (outside the sketch's own curves) picks it. Confirm brings the edge in as construction geometry and adds the offset copy, related to it so it follows the edge:
 

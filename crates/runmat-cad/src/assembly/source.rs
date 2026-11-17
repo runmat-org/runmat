@@ -408,6 +408,9 @@ pub struct ConfiguredSummary {
     pub mass: Option<f64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub center_of_mass: Option<[f64; 3]>,
+    /// The inertia tensor about the centre of mass, in the definition's axes (kg·m²).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub inertia: Option<[[f64; 3]; 3]>,
     /// A configuration-specific part number (a dash number), overriding the definition's.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub part_number: Option<String>,

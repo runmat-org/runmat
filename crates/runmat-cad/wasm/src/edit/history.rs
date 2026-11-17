@@ -23,6 +23,9 @@ use runmat_cad::syntax::rename::{
     rename_region_in_study, RenameKind,
 };
 
+/// The other files an edit changes: path, old text, change.
+type OtherFiles = Vec<(String, String, SourceChange)>;
+
 /// What an Outline id names, for a rename.
 fn rename_target(id: &str) -> Result<(RenameKind, &str), EditFailure> {
     if let Some(feature) = feature_of(id) {
@@ -51,7 +54,7 @@ pub(super) fn rename(
     text: &str,
     files: &Files,
     request: &EditRequest,
-) -> Result<(SourceChange, String, Vec<(String, String, SourceChange)>), EditFailure> {
+) -> Result<(SourceChange, String, OtherFiles), EditFailure> {
     let [selected] = request.selection.as_slice() else {
         return Err(model("select one item to rename"));
     };

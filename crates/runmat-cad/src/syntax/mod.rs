@@ -122,6 +122,10 @@ pub const PART: DocumentGrammar = DocumentGrammar {
             ..named("region", "regions", "region")
         },
         Collection {
+            type_field: Some("kind"),
+            ..named("representation", "representations", "representation")
+        },
+        Collection {
             tagged: Some(Tagged {
                 field: "target",
                 tag: "publishes",
@@ -219,10 +223,17 @@ pub const ASSEMBLY: DocumentGrammar = DocumentGrammar {
         named("mirror", "mirrors", "mirror"),
         named("fasteners", "fasteners", "fasteners"),
         named("envelope", "envelopes", "envelope"),
+        // `contact c1 = { a = { occurrence = [{ name = lower }], face = top }, b = …, bonded = true }`
+        named("contact", "contacts", "contact"),
         named("publish", "publishes", "publish"),
         named("configuration", "configurations", "configuration"),
+        named("display_state", "display_states", "display_state"),
         named("property", "properties", "property"),
         named("exploded", "exploded", "exploded"),
+        // `motion open_close = { duration = 4 s, drives = [{ mate = hinge, from = 0 deg, to = 90 deg }] }`
+        named("motion", "motions", "motion"),
+        // `position open = { values = [{ mate = hinge, value = 90 deg }] }`
+        named("position", "positions", "position"),
         // `view hero = { from = [-0.62, 0.7, -0.36], up = [0, 0, 1], default = true }`
         named("view", "views", "view"),
     ],
@@ -245,8 +256,16 @@ pub const DRAWING: DocumentGrammar = DocumentGrammar {
                 field: "kind",
                 tag: "view",
                 extras: &[
-                    "sheet", "model", "at", "scale", "display", "exclude", "exploded", "title",
+                    "sheet",
+                    "model",
+                    "at",
+                    "scale",
+                    "display",
+                    "exclude",
+                    "exploded",
+                    "title",
                     "centerlines",
+                    "tangent_edges",
                 ],
             }),
             ..named("view", "views", "view")

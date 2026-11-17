@@ -1,11 +1,11 @@
 use crate::{
     AnalysisModel, AnalysisProcedure, AnalysisValidationError, ComplexRepresentation,
-    CoordinateFrame, CoupledPhysicsFamily, ExcitationTarget, FieldLocation, ObservationComponent,
-    ObservationQuantity, ObservationRequest, ObservationSpec, ObservationTarget,
-    ObservationValueShape, PhysicsFamily, ProcedureStep, RecoveryPolicy, SignConvention,
-    SignalPrecision, SpatialReduction,
+    CoordinateFrame, ExcitationTarget, FieldLocation, ObservationComponent, ObservationQuantity,
+    ObservationRequest, ObservationSpec, ObservationTarget, ObservationValueShape, ProcedureStep,
+    RecoveryPolicy, SignConvention, SignalPrecision, SpatialReduction,
 };
 
+use super::family::quantity_supported;
 use super::{invalid_observation, observation_error};
 
 pub(super) fn validate_spec(
@@ -195,131 +195,6 @@ fn validate_quantity_family(
             "quantity is not produced by the step's physics family",
         )
     }
-}
-
-pub fn quantity_supported(step: &ProcedureStep, quantity: ObservationQuantity) -> bool {
-    // A `line_parameters` step publishes exactly the line parameters of its cross-section.
-    let line = quantity.line_parameter_scope().is_some();
-    if step.procedure == AnalysisProcedure::LineParameters || line {
-        return step.procedure == AnalysisProcedure::LineParameters
-            && step.family == PhysicsFamily::Electromagnetic
-            && line;
-    }
-    (match step.family {
-        PhysicsFamily::Structural => is_structural(quantity),
-        PhysicsFamily::Thermal => is_thermal(quantity),
-        PhysicsFamily::Electromagnetic => is_electromagnetic(quantity),
-        PhysicsFamily::Acoustic => is_acoustic(quantity),
-        PhysicsFamily::Fluid => is_fluid(quantity),
-        PhysicsFamily::Coupled(CoupledPhysicsFamily::Thermomechanical) => {
-            is_structural(quantity) || is_thermal(quantity)
-        }
-        PhysicsFamily::Coupled(CoupledPhysicsFamily::Electrothermal) => {
-            is_electromagnetic(quantity) || is_thermal(quantity)
-        }
-        PhysicsFamily::Coupled(CoupledPhysicsFamily::ConjugateHeatTransfer) => {
-            is_fluid(quantity) || is_thermal(quantity)
-        }
-        PhysicsFamily::Coupled(CoupledPhysicsFamily::FluidStructureInteraction) => {
-            is_fluid(quantity) || is_structural(quantity)
-        }
-    }) || is_universal(quantity)
-}
-
-fn is_structural(quantity: ObservationQuantity) -> bool {
-    matches!(
-        quantity,
-        ObservationQuantity::Displacement
-            | ObservationQuantity::Rotation
-            | ObservationQuantity::Velocity
-            | ObservationQuantity::Acceleration
-            | ObservationQuantity::Strain
-            | ObservationQuantity::Stress
-            | ObservationQuantity::VonMisesStress
-            | ObservationQuantity::ReactionForce
-            | ObservationQuantity::ReactionMoment
-            | ObservationQuantity::StrainEnergy
-            | ObservationQuantity::BeamAxialForce
-            | ObservationQuantity::BeamShearForce
-            | ObservationQuantity::BeamTorsionMoment
-            | ObservationQuantity::BeamBendingMoment
-            | ObservationQuantity::BeamBendingStress
-            | ObservationQuantity::BeamTorsionStress
-            | ObservationQuantity::ShellMembraneForce
-            | ObservationQuantity::ShellBendingMoment
-            | ObservationQuantity::ShellTransverseShear
-            | ObservationQuantity::ShellVonMises
-            | ObservationQuantity::ContactGap
-            | ObservationQuantity::ContactPressure
-            | ObservationQuantity::ModalFrequency
-            | ObservationQuantity::ModalParticipation
-            | ObservationQuantity::Eigenvalue
-    )
-}
-
-fn is_thermal(quantity: ObservationQuantity) -> bool {
-    matches!(
-        quantity,
-        ObservationQuantity::Temperature
-            | ObservationQuantity::TemperatureGradient
-            | ObservationQuantity::HeatFlux
-            | ObservationQuantity::HeatRate
-            | ObservationQuantity::ThermalEnergyStorageRateDensity
-    )
-}
-
-fn is_electromagnetic(quantity: ObservationQuantity) -> bool {
-    matches!(
-        quantity,
-        ObservationQuantity::ElectricPotential
-            | ObservationQuantity::ElectricField
-            | ObservationQuantity::ElectricDisplacement
-            | ObservationQuantity::ElectricEnergyDensity
-            | ObservationQuantity::JoulePowerDensity
-            | ObservationQuantity::ElectricCurrent
-            | ObservationQuantity::ElectricCurrentDensity
-            | ObservationQuantity::ElectricCharge
-            | ObservationQuantity::ElectricEdgeCirculation
-            | ObservationQuantity::MagneticEdgeCirculation
-            | ObservationQuantity::MagneticVectorPotential
-            | ObservationQuantity::MagneticFluxDensity
-            | ObservationQuantity::MagneticFieldIntensity
-            | ObservationQuantity::HeatRate
-    )
-}
-
-fn is_acoustic(quantity: ObservationQuantity) -> bool {
-    matches!(
-        quantity,
-        ObservationQuantity::AcousticPressure
-            | ObservationQuantity::AcousticParticleVelocity
-            | ObservationQuantity::AcousticIntensity
-            | ObservationQuantity::AcousticPortIntensity
-            | ObservationQuantity::SoundPressureLevel
-            | ObservationQuantity::TransmissionLoss
-    )
-}
-
-fn is_fluid(quantity: ObservationQuantity) -> bool {
-    matches!(
-        quantity,
-        ObservationQuantity::FluidPressure
-            | ObservationQuantity::FluidVelocity
-            | ObservationQuantity::Vorticity
-            | ObservationQuantity::MassFlowRate
-            | ObservationQuantity::VolumeFlowRate
-            | ObservationQuantity::WallShearStress
-            | ObservationQuantity::HeatRate
-    )
-}
-
-fn is_universal(quantity: ObservationQuantity) -> bool {
-    matches!(
-        quantity,
-        ObservationQuantity::Residual
-            | ObservationQuantity::Balance
-            | ObservationQuantity::ConstraintViolation
-    )
 }
 
 fn validate_shape(
@@ -564,68 +439,4 @@ fn validate_recovery(
 
 pub(super) fn is_scalar_result(spec: &ObservationSpec) -> bool {
     spec.result_value_shape() == ObservationValueShape::Scalar
-}
-
-#[cfg(test)]
-mod tests {
-    use crate::{ObservationQuantity, ProcedureStep};
-
-    use super::quantity_supported;
-
-    #[test]
-    fn quantity_support_follows_physics_family() {
-        let structural = ProcedureStep::structural_static("structural");
-        assert!(quantity_supported(&structural, ObservationQuantity::Stress));
-        for quantity in [
-            ObservationQuantity::VonMisesStress,
-            ObservationQuantity::BeamAxialForce,
-            ObservationQuantity::BeamShearForce,
-            ObservationQuantity::BeamTorsionMoment,
-            ObservationQuantity::BeamBendingMoment,
-            ObservationQuantity::BeamBendingStress,
-            ObservationQuantity::BeamTorsionStress,
-            ObservationQuantity::ShellMembraneForce,
-            ObservationQuantity::ShellBendingMoment,
-            ObservationQuantity::ShellTransverseShear,
-            ObservationQuantity::ShellVonMises,
-        ] {
-            assert!(quantity_supported(&structural, quantity));
-        }
-        assert!(!quantity_supported(
-            &structural,
-            ObservationQuantity::Temperature
-        ));
-        assert!(quantity_supported(
-            &structural,
-            ObservationQuantity::Residual
-        ));
-
-        let thermal = ProcedureStep::thermal_transient("thermal");
-        assert!(quantity_supported(&thermal, ObservationQuantity::HeatFlux));
-        assert!(quantity_supported(
-            &thermal,
-            ObservationQuantity::ThermalEnergyStorageRateDensity
-        ));
-        assert!(!quantity_supported(
-            &structural,
-            ObservationQuantity::ThermalEnergyStorageRateDensity
-        ));
-        for family in [
-            crate::PhysicsFamily::Electromagnetic,
-            crate::PhysicsFamily::Acoustic,
-            crate::PhysicsFamily::Fluid,
-            crate::PhysicsFamily::Coupled(crate::CoupledPhysicsFamily::FluidStructureInteraction),
-        ] {
-            let mut nonthermal = structural.clone();
-            nonthermal.family = family;
-            assert!(!quantity_supported(
-                &nonthermal,
-                ObservationQuantity::ThermalEnergyStorageRateDensity
-            ));
-        }
-        assert!(!quantity_supported(
-            &thermal,
-            ObservationQuantity::Displacement
-        ));
-    }
 }
