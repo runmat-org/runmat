@@ -1410,33 +1410,44 @@ pub fn gc_reset_for_test() -> Result<()> {
     Ok(())
 }
 
-/// Create an isolated test context with clean GC state
+/// Serializes tests that use the process-wide GC heap. Collection skips while another thread
+/// allocates, borrows or holds roots, so a test that asserts what a collection frees must not
+/// share the heap with another test.
+static GC_TEST_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+/// Exclusive use of a clean GC heap for one test, held until the guard drops. Tests that need
+/// both this guard and `runmat_filesystem::provider_override_lock` take the provider lock first.
+#[must_use = "the GC heap is exclusive only while the guard is held"]
+pub struct GcTestGuard {
+    _lock: std::sync::MutexGuard<'static, ()>,
+}
+
+impl Drop for GcTestGuard {
+    fn drop(&mut self) {
+        // Leave a clean heap for the next test; the lock is released after the reset.
+        let _ = gc_reset_for_test();
+    }
+}
+
+/// Takes the GC test lock and resets the heap. Async tests hold the guard across their awaits;
+/// synchronous tests can use [`gc_test_context`].
+pub fn gc_test_guard() -> GcTestGuard {
+    // A test that panicked while holding the lock leaves nothing to recover but the heap,
+    // which the reset below clears.
+    let lock = GC_TEST_LOCK
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    gc_reset_for_test().expect("GC reset should succeed");
+    GcTestGuard { _lock: lock }
+}
+
+/// Runs `test_fn` with exclusive use of a clean GC heap.
 pub fn gc_test_context<F, R>(test_fn: F) -> R
 where
     F: FnOnce() -> R,
 {
-    // Use a global test mutex to ensure tests run sequentially when needed
-    static TEST_MUTEX: std::sync::Mutex<()> = std::sync::Mutex::new(());
-
-    // Handle poisoned mutex gracefully
-    let _guard = match TEST_MUTEX.lock() {
-        Ok(guard) => guard,
-        Err(poisoned) => {
-            // Clear the poison and continue
-            poisoned.into_inner()
-        }
-    };
-
-    // Reset GC to clean state
-    gc_reset_for_test().expect("GC reset should succeed");
-
-    // Run the test
-    let result = test_fn();
-
-    // Clean up after test (optional, but good practice)
-    let _ = gc_reset_for_test();
-
-    result
+    let _guard = gc_test_guard();
+    test_fn()
 }
 
 #[cfg(test)]

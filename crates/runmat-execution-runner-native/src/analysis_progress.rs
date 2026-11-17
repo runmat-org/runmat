@@ -71,7 +71,8 @@ fn forward_to_parent(event: &FeaProgressEvent) {
     };
     // The sequence is assigned and written under one lock, so frames arrive in order. A lost
     // parent surfaces through the terminal frame; progress never fails the solve.
-    if let Ok(frame) = runmat_canonical_codec::encode_json_bounded(&message, target.max_message_bytes)
+    if let Ok(frame) =
+        runmat_canonical_codec::encode_json_bounded(&message, target.max_message_bytes)
     {
         let _ = target.writer.write_blocking(frame);
     }

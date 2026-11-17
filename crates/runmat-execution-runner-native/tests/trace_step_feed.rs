@@ -54,6 +54,12 @@ fn step_and_result_fields_reach_the_trace_feed() {
     let mesh = find("fea.study.mesh", "B");
     assert_eq!(arg(mesh, "step"), Some("Mesh"));
     assert_eq!(mesh.parent_span_id, case.span_id);
-    assert_eq!(arg(find("fea.study.mesh", "E"), "result"), Some("12,180 tet10"));
-    assert_eq!(find("meshing.native_session", "B").parent_span_id, mesh.span_id);
+    assert_eq!(
+        arg(find("fea.study.mesh", "E"), "result"),
+        Some("12,180 tet10")
+    );
+    assert_eq!(
+        find("meshing.native_session", "B").parent_span_id,
+        mesh.span_id
+    );
 }
