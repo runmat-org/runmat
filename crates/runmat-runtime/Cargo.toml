@@ -9,6 +9,13 @@ homepage = "https://runmat.com"
 repository = "https://github.com/runmat-org/runmat"
 build = "build.rs"
 links = "runmat_runtime_native"
+# Keep repository-only tests out of the source distribution.
+exclude = [
+    "/tests/**",
+    "/src/**/tests.rs",
+    "/src/**/tests/**",
+    "/src/**/*_tests.rs",
+]
 
 [dependencies]
 uuid = { version = "1", default-features = false, features = ["serde"] }
@@ -190,6 +197,7 @@ occt-native = ["runmat-geometry-io/occt-native", "runmat-geometry-io/occt-kernel
 occt-wasm-host = ["runmat-geometry-io/occt-wasm-host"]
 
 [dev-dependencies]
+tracing-subscriber = { version = "0.3", features = ["registry"] }
 runmat-geometry-fixtures = { workspace = true }
 runmat-accelerate-api = { workspace = true, features = ["test-support"] }
 runmat-macros = { workspace = true } 

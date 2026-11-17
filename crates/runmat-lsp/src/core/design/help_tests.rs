@@ -48,7 +48,8 @@ fn keywords_operations_arguments_values_and_units_hover() {
 fn materials_hover_with_their_library_properties() {
     let a = analysis();
     let text = hover(&a, "Aluminum 6061\"", 3);
-    assert!(text.contains("**Aluminum 6061-T6** · material `aluminum_6061_t6`"), "{text}");
+    let label = runmat_types::physical::materials::material("aluminum_6061_t6").unwrap().label;
+    assert!(text.contains(&format!("**{label}** · material `aluminum_6061_t6`")), "{text}");
     assert!(text.contains("- Density: 2700 kg/m³"), "{text}");
     assert!(text.contains("- Yield strength:"), "{text}");
 }
@@ -90,7 +91,8 @@ fn completion_offers_arguments_values_and_materials() {
     let labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
     assert_eq!(labels, vec!["new", "add", "cut", "intersect"]);
     let material = a.completion_items(&at("Aluminum 6061\"", 0));
-    assert!(material.iter().any(|i| i.label == "Aluminum 6061-T6"), "{material:?}");
+    let label = runmat_types::physical::materials::material("aluminum_6061_t6").unwrap().label;
+    assert!(material.iter().any(|i| i.label == label), "{material:?}");
 }
 
 #[test]

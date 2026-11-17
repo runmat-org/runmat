@@ -253,6 +253,18 @@ impl<'a, 'b> Run<'a, 'b> {
         Ok((profile, Some(h)))
     }
 
+    /// Whether a sketch profile's sketch is drawn on a face (`sketch s on feature.body.face.end`):
+    /// its plane's normal then points out of the body, as a face profile's does.
+    fn sketch_on_face(&self, p: &ProfileSource) -> bool {
+        let Some(sketch) = p.sketch() else {
+            return false;
+        };
+        matches!(
+            self.doc.feature(&sketch.sketch).map(|f| &f.kind),
+            Some(FeatureKind::Sketch(s)) if matches!(s.plane, PlaneRef::Face { .. })
+        )
+    }
+
     /// The names a profile's side faces take: by its sketch, or by the feature for a face.
     pub(super) fn profile_naming(id: &FeatureId, p: &ProfileSource) -> FeatureId {
         p.sketch()
@@ -268,9 +280,10 @@ impl<'a, 'b> Run<'a, 'b> {
     ) -> Result<Compiled, Halt> {
         let (mut profile, face) = self.profile_source(i, id, "profile", &e.profile)?;
         let (combine, combine_ops) = self.mode_operands(i, id, &e.mode)?;
-        // A face extrudes out of its body to add or make a body, and into it to remove or
-        // intersect.
-        let inward = face.is_some() && matches!(combine, Combine::Cut | Combine::Intersect);
+        // A profile on a face (the face itself, or a sketch drawn on it) extrudes out of its body
+        // to add or make a body, and into it to remove or intersect. `reverse` turns either.
+        let on_face = face.is_some() || self.sketch_on_face(&e.profile);
+        let inward = on_face && matches!(combine, Combine::Cut | Combine::Intersect);
         let dir = if e.reverse != inward { -1.0 } else { 1.0 };
         let mut ops = Operands {
             combine: combine_ops,

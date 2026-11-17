@@ -85,6 +85,7 @@ fn part_pass(path: &str, text: &str) -> Value {
     };
     let ctx = RegenContext {
         kernel: kernel.as_ref(),
+        tessellator: Some(kernel.as_ref()),
         solver: &ConstraintSketchSolver,
         units: &Units,
         dynamic: &NoDynamicValues,

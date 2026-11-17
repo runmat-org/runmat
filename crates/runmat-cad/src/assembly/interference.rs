@@ -108,6 +108,19 @@ pub trait InterferenceKernel {
 #[derive(Clone, Copy, Debug, Default)]
 pub struct BoxKernel;
 
+/// Whether envelope `e` lets occurrence `n` inside without an interference: its owner (and what
+/// is under it) always, anything when it doesn't keep out and has no owner.
+pub fn envelope_admits(
+    tree: &ResolvedAssembly,
+    e: &crate::assembly::resolve::ResolvedEnvelope,
+    n: NodeId,
+) -> bool {
+    match e.occupant {
+        Some(o) => under(tree, n, o),
+        None => !e.keep_out,
+    }
+}
+
 impl InterferenceKernel for BoxKernel {
     fn check(
         &self,
@@ -265,10 +278,7 @@ pub fn check(
                 tree.envelopes
                     .iter()
                     .find(|e| Some(&e.name) == env.envelope.as_ref() && e.world == env.bbox)
-                    .map(|e| match e.occupant {
-                        Some(o) => under(tree, n, o),
-                        None => !e.keep_out,
-                    })
+                    .map(|e| envelope_admits(tree, e, n))
                     .unwrap_or(false)
             }
             (None, None) => true,

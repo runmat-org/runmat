@@ -434,3 +434,41 @@ fn cost_lists_each_line_from_the_rates_entered() {
     assert_eq!(out["ok"], false);
     assert_eq!(out["message"], "set the build rate");
 }
+
+const SMALL: &str = "runmat 0.7\nstd 1\n\npart small {\n    sketch s1 on origin.xy {\n        l1 = line(start = [0 mm, 0 mm], end = [10 mm, 0 mm])\n        l2 = line(start = [10 mm, 0 mm], end = [10 mm, 10 mm])\n        l3 = line(start = [10 mm, 10 mm], end = [0 mm, 10 mm])\n        l4 = line(start = [0 mm, 10 mm], end = [0 mm, 0 mm])\n    }\n    feature body = extrude(profile = sketch.s1, distance = 10 mm)\n    output small = { body = feature.body.body, material = \"material.aluminum\" }\n}\n";
+
+const PAIR: &str = "runmat 0.7\nstd 1\n\nassembly pair {\n    use part block as big\n    use part small as a {\n        placement = { placement = offset, offset = { translation = [0 mm, 30 mm, 0 mm] } }\n    }\n    use part small as b {\n        placement = { placement = offset, offset = { translation = [20 mm, 30 mm, 0 mm] } }\n    }\n}\n";
+
+#[test]
+fn assembly_visualization_sorts_and_colors_components_by_mass_and_count() {
+    let files: Files = [("/p/block.part", BLOCK_100), ("/p/small.part", SMALL), ("/p/pair.assembly", PAIR)]
+        .map(|(p, t)| (p.to_owned(), t.to_owned()))
+        .into_iter()
+        .collect();
+    let run = |by: &str| -> Value {
+        serde_json::from_str(&analyze_json(
+            "/p/pair.assembly",
+            PAIR,
+            &files,
+            &json!({ "command": "assembly.visualization", "values": { "by": by } }).to_string(),
+        ))
+        .unwrap()
+    };
+    let out = run("mass");
+    assert_eq!(out["ok"], true, "{out}");
+    let rows = out["rows"].as_array().unwrap();
+    assert_eq!(rows.len(), 3, "{out}");
+    // The 100 mm block is heaviest: first, in the top band (red).
+    assert_eq!(rows[0]["cells"][0], "big", "{out}");
+    let legend = out["colors"]["legend"].as_array().unwrap();
+    assert_eq!(rows[0]["legend"].as_u64(), Some(legend.len() as u64 - 1), "{out}");
+    assert_eq!(out["colors"]["faces"].as_array().unwrap().len(), 3, "{out}");
+    assert!(out["colors"]["faces"][0]["item"].as_str().unwrap().starts_with("occurrence:"), "{out}");
+    // By count: the two small blocks share a part.
+    let out = run("count");
+    assert_eq!(out["rows"][0]["cells"][2], "2", "{out}");
+    // No component has a cost: every row reads "No value".
+    let out = run("cost");
+    assert_eq!(out["rows"][0]["cells"][2], "—", "{out}");
+    assert_eq!(run("rebuild")["ok"], false);
+}

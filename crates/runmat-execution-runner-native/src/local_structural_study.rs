@@ -3,7 +3,9 @@
 use runmat_analysis_fea::study::{
     compile_analysis_study, plan_structural_study_with_fields, AnalysisStudyCompilationInput,
 };
+use runmat_analysis_fea::progress::trace::{self, StudyStep};
 use runmat_analysis_fea::{FeaProgressEvent, FeaProgressPhase, FeaProgressStatus};
+use tracing::Instrument;
 
 use crate::{
     execute_structural_workloads_locally, NativeExecutionConfig, NativeExecutionError,
@@ -69,6 +71,9 @@ pub enum LocalStudyCompletion {
 
 /// Execute any portable typed study root locally: geometry, exact meshing, compilation and the
 /// family's governed task graph, all through process-isolated workers.
+///
+/// Each progress phase is also a trace step span (`fea.study.mesh`, `fea.study.assemble`,
+/// `fea.study.solve`, `fea.study.recover`) under the caller's current span.
 pub async fn execute_prepared_study_locally_with_observers(
     mut config: NativeExecutionConfig,
     prepared: PreparedStructuralStudyRoot,
@@ -84,6 +89,8 @@ pub async fn execute_prepared_study_locally_with_observers(
         mesh: observers.mesh,
     };
     config.progress_observer = crate::ProgressObserverSlot::new(observers.progress.clone());
+    // Geometry loading and meshing are one trace step; the meshing spans nest inside it.
+    let mesh_step = StudyStep::Mesh.span();
     emit_local_progress(
         &observers,
         OPERATION,
@@ -127,7 +134,10 @@ pub async fn execute_prepared_study_locally_with_observers(
         &mut composition_store,
         &observers,
     )
+    .instrument(mesh_step.clone())
     .await?;
+    trace::finish(&mesh_step, &trace::mesh_result(&meshing.artifact));
+    drop(mesh_step);
 
     emit_local_progress(
         &observers,
@@ -152,38 +162,50 @@ pub async fn execute_prepared_study_locally_with_observers(
         .map(Box::new)
         .map(LocalStudyCompletion::Family);
     }
-    let planning = decoded
-        .planning
-        .structural()
-        .ok_or_else(|| protocol("structural study root carries family planning"))?;
-    let mut compiled = compile_analysis_study(AnalysisStudyCompilationInput {
-        study: &decoded.study,
-        geometry: &output.document,
-        regions: &output.regions,
-        materials: &decoded.materials,
-        mesh: &meshing.artifact,
-    })
-    .map_err(protocol)?;
-    // Geometry has completed compilation; numerical execution retains its bound
-    // mesh and property identities, not the original geometry materialization.
-    drop(output);
-    let resolved_inputs = decoded
-        .input_materializations
-        .iter()
-        .map(|plan| plan.resolve(&meshing.artifact).map_err(protocol))
-        .collect::<NativeExecutionResult<Vec<_>>>()?;
-    let completed_inputs = crate::input_materialization::execute_locally(
-        analysis_config.clone(),
-        &resolved_inputs,
-        &composition_store,
-        &decoded.artifact_access,
-        workers,
-        &meshing.artifact,
-    )
-    .await?;
-    crate::input_materialization::apply_to_model(&mut compiled.model, completed_inputs)?;
-    let workloads = plan_structural_study_with_fields(&compiled, planning, &decoded.initial_fields)
+    let assemble_step = StudyStep::Assemble.span();
+    let steps = decoded.study.sequence.steps.len();
+    let outputs = decoded.study.outputs.len();
+    // A solid's nodes carry three displacement unknowns each.
+    let dofs = 3 * meshing.artifact.topology.nodes.len() as u64;
+    let (compiled, workloads) = async {
+        let planning = decoded
+            .planning
+            .structural()
+            .ok_or_else(|| protocol("structural study root carries family planning"))?;
+        let mut compiled = compile_analysis_study(AnalysisStudyCompilationInput {
+            study: &decoded.study,
+            geometry: &output.document,
+            regions: &output.regions,
+            materials: &decoded.materials,
+            mesh: &meshing.artifact,
+        })
         .map_err(protocol)?;
+        // Geometry has completed compilation; numerical execution retains its bound
+        // mesh and property identities, not the original geometry materialization.
+        drop(output);
+        let resolved_inputs = decoded
+            .input_materializations
+            .iter()
+            .map(|plan| plan.resolve(&meshing.artifact).map_err(protocol))
+            .collect::<NativeExecutionResult<Vec<_>>>()?;
+        let completed_inputs = crate::input_materialization::execute_locally(
+            analysis_config.clone(),
+            &resolved_inputs,
+            &composition_store,
+            &decoded.artifact_access,
+            workers,
+            &meshing.artifact,
+        )
+        .await?;
+        crate::input_materialization::apply_to_model(&mut compiled.model, completed_inputs)?;
+        let workloads = plan_structural_study_with_fields(&compiled, planning, &decoded.initial_fields)
+            .map_err(protocol)?;
+        Ok::<_, NativeExecutionError>((compiled, workloads))
+    }
+    .instrument(assemble_step.clone())
+    .await?;
+    trace::finish(&assemble_step, &trace::dof_result(dofs));
+    drop(assemble_step);
     emit_local_progress(
         &observers,
         OPERATION,
@@ -202,6 +224,7 @@ pub async fn execute_prepared_study_locally_with_observers(
         None,
         None,
     );
+    let solve_step = StudyStep::Solve.span();
     let numerical = execute_structural_workloads_locally(crate::StructuralWorkloadLocalExecution {
         execution_config: analysis_config,
         program_environment: request.recipe.program_revision.environment(),
@@ -214,7 +237,10 @@ pub async fn execute_prepared_study_locally_with_observers(
         local_execution: decoded.local_execution,
         admitted_accelerators: Some(&decoded.analysis_accelerator_requests),
     })
+    .instrument(solve_step.clone())
     .await?;
+    trace::finish(&solve_step, &trace::steps_result(steps));
+    drop(solve_step);
     emit_local_progress(
         &observers,
         OPERATION,
@@ -224,6 +250,7 @@ pub async fn execute_prepared_study_locally_with_observers(
         Some(1),
         Some(1),
     );
+    let recover_step = StudyStep::Recover.span();
     emit_local_progress(
         &observers,
         OPERATION,
@@ -233,14 +260,19 @@ pub async fn execute_prepared_study_locally_with_observers(
         None,
         None,
     );
-    let result = runmat_runtime::analysis::StructuralStudyResult::new(
-        compiled,
-        meshing.artifact,
-        meshing.evidence,
-        workloads,
-        numerical,
-    )
-    .map_err(protocol)?;
+    let result = recover_step
+        .in_scope(|| {
+            runmat_runtime::analysis::StructuralStudyResult::new(
+                compiled,
+                meshing.artifact,
+                meshing.evidence,
+                workloads,
+                numerical,
+            )
+        })
+        .map_err(protocol)?;
+    trace::finish(&recover_step, &trace::outputs_result(outputs));
+    drop(recover_step);
     let result = LocalStudyCompletion::Structural(Box::new(result));
     emit_local_progress(
         &observers,
@@ -264,11 +296,18 @@ async fn execute_family_locally(
     observers: &LocalStructuralStudyObservers,
 ) -> NativeExecutionResult<crate::CompletedFeaStudyResult> {
     const OPERATION: &str = "fea.typed_study";
+    // Opened where the caller announced ModelAssembly, so the step and the progress phase match.
+    let assemble_step = StudyStep::Assemble.span();
+    let steps = decoded.study.sequence.steps.len();
+    let outputs = decoded.study.outputs.len();
+    let nodes = meshing.artifact.topology.nodes.len() as u64;
+    let _assembling = assemble_step.enter();
     let resolved_inputs = decoded
         .input_materializations
         .iter()
         .map(|plan| plan.resolve(&meshing.artifact).map_err(protocol))
         .collect::<NativeExecutionResult<Vec<_>>>()?;
+    drop(_assembling);
     let mut completed_inputs = Some(
         crate::input_materialization::execute_locally(
             analysis_config.clone(),
@@ -278,8 +317,10 @@ async fn execute_family_locally(
             workers,
             &meshing.artifact,
         )
+        .instrument(assemble_step.clone())
         .await?,
     );
+    let _assembling = assemble_step.enter();
     // One read per run: the pool less what this coordinator holds once the family compile has
     // finished. Planning makes the read; the worker envelope reuses its value.
     let pool = match analysis_config.local_memory_capacity_bytes {
@@ -323,6 +364,9 @@ async fn execute_family_locally(
     .map_err(NativeExecutionError::Protocol)?;
     drop(output);
     crate::machine_capacity::trace_footprint("family study planned");
+    drop(_assembling);
+    trace::finish(&assemble_step, &trace::node_result(nodes));
+    drop(assemble_step);
     emit_local_progress(
         observers,
         OPERATION,
@@ -352,6 +396,7 @@ async fn execute_family_locally(
         None,
         None,
     );
+    let solve_step = StudyStep::Solve.span();
     let completed = crate::study_family::execute_family_study(
         &mut pool,
         planned,
@@ -362,15 +407,24 @@ async fn execute_family_locally(
             priority: 0,
         },
     )
+    .instrument(solve_step.clone())
     .await?;
-    let result = crate::typed_fea::local_family_result(
-        completed,
-        source,
-        &mut result_store,
-        meshing.artifact,
-        meshing.evidence,
-    )
-    .map_err(NativeExecutionError::Protocol)?;
+    trace::finish(&solve_step, &trace::steps_result(steps));
+    drop(solve_step);
+    let recover_step = StudyStep::Recover.span();
+    let result = recover_step
+        .in_scope(|| {
+            crate::typed_fea::local_family_result(
+                completed,
+                source,
+                &mut result_store,
+                meshing.artifact,
+                meshing.evidence,
+            )
+        })
+        .map_err(NativeExecutionError::Protocol)?;
+    trace::finish(&recover_step, &trace::outputs_result(outputs));
+    drop(recover_step);
     emit_local_progress(
         observers,
         OPERATION,

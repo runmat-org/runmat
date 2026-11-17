@@ -146,12 +146,14 @@ fn child(parent: &View, name: String, kind: ViewKind, at: [f64; 2]) -> View {
         model: parent.model.clone(),
         kind,
         at: round(at),
-        scale: None,
+        // A view drawn from another draws at its scale (a detail sets its own).
+        scale: parent.scale,
         display: parent.display,
         exclude: Vec::new(),
         exploded: None,
         title: None,
         centerlines: true,
+        tangent_edges: None,
     }
 }
 
@@ -194,6 +196,7 @@ pub fn edit(
     }
     Some((|| {
         let mut d = Drawing::open(path, text_, files)?;
+        let before: Vec<String> = d.document.views.iter().map(|v| v.name.clone()).collect();
         let summary = match command {
             "drawing.standard-3" | "drawing.model-view" | "drawing.isometric" => {
                 let model_ref = model_ref(&d, values)?;
@@ -222,6 +225,7 @@ pub fn edit(
                             exploded: None,
                             title: None,
                             centerlines: true,
+                            tangent_edges: None,
                         }
                     };
                 // A first view sits low left (room for dimensions under it and the title block
@@ -280,7 +284,7 @@ pub fn edit(
                         );
                         d.document.views.push(front);
                         let t = fresh(&d.document, "top");
-                        let mut top = new(
+                        let top = new(
                             &d,
                             t.clone(),
                             ViewKind::Projected {
@@ -290,10 +294,9 @@ pub fn edit(
                             top_at,
                             Display::HiddenLines,
                         );
-                        top.scale = None;
                         d.document.views.push(top);
                         let r = fresh(&d.document, "right");
-                        let mut right = new(
+                        let right = new(
                             &d,
                             r.clone(),
                             ViewKind::Projected {
@@ -303,7 +306,6 @@ pub fn edit(
                             right_at,
                             Display::HiddenLines,
                         );
-                        right.scale = None;
                         d.document.views.push(right);
                         if let Some(sheet) = d.document.sheets.iter_mut().find(|x| x.name == sheet)
                         {
@@ -509,6 +511,33 @@ pub fn edit(
             }
             _ => unreachable!(),
         };
+        // A view placed beside its parent or in the open area goes where the sheet's layout
+        // puts it, so a new view isn't moved (and reported) on its first layout.
+        if placed(values)?.is_none() {
+            settle_new_views(&mut d, &before)?;
+        }
         Ok((d.change()?, summary))
     })())
+}
+
+/// Moves the views not in `before` to where the sheet's layout places them. The guesses above
+/// space views by their models' extents; the layout also keeps room for dimensions, labels and
+/// the sheet's gap, which only it knows.
+fn settle_new_views(d: &mut Drawing<'_>, before: &[String]) -> Result<(), EditFailure> {
+    let text = d.change()?.source;
+    let laid: Value = serde_json::from_str(&crate::drawing::compile_json(d.path, &text, d.files))
+        .unwrap_or(Value::Null);
+    let layouts = &laid["projection"]["data"]["layouts"];
+    for view in d.document.views.iter_mut() {
+        if before.contains(&view.name) {
+            continue;
+        }
+        let spot = layouts[view.sheet.as_str()]["placed"][format!("view:{}", view.name)]
+            .as_array()
+            .and_then(|p| Some([p.first()?.as_f64()?, p.get(1)?.as_f64()?]));
+        if let Some(p) = spot {
+            view.at = round(p);
+        }
+    }
+    Ok(())
 }

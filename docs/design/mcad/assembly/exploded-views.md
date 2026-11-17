@@ -101,6 +101,19 @@ With `spacing`, the step moves its i-th occurrence `distance + i × spacing`, co
 - `base = <view>` runs another view's steps first, so a service view can extend the assembly-instructions view.
 - `include = [{ id, occurrence, view, after }]` runs a sub-assembly's own exploded view inside this one, after the step `after` (before the first step when it is left out).
 
+## Auto-explode
+
+Auto-explode (`explode.auto`, on the Explode tab) writes a new exploded view from the assembly's mates. Its steps are ordinary `translate` steps, so they can be edited, reordered or deleted afterward. The steps are worked out as follows:
+
+1. The mates join the components into a graph. In each group of mated components, the first fixed component stays where it is (the first component in assembly order when none is fixed). Every other component comes off the component it is mated to on the shortest mate path from there.
+2. A component moves along the Z axis of the mate connector between it and that component: a face's normal for a planar mate, the axis for a concentric, revolute or slider mate. The direction points away from the component it comes off.
+3. It moves the smallest distance that puts its assembled bounding box clear of that component's box by **Spacing** (20 mm by default). Everything mated beyond it moves with it, so each level clears the one under it.
+4. Steps are written outermost first: the components furthest from the fixed one along the mates, then the last in assembly order. **Explode lines** adds a trail for each moved component.
+
+In this stack, a pin stands on a block that sits on a fixed plate. Auto-explode writes `pin_out` first, which lifts the pin 20 mm clear of the block, then `block_out`, which lifts the block and the pin 20 mm clear of the plate. A component with no mate stays where it is, and the command reports it.
+
+Delete on an exploded view's row or a step's row in the Outline removes it. A step's trail lines go with it when no step left in the view moves that component, and a view that another view uses as its `base` stays until that view changes.
+
 ## What the check reports
 
 The check reports a view or step declared twice, a base view that is missing or that builds on itself, a zero direction or axis, a step that moves nothing or names something twice, and a path that names nothing in the assembly. A step that names an occurrence and its own sub-assembly moves the occurrence twice, and the check notes it. A renamed occurrence still resolves through the lock, with a fix that rewrites the path.

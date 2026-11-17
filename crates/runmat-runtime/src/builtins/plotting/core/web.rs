@@ -307,7 +307,7 @@ pub(crate) mod wasm {
             if expected.is_some() && expected != entry.bound_target {
                 return Ok(());
             }
-            if expected.is_none() && !frame.pointers.is_empty() {
+            if expected.is_none() && (!frame.pointers.is_empty() || !frame.guides.is_empty()) {
                 return Err(web_error("Presence requires a bound target"));
             }
             entry

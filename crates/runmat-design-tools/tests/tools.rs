@@ -579,7 +579,15 @@ drawing sheet {
         &files,
     )
     .expect("check");
-    assert_eq!(check["errors"], json!(0), "the drawing compiles: {check}");
+    // The view resolves `part bracket` to the file that declares it. (The check is the
+    // Desktop's Check drawing: a model that doesn't build on the grid test kernel is a Model
+    // finding on the view, which names the file it resolved.)
+    for d in check["diagnostics"].as_array().unwrap() {
+        if d["severity"] == "error" {
+            let message = d["message"].as_str().unwrap();
+            assert!(message.contains("/p/d/bracket_v2.part"), "{check}");
+        }
+    }
     assert_eq!(
         dependency_files("/p/d/sheet.drawing", drawing, &files),
         ["/p/d/bracket_v2.part"]

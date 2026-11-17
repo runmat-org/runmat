@@ -146,6 +146,16 @@ pub(super) fn pick(
         .forward
         .transform_point3(local_position)
         .to_array();
+    // A placement may rotate the prototype: the normal turns with it.
+    result.normal = result
+        .normal
+        .and_then(|n| {
+            placement
+                .forward
+                .transform_vector3(Vec3::from_array(n))
+                .try_normalize()
+        })
+        .map(|n| n.to_array());
     result.chunk_id = set.chunk_id.clone();
     result.mesh_id = set.mesh_id.clone();
     result.region_id = Some(placement.region_id.clone());

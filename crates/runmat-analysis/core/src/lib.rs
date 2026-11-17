@@ -74,7 +74,9 @@ pub use study::{
 };
 pub use validate::physics_family_can_consume_state;
 pub use validate_authored::validate_coordinate_frame;
-pub use validate_outputs::spec::quantity_supported as procedure_produces_observation_quantity;
+pub use validate_outputs::quantity_supported as procedure_produces_observation_quantity;
+pub use validate_outputs::family_supports_quantity as family_produces_observation_quantity;
+pub use validate_outputs::published_locations;
 pub use validate_outputs::{
     observation_sampling_matches_domain, validate_authored_observation_request,
     validate_observation_sampling,
@@ -239,6 +241,7 @@ pub use study::modal_solver::ModalSolverMethod;
 pub use study::output::{
     sound_pressure_level_db, AccuracyObservationEvent, ComplexRepresentation, CompressionPolicy,
     DiagnosticKind, DiagnosticObservation, ExtremaTiePolicy, FieldLocation, LineParameterScope,
+    SourceQuantity, SOURCE_QUANTITIES,
     MonitorCadence, MonitorObservation, MonitorStopCondition, ObservationComponent,
     ObservationCostEstimate, ObservationCostPolicy, ObservationEvent, ObservationId,
     ObservationPurpose, ObservationQuantity, ObservationRequest, ObservationResultQuantity,

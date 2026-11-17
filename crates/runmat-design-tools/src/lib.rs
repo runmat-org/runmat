@@ -42,6 +42,8 @@ mod locate;
 pub mod overview;
 #[cfg(feature = "render")]
 pub mod render;
+#[cfg(feature = "render")]
+mod render_sheet;
 pub mod rules;
 pub mod scene;
 pub mod seat;

@@ -593,7 +593,7 @@ async fn open(
             .parse()
             .map_err(|_| FeaRunDenied::LicenseInvalid)?,
         client: client_kind,
-        estimate_ops: None,
+        estimate_ops: request.estimate_ops,
         budget_ops: lower_cap,
         initial_grant_ops: None,
     };

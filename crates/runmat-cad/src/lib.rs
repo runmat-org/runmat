@@ -47,6 +47,7 @@ pub mod regen;
 pub mod run_inputs;
 pub mod scope;
 mod serde_rows;
+pub mod sketch_conversion;
 pub mod sketch_solver;
 pub mod step;
 pub mod syntax;

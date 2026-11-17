@@ -694,7 +694,9 @@ impl Figure {
             return (x, y);
         }
         let axis = |(lo, hi): (f64, f64), explicit: Option<(f64, f64)>, log: bool, method| {
-            if explicit.is_some() || log || !(lo.is_finite() && hi.is_finite() && lo < hi) {
+            // A flat series (lo == hi) still autoscales: resolve_axis_bounds pads it around its
+            // value, so a constant trace draws mid-axes instead of on a zero-height range.
+            if explicit.is_some() || log || !(lo.is_finite() && hi.is_finite() && lo <= hi) {
                 (lo, hi)
             } else {
                 resolve_axis_bounds(lo, hi, None, method)
@@ -3203,6 +3205,30 @@ mod tests {
         assert_eq!(
             equal.auto_axes_bounds_2d(0, (1.0, 2.0), (-123.0, -66.0)).1,
             (-123.0, -66.0)
+        );
+    }
+
+    #[test]
+    fn a_flat_line_autoscales_to_a_padded_range_around_its_value() {
+        // A steady speed: 660 everywhere draws mid-axes on whole ticks, not on an empty range.
+        let mut figure = Figure::new();
+        figure.add_line_plot(LinePlot::new(vec![0.0, 2.0], vec![660.0, 660.0]).unwrap());
+        let (x, y) = figure.auto_axes_bounds_2d(0, (0.0, 2.0), (660.0, 660.0));
+        assert_eq!(x, (0.0, 2.0));
+        assert_eq!(y, (620.0, 700.0));
+
+        // Zero gets a range of its own.
+        let mut zero = Figure::new();
+        zero.add_line_plot(LinePlot::new(vec![0.0, 2.0], vec![0.0, 0.0]).unwrap());
+        let (_, y) = zero.auto_axes_bounds_2d(0, (0.0, 2.0), (0.0, 0.0));
+        assert!(y.0 < 0.0 && y.1 > 0.0, "{y:?}");
+
+        // Explicit limits still win.
+        let mut limited = figure.clone();
+        limited.set_axes_limits(0, None, Some((0.0, 1000.0)));
+        assert_eq!(
+            limited.auto_axes_bounds_2d(0, (0.0, 2.0), (660.0, 660.0)).1,
+            (660.0, 660.0)
         );
     }
 

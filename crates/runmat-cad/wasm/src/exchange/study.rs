@@ -35,7 +35,7 @@ pub fn study_geometry(
     let step = if path.ends_with(".assembly") {
         super::assembly_step_in(path, text, files, configuration)?
     } else if path.ends_with(".part") {
-        super::part_step_in(path, text, configuration)?
+        super::part_study_step_in(path, text, configuration)?
     } else {
         return Err(format!("`{path}` is not a .part or .assembly file"));
     };
@@ -239,6 +239,17 @@ mod tests {
             source_closure_digest("/p/sim/study.assembly", &files),
             source_closure_digest("/q/r/sim/study.assembly", &moved)
         );
+    }
+
+    #[test]
+    fn a_part_whose_feature_fails_is_refused_with_that_error() {
+        let mut files = Files::new();
+        let part = "runmat 0.7\nstd 1\n\npart skid {\n    feature rail = extrude(profile = sketch.missing, distance = 3 mm)\n}\n";
+        files.insert("/p/mech/skid.part".into(), part.into());
+        let error = study_geometry("/p/mech/skid.part", &files, None)
+            .expect_err("a failed feature refuses the study geometry");
+        assert!(error.starts_with("`skid.part` doesn't regenerate (line 5): "), "{error}");
+        assert!(error.contains("missing"), "{error}");
     }
 
     #[test]

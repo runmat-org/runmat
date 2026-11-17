@@ -19,10 +19,20 @@ use runmat_time::Instant;
 
 use super::{FeaProgressEvent, FeaProgressPhase, FeaProgressStatus};
 
+/// Shortest spacing between two count events of one stream, in milliseconds.
+pub const MINIMUM_EVENT_INTERVAL_MS: u64 = 100;
 /// Shortest spacing between two count events of one stream.
-pub const MINIMUM_EVENT_INTERVAL: Duration = Duration::from_millis(100);
+pub const MINIMUM_EVENT_INTERVAL: Duration = Duration::from_millis(MINIMUM_EVENT_INTERVAL_MS);
+/// Spacing of heartbeats while a phase reports no new count, in milliseconds.
+pub const HEARTBEAT_INTERVAL_MS: u64 = 2000;
 /// Spacing of heartbeats while a phase reports no new count.
-pub const HEARTBEAT_INTERVAL: Duration = Duration::from_secs(2);
+pub const HEARTBEAT_INTERVAL: Duration = Duration::from_millis(HEARTBEAT_INTERVAL_MS);
+/// How often a host's heartbeat timer calls [`super::ProgressRelay::heartbeat`], in
+/// milliseconds. The relay sends a heartbeat only when [`HEARTBEAT_INTERVAL`] has passed, so
+/// heartbeats arrive at most this much later than due.
+pub const HEARTBEAT_POLL_INTERVAL_MS: u64 = 250;
+/// How often a host's heartbeat timer calls [`super::ProgressRelay::heartbeat`].
+pub const HEARTBEAT_POLL_INTERVAL: Duration = Duration::from_millis(HEARTBEAT_POLL_INTERVAL_MS);
 /// Smallest fraction (or relative count) change that is worth an event.
 pub const MINIMUM_FRACTION_STEP: f64 = 0.005;
 

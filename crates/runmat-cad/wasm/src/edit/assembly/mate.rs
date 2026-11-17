@@ -205,11 +205,8 @@ pub(super) fn resolve(
             None,
         ),
     };
-    let frame = frame.ok_or_else(|| {
-        model(format!(
-            "the picked {what} on `{occurrence}` has no frame to mate to"
-        ))
-    })?;
+    let frame =
+        frame.ok_or_else(|| model(format!("{what} on `{occurrence}` has no frame to mate to")))?;
     let anchor = match (&picked, named, file) {
         (Entity::Datum { feature }, _, Some(file)) => Anchor::Datum {
             file,

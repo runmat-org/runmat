@@ -42,15 +42,14 @@ use super::value::{lower_value, print_value};
 use crate::ids::{ConstraintId, SketchEntityId};
 use crate::model::datum::PlaneRef;
 use crate::model::sketch::{
-    EllipseMeasure, PointExpr, TextFont, PointRole, Sketch, SketchConstraint, SketchConstraintKind as K,
-    SketchEntity, SketchGeometry, SketchProjection, SketchTarget, SolvedCache, SolvedKey,
+    EllipseMeasure, PointExpr, PointRole, Sketch, SketchConstraint, SketchConstraintKind as K,
+    SketchEntity, SketchGeometry, SketchProjection, SketchTarget, SolvedCache, SolvedKey, TextFont,
 };
 use crate::value::ValueExpr;
 use runmat_design_syntax::ast::{self, Argument, Expr, Headed, Statement};
 use runmat_design_syntax::document::BlockEntry;
 use runmat_design_syntax::json::{
-    format_f64, is_identifier, lower_expr, print_json, quote, Json, LowerError, ValueSyntax,
-    INDENT,
+    format_f64, is_identifier, lower_expr, print_json, quote, Json, LowerError, ValueSyntax, INDENT,
 };
 use runmat_types::Span;
 
@@ -163,10 +162,7 @@ fn print_entity(entity: &SketchEntity) -> Option<String> {
         arguments.push("construction".into());
     }
     if let Some(from) = &entity.projected {
-        arguments.push(format!(
-            "from = published(occurrence = {}, name = {})",
-            from.occurrence, from.published
-        ));
+        arguments.push(format!("from = {}", print_projection(from)?));
     }
     let kind = match entity.geometry {
         SketchGeometry::Point { .. } => "point",
@@ -616,7 +612,10 @@ fn lower_entity(id: &str, value: &Expr) -> Result<SketchEntity, LowerError> {
             other => return Err(error(other.span(), "`construction` is true or false")),
         };
     }
-    let projected = call.take("from").map(|from| lower_projection(&from)).transpose()?;
+    let projected = call
+        .take("from")
+        .map(|from| lower_projection(&from))
+        .transpose()?;
     call.done(span)?;
     Ok(SketchEntity {
         id: SketchEntityId::new(id),
@@ -626,28 +625,107 @@ fn lower_entity(id: &str, value: &Expr) -> Result<SketchEntity, LowerError> {
     })
 }
 
-/// `from = published(occurrence = upper, name = upper_e1)`: a converted entity's source, an
-/// edge set a component publishes.
+/// A converted entity's `from = …` source.
+fn print_projection(from: &SketchProjection) -> Option<String> {
+    use SketchProjection as P;
+    let r = refs::print_reference;
+    Some(match from {
+        P::Published {
+            occurrence,
+            published,
+        } => format!("published(occurrence = {occurrence}, name = {published})"),
+        P::Project { edge } => format!("project({})", r(edge)?),
+        P::Silhouette { face, chain } => format!("silhouette({}, chain = {chain})", r(face)?),
+        P::Intersection { face, chain } => format!("intersection({}, chain = {chain})", r(face)?),
+        P::OffsetOnSurface {
+            edge,
+            face,
+            distance,
+        } => format!(
+            "offset_on_surface({}, face = {}, distance = {})",
+            r(edge)?,
+            r(face)?,
+            print_value(distance)?
+        ),
+    })
+}
+
+const PROJECTION_FORMS: &str = "`from` is `published(occurrence = <component>, name = <published \
+     edges>)` in an assembly, or `project(<edge>)`, `silhouette(<face>, chain = 0)`, \
+     `intersection(<face>, chain = 0)` or `offset_on_surface(<edge>, face = <face>, distance = \
+     <length>)` in a part";
+
+/// `from = published(occurrence = upper, name = upper_e1)` (an edge set a component publishes)
+/// or one of a part's own edge and face forms: a converted entity's source.
 fn lower_projection(expr: &Expr) -> Result<SketchProjection, LowerError> {
     let span = expr.span();
     let mut call = call_parts(expr)?;
-    if call.word != "published" {
-        return Err(error(
-            span,
-            "`from` is `published(occurrence = <component>, name = <published edges>)`",
-        ));
-    }
     let word = |e: Expr| match &e {
         Expr::Reference(r) if !r.segments().is_empty() => Ok(r.segments().join(".")),
         other => Err(error(other.span(), "expected a name")),
     };
-    let occurrence = word(call.need("occurrence", span)?)?;
-    let published = word(call.need("name", span)?)?;
+    let reference =
+        |call: &mut Call, what: &str| -> Result<crate::refs::reference::Reference, LowerError> {
+            if call.positional.is_empty() {
+                return Err(error(
+                    span,
+                    format!("`{}` needs the {what} first", call.word),
+                ));
+            }
+            let e = call.positional.remove(0);
+            refs::lower_reference(&e).unwrap_or_else(|| {
+                Err(error(
+                    e.span(),
+                    format!("expected a reference to the {what}"),
+                ))
+            })
+        };
+    let chain = |call: &mut Call| -> Result<u32, LowerError> {
+        match call.take("chain") {
+            None => Ok(0),
+            Some(e) => {
+                let n = literal_number(&e)?;
+                if n < 0.0 || n.fract() != 0.0 {
+                    return Err(error(e.span(), "`chain` is 0, 1, 2 …"));
+                }
+                Ok(n as u32)
+            }
+        }
+    };
+    let from = match call.word.as_str() {
+        "published" => SketchProjection::Published {
+            occurrence: word(call.need("occurrence", span)?)?,
+            published: word(call.need("name", span)?)?,
+        },
+        "project" => SketchProjection::Project {
+            edge: reference(&mut call, "edge")?,
+        },
+        "silhouette" => SketchProjection::Silhouette {
+            face: reference(&mut call, "face")?,
+            chain: chain(&mut call)?,
+        },
+        "intersection" => SketchProjection::Intersection {
+            face: reference(&mut call, "face")?,
+            chain: chain(&mut call)?,
+        },
+        "offset_on_surface" => {
+            let edge = reference(&mut call, "edge")?;
+            let face = call.need("face", span)?;
+            let face = refs::lower_reference(&face)
+                .unwrap_or_else(|| Err(error(face.span(), "expected a reference to the face")))?;
+            SketchProjection::OffsetOnSurface {
+                edge,
+                face,
+                distance: lower_value(&call.need("distance", span)?)?,
+            }
+        }
+        _ => return Err(error(span, PROJECTION_FORMS)),
+    };
+    if let Some(extra) = call.positional.first() {
+        return Err(error(extra.span(), PROJECTION_FORMS));
+    }
     call.done(span)?;
-    Ok(SketchProjection {
-        occurrence,
-        published,
-    })
+    Ok(from)
 }
 
 fn lower_kind(expr: &Expr, value: Option<&Expr>) -> Result<(K, Option<ConstraintId>), LowerError> {

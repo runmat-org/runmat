@@ -16,10 +16,12 @@ pub mod hole_tables;
 pub mod items;
 pub mod materials;
 pub mod mold;
+pub mod representation;
 pub mod sheet_metal;
 pub mod sketch;
 pub mod surface;
 pub mod visit;
+pub mod library;
 pub mod weldment;
 
 use crate::ids::{ConfigurationName, FeatureId, FilePath, PublishName};
@@ -34,6 +36,7 @@ pub use direct::*;
 pub use feature::*;
 pub use items::*;
 pub use mold::MoldFeature;
+pub use representation::PartRepresentation;
 pub use sheet_metal::SheetMetalFeature;
 pub use sketch::*;
 pub use surface::SurfaceFeature;
@@ -74,6 +77,9 @@ pub struct PartDocument {
     pub parts: Vec<PartOutput>,
     #[serde(default)]
     pub regions: Vec<Region>,
+    /// Analysis representations (`representation simple : defeatured = { … }`).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub representations: Vec<PartRepresentation>,
     #[serde(default)]
     pub publishes: Vec<PublishEntry>,
     #[serde(default)]
@@ -94,6 +100,13 @@ pub struct PartDocument {
     /// `feature def` templates defined in this file (library features).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub feature_defs: Vec<FeatureDef>,
+    /// Document settings: units, decimals, drafting standard and general tolerance
+    /// ([`crate::assembly::settings`]).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub settings: Option<crate::assembly::settings::DocumentSettings>,
+    /// The gauge and bend table every sheet body follows ([`sheet_metal::tables`]).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sheet_metal: Option<sheet_metal::tables::SheetMetalDefaults>,
 }
 
 impl PartDocument {
@@ -107,6 +120,7 @@ impl PartDocument {
             rollback_after: None,
             parts: Vec::new(),
             regions: Vec::new(),
+            representations: Vec::new(),
             publishes: Vec::new(),
             materials: Vec::new(),
             links: Vec::new(),
@@ -115,6 +129,8 @@ impl PartDocument {
             pmi: PmiSet::default(),
             closed: false,
             feature_defs: Vec::new(),
+            settings: None,
+            sheet_metal: None,
         }
     }
 
@@ -193,8 +209,19 @@ impl PartDocument {
         let mut features = Vec::new();
         for f in &self.features {
             if let FeatureKind::Library(inst) = &f.kind {
+                // A library file's definition is held under its full `def`; this file's under
+                // its own name.
                 let name = inst.def.rsplit("feature_def.").next().unwrap_or(&inst.def);
-                if let Some(def) = self.feature_defs.iter().find(|d| d.name == name) {
+                let def = self
+                    .feature_defs
+                    .iter()
+                    .find(|d| d.name == inst.def)
+                    .or_else(|| {
+                        (!inst.def.contains('#'))
+                            .then(|| self.feature_defs.iter().find(|d| d.name == name))
+                            .flatten()
+                    });
+                if let Some(def) = def {
                     match def.expand(&f.id, inst) {
                         Ok(fs) => {
                             features.extend(fs);

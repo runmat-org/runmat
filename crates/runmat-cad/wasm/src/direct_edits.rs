@@ -60,7 +60,10 @@ fn keep(values: &Values, picks: &Picks, moved: &[Value]) -> Result<Value, EditFa
     }
     let faces = picks.references(&some(values, "keep_faces", "the faces to keep")?)?;
     Ok(match relation {
-        "fixed" => json!(faces.into_iter().map(|face| json!({ "keep": "fixed", "face": face })).collect::<Vec<_>>()),
+        "fixed" => json!(faces
+            .into_iter()
+            .map(|face| json!({ "keep": "fixed", "face": face }))
+            .collect::<Vec<_>>()),
         "parallel" | "perpendicular" | "coplanar" | "concentric" | "tangent" => {
             let (a, b) = match faces.as_slice() {
                 [b] => (moved.first().cloned().unwrap_or(Value::Null), b.clone()),
@@ -127,6 +130,20 @@ pub fn direct_kind(
                 json!({ "feature": "direct", "direct": "move_faces", "faces": faces, "motion": motion, "keep": keep }),
             )
         }
+        // Instant 3D on a face no feature dimension drives: the face moves along its normal.
+        "direct.instant-3d" => {
+            let target = one(values, "target", "the face or dimension to drag")?;
+            let face = picks.reference(&target)?;
+            if crate::picks::topo(&face) != "face" {
+                return Err(model(format!(
+                    "`{target}` isn't a face; Instant 3D drags a face, or an extrude's depth"
+                )));
+            }
+            (
+                "instant",
+                json!({ "feature": "direct", "direct": "move_faces", "faces": [face], "motion": { "motion": "offset", "distance": value(values, "value", "mm")? } }),
+            )
+        }
         "direct.offset-face" | "direct.pull" => (
             if command == "direct.pull" {
                 "pull"
@@ -180,6 +197,79 @@ pub fn direct_kind(
         _ => return Ok(None),
     };
     Ok(Some(kind))
+}
+
+/// Instant 3D on what a feature dimension drives: the end cap of a blind or mid-plane extrude
+/// (`feature.<f>.face.end`), or the extrude itself picked, changes its depth by the dragged
+/// `value` (twice that for mid-plane, which grows both ways). `None` when the target is a face
+/// no such dimension drives; it then moves as a direct edit ([`direct_kind`]).
+pub fn instant_dimension(
+    path: &str,
+    text: &str,
+    values: &Values,
+    document: &runmat_cad::model::PartDocument,
+) -> Option<Result<(runmat_cad::syntax::edit::SourceChange, String), EditFailure>> {
+    use runmat_cad::model::{Extent, FeatureKind};
+    use runmat_cad::value::{BinaryOp, ValueExpr};
+    let target = picks_of(values, "target").into_iter().next()?;
+    let (id, picked_feature) = match target.strip_prefix("feature:") {
+        Some(id) => (id.to_owned(), true),
+        None => (
+            target
+                .strip_prefix("feature.")?
+                .strip_suffix(".face.end")?
+                .to_owned(),
+            false,
+        ),
+    };
+    let feature = document.features.iter().find(|f| f.id.0 == id)?;
+    let blind = matches!(
+        &feature.kind,
+        FeatureKind::Extrude(e) if matches!(e.extent, Extent::Blind { .. } | Extent::Symmetric { .. })
+    );
+    if !blind {
+        return picked_feature.then(|| {
+            Err(model(format!(
+                "Instant 3D changes the depth of a blind or mid-plane extrude; `{id}` has none. \
+                 Drag one of its faces instead"
+            )))
+        });
+    }
+    let by = match values.get("value").and_then(Value::as_f64) {
+        Some(v) if v != 0.0 => v,
+        _ => {
+            return Some(Err(model(
+                "drag the arrow, or type how far the depth changes",
+            )))
+        }
+    };
+    let mut summary = String::new();
+    let result = runmat_cad::syntax::edit::edit_part(text, path, |document| {
+        let Some(FeatureKind::Extrude(e)) = document.feature_mut(&id).map(|f| &mut f.kind) else {
+            return Err(model(format!("the part has no extrude `{id}`")));
+        };
+        let (distance, step) = match &mut e.extent {
+            Extent::Blind { distance } => (distance, by),
+            Extent::Symmetric { distance } => (distance, 2.0 * by),
+            _ => unreachable!("checked above"),
+        };
+        let next = match &*distance {
+            ValueExpr::Quantity { value, unit } if unit == "mm" => {
+                let v = ((value + step) * 1e4).round() / 1e4;
+                if v <= 0.0 {
+                    return Err(model(format!(
+                        "that would leave `{id}` {v} mm deep; an extrude's depth stays above zero"
+                    )));
+                }
+                ValueExpr::mm(v)
+            }
+            other => ValueExpr::binary(BinaryOp::Add, other.clone(), ValueExpr::mm(step)),
+        };
+        summary = format!("Changed {id}'s depth by {step} mm");
+        *distance = next;
+        Ok(())
+    });
+    Some(result.map(|change| (change, summary)))
 }
 
 #[cfg(test)]
@@ -282,9 +372,7 @@ mod tests {
     /// an edge or an axis (along it), and Reverse flips it: the owner's "Direction: Top" case.
     #[test]
     fn move_face_translates_along_a_planes_normal_an_edge_or_an_axis() {
-        let along = |direction: &str, reverse: bool| {
-            json!({ "faces": [END], "motion": "translate", "direction": [direction], "distance": 3, "reverse": reverse })
-        };
+        let along = |direction: &str, reverse: bool| json!({ "faces": [END], "motion": "translate", "direction": [direction], "distance": 3, "reverse": reverse });
         // The Top plane, as the Outline names it, is the XY plane: its normal is +Z.
         let (t, _) = moved("direct.move-face", along("origin:top", false));
         assert!(
@@ -330,7 +418,10 @@ mod tests {
             "direct.move-face",
             json!({ "faces": [END], "distance": 2, "keep": "fixed", "keep_faces": [END] }),
         );
-        assert!(t.contains("{ keep = fixed, face = feature.body.face.end }"), "{t}");
+        assert!(
+            t.contains("{ keep = fixed, face = feature.body.face.end }"),
+            "{t}"
+        );
         assert!(!errors.is_empty(), "moving a Fixed face must fail\n{t}");
     }
 
@@ -342,7 +433,10 @@ mod tests {
             "direct.move-face",
             json!({ "faces": ["feature.body.face.side(s1.l2)"], "motion": "translate", "direction": ["origin:top"], "distance": 5 }),
         );
-        assert!(errors.iter().any(|e| e.contains("own plane")), "{errors:?}\n{t}");
+        assert!(
+            errors.iter().any(|e| e.contains("own plane")),
+            "{errors:?}\n{t}"
+        );
         // Across the face (the Right plane's normal, +X) it moves.
         let (t, errors) = moved(
             "direct.move-face",
@@ -354,10 +448,7 @@ mod tests {
     /// Offset is Move face's default motion, and Rotate's Reverse turns the other way.
     #[test]
     fn move_face_offsets_by_default_and_reverse_turns_a_rotation_back() {
-        let (t, _) = moved(
-            "direct.move-face",
-            json!({ "faces": [END], "distance": 2 }),
-        );
+        let (t, _) = moved("direct.move-face", json!({ "faces": [END], "distance": 2 }));
         assert!(t.contains("motion = offset(distance = 2 mm)"), "{t}");
         let (t, _) = moved(
             "direct.move-face",
@@ -403,6 +494,59 @@ mod tests {
         assert_eq!(out["ok"], false, "{out}");
         assert!(
             out["message"].as_str().unwrap().contains("heal it"),
+            "{out}"
+        );
+    }
+
+    /// Instant 3D on an extrude's end cap (or the extrude picked) changes its depth by the drag;
+    /// on any other face it moves the face as a direct edit; a zero drag or a sketch is refused.
+    #[test]
+    fn instant_3d_changes_an_extrude_depth_or_moves_a_face() {
+        let (t, errors) = added_to(
+            &plain(),
+            "direct.instant-3d",
+            json!({ "target": END, "value": 3.0 }),
+        );
+        assert!(errors.is_empty(), "{errors:?}");
+        assert!(t.contains("distance = 13 mm"), "{t}");
+        assert!(!t.contains("direct."), "{t}");
+        let (t, _) = added_to(
+            &plain(),
+            "direct.instant-3d",
+            json!({ "target": "feature:body", "value": -4.0 }),
+        );
+        assert!(t.contains("distance = 6 mm"), "{t}");
+        let side = "feature.body.face.side(s1.l2)";
+        let (t, errors) = added_to(
+            &plain(),
+            "direct.instant-3d",
+            json!({ "target": side, "value": 2.0 }),
+        );
+        assert!(errors.is_empty(), "{errors:?}");
+        assert!(t.contains("feature instant1 = direct.move_faces("), "{t}");
+        let request =
+            json!({ "command": "direct.instant-3d", "values": { "target": END, "value": 0.0 } })
+                .to_string();
+        let out: Value = serde_json::from_str(&crate::edit::edit_json(
+            "/p/plate.part",
+            &plain(),
+            &Files::new(),
+            &request,
+        ))
+        .unwrap();
+        assert_eq!(out["ok"], false, "{out}");
+        let request =
+            json!({ "command": "direct.instant-3d", "values": { "target": END, "value": -20.0 } })
+                .to_string();
+        let out: Value = serde_json::from_str(&crate::edit::edit_json(
+            "/p/plate.part",
+            &plain(),
+            &Files::new(),
+            &request,
+        ))
+        .unwrap();
+        assert!(
+            out["message"].as_str().unwrap().contains("above zero"),
             "{out}"
         );
     }

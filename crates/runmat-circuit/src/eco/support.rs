@@ -232,7 +232,7 @@ pub(super) fn package_extent(pool: &Pool, u: Option<Uuid>) -> (Coord, Coord) {
 
 /// Lays new parts out: inside their channel's room when the board has it, else in a staging
 /// area to the right of the board, one block per room or sheet.
-pub(super) struct Placer {
+pub(crate) struct Placer {
     pub(super) staging: Point,
     pub(super) next_y: Coord,
 }
@@ -251,7 +251,7 @@ impl Placer {
         }
     }
     /// Grid positions for `sizes` inside `area` (row-major, 1 mm gaps), avoiding `occupied`.
-    pub(super) fn grid(area: Rect, sizes: &[(Coord, Coord)], occupied: &[Rect]) -> Vec<Point> {
+    pub(crate) fn grid(area: Rect, sizes: &[(Coord, Coord)], occupied: &[Rect]) -> Vec<Point> {
         let gap = mm(1.0);
         let cell_w = sizes.iter().map(|s| s.0).max().unwrap_or(mm(2.0)) + gap;
         let cell_h = sizes.iter().map(|s| s.1).max().unwrap_or(mm(2.0)) + gap;

@@ -90,6 +90,59 @@ impl Std {
         at: f64,
         t: &str,
     ) -> (Vec<Prim>, Xy) {
+        self.linear_dimension_with(id, a, b, axis, at, t, None)
+    }
+
+    /// Where along the dimension line (sheet mm on its axis) the figure of a dimension from
+    /// `a` to `b` may sit: its default spot first (centred, or past `b` when it doesn't fit
+    /// between the arrows), then spots along the line between the arrows nearest the centre
+    /// first, then past either end. Each is the figure's centre.
+    pub fn figure_spots(&self, a: Xy, b: Xy, axis: usize, t: &str) -> Vec<f64> {
+        let (a0, b0) = (a[axis].min(b[axis]), a[axis].max(b[axis]));
+        let extent = self.figure_extent(axis, t);
+        let mid = (a0 + b0) / 2.0;
+        let fits = b0 - a0 >= extent + 2.0 * self.arrow + 2.0;
+        let past = |end: f64, sign: f64| end + sign * (self.arrow + 2.0 + extent / 2.0);
+        let mut spots = vec![if fits { mid } else { past(b0, 1.0) }];
+        if fits {
+            let room = (b0 - a0) / 2.0 - self.arrow - 1.0 - extent / 2.0;
+            let mut k = 1.0;
+            while k * 0.5 <= room {
+                spots.push(mid + k * 0.5);
+                spots.push(mid - k * 0.5);
+                k += 1.0;
+            }
+        }
+        spots.push(past(b0, 1.0));
+        spots.push(past(a0, -1.0));
+        spots.dedup();
+        spots
+    }
+
+    /// The figure's extent along the dimension line: its width, or its height when it stands
+    /// upright on a vertical ASME dimension.
+    fn figure_extent(&self, axis: usize, t: &str) -> f64 {
+        if axis == 1 && self.unidirectional {
+            self.text + 1.0
+        } else {
+            Std::text_width(t, self.text)
+        }
+    }
+
+    /// [`Self::linear_dimension`] with the figure centred at `figure` along the line (one of
+    /// [`Self::figure_spots`]) instead of its default spot. A figure between the arrows keeps
+    /// the arrows inside; one past an end puts them outside, pointing in.
+    #[allow(clippy::too_many_arguments)]
+    pub fn linear_dimension_with(
+        &self,
+        id: &str,
+        a: Xy,
+        b: Xy,
+        axis: usize,
+        at: f64,
+        t: &str,
+        figure: Option<f64>,
+    ) -> (Vec<Prim>, Xy) {
         let other = 1 - axis;
         let p = |along: f64, across: f64| -> Xy {
             if axis == 0 {
@@ -109,24 +162,20 @@ impl Std {
             out.push(mark(id, "dimink", line(vec![s[0], s[1], e[0], e[1]])));
         }
         let along: Xy = if axis == 0 { [1.0, 0.0] } else { [0.0, 1.0] };
-        let tw = Std::text_width(t, self.text);
-        // The figure's extent along the line: its width, or its height when it stands upright
-        // on a vertical ASME dimension.
         let upright = axis == 1 && self.unidirectional;
-        let extent = if upright { self.text + 1.0 } else { tw };
-        let fits = b0 - a0 >= extent + 2.0 * self.arrow + 2.0;
-        let mid = (a0 + b0) / 2.0;
-        let text_along = if fits {
-            mid
-        } else {
-            b0 + self.arrow + 2.0 + extent / 2.0
-        };
+        let extent = self.figure_extent(axis, t);
+        let room_inside = b0 - a0 >= extent + 2.0 * self.arrow + 2.0;
+        let text_along = figure.unwrap_or(self.figure_spots(a, b, axis, t)[0]);
+        // Between the arrows when the figure sits there; past an end otherwise.
+        let fits = room_inside
+            && text_along - extent / 2.0 >= a0 + self.arrow
+            && text_along + extent / 2.0 <= b0 - self.arrow;
         let inline = self.unidirectional;
         if fits {
             if inline {
                 // A break in the line for the figure.
                 let half = extent / 2.0 + 1.0;
-                for (s, e) in [(a0, mid - half), (mid + half, b0)] {
+                for (s, e) in [(a0, text_along - half), (text_along + half, b0)] {
                     let (s, e) = (p(s, at), p(e, at));
                     out.push(mark(id, "dimink", line(vec![s[0], s[1], e[0], e[1]])));
                 }
@@ -137,9 +186,15 @@ impl Std {
             out.push(self.arrowhead(id, p(a0, at), [-along[0], -along[1]]));
             out.push(self.arrowhead(id, p(b0, at), along));
         } else {
-            // Arrows outside, pointing in, the line running past both ends.
+            // Arrows outside, pointing in, the line running past both ends and on under the
+            // figure set past one of them.
             let out_by = self.arrow + 2.0;
-            let (s, e) = (p(a0 - out_by, at), p(b0 + out_by, at));
+            let (mut s0, mut e0) = (a0 - out_by, b0 + out_by);
+            if figure.is_some() {
+                s0 = s0.min(text_along - extent / 2.0);
+                e0 = e0.max(text_along + extent / 2.0);
+            }
+            let (s, e) = (p(s0, at), p(e0, at));
             out.push(mark(id, "dimink", line(vec![s[0], s[1], e[0], e[1]])));
             out.push(self.arrowhead(id, p(a0, at), along));
             out.push(self.arrowhead(id, p(b0, at), [-along[0], -along[1]]));
