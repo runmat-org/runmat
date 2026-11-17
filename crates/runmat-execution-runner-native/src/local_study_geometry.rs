@@ -115,7 +115,8 @@ pub(crate) async fn execute_local_study_geometry(
             capacity.min(config.authored_worker_memory_bytes.unwrap_or(u64::MAX)),
             &meshing_request.limits,
         ),
-        None => crate::machine_capacity::meshing_execution_ceilings(&meshing_request.limits),
+        None => crate::machine_capacity::meshing_execution_ceilings(&meshing_request.limits)
+            .map_err(protocol)?,
     };
     // Worker slots advertise the whole machine, while the pool has one aggregate
     // capacity. A wide volume task and narrow entity tasks draw from the same budget.

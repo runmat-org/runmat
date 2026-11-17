@@ -216,6 +216,7 @@ fn production_observer_runs_before_quality_and_validated_token_preserves_wire_by
     let options = super::super::tests::volume_options();
     let metric = super::super::tests::metric_request();
     let observer = Observer(AtomicUsize::new(0));
+    let memory = crate::cdt::test_fixtures::allocation::AllocationBudget::new(u64::MAX);
     let admitted = construct_delaunay_volume_mesh_with_quality_observer(
         &topology,
         &surface,
@@ -223,9 +224,35 @@ fn production_observer_runs_before_quality_and_validated_token_preserves_wire_by
         options,
         &NeverCancelled,
         &observer,
+        &memory,
     )
     .unwrap();
     assert_eq!(observer.0.load(Ordering::Relaxed), 1);
+    // Construction releases its working charge; the caller charges the retained mesh.
+    assert_eq!(memory.live_bytes(), 0);
+    assert!(memory.peak_bytes() >= admitted.resident_bytes());
+
+    // The same construction under half its charged peak stops with a memory refusal that
+    // names what it needed.
+    let tight =
+        crate::cdt::test_fixtures::allocation::AllocationBudget::new(memory.peak_bytes() / 2);
+    let refused = construct_delaunay_volume_mesh_with_quality_observer(
+        &topology,
+        &surface,
+        &metric,
+        options,
+        &NeverCancelled,
+        &Observer(AtomicUsize::new(0)),
+        &tight,
+    )
+    .err()
+    .expect("half the charged peak must be refused");
+    let DelaunayVolumeMeshErrorKind::MemoryBudgetExceeded { required_bytes } = refused.kind else {
+        panic!("expected a memory refusal, got {refused}");
+    };
+    assert!(required_bytes > memory.peak_bytes() / 2);
+    assert!(tight.peak_bytes() <= memory.peak_bytes() / 2);
+    assert_eq!(tight.live_bytes(), 0);
     let bytes = admitted.encode(&Control).unwrap();
     assert!(
         bytes.len() as u64

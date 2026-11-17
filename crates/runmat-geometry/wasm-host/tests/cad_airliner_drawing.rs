@@ -3,12 +3,10 @@
 //! The drawing projects the whole airliner (about 3,200 occurrences) in three views at 1:200.
 //! The test compiles it the way the Desktop's drawing worker does: the sheet stage, then one
 //! view per compile (`call_framed`, meshes as bytes), and holds each compile's Rust heap peak to
-//! three quarters of the host's `-sMAXIMUM_MEMORY` ceiling, as `cad_drawing_memory` does for the
-//! drone.
+//! [`PEAK_BYTES`], as `cad_drawing_memory` does for the drone.
 
 use std::alloc::{GlobalAlloc, Layout, System};
 use std::collections::BTreeMap;
-use std::path::PathBuf;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 struct Counting;
@@ -51,22 +49,10 @@ static ALLOC: Counting = Counting;
 #[allow(dead_code)]
 mod aircraft_text;
 
-/// The browser host's memory ceiling, `-sMAXIMUM_MEMORY` in build-exact-cad-wasm.sh.
-fn host_ceiling() -> usize {
-    let script = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("../../../scripts/runtime/build-exact-cad-wasm.sh");
-    let text = std::fs::read_to_string(&script).expect("build-exact-cad-wasm.sh");
-    let at = text
-        .find("-sMAXIMUM_MEMORY=")
-        .expect("the host build sets its memory ceiling")
-        + "-sMAXIMUM_MEMORY=".len();
-    text[at..]
-        .chars()
-        .take_while(char::is_ascii_digit)
-        .collect::<String>()
-        .parse()
-        .expect("a byte count")
-}
+/// The most a compile's Rust heap may reach: 384 MB, three quarters of the browser host's former
+/// 512 MB ceiling. The general arrangement peaks at about 370 MB natively (the top view), so a
+/// regression past the margin fails here.
+const PEAK_BYTES: usize = 402_653_184;
 
 /// The general arrangement: side elevation, plan and front view of the whole aircraft at 1:200.
 const GA: &str = r#"runmat 0.7
@@ -107,7 +93,7 @@ fn compile(path: &str, files: &BTreeMap<String, String>, options: &str) -> (Stri
 }
 
 /// The general arrangement compiles stage by stage with no error, each view has visible lines,
-/// and each compile's heap peak stays within its share of the host's ceiling.
+/// and each compile's heap peak stays within [`PEAK_BYTES`].
 #[test]
 fn the_airliner_general_arrangement_compiles_within_the_host_memory() {
     let mut files: BTreeMap<String, String> = aircraft_text::files()
@@ -116,7 +102,6 @@ fn the_airliner_general_arrangement_compiles_within_the_host_memory() {
         .collect();
     let path = "/p/airliner/drawings/airliner.drawing".to_string();
     files.insert(path.clone(), GA.to_string());
-    let share = host_ceiling() / 4 * 3;
     let mut over = Vec::new();
     for (stage, options) in [
         ("sheet", r#"{"drawing":{"stage":"sheet"}}"#),
@@ -172,15 +157,14 @@ fn the_airliner_general_arrangement_compiles_within_the_host_memory() {
             let centers = entry["centers"].as_array().map(Vec::len).unwrap_or(0);
             eprintln!("  {stage}: {centers} center marks and centerlines");
         }
-        if peak > share {
+        if peak > PEAK_BYTES {
             over.push(format!("{stage} peaked at {} MB", peak >> 20));
         }
     }
     assert!(
         over.is_empty(),
-        "over the compile's {} MB share of the host's {} MB: {over:?}",
-        share >> 20,
-        host_ceiling() >> 20
+        "over the {} MB peak a compile may reach: {over:?}",
+        PEAK_BYTES >> 20
     );
 }
 

@@ -10,6 +10,16 @@ pub(super) struct PendingChanges {
     journals: Vec<Journal>,
 }
 impl PendingChanges {
+    pub(super) fn resident_bytes(&self) -> u64 {
+        use runmat_meshing_core::resident_bytes::{btree_bytes, vec_bytes};
+        self.journals.iter().fold(
+            btree_bytes::<CellKey, Change>(self.entries.len())
+                .saturating_add(vec_bytes::<Journal>(self.journals.capacity())),
+            |sum, journal| {
+                sum.saturating_add(btree_bytes::<CellKey, Option<Change>>(journal.len()))
+            },
+        )
+    }
     pub(super) fn begin(&mut self) -> usize {
         self.journals.push(BTreeMap::new());
         self.journals.len()

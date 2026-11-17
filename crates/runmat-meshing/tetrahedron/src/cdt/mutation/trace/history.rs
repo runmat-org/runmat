@@ -11,6 +11,23 @@ pub(in crate::cdt) struct TopologyEdits {
     length: usize,
 }
 impl TopologyEdits {
+    /// Heap bytes of the block handles, blocks and edits, counting shared blocks as owned.
+    pub(in crate::cdt::mutation) fn resident_bytes(&self) -> u64 {
+        use runmat_meshing_core::resident_bytes::{arc_bytes, vec_bytes};
+        self.blocks.iter().fold(
+            vec_bytes::<Arc<Vec<Arc<TopologyEdit>>>>(self.blocks.capacity()),
+            |sum, block| {
+                block.iter().fold(
+                    sum.saturating_add(arc_bytes::<Vec<Arc<TopologyEdit>>>())
+                        .saturating_add(vec_bytes::<Arc<TopologyEdit>>(block.capacity())),
+                    |sum, edit| {
+                        sum.saturating_add(arc_bytes::<TopologyEdit>())
+                            .saturating_add(edit.payload_bytes())
+                    },
+                )
+            },
+        )
+    }
     pub(super) fn block_count(&self) -> usize {
         self.blocks.len()
     }

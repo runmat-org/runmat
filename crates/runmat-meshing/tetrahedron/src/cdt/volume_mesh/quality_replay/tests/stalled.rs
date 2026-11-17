@@ -117,6 +117,7 @@ fn stalled_state_reaches_the_host_observer_without_replacing_the_verdict() {
         super::super::super::quality_convergence::QualityExecution {
             cancellation: &NeverCancelled,
             observer: &observer,
+            memory: None,
         },
     )
     .err()

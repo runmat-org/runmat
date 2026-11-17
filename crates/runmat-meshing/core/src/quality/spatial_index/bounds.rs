@@ -10,6 +10,14 @@ pub struct BoundsSpatialIndex<T> {
     root: Option<Arc<Node<T>>>,
 }
 
+impl<T> BoundsSpatialIndex<T> {
+    /// Heap bytes of the tree's nodes, counting every shared branch as if this index owned it
+    /// alone. Payloads are stored inline; heap they own is not counted.
+    pub fn resident_bytes(&self) -> u64 {
+        self.root.as_deref().map_or(0, Node::resident_bytes)
+    }
+}
+
 impl<T: Ord + Clone> BoundsSpatialIndex<T> {
     /// Invalid finite/order bounds return None; work rejection returns no index.
     pub fn from_entries_with_checkpoint<E>(

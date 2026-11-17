@@ -39,6 +39,30 @@ pub(super) struct TrialJournal {
     dirty: BTreeMap<Face, bool>,
 }
 
+impl TrialJournal {
+    /// Heap bytes of this journal's own undo maps. Its index checkpoints share the live
+    /// topology's branches, which the topology inventory counts.
+    pub(super) fn resident_bytes(&self) -> u64 {
+        use runmat_meshing_core::resident_bytes::{btree_bytes, vec_bytes};
+        let faces = self.faces.values().flatten().fold(
+            btree_bytes::<Face, Option<FaceUses>>(self.faces.len()),
+            |sum, uses| sum.saturating_add(vec_bytes::<(u32, usize)>(uses.capacity())),
+        );
+        [
+            btree_bytes::<u32, Option<MutableTetrahedron>>(self.cells.len()),
+            btree_bytes::<u32, crate::cdt::DelaunayVolumeNode>(self.nodes.len()),
+            btree_bytes::<[u32; 4], Option<u32>>(self.cell_keys.len()),
+            btree_bytes::<(u32, u32), bool>(self.stars.len()),
+            faces,
+            btree_bytes::<Face, Option<(u32, usize)>>(self.boundary.len()),
+            btree_bytes::<u32, bool>(self.free.len()),
+            btree_bytes::<Face, bool>(self.dirty.len()),
+        ]
+        .into_iter()
+        .fold(0, u64::saturating_add)
+    }
+}
+
 /// Whole-owner adoption must happen outside a trial. Local providers edit through
 /// the ordinary checked cavity/point APIs; unwinding also rolls their edits back.
 pub(in crate::cdt) struct CavityTrial<'a> {
