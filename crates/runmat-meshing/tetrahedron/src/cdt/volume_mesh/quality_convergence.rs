@@ -31,6 +31,7 @@ pub(super) struct ConvergedVolumeQuality {
     pub(super) lifecycle_counts: (u64, u64),
 }
 
+#[derive(Clone, Copy)]
 pub(super) struct QualityExecution<'a> {
     pub(super) cancellation: &'a dyn MeshingCancellationSignal,
     pub(super) observer: &'a dyn super::quality_replay::VolumeQualityObserver,

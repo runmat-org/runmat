@@ -168,10 +168,10 @@ fn construct_component_mesh(
     metric_request: &MetricFieldRequest,
     frame: &frame::CanonicalVolumeFrame,
     options: DelaunayVolumeMeshOptions,
-    cancellation: &dyn MeshingCancellationSignal,
-    observer: &dyn quality_replay::VolumeQualityObserver,
-    memory: Option<&dyn runmat_geometry_core::GeometryEvaluationControl>,
+    execution: quality_convergence::QualityExecution<'_>,
 ) -> Result<DelaunayVolumeMesh, DelaunayVolumeMeshError> {
+    let cancellation = execution.cancellation;
+    let observer = execution.observer;
     let constraints = &owned_constraints;
     let component_span = tracing::info_span!(
         "meshing.tetrahedron.component",
@@ -344,11 +344,7 @@ fn construct_component_mesh(
             provenance,
             &seeded.node_identities,
             options,
-            quality_convergence::QualityExecution {
-                cancellation,
-                observer,
-                memory,
-            },
+            execution,
         )
     })?;
     Ok(DelaunayVolumeMesh {

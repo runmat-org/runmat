@@ -116,9 +116,11 @@ fn construct_with_observer(
             metric_request,
             &frame,
             component_options,
-            cancellation,
-            observer,
-            memory,
+            super::quality_convergence::QualityExecution {
+                cancellation,
+                observer,
+                memory,
+            },
         )?;
         let insertion_count = mesh.refinement_insertions().count() as u64;
         remaining_insertions = remaining_insertions.saturating_sub(insertion_count);
