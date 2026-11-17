@@ -189,6 +189,7 @@ smaller project."
                 Err(error) => return Err(error.to_string()),
             }
         }
+        capture_design_closures(&root, &mut files, geometry_bytes).await?;
         let mut dependencies = Vec::new();
         if let Some(handoff) = &self.project_handoff {
             for (source, path) in &handoff.project.access_paths {
@@ -236,6 +237,50 @@ smaller project."
             .find(|result| result.root_module == request.root)
             .ok_or_else(|| "working FEA root is outside the captured source inventory".into())
     }
+}
+
+/// A referenced part or assembly regenerates from the capture alone, so the capture holds every
+/// file the design reads (other parts, the folders an assembly names, imported STEP files), read
+/// through the provider's async API. Files outside the project stay out; the check then reports
+/// the design's missing dependency.
+async fn capture_design_closures(
+    root: &std::path::Path,
+    files: &mut BTreeMap<LogicalSourcePath, FeaWorkspaceFile>,
+    mut geometry_bytes: usize,
+) -> Result<(), String> {
+    use runmat_runtime::geometry::design_source;
+    let designs = files
+        .keys()
+        .filter(|path| design_source::is_design_geometry(path.as_str()))
+        .cloned()
+        .collect::<Vec<_>>();
+    for design in designs {
+        let physical = runmat_runtime::analysis::physical_source_path(root, &design)
+            .map_err(|error| error.to_string())?;
+        let Ok(closure) = design_source::design_closure_files(&physical).await else {
+            continue;
+        };
+        for (path, text) in closure {
+            let Ok(relative) = std::path::Path::new(&path).strip_prefix(root) else {
+                continue;
+            };
+            let Ok(logical) = LogicalSourcePath::new(relative.to_string_lossy().into_owned())
+            else {
+                continue;
+            };
+            if files.contains_key(&logical) {
+                continue;
+            }
+            geometry_bytes = geometry_bytes
+                .checked_add(text.len())
+                .ok_or("geometry capture size overflow")?;
+            if geometry_bytes > MAX_GEOMETRY_BYTES {
+                return Err("referenced geometry exceeds the 64 MiB source-check budget".into());
+            }
+            files.insert(logical.clone(), captured(logical, text.into_bytes()));
+        }
+    }
+    Ok(())
 }
 
 fn captured(path: LogicalSourcePath, bytes: Vec<u8>) -> FeaWorkspaceFile {

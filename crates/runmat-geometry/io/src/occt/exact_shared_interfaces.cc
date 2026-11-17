@@ -213,16 +213,24 @@ ExactSharedInterfaces share_exact_interfaces(const TopoDS_Shape& root,
     }
   }
 
+  // A General Fuse needs at least two arguments. A single solid has no other body to touch,
+  // so it is its own image and keeps every name.
+  const bool fuse = inputs.size() > 1;
   BOPAlgo_Builder builder;
   for (const Input& input : inputs) {
     builder.AddArgument(input.solid);
   }
   builder.SetRunParallel(Standard_True);
   builder.SetNonDestructive(Standard_True);
-  CancelProgress progress(options);
-  builder.Perform(progress.Start());
+  if (fuse) {
+    CancelProgress progress(options);
+    builder.Perform(progress.Start());
+  }
   check_cancelled(options);
-  if (builder.HasErrors()) {
+  const auto image_of = [&](const TopoDS_Shape& shape, TopAbs_ShapeEnum kind) {
+    return fuse ? images(builder, shape, kind) : std::vector<TopoDS_Shape>{shape};
+  };
+  if (fuse && builder.HasErrors()) {
     std::ostringstream report;
     builder.DumpErrors(report);
     throw std::runtime_error("OCCT could not join touching bodies into shared interfaces: " +
@@ -243,7 +251,7 @@ ExactSharedInterfaces share_exact_interfaces(const TopoDS_Shape& root,
     check_cancelled(options);
     const Input& input = inputs[index];
     const PlacedBody& body = bodies[input.body];
-    const std::vector<TopoDS_Shape> solid_images = images(builder, input.solid, TopAbs_SOLID);
+    const std::vector<TopoDS_Shape> solid_images = image_of(input.solid, TopAbs_SOLID);
     if (solid_images.size() != 1) {
       throw std::runtime_error(quoted(body.display_name, input.body) +
                                " interpenetrates another body; shared interfaces need bodies "
@@ -281,7 +289,7 @@ ExactSharedInterfaces share_exact_interfaces(const TopoDS_Shape& root,
         if (tags.empty() && names.empty()) {
           continue;
         }
-        for (const TopoDS_Shape& subshape_image : images(builder, subshape, kind)) {
+        for (const TopoDS_Shape& subshape_image : image_of(subshape, kind)) {
           for (const std::string& tag : tags) {
             result.names.add_subshape_tag(subshape_image, tag);
           }

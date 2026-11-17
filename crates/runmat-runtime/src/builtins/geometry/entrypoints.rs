@@ -21,12 +21,13 @@ pub async fn geometry_load_builtin(
         GEOMETRY_LOAD_NAME,
         &GEOMETRY_LOAD_ERROR_OPERATION,
         &GEOMETRY_LOAD_ERROR_INTERNAL,
-        crate::geometry::geometry_load_with_options_op(
+        crate::geometry::geometry_load_with_options_op_async(
             &path,
             &bytes,
             import_options,
             OperationContext::new(None, None),
-        ),
+        )
+        .await,
         Some(GEOMETRY_ASSET_CLASS),
         Some(GEOMETRY_ASSET_JSON_PROPERTY),
     )
