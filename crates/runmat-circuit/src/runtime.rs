@@ -227,6 +227,42 @@ pub fn layout_path_for(circuit: &str) -> String {
     format!("{}{LAYOUT_SUFFIX}", stem(circuit))
 }
 
+/// The board command that starts a circuit's board: Outline on a circuit with no layout writes
+/// the circuit's first `.circuit.layout` with the outline in it.
+pub(super) const STARTS_BOARD: &str = "board.outline";
+
+/// The layout a circuit's first board starts from: the circuit it lays out and an empty board,
+/// in the form the starter files take (`runmat 0.7`, `std 1`).
+pub(super) fn starter_layout(circuit_name: &str) -> String {
+    format!("runmat 0.7\nstd 1\n\nuse circuit {circuit_name}\n\nlayout {circuit_name} {{\n}}\n")
+}
+
+/// Runs `run` with the starter layout beside the circuit, then turns the layout's change into
+/// the creation of that file: its whole text, written as a new file the host refuses to
+/// overwrite.
+pub(super) fn with_starter_layout<F>(
+    files: &Files,
+    layout_path: &str,
+    circuit_name: &str,
+    run: F,
+) -> Result<EditOutput, EditError>
+where
+    F: FnOnce(&Files) -> Result<EditOutput, EditError>,
+{
+    let mut with_layout = files.clone();
+    with_layout.insert(layout_path.to_owned(), starter_layout(circuit_name));
+    let mut out = run(&with_layout)?;
+    for change in out.files.iter_mut().filter(|c| c.path == layout_path) {
+        change.edits = vec![Utf16Edit {
+            start: 0,
+            end: 0,
+            text: change.text.clone(),
+        }];
+        change.reprinted = true;
+    }
+    Ok(out)
+}
+
 /// `io.circuit` → `io.circuit.lock`.
 pub fn lock_path_for(circuit: &str) -> String {
     format!("{}{LOCK_SUFFIX}", stem(circuit))

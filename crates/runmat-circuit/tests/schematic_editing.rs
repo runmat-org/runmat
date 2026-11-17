@@ -713,3 +713,68 @@ fn a_session_runs_the_schematic_tools() {
         .expect("wires");
     assert!(out.files[0].text.contains(r#"connect = ["J1.1", U1.VIN]"#));
 }
+
+/// Outline on a circuit with no board writes the circuit's first layout, with the outline in it,
+/// in the kept session (the Desktop) and in the stateless runtime (the agent and the CLI).
+#[test]
+fn outline_on_a_circuit_without_a_board_starts_its_layout() {
+    let request = EditRequest {
+        command: "board.outline".into(),
+        values: json!({ "source": "draw", "points": [[0.0, 0.0], [40.0, 0.0], [40.0, 30.0], [0.0, 30.0]] })
+            .as_object()
+            .cloned()
+            .unwrap(),
+        ..Default::default()
+    };
+    let check = |out: &runtime::EditOutput| {
+        let layout = out
+            .files
+            .iter()
+            .find(|c| c.path == "/p/reg.circuit.layout")
+            .expect("writes the layout");
+        assert!(layout.reprinted, "a new file");
+        assert!(
+            layout
+                .text
+                .starts_with("runmat 0.7\nstd 1\n\nuse circuit reg\n\nlayout reg {"),
+            "{}",
+            layout.text
+        );
+        assert!(layout.text.contains("outline"), "{}", layout.text);
+        assert_eq!(layout.edits.len(), 1);
+        assert_eq!(layout.edits[0].text, layout.text);
+        // The written layout compiles to a board with that outline.
+        let mut with = files(BLANK);
+        with.insert(layout.path.clone(), layout.text.clone());
+        let compiled = runtime::compile(PATH, BLANK, &with, &CompileOptions::default());
+        assert!(
+            compiled.diagnostics.is_empty(),
+            "{:?}",
+            compiled.diagnostics
+        );
+    };
+    let mut session = runtime::Session::new();
+    check(
+        &session
+            .edit(PATH, BLANK, &files(BLANK), &request)
+            .expect("starts the board"),
+    );
+    check(&runtime::edit(PATH, BLANK, &files(BLANK), &request).expect("starts the board"));
+    // Any other board command still asks for a board first.
+    let route = EditRequest {
+        command: "board.place-via".into(),
+        values: json!({ "points": [[6.0, 6.0]] })
+            .as_object()
+            .cloned()
+            .unwrap(),
+        ..Default::default()
+    };
+    let refused = runtime::Session::new()
+        .edit(PATH, BLANK, &files(BLANK), &route)
+        .expect_err("no board");
+    assert!(
+        refused.message.contains("has no board yet"),
+        "{}",
+        refused.message
+    );
+}

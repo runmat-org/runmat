@@ -102,6 +102,16 @@ pub fn edit(
         ),
         diagnostics,
     })?;
+    let layout_path = layout_path_for(&project.circuit_path);
+    // The starter is given once: a starter that reads to no board refuses below, as before.
+    if project.layout.is_none()
+        && request.command == super::STARTS_BOARD
+        && !files.contains_key(&layout_path)
+    {
+        return super::with_starter_layout(files, &layout_path, &project.own.name, |files| {
+            edit(path, text, files, request)
+        });
+    }
     match request.command.as_str() {
         "schematic.update-board" => update_board(&project, request),
         "board.update-schematic" => update_schematic(&project, request),
