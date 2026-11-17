@@ -255,6 +255,7 @@ pub mod meshing;
 pub mod rate;
 pub mod relay;
 pub mod solver;
+pub mod trace;
 
 pub use counter::CountReporter;
 pub use rate::ProgressRateLimiter;

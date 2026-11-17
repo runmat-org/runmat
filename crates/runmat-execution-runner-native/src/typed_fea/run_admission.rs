@@ -34,7 +34,7 @@ pub(super) fn admit_root(
     source: &runmat_core::CheckedFeaSessionSource,
     root: &ResolvedFeaRoot,
     mut options: LocalFeaExecutionOptions,
-) -> Result<(FeaRunScope, LocalFeaExecutionOptions), String> {
+) -> Result<AdmittedRoot, String> {
     let (study, root_id, cases) = match root {
         ResolvedFeaRoot::Study(study) => (
             study,
@@ -92,8 +92,20 @@ pub(super) fn admit_root(
     )
     .map_err(|e| format!("{}: {e}", e.error_code()))?;
     request.site = FeaRunScope::admission_site().map_err(|e| format!("{}: {e}", e.error_code()))?;
+    let run_id = request.run_id.clone();
     let scope = FeaRunScope::admit(request).map_err(|e| format!("{}: {e}", e.error_code()))?;
-    Ok((scope, options))
+    Ok(AdmittedRoot {
+        scope,
+        options,
+        run_id,
+    })
+}
+
+/// A root admitted to run: its scope, the options frozen to its allocation and its run id.
+pub(super) struct AdmittedRoot {
+    pub scope: FeaRunScope,
+    pub options: LocalFeaExecutionOptions,
+    pub run_id: String,
 }
 
 pub(super) fn outcome(result: &Result<LocalFeaExecution, String>) -> FeaRunOutcome {

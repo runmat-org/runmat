@@ -122,3 +122,77 @@ fn admitted_assessment_phase_keeps_missing_scalar_evidence_indeterminate() {
     assert!(retained.observation_scalars.is_empty());
     assert_eq!(store.list_runs().unwrap().len(), 1);
 }
+
+/// Assessment is the study's "Assess acceptance" trace step, with its verdict count as result.
+#[test]
+fn assessment_is_the_assess_trace_step_with_its_verdict_count() {
+    use std::sync::Mutex;
+    use tracing::field::{Field, Visit};
+    use tracing_subscriber::layer::{Context, Layer, SubscriberExt};
+    use tracing_subscriber::registry::LookupSpan;
+
+    #[derive(Clone, Default)]
+    struct Steps(Arc<Mutex<Vec<(&'static str, Option<String>, Option<String>)>>>);
+    struct Strings<'a>(&'a mut Option<String>, &'a mut Option<String>);
+    impl Visit for Strings<'_> {
+        fn record_str(&mut self, field: &Field, value: &str) {
+            match field.name() {
+                "step" => *self.0 = Some(value.into()),
+                "result" => *self.1 = Some(value.into()),
+                _ => {}
+            }
+        }
+        fn record_debug(&mut self, _: &Field, _: &dyn std::fmt::Debug) {}
+    }
+    impl<S: tracing::Subscriber + for<'a> LookupSpan<'a>> Layer<S> for Steps {
+        fn on_new_span(
+            &self,
+            attributes: &tracing::span::Attributes<'_>,
+            id: &tracing::span::Id,
+            context: Context<'_, S>,
+        ) {
+            let mut spans = self.0.lock().unwrap();
+            context
+                .span(id)
+                .unwrap()
+                .extensions_mut()
+                .insert(spans.len());
+            let (mut step, mut result) = (None, None);
+            attributes.record(&mut Strings(&mut step, &mut result));
+            spans.push((attributes.metadata().name(), step, result));
+        }
+        fn on_record(
+            &self,
+            id: &tracing::span::Id,
+            values: &tracing::span::Record<'_>,
+            context: Context<'_, S>,
+        ) {
+            let index = *context.span(id).unwrap().extensions().get::<usize>().unwrap();
+            let mut spans = self.0.lock().unwrap();
+            let (_, step, result) = &mut spans[index];
+            values.record(&mut Strings(step, result));
+        }
+    }
+
+    let _guard = crate::analysis::tests::analysis_test_guard();
+    let (mut publication, _store) = fixture();
+    let (compiled, _, _) = crate::analysis::assessment::tests::fixture();
+    let manifest = manifest(&mut publication, &compiled);
+    let steps = Steps::default();
+    let subscriber = tracing_subscriber::registry().with(steps.clone());
+    let prepared = tracing::subscriber::with_default(subscriber, || {
+        PreparedStudyPublication::new(publication.completion, manifest)
+    })
+    .unwrap();
+    let completed = prepared.publish_without_function_execution().unwrap();
+    assert_eq!(completed.data.assessments.len(), 1);
+    let spans = steps.0.lock().unwrap().clone();
+    let assess = spans
+        .iter()
+        .filter(|(name, _, _)| *name == "fea.study.assess")
+        .collect::<Vec<_>>();
+    assert_eq!(assess.len(), 1, "{spans:?}");
+    assert_eq!(assess[0].1.as_deref(), Some("Assess acceptance"));
+    // The one criterion has no scalar evidence, so it is indeterminate: none passed.
+    assert_eq!(assess[0].2.as_deref(), Some("0 of 1 passed"));
+}
