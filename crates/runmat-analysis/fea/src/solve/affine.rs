@@ -418,7 +418,7 @@ where
             prepared.rhs(),
             reduced_guess.as_deref(),
             tolerance,
-            factor.as_deref(),
+            super::CholeskyFactor::of(factor.as_deref(), admission),
             &mut before_capacity,
         )
         .await
@@ -432,7 +432,7 @@ where
             plan,
             strategy,
             block_size,
-            factor: factor.as_deref(),
+            factor: super::CholeskyFactor::of(factor.as_deref(), admission),
             device,
         })
         .map_err(ScopedSpmvError::Usage)?
