@@ -1,0 +1,57 @@
+runmat 0.7
+std 1
+
+// Engineering intent and acceptance basis recovered from DESIGN-NOTES.md (2026-11-07):
+// one skid carries 97 N upward at its sole for a 1 m/s touchdown stopped over 2 mm;
+// peak von Mises stress limit 55 MPa. User supplied conditioned GF nylon elastic data:
+// E = 7.5 GPa, nu = 0.35. The original landing_skid.fea and its geometry are absent.
+// This check therefore uses the reconstructed part's named regions, but cannot claim to
+// reproduce the earlier solved result until the historical part/study geometry is restored.
+geometry skid {
+    file = "../mechanical/body/landing_skid.part"
+    interfaces = shared
+    region body : solid { select name "landing_skid"; expect exactly_one }
+    region mounts : face { select name "mount"; expect one_or_more }
+    region sole : face { select name "sole"; expect exactly_one }
+}
+
+mesh skid on geometry.skid {
+    tetrahedra {
+        order = quadratic
+    }
+}
+
+material gf_nylon_conditioned {
+    name = "Conditioned 30% glass-filled nylon"
+    mass_density = 1360 kg/m^3
+    elastic {
+        youngs_modulus = 7.5 GPa
+        poisson_ratio = 0.35
+    }
+}
+
+model hard_landing {
+    assign material.gf_nylon_conditioned to geometry.skid.region.body
+    constraint mounts_fixed {
+        structural.fixed { target = geometry.skid.region.mounts }
+    }
+    load touchdown {
+        force on geometry.skid.region.sole = [0, 0, 97] N
+    }
+    load_case landing { include load.touchdown }
+}
+
+study landing_skid_hard_landing {
+    geometry = geometry.skid
+    mesh = mesh.skid
+    model = model.hard_landing
+    analysis static { structural static {} }
+    output von_mises = analysis.static.field.element.von_mises_stress
+    output peak_stress = max(analysis.static.field.element.von_mises_stress, over = geometry.skid.region.body)
+    assessment stress_limit {
+        value = output.peak_stress
+        maximum = 55 MPa
+        evidence = authored_samples
+    }
+}
+
