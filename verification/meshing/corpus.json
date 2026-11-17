@@ -506,6 +506,18 @@
       "features": ["assembly", "persistent-labels", "product-names"],
       "expected": { "outcome": "success", "topology": "three bodies named esc_board_thermal, esc_heatsink and thermal_pad; authored fins face name survives import", "mass_properties": "product-name and face-name witness; independent mass properties are unmeasured", "regions": 3, "mesh_error_bounds": "import/preview identity witness; volume-meshing error bounds are unmeasured" },
       "test": { "source": "crates/runmat-geometry/io/tests/step_face_names.rs", "name": "assembly_step_preview_names_bodies_by_product" }
+    },
+    {
+      "id": "camera-bracket",
+      "path": "camera_bracket.step",
+      "sha256": "81d5f16412a584592310423efe3627049091ea34b96df5a3f7bc0b1e9f85ee99",
+      "tier": "small",
+      "format": "step",
+      "supported_input": true,
+      "provenance": { "origin": "repository-authored thin-plate fixture (G62 check-time mesh estimate calibration)", "exporter": "Open CASCADE STEP processor", "exporter_version": "7.8", "license": "RunMat repository license" },
+      "features": ["thin-walls", "bores", "solid"],
+      "expected": { "outcome": "success", "topology": "one solid of three 3 mm plates: a 15 x 8 mm mount with two 2.2 mm bores, a 20 x 17.9 mm web and a 26 x 26 mm camera plate with four 2.2 mm bores", "mass_properties": "preview volume, area and wall and bore spectrum asserted by imported_previews_measure_volume_walls_and_bores", "regions": 1, "mesh_error_bounds": "preview-measure witness; volume-meshing error bounds are unmeasured" },
+      "test": { "source": "crates/runmat-geometry/io/tests/preview_measure.rs", "name": "imported_previews_measure_volume_walls_and_bores" }
     }
   ]
 }
