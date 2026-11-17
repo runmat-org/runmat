@@ -667,3 +667,19 @@ fn vorticity_is_its_own_per_second_kind_distinct_from_rates_and_angular_velocity
     assert_eq!(field.canonical_values(), &[0.0, -1.25, 4.0]);
     assert!(Quantity::<kind::Vorticity, Vec<f64>>::try_new(vec![f64::NAN]).is_err());
 }
+
+/// DYNCHECK12: a mode count asked as a dimensionless quantity was refused as an unknown unit for
+/// `1`, the spelling the unit table gives a bare number; `1` reads as the bare-number unit, and
+/// only the whole expression `1` does.
+#[test]
+fn one_is_the_unit_of_a_bare_number() {
+    let one = parse_unit_expression("1").unwrap();
+    assert_eq!(one.dimension(), crate::PhysicalDimension::DIMENSIONLESS);
+    assert_eq!(one.angle_power(), 0);
+    assert_eq!(one.scale(), 1.0);
+    assert_eq!(one.to_canonical(6.0).unwrap(), 6.0);
+    assert!(parse_unit_expression(" 1 ").is_ok());
+    for refused in ["2", "1/s", "mm*1", "10"] {
+        assert!(parse_unit_expression(refused).is_err(), "{refused}");
+    }
+}

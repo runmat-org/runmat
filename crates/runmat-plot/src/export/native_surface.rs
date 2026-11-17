@@ -1893,6 +1893,7 @@ mod parity_tests {
                     ])
                     .expect("2D pointer");
                 let frame = crate::collaboration::PresenceFrame {
+                    guides: Vec::new(),
                     revision: "accepted-run".into(),
                     target: None,
                     pointers: vec![crate::collaboration::PresencePointer {
@@ -2008,6 +2009,7 @@ mod parity_tests {
                         ])
                         .expect("geometry pointer");
                     let geometry_frame = crate::collaboration::PresenceFrame {
+                        guides: Vec::new(),
                         revision: "geometry-revision".into(),
                         target: None,
                         pointers: vec![crate::collaboration::PresencePointer {

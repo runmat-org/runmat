@@ -1,6 +1,9 @@
+mod family;
 mod monitor;
 mod sampling;
 pub(crate) mod spec;
+
+pub use family::{family_supports_quantity, published_locations, quantity_supported};
 
 pub use sampling::observation_sampling_matches_domain;
 

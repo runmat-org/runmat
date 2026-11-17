@@ -30,6 +30,8 @@ interface usb2 = { members = [DP, DN], diff_pairs = [[DP, DN]] }
 
 The board reads each class's track width and clearance, and DRC checks them.
 
+In the Desktop, right-click nets and choose Net class to put them in a class (`default` takes them out of theirs). Net class writes the class on each net's `net` statement. When a net has no `net` statement, it adds one to the sheet that draws the net. A net of a repeated sheet is declared once for every channel. A class name the circuit doesn't declare yet is added as `net_class <name> = {}`, ready for its rules.
+
 A `blanket` inside a sheet gives several nets one class and set of parameters:
 
 ```circuit fragment

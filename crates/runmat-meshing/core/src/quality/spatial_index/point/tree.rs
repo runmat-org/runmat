@@ -18,6 +18,18 @@ enum Content {
     },
 }
 impl Node {
+    pub(super) fn resident_bytes(&self) -> u64 {
+        use crate::resident_bytes::{arc_bytes, box_bytes, vec_bytes};
+        arc_bytes::<Self>().saturating_add(match &self.content {
+            Content::Leaf(indices) => vec_bytes::<usize>(indices.capacity()),
+            Content::Branch { children, .. } => children
+                .iter()
+                .flatten()
+                .fold(box_bytes::<[Option<Arc<Node>>; 8]>(), |sum, child| {
+                    sum.saturating_add(child.resident_bytes())
+                }),
+        })
+    }
     pub fn build<E>(
         region: Aabb3,
         indices: Vec<usize>,

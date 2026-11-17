@@ -8,8 +8,14 @@
 //! An assembly's mass properties add every placed part occurrence, each regenerated once per
 //! file and configuration and moved to its world placement: the centre of gravity is the
 //! mass-weighted centroid, and the inertia tensor about it (world axes) sums each part's
-//! rotated tensor and its parallel-axis term. A part with no density is listed, carries no
-//! mass, and makes the result incomplete.
+//! rotated tensor and its parallel-axis term.
+//!
+//! No density is assumed. A part with no density (no `density` property and a material the
+//! table doesn't know, or no material) is listed with its volume and the reason, carries no mass
+//! and no centre of mass, and leaves the total's mass, centre of mass and inertia unknown.
+//!
+//! A component at the envelope representation (a sub-assembly's, everything under it) weighs
+//! its parts as above: the envelope changes what is drawn and checked for interference.
 //!
 //! A circuit board occurrence weighs what its layout holds ([`runmat_circuit::mass`]): the
 //! stackup's laminate, copper and mask, and its placed components (each at the mass its part
@@ -54,17 +60,29 @@ pub struct PartMass {
     pub density: Option<f64>,
     pub density_source: Option<DensitySource>,
     pub mass: Option<f64>,
+    /// Why `mass` (and `center`) are unknown: the part's density is unknown, naming the material
+    /// it looked for.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mass_unknown: Option<String>,
     pub volume: f64,
     /// The occurrence's centre of mass in the assembly's frame (m), so a balance check can
-    /// read which parts move the CG.
-    pub center: [f64; 3],
+    /// read which parts move the CG; none when its mass is unknown.
+    pub center: Option<[f64; 3]>,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Serialize)]
 pub struct MassReport {
-    pub total: Mass,
+    /// Every part's volume (m³), known with or without densities.
+    pub volume: f64,
+    /// The mass, centre of mass and inertia of the whole; none when any part's mass is unknown
+    /// (`unknown` says why), so a partial sum never reads as the total.
+    pub total: Option<Mass>,
+    /// Why `total` is unknown.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub unknown: Option<String>,
     pub parts: Vec<PartMass>,
-    /// Parts without a density, or whose bodies the kernel could not integrate.
+    /// Parts without a density, or whose bodies the kernel could not integrate, each naming
+    /// the part (and the material it looked for).
     pub problems: Vec<String>,
 }
 
@@ -73,6 +91,23 @@ impl MassReport {
     pub fn complete(&self) -> bool {
         self.problems.is_empty()
     }
+
+    /// Sets the total from the placed masses, or leaves it unknown with the reason when a part
+    /// has no mass.
+    fn finish(&mut self, masses: &[Mass]) {
+        self.volume = self.parts.iter().map(|p| p.volume).sum();
+        match self.problems.as_slice() {
+            [] => self.total = Some(combine(masses)),
+            [only] => self.unknown = Some(only.clone()),
+            [first, rest @ ..] => {
+                self.unknown = Some(format!(
+                    "{} parts have no known mass; {first} (and {} more)",
+                    rest.len() + 1,
+                    rest.len()
+                ))
+            }
+        }
+    }
 }
 
 /// A part's integrated bodies at unit density in its own frame, and its density.
@@ -80,7 +115,7 @@ impl MassReport {
 struct Integrated {
     unit: Mass,
     material: Option<String>,
-    density: Option<(f64, DensitySource)>,
+    density: Result<(f64, DensitySource), String>,
 }
 
 /// Each part's integration, kept between calls on this thread by content (the part's text,
@@ -162,7 +197,9 @@ fn integrate(
         material: output
             .and_then(|o| o.material.as_ref())
             .map(|m| m.as_str().to_owned()),
-        density: output.and_then(part_density),
+        density: output
+            .ok_or_else(|| "it has no output".to_owned())
+            .and_then(part_density),
     })
 }
 
@@ -242,25 +279,26 @@ fn share(
     part: &Integrated,
     center: [f64; 3],
 ) -> PartMass {
+    let known = part.density.as_ref().ok();
     PartMass {
         path,
         item,
         file,
         configuration,
         material: part.material.clone(),
-        density: part.density.map(|d| d.0),
-        density_source: part.density.map(|d| d.1),
-        mass: part.density.map(|d| part.unit.volume * d.0),
+        density: known.map(|d| d.0),
+        density_source: known.map(|d| d.1),
+        mass: known.map(|d| part.unit.volume * d.0),
+        mass_unknown: part.density.as_ref().err().cloned(),
         volume: part.unit.volume,
-        center,
+        center: known.map(|_| center),
     }
 }
 
-fn no_density(path: &str, material: Option<&str>) -> String {
-    match material {
-        Some(m) => format!("{path}: no density for {m}; give the part a `density` property"),
-        None => format!("{path}: no material or `density` property, so it has no mass"),
-    }
+/// The diagnostic for a part occurrence without a density: the part and why (the material it
+/// looked for).
+fn no_density(path: &str, reason: &str) -> String {
+    format!("{path}: mass unknown: {reason}")
 }
 
 /// The mass properties of the part `path` in its named configuration (the default for `None`).
@@ -274,18 +312,10 @@ pub fn part_mass(
     let integrated = integrate(&part.document, &part.result, part.kernel.as_ref())?;
     let mut report = MassReport::default();
     let configuration = configuration.unwrap_or("default").to_owned();
-    match integrated.density {
-        Some((d, _)) => report.total = scaled(&integrated.unit, d),
-        None => {
-            report
-                .problems
-                .push(no_density(path, integrated.material.as_deref()));
-            report.total = Mass {
-                volume: integrated.unit.volume,
-                center: integrated.unit.center,
-                ..Mass::default()
-            };
-        }
+    let mut masses = Vec::new();
+    match &integrated.density {
+        Ok((d, _)) => masses.push(scaled(&integrated.unit, *d)),
+        Err(reason) => report.problems.push(no_density(path, reason)),
     }
     report.parts.push(share(
         path.to_owned(),
@@ -295,6 +325,7 @@ pub fn part_mass(
         &integrated,
         integrated.unit.center,
     ));
+    report.finish(&masses);
     Ok(report)
 }
 
@@ -318,6 +349,56 @@ fn board_mass(file: &str, files: &Files) -> Result<Mass, String> {
 
 /// The mass properties of the assembly `path` in its named configuration, over every placed
 /// part occurrence.
+/// Writes each placed part's mass, centre of mass and inertia (about the centre, part axes)
+/// into its configured summary in `source`, the facts a dynamic motion study reads
+/// ([`runmat_cad::assembly::motion::dynamics`]). Each part is integrated once per file and
+/// configuration (and kept by content); a part with no density, or whose bodies the kernel
+/// can't integrate, keeps no mass, and the study names it.
+pub fn fill_part_masses(
+    resolved: &runmat_cad::assembly::resolve::ResolvedAssembly,
+    documents: &BTreeMap<String, PartDocument>,
+    source: &mut runmat_cad::assembly::source::MemorySource,
+    files: &Files,
+) {
+    use std::sync::Arc;
+    let mut done = std::collections::BTreeSet::new();
+    for node in &resolved.nodes {
+        if node.parent.is_none() || node.failed || node.definition.kind != DefinitionKind::Part {
+            continue;
+        }
+        let file = node.definition.file.0.clone();
+        let digest = node.configuration.digest();
+        if !done.insert((node.definition.clone(), node.revision.clone(), digest.clone())) {
+            continue;
+        }
+        let content = crate::evaluate::content_key(&file, &digest, files);
+        let found = match content.and_then(kept::get) {
+            Some(found) => found,
+            None => {
+                let Some(document) = documents.get(&file) else { continue };
+                let configured = document.in_configuration(node.configuration.name.as_ref());
+                let (result, kernel) = regenerate_configured(document, &node.configuration);
+                let Ok(found) = integrate(&configured, &result, kernel.as_ref()) else { continue };
+                if let Some(k) = content {
+                    kept::put(k, found.clone());
+                }
+                found
+            }
+        };
+        let Ok((density, _)) = found.density else { continue };
+        let m = scaled(&found.unit, density);
+        let Some(part) = source.parts.get_mut(&(node.definition.clone(), node.revision.clone())) else {
+            continue;
+        };
+        let Some(summary) = part.configured.get(&digest) else { continue };
+        let mut filled = (**summary).clone();
+        filled.mass = Some(m.mass);
+        filled.center_of_mass = Some(m.center);
+        filled.inertia = Some(m.inertia);
+        part.configured.insert(digest, Arc::new(filled));
+    }
+}
+
 pub fn assembly_mass(
     path: &str,
     text: &str,
@@ -331,11 +412,14 @@ pub fn assembly_mass(
     let mut report = MassReport::default();
     let mut placed_masses = Vec::new();
     for (id, node) in resolved.nodes.iter().enumerate() {
-        if node.parent.is_none() || node.failed || node.represented_by_ancestor {
+        // A component drawn as its envelope still weighs what its parts weigh: the envelope
+        // stands in for its geometry in the view and in interference, not for its mass.
+        // A reference component (a skeleton) weighs nothing in the product.
+        if node.parent.is_none() || node.failed || node.reference {
             continue;
         }
         if node.definition.kind == DefinitionKind::Circuit {
-            let file = node.definition.file.0.clone();
+            let file = node.source_key();
             let occurrence = resolved.path(id as u32);
             match board_mass(&file, files) {
                 Err(e) => report.problems.push(format!("{occurrence}: {e}")),
@@ -350,8 +434,9 @@ pub fn assembly_mass(
                         density: None,
                         density_source: None,
                         mass: Some(m.mass),
+                        mass_unknown: None,
                         volume: m.volume,
-                        center: placed_mass.center,
+                        center: Some(placed_mass.center),
                     });
                     placed_masses.push(placed_mass);
                 }
@@ -361,7 +446,7 @@ pub fn assembly_mass(
         if node.definition.kind != DefinitionKind::Part {
             continue;
         }
-        let file = node.definition.file.0.clone();
+        let file = node.source_key();
         let occurrence = resolved.path(id as u32);
         let key = (file.clone(), node.configuration.digest());
         let content = crate::evaluate::content_key(&file, &key.1, files);
@@ -395,17 +480,16 @@ pub fn assembly_mass(
                     part,
                     node.world.apply(part.unit.center),
                 ));
-                match part.density {
-                    Some((d, _)) => placed_masses.push(placed(&scaled(&part.unit, d), &node.world)),
-                    None => report
-                        .problems
-                        .push(no_density(&occurrence, part.material.as_deref())),
+                match &part.density {
+                    Ok((d, _)) => {
+                        placed_masses.push(placed(&scaled(&part.unit, *d), &node.world))
+                    }
+                    Err(reason) => report.problems.push(no_density(&occurrence, reason)),
                 }
             }
         }
     }
-    report.total = combine(&placed_masses);
-    report.total.volume = report.parts.iter().map(|p| p.volume).sum();
+    report.finish(&placed_masses);
     Ok(report)
 }
 
@@ -459,31 +543,79 @@ mod tests {
         let part = part_mass("/p/block.part", BLOCK, None).unwrap();
         assert!(part.complete(), "{:?}", part.problems);
         // 100 × 10 × 10 mm of steel: 1e-5 m³ at 7850 kg/m³.
-        assert!((part.total.mass - 0.0785).abs() < 1e-3, "{:?}", part.total);
+        let one = part.total.clone().expect("steel has a density");
+        assert!((one.mass - 0.0785).abs() < 1e-3, "{one:?}");
         let assembly = "runmat 0.7\nstd 1\n\nassembly pair {\n    use part block as a\n    use part block as b {\n        placement = { placement = offset, offset = { translation = [0 mm, 100 mm, 0 mm] } }\n    }\n}\n";
         let mut files = Files::new();
         files.insert("/p/block.part".into(), BLOCK.into());
         let report = assembly_mass("/p/pair.assembly", assembly, &files, None).unwrap();
         assert_eq!(report.parts.len(), 2, "{report:?}");
-        assert!((report.total.mass - 2.0 * part.total.mass).abs() < 1e-9);
+        let both = report.total.clone().expect("both copies are steel");
+        assert!((both.mass - 2.0 * one.mass).abs() < 1e-9);
         // The centre sits halfway between the copies.
         assert!(
-            (report.total.center[1] - (part.total.center[1] + 0.05)).abs() < 1e-6,
-            "{:?}",
-            report.total
+            (both.center[1] - (one.center[1] + 0.05)).abs() < 1e-6,
+            "{both:?}"
         );
     }
 
     #[test]
-    fn a_part_without_a_density_says_so() {
+    fn a_part_without_a_material_has_an_unknown_mass() {
         let text = BLOCK.replace(", material = \"material.steel\"", "");
         let report = part_mass("/p/block.part", &text, None).unwrap();
         assert!(!report.complete());
-        assert!(
-            report.problems[0].contains("no material"),
-            "{:?}",
-            report.problems
+        assert_eq!(
+            report.problems,
+            ["/p/block.part: mass unknown: it has no material and no `density` property"]
         );
+        assert_eq!(report.total, None, "no density is assumed");
+        assert_eq!(report.unknown.as_deref(), Some(report.problems[0].as_str()));
+        // The volume is still measured; the mass and centre of mass are not.
+        assert!((report.volume - 1e-5).abs() < 1e-9, "{}", report.volume);
+        let row = &report.parts[0];
+        assert_eq!((row.mass, row.density, row.center), (None, None, None));
+    }
+
+    #[test]
+    fn an_unknown_material_names_itself_and_leaves_the_mass_unknown() {
+        let text = BLOCK.replace("material.steel", "material.unobtainium");
+        let report = part_mass("/p/block.part", &text, None).unwrap();
+        assert_eq!(report.total, None, "no steel density is assumed");
+        assert_eq!(
+            report.problems,
+            ["/p/block.part: mass unknown: no density is known for material `material.unobtainium`; pick a library material or give the part a `density` property"]
+        );
+        let row = &report.parts[0];
+        assert_eq!(row.material.as_deref(), Some("material.unobtainium"));
+        assert_eq!(row.mass, None);
+        assert!(row.mass_unknown.as_deref().unwrap().contains("material.unobtainium"));
+        // A `density` property on the same part gives it a mass.
+        let stated = text.replace(
+            "material = \"material.unobtainium\" }",
+            "material = \"material.unobtainium\", properties = [{ name = density, value = { type = quantity, value = 2000 kg/m^3 } }] }",
+        );
+        let report = part_mass("/p/block.part", &stated, None).unwrap();
+        assert!(report.complete(), "{:?}", report.problems);
+        assert!((report.total.unwrap().mass - 0.02).abs() < 1e-9);
+    }
+
+    #[test]
+    fn one_unknown_part_leaves_the_assembly_total_unknown() {
+        let mut files = Files::new();
+        files.insert("/p/block.part".into(), BLOCK.into());
+        files.insert(
+            "/p/odd.part".into(),
+            BLOCK.replace("block", "odd").replace("material.steel", "material.unobtainium"),
+        );
+        let text = "runmat 0.7\nstd 1\n\nassembly pair {\n    use part block as a\n    use part odd as b {\n        placement = { placement = offset, offset = { translation = [0 mm, 100 mm, 0 mm] } }\n    }\n}\n";
+        let report = assembly_mass("/p/pair.assembly", text, &files, None).unwrap();
+        assert_eq!(report.parts.len(), 2, "{report:?}");
+        // The steel copy's mass is not passed off as the assembly's.
+        assert_eq!(report.total, None);
+        let reason = report.unknown.as_deref().unwrap();
+        assert!(reason.contains("b: mass unknown") && reason.contains("material.unobtainium"), "{reason}");
+        assert!(report.parts[0].mass.is_some() && report.parts[1].mass.is_none());
+        assert!((report.volume - 2e-5).abs() < 1e-9);
     }
 
     #[test]
@@ -509,9 +641,10 @@ mod tests {
         assert_eq!(board.material.as_deref(), Some(BOARD_MATERIAL));
         let m = board.mass.unwrap();
         assert!((0.016..0.08).contains(&m), "{m} kg");
-        assert!((report.total.mass - m).abs() < 1e-12);
+        let total = report.total.clone().unwrap();
+        assert!((total.mass - m).abs() < 1e-12);
         // The centre sits over the board and above its 10 mm placement, components on top.
-        let c = report.total.center;
+        let c = total.center;
         assert!(
             (0.0..0.09).contains(&c[0]) && (0.0..0.06).contains(&c[1]),
             "{c:?}"

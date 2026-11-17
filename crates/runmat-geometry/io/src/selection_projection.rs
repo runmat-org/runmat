@@ -90,12 +90,16 @@ impl ExactSelectionProjection {
                 .as_ref()
                 .and_then(|o| o.face_id)
                 .ok_or_else(|| invalid("display face has no kernel join evidence"))?;
-            if !self.faces.contains_key(&ordinal)
-                || source_regions.insert(ordinal, region).is_some()
-            {
-                return Err(invalid(
-                    "display face has missing or duplicate exact identity evidence",
-                ));
+            if !self.faces.contains_key(&ordinal) {
+                return Err(invalid(format!(
+                    "display face {ordinal} has no exact face among the {} source faces",
+                    self.faces.len()
+                )));
+            }
+            if source_regions.insert(ordinal, region).is_some() {
+                return Err(invalid(format!(
+                    "display face {ordinal} is claimed by two display regions"
+                )));
             }
         }
         let mut by_region: BTreeMap<&str, Vec<&RegionEntityMapping>> = BTreeMap::new();
@@ -282,7 +286,27 @@ mod tests {
         };
         let mut asset = asset();
         let original = asset.clone();
-        assert!(projection.bind(&mut asset).is_err());
+        let error = projection.bind(&mut asset).unwrap_err().to_string();
+        assert!(
+            error.contains("display face 0 has no exact face"),
+            "{error}"
+        );
         assert_eq!(asset, original);
+    }
+    #[test]
+    fn a_source_face_claimed_twice_is_rejected_by_ordinal() {
+        let projection = ExactSelectionProjection {
+            faces: BTreeMap::from([(0, entity(PersistentEntityKind::Face, "part-a"))]),
+            solids: Vec::new(),
+        };
+        let mut asset = asset();
+        let mut twin = asset.regions[0].clone();
+        twin.region_id = "face_000002".into();
+        asset.regions.push(twin);
+        let error = projection.bind(&mut asset).unwrap_err().to_string();
+        assert!(
+            error.contains("display face 0 is claimed by two display regions"),
+            "{error}"
+        );
     }
 }

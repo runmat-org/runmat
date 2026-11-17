@@ -104,11 +104,19 @@ fn the_check_reports_a_note_that_had_no_room_where_it_was_put() {
         &files("l_bracket", AGENT),
     )
     .unwrap();
+    // design.check reports drawing.check's findings: a note the layout moved is an Overlap
+    // finding at info severity (the layout settled it), on the note's declaration.
+    let moved = |d: &&Value| {
+        d["code"] == "drawing.overlap"
+            && d["message"]
+                .as_str()
+                .is_some_and(|m| m.contains("has no room there"))
+    };
     let warnings: Vec<&Value> = out["diagnostics"]
         .as_array()
         .unwrap()
         .iter()
-        .filter(|d| d["severity"] == "warning" && d["code"] == "note_moved")
+        .filter(moved)
         .collect();
     assert!(!warnings.is_empty(), "{:#}", out["diagnostics"]);
     for w in &warnings {
@@ -121,8 +129,14 @@ fn the_check_reports_a_note_that_had_no_room_where_it_was_put() {
         &files("l_bracket_notes", LISTED),
     )
     .unwrap();
+    // The listed notes keep clear: no Overlap finding (the title block's own fields are
+    // another rule's business).
     assert!(
-        clean["diagnostics"].as_array().unwrap().is_empty(),
+        !clean["diagnostics"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|d| d["code"] == "drawing.overlap"),
         "{:#}",
         clean["diagnostics"]
     );

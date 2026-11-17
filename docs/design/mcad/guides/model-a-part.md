@@ -134,7 +134,34 @@ See [Outputs, regions and published values](/docs/mcad/part/regions-and-publish)
 
 The source view marks each problem at its line as you type. A feature that fails names its root cause, and the features after it that fail because of it are listed under that root, each with a repair such as Re-pick or Suppress. Run the same check from the agent or a script with `design.check`.
 
+### Replace a reference
+
+**Replace reference** on the Manage tab moves features from one face, edge, vertex, body, datum plane or sketch to another. Pick the reference the features use now and the one they should use. **Every use** changes each feature that uses it; **In one feature** changes only the feature you pick and leaves the others as they are.
+
+Replacing `feature.body.face.end` with `feature.body.face.start` in the motor plate's `bore` changes the face it starts from, and nothing else:
+
+```
+feature bore = hole(face = feature.body.face.start, at = { c = point(input.size / 2, input.size / 2, input.thickness) }, diameter = 22 mm, through_all)
+```
+
+The editor's bottom strip then lists every feature that used the old reference, with the parameter that held it (`bore (face)`, or `corners (edges[0].a)` for a face inside an edge set), names the features still on the old reference, and lists each error the rebuild reports that the part did not have before. A feature that now uses a reference made later in the history is one such error; move it below that feature, or replace the reference again. Undo restores the previous text.
+
+The written reference is the same persistent name the source text would give, such as `feature.body.face.start`, so a study, drawing or assembly that reads the part matches it by name. An edge set such as `edges_between(feature.body.face.end, …)` follows the new face. Replacing a profile's sketch takes every closed loop of the new sketch.
+
 Evaluate's Mass properties command weighs the plate from its material's density: mass, center of gravity and inertia about it. See [Evaluate](/docs/mcad/evaluate).
+
+### Document settings
+
+**Document settings** on the Manage tab writes one line in the part:
+
+```
+settings = { units = ips, standard = asme, tolerance = medium, decimals = 3 }
+```
+
+- **Units**: Mass properties and Measure read in millimeter, gram, second (`mmgs`); meter, kilogram, second (`mks`); or inch, pound, second (`ips`). The model stays in SI, so changing the units changes no geometry.
+- **Decimals**: readouts round to this many decimal places. Without it they keep six significant digits.
+- **Drafting standard**: the standard the part's 3D annotations follow, `iso` or `asme` (ASME Y14.5). ASME Y14.5-2018 withdrew the concentricity and symmetry tolerances, so on an ASME part each GD&T tolerance with one of them is reported in the editor's bottom strip.
+- **General tolerance**: the ISO 2768-1 class (`fine`, `medium`, `coarse` or `very_coarse`, the standard's f, m, c and v) for dimensions written without a tolerance. Measure lists it under a distance. A 100 mm distance in class m reads `± 0.3 mm (ISO 2768-m)`, the deviation ISO 2768-1 Table 1 gives for nominal sizes over 30 mm up to 120 mm.
 
 ## Next
 

@@ -465,12 +465,13 @@ pub(super) const OPERATIONS: &[Operation] = &[
     ),
     feature(
         "library",
-        "An instance of a reusable feature definition (`feature_def`).",
+        "An instance of a reusable feature definition (`feature_def`) or a library part.",
         &[
             req("def", Text, "The definition."),
             opt("args", Record, "Its inputs, by name."),
             opt("bindings", Record, "Its references, by name."),
             MODE,
+            opt("plane", Plane, "The face or plane that a library feature's `origin.xy` stands for."),
         ],
     ),
 ];

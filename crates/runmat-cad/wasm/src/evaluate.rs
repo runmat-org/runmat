@@ -73,6 +73,8 @@ pub struct Interference {
 enum Source<'a> {
     Part(&'a runmat_cad::assembly::source::ConfigKey),
     Board,
+    /// An occurrence at the envelope representation: its box, in its own frame.
+    Envelope(Aabb),
 }
 
 struct Placement<'a> {
@@ -87,6 +89,16 @@ struct Placement<'a> {
     bbox: Aabb,
     /// The occurrence is one of the changed ones (always true without a `changed` list).
     changed: bool,
+    /// The occurrence node, or (for a space the assembly reserves) the declared envelope.
+    at: At,
+}
+
+/// What a placement stands for: an occurrence, or a declared envelope (by its index in the
+/// resolved tree's envelopes).
+#[derive(Clone, Copy)]
+enum At {
+    Node(u32),
+    Declared(usize),
 }
 
 fn is_zero(n: &usize) -> bool {
@@ -138,7 +150,18 @@ pub fn assembly_clearance_of(
 ) -> Result<Interference, String> {
     let resolution = resolve_assembly_in(path, text, files, configuration)
         .map_err(|d| d.first().map(|d| d.message.clone()).unwrap_or_default())?;
-    let resolved = &resolution.resolved;
+    clearance_in(&resolution, &resolution.resolved, files, clearance, changed)
+}
+
+/// [`assembly_clearance_of`] on an assembly already resolved, with its occurrences where
+/// `resolved` places them (the resolution's own tree, or a motion study's frame of it).
+pub fn clearance_in(
+    resolution: &crate::runtime::AssemblyResolution,
+    resolved: &runmat_cad::assembly::resolve::ResolvedAssembly,
+    files: &Files,
+    clearance: f64,
+    changed: Option<&[String]>,
+) -> Result<Interference, String> {
     let is_changed = |p: &str| {
         changed.is_none_or(|c| c.iter().any(|n| p == n || p.starts_with(&format!("{n}/"))))
     };
@@ -162,7 +185,14 @@ pub fn assembly_clearance_of(
             loaded.insert(slot, Some(kept.clone()));
             return Some(kept);
         }
-        let entry = match p.source {
+        let entry = match &p.source {
+            Source::Envelope(b) => match envelope_body(b) {
+                Ok(body) => Some(body),
+                Err(e) => {
+                    errors.push(format!("{}: its envelope doesn't make a solid: {e}", p.path));
+                    None
+                }
+            },
             Source::Board => match crate::board_solid::board_body(&p.file, files) {
                 Ok(board) => {
                     let problems: Vec<String> = board
@@ -248,16 +278,32 @@ pub fn assembly_clearance_of(
     };
     let mut placements = Vec::new();
     for (id, node) in resolved.nodes.iter().enumerate() {
-        if node.parent.is_none() || node.failed || node.represented_by_ancestor {
+        // An occurrence at the envelope representation checks as its box (a sub-assembly's
+        // box stands in for everything under it).
+        let envelope = runmat_cad::assembly::representation::is_envelope(resolved, id as u32);
+        if node.reference
+            || !envelope && (node.parent.is_none() || node.failed || node.represented_by_ancestor)
+        {
             continue;
         }
-        let file = node.definition.file.0.clone();
+        let file = node.source_key();
         let source = match node.definition.kind {
+            _ if envelope => match runmat_cad::assembly::representation::envelope_box(
+                resolved,
+                &resolution.source,
+                id as u32,
+            ) {
+                Some(b) => Source::Envelope(b),
+                None => continue,
+            },
             DefinitionKind::Circuit => Source::Board,
             DefinitionKind::Part => Source::Part(&node.configuration),
             _ => continue,
         };
-        let key = cache::content_key(&file, &node.configuration.digest(), files);
+        let key = match source {
+            Source::Envelope(_) => None,
+            _ => cache::content_key(&file, &node.configuration.digest(), files),
+        };
         let occurrence_path = resolved.path(id as u32);
         let mut placement = Placement {
             changed: is_changed(&occurrence_path),
@@ -271,10 +317,12 @@ pub fn assembly_clearance_of(
                 min: [0.0; 3],
                 max: [0.0; 3],
             },
+            at: At::Node(id as u32),
         };
-        let local = match key.and_then(cache::bbox) {
-            Some(bbox) => Some(bbox),
-            None => {
+        let local = match (&placement.source, key.and_then(cache::bbox)) {
+            (Source::Envelope(b), _) => Some(*b),
+            (_, Some(bbox)) => Some(bbox),
+            (_, None) => {
                 let bbox = load(&placement, &mut errors).map(|b| b.bbox);
                 if let (Some(k), Some(b)) = (key, bbox) {
                     cache::set_bbox(k, b);
@@ -285,6 +333,24 @@ pub fn assembly_clearance_of(
         let Some(local) = local else { continue };
         placement.bbox = local.transformed(&node.world);
         placements.push(placement);
+    }
+    // The spaces the top assembly reserves: a component inside one it doesn't admit interferes.
+    for (i, e) in resolved.envelopes.iter().enumerate() {
+        if e.declared_by != 0 {
+            continue;
+        }
+        let path = format!("envelope.{}", e.name);
+        placements.push(Placement {
+            changed: is_changed(&path),
+            item: format!("envelope:{}", e.name),
+            path,
+            file: String::new(),
+            source: Source::Envelope(e.world),
+            key: None,
+            world: Transform::IDENTITY,
+            bbox: e.world,
+            at: At::Declared(i),
+        });
     }
     if let Some(names) = changed {
         if let Some(missing) = names.iter().find(|n| {
@@ -298,14 +364,24 @@ pub fn assembly_clearance_of(
         }
     }
     let mut out = Interference {
-        parts: placements.len(),
+        parts: placements.iter().filter(|p| matches!(p.at, At::Node(_))).count(),
         clearance,
         errors,
         changed: changed.map(<[String]>::to_vec).unwrap_or_default(),
         ..Default::default()
     };
+    let admitted = |a: &Placement, b: &Placement| match (a.at, b.at) {
+        (At::Declared(_), At::Declared(_)) => true,
+        (At::Declared(e), At::Node(n)) | (At::Node(n), At::Declared(e)) => {
+            runmat_cad::assembly::interference::envelope_admits(resolved, &resolved.envelopes[e], n)
+        }
+        (At::Node(_), At::Node(_)) => false,
+    };
     for (i, a) in placements.iter().enumerate() {
         for b in &placements[i + 1..] {
+            if admitted(a, b) {
+                continue;
+            }
             if !(a.changed || b.changed)
                 || grown(&a.bbox, clearance).intersection(&b.bbox).is_empty()
             {
@@ -550,6 +626,46 @@ mod cache {
 /// Every pair of solids of `body_a` (placed as `a`) and `body_b` (as `b`) whose boxes come
 /// within `clearance`, through the kernel: the summed common volume, the least distance, and
 /// the first pair that overlaps.
+/// A box solid for an envelope: the box in its occurrence's frame, as one prism.
+fn envelope_body(b: &Aabb) -> Result<bodies::Body, String> {
+    // A flat box (a sheet's envelope) still makes a solid.
+    let (mut min, mut max) = (b.min, b.max);
+    for k in 0..3 {
+        if max[k] - min[k] < 1e-6 {
+            min[k] -= 5e-7;
+            max[k] += 5e-7;
+        }
+    }
+    let ring = [
+        (min[0], min[1]),
+        (max[0], min[1]),
+        (max[0], max[1]),
+        (min[0], max[1]),
+    ]
+    .map(|(x, y)| (x * 1e3, y * 1e3));
+    let kernel = crate::kernel::make();
+    let handle = crate::board_solid::prism(
+        kernel.as_ref(),
+        vec![crate::board_solid::ring_loop(&ring, "envelope")],
+        min[2],
+        max[2],
+        runmat_cad::regen::kernel::Combine::New,
+        &[],
+    )?;
+    let bbox = Aabb { min, max };
+    Ok(bodies::Body {
+        kernel,
+        solids: vec![bodies::Solid {
+            handle,
+            bbox,
+            name: "envelope".into(),
+        }],
+        bbox,
+        fill: 0,
+        problems: Vec::new(),
+    })
+}
+
 fn body_pairs(
     body_a: &bodies::Body,
     a: &Placement,

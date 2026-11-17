@@ -119,10 +119,15 @@ pub struct FeatureDef {
     pub features: Vec<Feature>,
 }
 
-/// One use of a library feature.
+/// One use of a library feature or part.
+///
+/// `def` names a `feature_def` in this file (`feature_def.boss`), one in a library file
+/// (`library/fixtures.part#feature_def.slot`), or a whole library part (`library/pin.part`),
+/// whose `input`s are the parameters and whose features add a body. The host reads library
+/// files into [`crate::model::PartDocument::feature_defs`] under the full `def` before
+/// regeneration.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct LibraryInstance {
-    /// `library/bosses.part#feature_def.mount_boss`, or a def in this file.
     pub def: String,
     #[serde(default)]
     pub args: BTreeMap<InputName, ValueExpr>,
@@ -130,10 +135,17 @@ pub struct LibraryInstance {
     pub bindings: BTreeMap<String, Reference>,
     #[serde(default)]
     pub mode: BodyMode,
+    /// `plane`: the face or plane the definition's `origin.xy` stands for: its sketches and datums on
+    /// `origin.xy` move there, so the feature lands on the picked face.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub plane: Option<crate::model::datum::PlaneRef>,
 }
 
 impl Params for LibraryInstance {
     fn visit<'a>(&'a self, v: &mut Visit<'a>) {
+        if let Some(crate::model::datum::PlaneRef::Face { face }) = &self.plane {
+            v.reference("plane", face);
+        }
         for a in self.args.values() {
             v.value(a);
         }
@@ -185,15 +197,37 @@ impl FeatureDef {
         }
         let prefix = |id: &FeatureId| FeatureId::new(format!("{}.{}", instance, id));
         let ids: Vec<FeatureId> = self.features.iter().map(|f| f.id.clone()).collect();
+        let origin_xy = serde_json::to_value(crate::model::datum::PlaneRef::origin_xy())
+            .expect("plane serialises");
+        let on = use_
+            .plane
+            .as_ref()
+            .map(|p| serde_json::to_value(p).expect("plane serialises"));
         let mut out = Vec::new();
         for f in &self.features {
             let mut json = serde_json::to_value(f).expect("feature serialises");
+            if let Some(on) = &on {
+                replace_value(&mut json, &origin_xy, on);
+            }
             rewrite(&mut json, &values, &use_.bindings, &ids, &prefix);
             let mut g: Feature = serde_json::from_value(json).expect("rewritten feature");
             g.id = prefix(&f.id);
             out.push(g);
         }
         Ok(out)
+    }
+}
+
+/// Every occurrence of `from` in `v` replaced by `to`.
+fn replace_value(v: &mut serde_json::Value, from: &serde_json::Value, to: &serde_json::Value) {
+    if v == from {
+        *v = to.clone();
+        return;
+    }
+    match v {
+        serde_json::Value::Object(map) => map.values_mut().for_each(|x| replace_value(x, from, to)),
+        serde_json::Value::Array(a) => a.iter_mut().for_each(|x| replace_value(x, from, to)),
+        _ => {}
     }
 }
 

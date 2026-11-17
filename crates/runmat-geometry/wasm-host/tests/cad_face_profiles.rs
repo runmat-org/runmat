@@ -96,6 +96,54 @@ fn a_face_cuts_through_all_and_to_a_depth() {
     );
 }
 
+/// The total volume (mm³) of a part written as `text`, which must compile without errors.
+fn volume_of(text: &str) -> f64 {
+    let compiled = call("compile", &["/p/plate.part", text, "{}", "{}"]);
+    let errors: Vec<&Value> = compiled["diagnostics"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter(|d| d["severity"] == "error")
+        .collect();
+    assert!(errors.is_empty(), "{errors:?}\n{text}");
+    let mass = call(
+        "analyze",
+        &[
+            "/p/plate.part",
+            text,
+            "{}",
+            &json!({ "command": "evaluate.mass-properties" }).to_string(),
+        ],
+    );
+    assert_eq!(mass["ok"], true, "{mass}");
+    mass["data"]["total"]["volume"].as_f64().unwrap() * 1e9
+}
+
+#[test]
+fn a_sketch_on_a_face_cuts_into_the_body_and_adds_out_of_it() {
+    // A 6 x 6 mm square sketched on the plate's top face, clear of the boss and the hole. Cut 3 mm
+    // deep with no `reverse`: the pocket goes into the plate (out of it, it would cut nothing).
+    let sketch = "    sketch s3 on feature.body.face.end {\n        q1 = line(start = [20 mm, 4 mm], end = [26 mm, 4 mm])\n        q2 = line(start = [26 mm, 4 mm], end = [26 mm, 10 mm])\n        q3 = line(start = [26 mm, 10 mm], end = [20 mm, 10 mm])\n        q4 = line(start = [20 mm, 10 mm], end = [20 mm, 4 mm])\n    }\n";
+    let open = PLATE
+        .trim_end()
+        .strip_suffix('}')
+        .expect("the part's closing brace");
+    let with = |feature: &str| format!("{open}{sketch}{feature}}}\n");
+    close(
+        volume_of(&with(
+            "    feature pocket = extrude(profile = sketch.s3, distance = 3 mm, mode = cut)\n",
+        )),
+        BASE - 36.0 * 3.0,
+    );
+    // A boss from the same sketch still grows out of the face (the boss above does too).
+    close(
+        volume_of(&with(
+            "    feature stud = extrude(profile = sketch.s3, distance = 3 mm, mode = add)\n",
+        )),
+        BASE + 36.0 * 3.0,
+    );
+}
+
 #[test]
 fn a_face_revolves_about_an_edge_in_its_plane() {
     // The boss's top face, 10 x 10 at z = 15, a quarter turn about its edge along x at y = 5:

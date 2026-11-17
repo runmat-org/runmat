@@ -19,7 +19,9 @@ A part's geometry is its feature history: `feature <name> = <operation>(…)` st
 | `emboss` | Raised or recessed text or shapes on a face. | `profile`, `face`, `height`, `wrap` |
 <!-- /arguments -->
 
-`mode` is `new` (the default for the first solid), `add`, `cut` or `intersect`. On the part's first body feature, `add` has no body to join, so it makes the first body as `new` does; `cut` and `intersect` there fail with nothing to act on. A part with a plate and a cut pocket:
+`mode` is `new` (the default for the first solid), `add`, `cut` or `intersect`. On the part's first body feature, `add` has no body to join, so it makes the first body as `new` does; `cut` and `intersect` there fail with nothing to act on.
+
+An extrude goes along its profile plane's normal. A profile on a body's face, either the face itself or a sketch drawn on it, goes out of the body for `new` and `add` and into it for `cut` and `intersect`. `reverse` turns the direction either way. A part with a plate and a pocket cut 5 mm into its top face:
 
 ```part
 runmat 0.7
@@ -39,7 +41,7 @@ part pocket_plate {
         p3 = line(start = [60 mm, 35 mm], end = [20 mm, 35 mm])
         p4 = line(start = [20 mm, 35 mm], end = [20 mm, 15 mm])
     }
-    feature pocket = extrude(profile = sketch.pocket_s, distance = 5 mm, reverse, mode = cut)
+    feature pocket = extrude(profile = sketch.pocket_s, distance = 5 mm, mode = cut)
     output pocket_plate = { body = feature.body.body }
 }
 ```
@@ -195,7 +197,7 @@ feature mir = mirror(features = [pk2], plane = plane.mp)
 | `body_op.copy` | Copies bodies, the originals kept: copy `k` moves `k` times by the offset, then turns `k` times by `angle` about `axis`. | `bodies`, `dx`, `dy`, `dz`, `axis`, `angle`, `count` |
 | `body_op.indent` | Presses a tool body into a target; the tool, grown by `clearance`, is cut from the target and kept. | `target`, `tool`, `clearance` |
 | `import` | A body from a STEP file, held by the file's digest; its named faces read as `feature.<name>.face("Top")`. | `source`, `digest` |
-| `library` | An instance of a reusable feature definition (`feature_def`). | `def`, `args`, `bindings`, `mode` |
+| `library` | An instance of a reusable feature definition (`feature_def`) or a library part. | `def`, `args`, `bindings`, `mode`, `plane` |
 <!-- /arguments -->
 
 ```part fragment
@@ -204,6 +206,22 @@ feature halve = split(body = feature.body.body, tool = plane.cutp)
 feature drop = body_op.delete(bodies = [feature.halve.body.body(side = negative)])
 feature step = import(source = "supplier/housing.step", digest = d2)
 feature boss1 = library(def = "feature_def.boss", args = { h = 8 mm }, mode = add)
+```
+
+### Library features and parts
+
+A project's `library/` folder, beside the part, holds features and parts to reuse. Nothing is fetched from a network.
+
+- Each `feature_def` in a `library/*.part` file is a library feature, named `library/<file>.part#feature_def.<name>`. Its features are written on `origin.xy`. The instance's `plane` names the face or datum plane that `origin.xy` stands for, so the feature lands there. A cut written with `reverse = true` goes into the face.
+- A `library/*.part` file with no `feature_def` is a library part, named `library/<file>.part`. Inserting it adds its features to this part as a new body, at the origin. Its `input`s become the instance's `args`. A library part can't compute `let` values.
+
+`args` sets the inputs; the others keep their defaults. The instance's features are named `<instance>.<feature>` (`slot1.cut`). Editing the library file rebuilds every part that uses it.
+
+The **Library** command (Features tab) searches the library folder as you type, and takes the placement face and the input values.
+
+```part fragment
+feature slot1 = library(def = "library/fixtures.part#feature_def.slot", args = { width = 30 mm, depth = 4 mm }, plane = feature.block.face.end)
+feature pin1 = library(def = "library/pin.part", args = { d = 8 mm })
 ```
 
 ## Datums and curves
@@ -283,6 +301,24 @@ feature shrink = mold.shrink(bodies = [feature.body.body], x = 0.005, y = 0.005,
 feature draft_check = mold.parting_line(body = feature.body.body, pull = origin.z, min_draft = 1 deg)
 ```
 
+### Structural profiles
+
+A member's `profile` is a parametric family (`rect_tube`, `pipe`, `angle`, `channel`, `i_beam`, `flat_bar`, `round_bar`), a standard size, or a closed sketch region.
+
+| Profile | Writes | Sizes |
+|---|---|---|
+| A standard size | `standard(designation = "IPE 200")` | IPE 80–600, HEA 100–300 and HEB 100–300 from EN 10365:2017, with their root radii; pipe NPS ½–12 Schedule 40 from ASME B36.10M (`NPS 2 Sch 40`) |
+| A sketch region | `sketch_region(sketch = ell_40)` | every closed region of the sketch, holes subtracted; the sketch's origin sits on the member's path |
+
+The cut list weighs each member by its section's area. For an I-section, that area includes the four root fillets: IPE 200 is 2 × 100 × 8.5 + 183 × 5.6 + (4 − π) × 12² = 2848 mm², the 28.5 cm² the standard lists. For a sketch region, regeneration integrates the solved sketch.
+
+The **Profile library** command (Weldments tab) searches the standard sizes and the project's profiles as you type, and places members on the picked sketch lines. Its summary gives the section's area and second moments of area. With **Save sketch as profile**, it writes the picked sketch to `library/profiles/<name>.part` beside the part. Placing a project profile copies its sketch into the part under the profile's name, so later edits to the library file don't change members already placed.
+
+```part fragment
+feature beams = weldment.structural_member(groups = [{ sketch = layout, segments = [bottom, right], profile = standard(designation = "IPE 200"), material = s235 }])
+feature rails = weldment.structural_member(groups = [{ sketch = layout, segments = [top], profile = sketch_region(sketch = ell_40), material = al_6061 }])
+```
+
 ## Direct edits
 
 `direct.move_faces`, `direct.replace_faces`, `direct.delete_faces` and `direct.move_bodies` edit imported or finished geometry as features in the history. `keep` lists relations the edit must keep, such as two faces staying parallel; an edit that would break one is an error (`cad.direct.relation_broken`). In the Desktop, Move face's Keep field writes these relations.
@@ -296,6 +332,8 @@ feature draft_check = mold.parting_line(body = feature.body.body, pull = origin.
 | `rotate(axis, angle)` | The faces turn together about `axis` by `angle`. | Move face → Rotate about an axis |
 
 In every motion the neighboring faces extend or trim to meet the moved faces. Move face → Offset and Offset face write the same feature.
+
+**Instant 3D** (`direct.instant-3d`) drags a face in the view by its arrow, or takes a typed distance. When a feature dimension drives the face, Instant 3D changes the dimension: the end cap of a blind extrude (`feature.<f>.face.end`), or the extrude picked itself, changes the extrude's `distance` by the drag (twice the drag for a mid-plane extrude, which grows both ways). A literal depth is rewritten (`10 mm` dragged 3 mm becomes `13 mm`); a depth written as an expression gains `+ 3 mm`. A drag that would leave the depth at zero or less is refused. Any other face moves as a direct edit, `direct.move_faces(faces = [<face>], motion = offset(distance = <drag>))`, the same feature Pull writes.
 
 ```part fragment
 feature lift = direct.move_faces(faces = [feature.body.face.side(s1.l2)], motion = along(direction = { along = normal, plane = origin.xy }, distance = 16.59 mm))

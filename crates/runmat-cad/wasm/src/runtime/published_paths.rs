@@ -7,10 +7,8 @@ use runmat_cad::assembly::source::{PathChain, PublishedGeometry};
 use runmat_cad::ids::PublishName;
 use runmat_cad::refs::name::TopoKind;
 use runmat_cad::refs::resolve::EntityHandle;
+use runmat_cad::sketch_conversion::join;
 use std::collections::BTreeMap;
-
-/// Ends closer than this (metres) join.
-const JOIN: f64 = 1e-6;
 
 /// Every published edge set of `part` as a path.
 pub(super) fn published_paths(part: &RegeneratedPart) -> BTreeMap<PublishName, PublishedGeometry> {
@@ -62,43 +60,6 @@ pub(super) fn published_paths(part: &RegeneratedPart) -> BTreeMap<PublishName, P
         out.insert(name.clone(), PublishedGeometry::Path { chains });
     }
     out
-}
-
-fn near(a: [f64; 3], b: [f64; 3]) -> bool {
-    (0..3).map(|k| (a[k] - b[k]).powi(2)).sum::<f64>().sqrt() < JOIN
-}
-
-/// Polylines joined end to end, each turned as it needs to be.
-pub(super) fn join(mut pieces: Vec<Vec<[f64; 3]>>) -> Vec<Vec<[f64; 3]>> {
-    let mut chains = Vec::new();
-    while let Some(mut chain) = pieces.pop() {
-        loop {
-            let (head, tail) = (chain[0], chain[chain.len() - 1]);
-            let Some(at) = pieces.iter().position(|p| {
-                let (s, e) = (p[0], p[p.len() - 1]);
-                near(s, tail) || near(e, tail) || near(s, head) || near(e, head)
-            }) else {
-                break;
-            };
-            let mut p = pieces.remove(at);
-            let (s, e) = (p[0], p[p.len() - 1]);
-            if near(s, tail) {
-                chain.extend(p.drain(1..));
-            } else if near(e, tail) {
-                p.reverse();
-                chain.extend(p.drain(1..));
-            } else {
-                if near(s, head) {
-                    p.reverse();
-                }
-                p.pop();
-                p.extend(chain);
-                chain = p;
-            }
-        }
-        chains.push(chain);
-    }
-    chains
 }
 
 #[cfg(test)]

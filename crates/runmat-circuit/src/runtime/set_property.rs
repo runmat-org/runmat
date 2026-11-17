@@ -73,7 +73,7 @@ fn one_value(values: &serde_json::Map<String, Value>) -> Result<(&str, &Value), 
  * Values
  * --------------------------------------------------------------------------------------------- */
 
-fn text(value: &Value) -> Option<String> {
+pub(super) fn text(value: &Value) -> Option<String> {
     match value {
         Value::String(s) => Some(s.trim().to_owned()).filter(|s| !s.is_empty()),
         Value::Number(n) => Some(n.to_string()),
@@ -549,6 +549,7 @@ pub(super) fn circuit_change(
         own,
     )?;
     Ok(EditOutput {
+        report: None,
         summary,
         files: vec![file_change(
             &project.circuit_path,
@@ -560,6 +561,7 @@ pub(super) fn circuit_change(
 
 fn nothing(item: &str) -> EditOutput {
     EditOutput {
+        report: None,
         summary: format!("{item} already has that value"),
         files: Vec::new(),
     }
@@ -651,6 +653,7 @@ fn footprint_field(
     })
     .map_err(failure)?;
     Ok(EditOutput {
+        report: None,
         summary: format!("{} on {designator}", edit.command()),
         files: vec![file_change(&layout.path, &layout.text, change)],
     })
@@ -696,6 +699,7 @@ fn board_item_field(
     })
     .map_err(failure)?;
     Ok(EditOutput {
+        report: None,
         summary,
         files: if change.edits.is_empty() {
             Vec::new()

@@ -268,7 +268,7 @@ fn cube_by_face() -> GeometryScene {
     let whole = cube();
     let indices = whole.indices.clone().unwrap();
     let chunks = (0..6usize)
-        .map(|face| {
+        .flat_map(|face| {
             let mut chunk = GeometrySceneChunk::indexed_triangles(
                 format!("mesh_1:chunk_{face}"),
                 whole.vertices.clone(),
@@ -286,7 +286,6 @@ fn cube_by_face() -> GeometryScene {
             let edges = chunk.wireframe_edges([0.1, 0.1, 0.1, 1.0]);
             std::iter::once(chunk).chain(edges)
         })
-        .flatten()
         .collect::<Vec<_>>();
     // The edge chunks belong to the same body: a cap reads only its surface triangles.
     assert_eq!(chunks.len(), 12);

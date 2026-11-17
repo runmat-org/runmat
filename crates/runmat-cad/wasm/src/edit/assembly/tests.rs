@@ -139,7 +139,7 @@ pub(super) fn run(text: &str, request: Value) -> String {
 pub(super) fn top(f: &Frame) -> bool {
     f.kind == FrameKind::Plane && f.z[2] > 0.99
 }
-fn bottom(f: &Frame) -> bool {
+pub(super) fn bottom(f: &Frame) -> bool {
     f.kind == FrameKind::Plane && f.z[2] < -0.99
 }
 fn side(f: &Frame) -> bool {
@@ -149,7 +149,7 @@ fn round(f: &Frame) -> bool {
     f.kind == FrameKind::Axis
 }
 
-fn mate(text: &str, kind: &str, first: String, second: String, extra: Value) -> String {
+pub(super) fn mate(text: &str, kind: &str, first: String, second: String, extra: Value) -> String {
     let mut values = json!({ "type": kind, "first": [first], "second": [second] });
     for (k, v) in extra.as_object().unwrap() {
         values[k] = v.clone();

@@ -150,14 +150,32 @@ pub enum SelectKind {
     Curve,
     Region,
     Input,
+    /// An analysis representation of a part (`representation:<name>`).
+    Representation,
     // Assembly.
     Occurrence,
     Mate,
     Part,
     Hole,
     ExplodeStep,
+    /// A saved exploded view (`exploded:<name>`).
+    ExplodedView,
     /// A name the assembly publishes (`publish:<name>`).
     Publish,
+    /// A configuration of the file (`configuration:<name>`).
+    Configuration,
+    /// A display state of the assembly (`display_state:<name>`).
+    DisplayState,
+    /// A space the assembly reserves (`envelope:<name>`).
+    Envelope,
+    /// A contact region between two components' faces (`contact:<name>`).
+    Contact,
+    /// An option or effectivity axis of the assembly's options (`option:<name>`).
+    ProductOption,
+    /// A motion study of the assembly (`motion:<name>`).
+    MotionStudy,
+    /// A named mate position of the assembly (`position:<name>`).
+    MatePosition,
     // Drawing.
     Sheet,
     View,
@@ -209,12 +227,21 @@ impl SelectKind {
             Curve => "curve",
             Region => "region",
             Input => "input",
+            Representation => "representation",
             Occurrence => "component",
             Mate => "mate",
             Part => "part",
             Hole => "hole",
             ExplodeStep => "explode step",
+            ExplodedView => "exploded view",
             Publish => "published item",
+            Configuration => "configuration",
+            DisplayState => "display state",
+            Envelope => "envelope",
+            Contact => "contact region",
+            ProductOption => "option",
+            MotionStudy => "motion study",
+            MatePosition => "mate position",
             Sheet => "sheet",
             View => "view",
             Annotation => "annotation",
@@ -262,6 +289,11 @@ pub struct ChoiceOption {
 pub enum Suggest {
     /// The circuit's global nets (power and ground rails), with their pin counts.
     Rails,
+    /// Structural profiles: the standard sizes and the project's custom profiles
+    /// (`library/profiles/`).
+    Profiles,
+    /// Library features and parts in the project's `library/` folder.
+    Library,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]

@@ -21,6 +21,7 @@
 
 mod distance;
 mod items;
+mod span;
 #[cfg(test)]
 mod tests;
 
@@ -39,12 +40,42 @@ fn identity() -> Transform {
     Transform::translation([0.0; 3])
 }
 
+thread_local! {
+    /// The document readout (units, decimals, general tolerance) of the part or assembly being
+    /// measured, while [`measure`] runs: its
+    /// readouts use them ([`runmat_cad::assembly::settings`]). `None`: millimeters.
+    static UNITS: std::cell::Cell<Option<runmat_cad::assembly::settings::Readout>> =
+        const { std::cell::Cell::new(None) };
+}
+
+/// Sets [`UNITS`] for one measure, and clears them when dropped.
+struct ReadoutUnits;
+
+impl ReadoutUnits {
+    fn set(units: Option<runmat_cad::assembly::settings::Readout>) -> Self {
+        UNITS.with(|u| u.set(units));
+        ReadoutUnits
+    }
+}
+
+impl Drop for ReadoutUnits {
+    fn drop(&mut self) {
+        UNITS.with(|u| u.set(None));
+    }
+}
+
 fn mm(m: f64) -> String {
-    format!("{:.3} mm", m * 1000.0)
+    match UNITS.with(std::cell::Cell::get) {
+        Some(u) => u.length(m),
+        None => format!("{:.3} mm", m * 1000.0),
+    }
 }
 
 fn mm2(m2: f64) -> String {
-    format!("{:.3} mm²", m2 * 1e6)
+    match UNITS.with(std::cell::Cell::get) {
+        Some(u) => u.area(m2),
+        None => format!("{:.3} mm²", m2 * 1e6),
+    }
 }
 
 fn deg(r: f64) -> String {
@@ -165,7 +196,12 @@ fn row(quantity: &str, value: String) -> Row {
 }
 
 fn line(from: V3, to: V3, label: String) -> ModelDimension {
-    ModelDimension { from, to, label }
+    ModelDimension {
+        from,
+        to,
+        label,
+        extension_lines: Vec::new(),
+    }
 }
 
 /// The angle between two directions, as people read it: between lines or planes 0° to 90°,
@@ -195,15 +231,19 @@ fn point_of(d: &Direction) -> V3 {
     }
 }
 
-/// The normal distance of two parallel planes, with the foot of the first's point on the second.
-fn plane_gap(a: &Direction, b: &Direction) -> Option<(f64, V3, V3)> {
-    let (Direction::Plane(p, n), Direction::Plane(q, m)) = (*a, *b) else {
+/// The normal distance of two parallel planar items and its drawing: the dimension line along the
+/// normal between their planes, with extension lines to an item it stands off
+/// ([`span::normal_span`]).
+fn plane_gap(a: &Item, b: &Item) -> Option<(f64, span::Span)> {
+    let (Some(Direction::Plane(p, n)), Some(Direction::Plane(q, m))) = (a.direction, b.direction)
+    else {
         return None;
     };
-    (dot(n, m).abs() >= PARALLEL).then(|| {
-        let d = dot(sub(p, q), m);
-        (d.abs(), p, sub(p, scale(m, d)))
-    })
+    if dot(n, m).abs() < PARALLEL {
+        return None;
+    }
+    let d = dot(sub(p, q), m);
+    Some((d.abs(), span::normal_span(&a.prims, &b.prims, m)?))
 }
 
 /// The distance between two parallel axes (cylinders, circular edges), with the foot of the
@@ -291,29 +331,50 @@ fn pair(
     let n: Nearest =
         nearest(&a.prims, &b.prims).ok_or("a picked item has no geometry to measure")?;
     rows.push(row("Minimum distance", mm(n.distance)));
+    // The document's general tolerance on that distance (ISO 2768-1), when it names a class.
+    if let Some(t) = UNITS
+        .with(std::cell::Cell::get)
+        .and_then(|u| u.general_tolerance(n.distance))
+    {
+        rows.push(row("General tolerance", t));
+    }
     let d = sub(n.b, n.a);
     rows.push(row("ΔX", mm(d[0].abs())));
     rows.push(row("ΔY", mm(d[1].abs())));
     rows.push(row("ΔZ", mm(d[2].abs())));
     let mut summary = format!("Minimum distance {}", mm(n.distance));
-    let planes = match (&a.direction, &b.direction) {
-        (Some(x), Some(y)) => plane_gap(x, y).map(|g| ("Normal distance", g)),
-        _ => None,
-    };
+    let planes = plane_gap(a, b).map(|g| ("Normal distance", g));
     let axes = match (&a.circle, &b.circle) {
-        (Some(x), Some(y)) => axis_gap(x, y).map(|g| ("Axis distance", g)),
+        (Some(x), Some(y)) => axis_gap(x, y).map(|(g, from, to)| {
+            (
+                "Axis distance",
+                (
+                    g,
+                    span::Span {
+                        from,
+                        to,
+                        extension_lines: Vec::new(),
+                    },
+                ),
+            )
+        }),
         _ => None,
     };
     // Two parallel circles report both: how far apart their planes are and their axes.
-    if let (Some(_), Some((name, (g, ..)))) = (planes, axes) {
-        rows.push(row(name, mm(g)));
+    if let (Some(_), Some((name, (g, _)))) = (&planes, &axes) {
+        rows.push(row(name, mm(*g)));
     }
     let gap = planes.or(axes);
     match gap {
-        Some((name, (g, from, to))) => {
+        Some((name, (g, span))) => {
             rows.push(row(name, mm(g)));
             summary += &format!(" · {} {}", name.to_lowercase(), mm(g));
-            dims.push(line(from, to, mm(g)));
+            dims.push(ModelDimension {
+                from: span.from,
+                to: span.to,
+                label: mm(g),
+                extension_lines: span.extension_lines,
+            });
         }
         None => dims.push(line(n.a, n.b, mm(n.distance))),
     }
@@ -360,6 +421,7 @@ pub fn measure(
         .get("configuration")
         .and_then(Value::as_str)
         .filter(|c| !c.is_empty() && *c != "default");
+    let _units = ReadoutUnits::set(crate::analyze::document_readout(path, text, files));
     let picks = picks_of(values, "items");
     if picks.is_empty() {
         return Err(

@@ -1,0 +1,36 @@
+runmat 0.7
+std 1
+
+drawing bracket {
+    format a3 = {
+        size = { size = iso, name = A3 },
+        title_block = [
+            { label = "Title", source = { source = literal, text = "Angle bracket" } },
+            { label = "Material", source = { source = property, name = material } },
+            { label = "Scale", source = { source = scale } },
+            { label = "Sheet", source = { source = sheet_number } }
+        ]
+    }
+    sheet "1" = { format = a3, scale = [1, 1], projection = third_angle }
+
+    view front = standard(orientation = front, sheet = "1", model = { part = bracket }, at = [95, 185], display = hidden_lines)
+    view top = projected(from = front, direction = up, sheet = "1", model = { part = bracket }, at = [95, 100], display = hidden_lines)
+    view side = projected(from = front, direction = right, sheet = "1", model = { part = bracket }, at = [205, 185], display = hidden_lines)
+    view iso = standard(orientation = isometric, sheet = "1", model = { part = bracket }, at = [315, 100], display = visible_lines)
+
+    annotation width = dimension(style = linear, references = [feature.body.face.side(angle_profile.back), feature.body.face.side(angle_profile.toe)], view = front, at = [95, 145])
+    annotation height = dimension(style = linear, references = [feature.body.face.side(angle_profile.bottom), feature.body.face.side(angle_profile.top)], view = side, at = [245, 185])
+    annotation length = dimension(style = linear, references = [feature.body.face.start, feature.body.face.end], view = front, at = [55, 185])
+    annotation thickness = dimension(style = linear, references = [feature.body.face.side(angle_profile.bottom), feature.body.face.side(angle_profile.inner_bottom)], view = top, at = [145, 100])
+    annotation bottom_bores = hole_callout(hole = feature.bottom_holes.face.wall(a), view = front, at = [140, 205])
+    annotation back_bores = hole_callout(hole = feature.back_holes.face.wall(a), view = side, at = [260, 205])
+    annotation bottom_offset = dimension(style = linear, references = [feature.body.face.side(angle_profile.back), feature.bottom_holes.face.wall(a)], view = front, at = [95, 232])
+    annotation back_offset = dimension(style = linear, references = [feature.body.face.side(angle_profile.bottom), feature.back_holes.face.wall(a)], view = side, at = [205, 232])
+    annotation bottom_first = dimension(style = linear, references = [feature.body.face.start, feature.bottom_holes.face.wall(a)], view = front, at = [38, 170])
+    annotation bottom_pitch = dimension(style = linear, references = [feature.bottom_holes.face.wall(a), feature.bottom_holes.face.wall(b)], view = front, at = [72, 182])
+    annotation bottom_pitch_2 = dimension(style = linear, references = [feature.bottom_holes.face.wall(b), feature.bottom_holes.face.wall(c)], view = front, at = [72, 198])
+    annotation back_first = dimension(style = linear, references = [feature.body.face.start, feature.back_holes.face.wall(a)], view = side, at = [160, 170])
+    annotation back_pitch = dimension(style = linear, references = [feature.back_holes.face.wall(a), feature.back_holes.face.wall(b)], view = side, at = [180, 182])
+    annotation back_pitch_2 = dimension(style = linear, references = [feature.back_holes.face.wall(b), feature.back_holes.face.wall(c)], view = side, at = [180, 198])
+    annotation fillets = note(text = "R0.5 ALL EDGES, INCLUDING HOLE RIMS", view = iso, at = [275, 50])
+}

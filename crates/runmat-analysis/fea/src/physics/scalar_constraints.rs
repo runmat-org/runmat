@@ -353,7 +353,7 @@ pub(crate) fn solve(
         plan: shared_sparse::ambient_plan(),
         strategy,
         block_size: 1,
-        factor: None,
+        factor: crate::solve::CholeskyFactor::UNADMITTED,
         device: None,
     })?;
     if let Some(failure) = outcome.failure {

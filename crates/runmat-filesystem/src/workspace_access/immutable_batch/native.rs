@@ -612,6 +612,9 @@ mod tests {
     #[test]
     fn a_single_component_relative_root_persists_up_to_the_current_directory() {
         // `Path::new("src").parent()` is the empty path; the walk ends at ".".
+        // The relative paths resolve against the process cwd (the crate root under
+        // `cargo test`); tests that change the cwd hold this lock until they restore it.
+        let _cwd = crate::provider_override_lock();
         super::sync_exposing_directories(
             Path::new("src"),
             [Path::new("src/workspace_access"), Path::new("src")],
