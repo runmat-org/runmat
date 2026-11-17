@@ -24,6 +24,8 @@ use crate::core::fea::{analyze_fea_source, is_fea_uri, FeaDocumentAnalysis};
 use crate::core::workspace::workspace_symbols_with_project_async;
 
 mod source_workspace;
+#[cfg(target_arch = "wasm32")]
+mod study_geometry;
 use source_workspace::SourceWorkspace;
 #[cfg(test)]
 mod source_workspace_tests;
