@@ -55,6 +55,26 @@ pub struct AnalysisExecutionCandidate {
     /// ready, and the limit says by how much.
     #[serde(default)]
     pub resource_limit: Option<AnalysisResourceLimit>,
+    /// Operations this run is estimated to charge against the simulation allowance, by usage
+    /// category. A host refuses the run before it starts when the total exceeds the allowance
+    /// left; admission refuses it too. Absent when the study type or geometry has no estimate.
+    #[serde(default)]
+    pub estimated_operations: Option<AnalysisOperationEstimate>,
+}
+/// Operations a run is estimated to charge, by the usage ledger's categories, as decimal
+/// counts. `total` is the figure compared with the remaining allowance.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct AnalysisOperationEstimate {
+    pub meshing: runmat_simulation_usage::OperationCount,
+    pub assembly: runmat_simulation_usage::OperationCount,
+    pub factorization: runmat_simulation_usage::OperationCount,
+    pub solve: runmat_simulation_usage::OperationCount,
+    pub other: runmat_simulation_usage::OperationCount,
+    pub total: runmat_simulation_usage::OperationCount,
+    /// Conjugate-gradient iterations the solve figure covers; absent for a direct solve. A solve
+    /// that needs more iterations charges more than the estimate.
+    pub solve_iterations: Option<u32>,
 }
 /// A check-time refusal: the estimated requirement of one resource term against the maximum
 /// the target admits, with the action that resolves it.
@@ -80,4 +100,20 @@ pub struct AnalysisExecutionChoices {
     pub plan_id: String,
     pub revision: [u8; 32],
     pub candidates: Vec<AnalysisExecutionCandidate>,
+}
+impl AnalysisOperationEstimate {
+    /// The contract form of a plan's estimate; `None` when its total exceeds the count range.
+    pub fn from_estimate(
+        estimate: &runmat_analysis_fea::planning::operations::FeaOperationEstimate,
+    ) -> Option<Self> {
+        Some(Self {
+            meshing: estimate.meshing,
+            assembly: estimate.assembly,
+            factorization: estimate.factorization,
+            solve: estimate.solve,
+            other: estimate.other,
+            total: estimate.total().ok()?,
+            solve_iterations: estimate.solve_iterations,
+        })
+    }
 }

@@ -186,6 +186,16 @@ export interface FeaResourceLimit {
   nextAction: string;
 }
 
+export interface FeaOperationEstimate {
+  meshing: string;
+  assembly: string;
+  factorization: string;
+  solve: string;
+  other: string;
+  total: string;
+  solveIterations: number | null;
+}
+
 export interface FeaExecutionCandidate {
   mode: FeaExecutionMode;
   cores: number | null;
@@ -197,6 +207,7 @@ export interface FeaExecutionCandidate {
   estimatedElementCount: number | null;
   estimatedNodeCount: number | null;
   resourceLimit: FeaResourceLimit | null;
+  estimatedOperations: FeaOperationEstimate | null;
 }
 
 export interface FeaExecutionChoices {

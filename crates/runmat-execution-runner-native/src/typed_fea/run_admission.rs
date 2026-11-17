@@ -85,12 +85,16 @@ pub(super) fn admit_root(
     }
     let mut identity = source.check_result().revision.0.to_vec();
     identity.extend_from_slice(root_id.as_bytes());
+    let estimate = (options.root.is_none() && matches!(root, ResolvedFeaRoot::Study(_)))
+        .then(|| planned_operations(source, cases))
+        .flatten();
     let mut request = FeaRunRequest::local(
         FeaRunKind::MeshAndSolve,
         millicores,
         runmat_execution::Digest::sha256(identity),
     )
-    .map_err(|e| format!("{}: {e}", e.error_code()))?;
+    .map_err(|e| format!("{}: {e}", e.error_code()))?
+    .with_estimate(estimate);
     request.site = FeaRunScope::admission_site().map_err(|e| format!("{}: {e}", e.error_code()))?;
     let run_id = request.run_id.clone();
     let scope = FeaRunScope::admit(request).map_err(|e| format!("{}: {e}", e.error_code()))?;
@@ -106,6 +110,24 @@ pub(super) struct AdmittedRoot {
     pub scope: FeaRunScope,
     pub options: LocalFeaExecutionOptions,
     pub run_id: String,
+}
+
+/// The check-time operations estimate of the default study root, which admission compares with
+/// the allowance before any work. `None` when the study has no estimate.
+fn planned_operations(
+    source: &runmat_core::CheckedFeaSessionSource,
+    cases: usize,
+) -> Option<runmat_simulation_usage::OperationCount> {
+    let machine = crate::machine_capacity::memory_bytes().unwrap_or(u64::MAX);
+    source
+        .fea_execution_preflight()
+        .ok()?
+        .estimate?
+        .operations(machine)?
+        .repeated(u64::try_from(cases).ok()?)
+        .ok()?
+        .total()
+        .ok()
 }
 
 pub(super) fn outcome(result: &Result<LocalFeaExecution, String>) -> FeaRunOutcome {

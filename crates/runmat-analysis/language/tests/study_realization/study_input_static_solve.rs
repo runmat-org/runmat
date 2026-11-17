@@ -93,6 +93,7 @@ fn two_authored_force_inputs_compile_to_distinct_physical_static_solutions() {
             capabilities: vec![
                 GeometryInspectionCapability::Topology,
                 GeometryInspectionCapability::PersistentIds,
+                GeometryInspectionCapability::AuthoredNames,
             ],
             exchange: None,
             resolved_units: None,

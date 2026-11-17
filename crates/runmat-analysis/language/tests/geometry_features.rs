@@ -164,6 +164,7 @@ geometry bracket {
         capabilities: vec![
             GeometryInspectionCapability::Topology,
             GeometryInspectionCapability::PersistentIds,
+            GeometryInspectionCapability::AuthoredNames,
         ],
         exchange: None,
         resolved_units: Some(runmat_geometry_core::LengthUnit::Millimeter),
@@ -212,6 +213,7 @@ model loaded_bracket { assign material.steel to geometry.bracket.region.body }
         capabilities: vec![
             GeometryInspectionCapability::Topology,
             GeometryInspectionCapability::PersistentIds,
+            GeometryInspectionCapability::AuthoredNames,
         ],
         exchange: None,
         resolved_units: None,
@@ -276,6 +278,7 @@ fn a_name_carried_by_two_entities_fails_an_exactly_one_region_at_check() {
         capabilities: vec![
             GeometryInspectionCapability::Topology,
             GeometryInspectionCapability::PersistentIds,
+            GeometryInspectionCapability::AuthoredNames,
         ],
         exchange: None,
         resolved_units: None,
@@ -309,6 +312,97 @@ fn a_name_carried_by_two_entities_fails_an_exactly_one_region_at_check() {
     );
 }
 
+fn named_face_inspection(capabilities: Vec<GeometryInspectionCapability>) -> GeometryInspection {
+    GeometryInspection {
+        authored_names: std::collections::BTreeMap::from([(
+            "face".to_string(),
+            vec!["mount".to_string(), "top".to_string()],
+        )]),
+        preview_extent_m: None,
+        preview_measure: None,
+        shared_faces: Default::default(),
+        content_digest: SourceDigest([3; 32]),
+        topology_digest: SourceDigest([4; 32]),
+        capabilities,
+        exchange: None,
+        resolved_units: None,
+        unit_evidence: Default::default(),
+    }
+}
+
+fn check_puck_regions(inspection: GeometryInspection) -> CheckedFeaProgram {
+    let source = r#"geometry puck { file = "./puck.step"; units = m
+        region pressed : face { select name "mounting"; expect exactly_one }
+        region seat : face { select name "mount"; expect exactly_one }
+    }
+"#;
+    let host = TestHost::default().with_geometry_inspection("project/puck.step", inspection);
+    FeaCompiler::new(&host).check(CheckRequest {
+        modules: ModuleGraphRequest {
+            source_root: LogicalSourcePath::new("project").unwrap(),
+            root: source_module("project/main.fea", source, 1),
+        },
+    })
+}
+
+// Known authored names are checked on their own capability: persistent IDs are a separate fact.
+#[test]
+fn authored_names_are_checked_without_persistent_ids() {
+    let checked = check_puck_regions(named_face_inspection(vec![
+        GeometryInspectionCapability::AuthoredNames,
+    ]));
+    let errors = checked
+        .diagnostics
+        .iter()
+        .filter(|diagnostic| diagnostic.severity == FeaDiagnosticSeverity::Error)
+        .map(|diagnostic| diagnostic.message.as_str())
+        .collect::<Vec<_>>();
+    assert_eq!(
+        errors,
+        [
+            "region `pressed` selects face name \"mounting\", which `project/puck.step` does not carry; named faces: \"mount\", \"top\""
+        ],
+        "{:#?}",
+        checked.diagnostics
+    );
+    assert!(checked
+        .diagnostics
+        .iter()
+        .all(|diagnostic| diagnostic.location.is_some()));
+}
+
+// A host that cannot read a file's names says so at the geometry, for each `select name`
+// region; the check does not pass the name silently.
+#[test]
+fn select_name_without_readable_names_is_flagged_as_unconfirmed() {
+    let checked = check_puck_regions(named_face_inspection(vec![
+        GeometryInspectionCapability::Topology,
+        GeometryInspectionCapability::PersistentIds,
+    ]));
+    let unconfirmed = checked
+        .diagnostics
+        .iter()
+        .filter(|diagnostic| diagnostic.code == "fea.semantic.geometry_names_unconfirmed")
+        .collect::<Vec<_>>();
+    assert_eq!(unconfirmed.len(), 2, "{:#?}", checked.diagnostics);
+    assert!(unconfirmed.iter().all(|diagnostic| {
+        diagnostic.severity == FeaDiagnosticSeverity::Warning
+            && diagnostic.location.is_some()
+            && diagnostic
+                .message
+                .contains("cannot be confirmed without the exact geometry backend")
+            && diagnostic.message.contains("`project/puck.step`")
+    }));
+    assert!(
+        !checked
+            .diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.message.contains("does not carry")),
+        "{:#?}",
+        checked.diagnostics
+    );
+}
+
 #[test]
 fn authored_units_override_a_different_file_declaration_with_a_warning() {
     let source = r#"
@@ -324,6 +418,7 @@ geometry channel {
         capabilities: vec![
             GeometryInspectionCapability::Topology,
             GeometryInspectionCapability::PersistentIds,
+            GeometryInspectionCapability::AuthoredNames,
         ],
         exchange: None,
         preview_extent_m: None,
