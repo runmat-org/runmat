@@ -530,7 +530,8 @@ mod tests {
                 .any(|message| message.contains("selects face name \"mounting\"")
                     && message.contains("named faces: ")
                     && message.contains("\"mount\"")
-                    && message.contains("\"top\"")),
+                    && message.contains("\"top\"")
+                    && !message.contains("feature.")),
             "{messages:#?}"
         );
         let admitted = check("mount");
