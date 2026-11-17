@@ -100,8 +100,10 @@ pub enum DirectWorkspacePolicy {
     /// Performance-selected kernels may retain backend-managed packing storage.
     BackendManaged,
     /// Numeric work uses only the factor storage and the quoted explicit scratch.
-    /// Supported for simplicial Cholesky and LDLT; pivoting routes require their
-    /// own complete storage contract before they can accept this policy.
+    /// Supported for simplicial Cholesky, LDLT and LU. LU pivots, so its factor
+    /// size stays a nominal estimate and is never a finite numeric admission quote;
+    /// the policy still keeps it off kernels that retain unquoted packing storage.
+    /// Bunch-Kaufman and QR require their own storage contract first.
     CallerOwned,
 }
 
@@ -289,10 +291,13 @@ impl SymbolicFactorization {
         control: SolveControl<'_>,
     ) -> SolverResult<Arc<Self>> {
         if options.workspace == DirectWorkspacePolicy::CallerOwned
-            && !matches!(options.kind, FactorKind::Cholesky | FactorKind::Ldlt)
+            && !matches!(
+                options.kind,
+                FactorKind::Cholesky | FactorKind::Ldlt | FactorKind::Lu
+            )
         {
             return Err(SolverError::Unsupported(
-                "caller-owned numeric workspace requires nonpivoting Cholesky or LDLT".into(),
+                "caller-owned numeric workspace requires simplicial Cholesky, LDLT or LU".into(),
             ));
         }
         if matrix.nrows() != matrix.ncols() {
