@@ -490,15 +490,15 @@ impl FeaRunScope {
         permit: Box<dyn FeaRunPermit>,
     ) -> Result<Self, FeaRunDenied> {
         request.validate()?;
+        let permit = super::estimate_admission::refuse_unaffordable(&request, permit)?;
         let budget = permit.budget();
-        let scope = Self::start(
+        Self::start(
             request,
             LeaseAuthority::Metered(budget),
             Some(permit),
             0,
             true,
-        )?;
-        Ok(scope)
+        )
     }
     /// Trusted owned-worker boundary only. The caller validates the exact original
     /// lease, request, payload and elapsed root clock before delegating this budget.

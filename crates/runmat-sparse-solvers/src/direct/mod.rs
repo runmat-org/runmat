@@ -490,6 +490,7 @@ impl<T: FactorScalar> DirectSolver<T> {
             residual: 0.0,
             converged: 0,
         });
+        let factorizing = crate::trace::factorization_span(symbolic.kind, symbolic.dimension());
         let (numeric, regularized) = reference_work::with_direct_usage(
             &symbolic,
             reference_work::DirectPhase::Factorization,
@@ -500,6 +501,7 @@ impl<T: FactorScalar> DirectSolver<T> {
                 }
             },
         )?;
+        drop(factorizing);
         control.report(factorization_complete());
         control.check()?;
         Ok(Self {
@@ -525,11 +527,13 @@ impl<T: FactorScalar> DirectSolver<T> {
             converged: 0,
         });
         let symbolic = Arc::clone(&self.symbolic);
+        let factorizing = crate::trace::factorization_span(symbolic.kind, symbolic.dimension());
         reference_work::with_direct_usage(
             &symbolic,
             reference_work::DirectPhase::Factorization,
             || self.refactorize_numeric(matrix),
         )?;
+        drop(factorizing);
         control.report(factorization_complete());
         Ok(())
     }

@@ -10,6 +10,10 @@ pub use entrypoints::merge_lease_error;
 mod lifecycle;
 mod host;
 mod provider;
+mod estimate_admission;
+mod readable_count;
+#[cfg(test)]
+mod estimate_tests;
 mod scope;
 mod types;
 

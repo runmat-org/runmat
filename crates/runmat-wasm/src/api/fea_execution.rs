@@ -305,12 +305,30 @@ impl RunMatWasm {
         })
         .await
     }
+    /// Runs a checked study as one `fea.study` trace span with a step span per phase (see
+    /// `runmat_analysis_fea::progress::trace`).
     pub(super) async fn run_fea_source_in_scope(
         &self,
         path: String,
         plan_id: String,
         filesystem: &CapturedFilesystem,
     ) -> Result<JsValue, JsValue> {
+        use tracing::Instrument;
+        let study = runmat_analysis_fea::progress::trace::study_span(&path);
+        self.run_fea_source_in_study_span(path, plan_id, filesystem, &study)
+            .instrument(study.clone())
+            .await
+    }
+
+    async fn run_fea_source_in_study_span(
+        &self,
+        path: String,
+        plan_id: String,
+        filesystem: &CapturedFilesystem,
+        study_span: &tracing::Span,
+    ) -> Result<JsValue, JsValue> {
+        use runmat_analysis_fea::progress::trace::{self, StudyStep};
+        use tracing::Instrument;
         let mut session = self.take_session()?;
         let cancellation = runmat_execution::cancellation::CancellationSource::new();
         let _interrupt =
@@ -332,6 +350,7 @@ impl RunMatWasm {
                 ..Default::default()
             },
         );
+        let check_step = StudyStep::Check.span();
         let fresh = super::session::await_wasm_preparation(&cancellation, async {
             filesystem
                 .read
@@ -340,7 +359,16 @@ impl RunMatWasm {
                 .map_err(|error| js_error(&error.to_string()))?
                 .map_err(|e| js_error(&e))
         })
+        .instrument(check_step.clone())
         .await?;
+        let errors = fresh
+            .diagnostics()
+            .filter(|diagnostic| {
+                diagnostic.severity == runmat_analysis_language::FeaDiagnosticSeverity::Error
+            })
+            .count();
+        trace::finish(&check_step, &trace::check_result(errors));
+        drop(check_step);
         ensure_not_cancelled(&cancellation)?;
         let checked = fresh.check_result();
         {
@@ -362,12 +390,22 @@ impl RunMatWasm {
             .take()
             .ok_or_else(|| js_error("The selected execution options are no longer available."))?;
         // Await the installed host before the first mesh/solve effect.
+        // The check-time operations estimate travels with the lease request: the host records
+        // it, and admission refuses before any work when it exceeds the allowance left.
+        let estimate = fresh
+            .fea_execution_preflight()
+            .ok()
+            .and_then(|preflight| preflight.estimate)
+            .and_then(|estimate| estimate.operations(instance_budget_bytes()))
+            .and_then(|operations| operations.total().ok());
         let request = FeaRunRequest::local(
             FeaRunKind::MeshAndSolve,
             1000,
             checked_study_identity(&fresh)?,
         )
-        .map_err(super::fea_lease::denied_to_js)?;
+        .map_err(super::fea_lease::denied_to_js)?
+        .with_estimate(estimate);
+        trace::record_run_id(study_span, &request.run_id);
         let context = super::fea_async_host::start(
             self.fea_admission.clone(),
             self.active_fea_lease.clone(),
@@ -402,12 +440,21 @@ impl RunMatWasm {
             admit(runmat_core::admit_browser_solve(&study.resource_plan, request_bytes, budget))?;
             let request =
                 serde_json::to_string(&study).map_err(|e| js_error(&e.to_string()))?;
-            let response = execute_prepared(
-                &request,
-                budget as f64,
-                context.worker_context(&request, super::fea_run_context::WorkerWorkClass::Numerical).await?,
-            )
+            // The owned numerical worker solves; its own trace holds the solver detail.
+            let solve_step = StudyStep::Solve.span();
+            let steps = study.compiled.model.sequence.steps.len();
+            let response = async {
+                execute_prepared(
+                    &request,
+                    budget as f64,
+                    context.worker_context(&request, super::fea_run_context::WorkerWorkClass::Numerical).await?,
+                )
+                .await
+            }
+            .instrument(solve_step.clone())
             .await?;
+            trace::finish(&solve_step, &trace::steps_result(steps));
+            drop(solve_step);
             drop(request);
             context.retire_finished().await?;
             // The result is JSON text: one UTF-16 unit per byte outside non-ASCII names.
@@ -427,14 +474,18 @@ impl RunMatWasm {
             ensure_not_cancelled(&cancellation)?;
             let numerical: runmat_runtime::analysis::StructuralStudySequenceNumericalResult =
                 serde_json::from_str(&json).map_err(|e| js_error(&e.to_string()))?;
-            let result = runmat_runtime::analysis::StructuralStudyResult::new(
+            let recover_step = StudyStep::Recover.span();
+            let outputs = study.compiled.outputs.len();
+            let result = recover_step.in_scope(|| runmat_runtime::analysis::StructuralStudyResult::new(
                 study.compiled,
                 study.mesh,
                 study.evidence,
                 study.workloads,
                 runmat_runtime::analysis::StructuralStudyNumericalResult::LinearSequence(numerical),
-            )
+            ))
             .map_err(|e| js_error(&e))?;
+            trace::finish(&recover_step, &trace::outputs_result(outputs));
+            drop(recover_step);
             // Frozen source inputs have finished their job. Result I/O uses the
             // original provider and its canonical workspace transaction authority.
             Ok::<_, JsValue>(result)
