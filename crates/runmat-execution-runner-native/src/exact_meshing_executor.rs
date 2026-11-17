@@ -158,7 +158,7 @@ impl NativeExactMeshingExecutor<'_> {
             event_code = "meshing.stage.started",
             "meshing stage started"
         );
-        let partition = crate::local_progress::PartitionFaces::of(stage.host());
+        let partition = crate::local_progress::partition_faces(stage.host());
         loop {
             self.record_progress(task.drain_progress(), workload.stage, partition);
             if let Some(completion) = task.try_completion() {
@@ -192,7 +192,7 @@ impl NativeExactMeshingExecutor<'_> {
         let host = stage.host();
         self.tracker.stage_started(
             host.workload.stage,
-            crate::local_progress::PartitionFaces::of(host),
+            crate::local_progress::partition_faces(host),
         );
     }
 
@@ -200,7 +200,7 @@ impl NativeExactMeshingExecutor<'_> {
         let host = stage.host();
         self.tracker.stage_completed(
             host.workload.stage,
-            crate::local_progress::PartitionFaces::of(host),
+            crate::local_progress::partition_faces(host),
         );
     }
 
@@ -208,7 +208,7 @@ impl NativeExactMeshingExecutor<'_> {
         &mut self,
         records: Vec<ProgramProgress>,
         stage: runmat_meshing_core::MeshingStageKind,
-        partition: crate::local_progress::PartitionFaces,
+        partition: runmat_analysis_fea::progress::meshing::MeshingPartitionFaces,
     ) {
         self.tracker.record(stage, partition, &records);
         for record in &records {

@@ -14,6 +14,12 @@ export const FEA_DIAGNOSTICS_ARTIFACT_KIND = "finite_element_diagnostics" as con
 export const FEA_ARTIFACT_MANIFEST_KIND = "finite_element_artifact_manifest" as const;
 export const FEA_FIELD_DEFAULT_PAGE_SIZE = 4096 as const;
 export const FEA_FIELD_DEFAULT_MATERIALIZE_LIMIT = 256 as const;
+export const FEA_PROGRESS_MINIMUM_EVENT_INTERVAL_MS = 100 as const;
+export const FEA_PROGRESS_HEARTBEAT_INTERVAL_MS = 2000 as const;
+export const FEA_PROGRESS_HEARTBEAT_POLL_INTERVAL_MS = 250 as const;
+export const FEA_PROGRESS_UNIT_METADATA = "unit" as const;
+export const FEA_PROGRESS_HEARTBEAT_METADATA = "heartbeat" as const;
+export const FEA_PROGRESS_ELAPSED_METADATA = "elapsedMs" as const;
 
 export type FeaExecutionMode = "single_core" | "multi_core";
 
