@@ -43,16 +43,19 @@ pub(super) fn map_volume_error(error: DelaunayVolumeMeshError) -> Box<MeshingFai
 }
 
 /// Maps a construction failure; a memory refusal reports the stage's whole requirement against
-/// the run's memory ceiling.
+/// the run's memory ceiling: everything its charges held when the ceiling refused one of them,
+/// plus that charge's increase.
 pub(super) fn map_construction_error(
     error: DelaunayVolumeMeshError,
     held_before_construction: u64,
-    maximum_bytes: u64,
+    control: &crate::MeshingGeometryEvaluationControl<'_>,
 ) -> Box<MeshingFailure> {
     match error.kind {
         DelaunayVolumeMeshErrorKind::MemoryBudgetExceeded { required_bytes } => memory_refusal(
-            held_before_construction.saturating_add(required_bytes),
-            maximum_bytes,
+            control
+                .refused_allocation_bytes()
+                .max(held_before_construction.saturating_add(required_bytes)),
+            control.maximum_allocation_bytes(),
             &error.to_string(),
         ),
         _ => map_volume_error(error),
