@@ -1,28 +1,15 @@
-//! Diagnostics for prescribed and reduced coupling branches; solved-state assembly bypasses these.
+//! Coupling summaries recorded by structural assembly. The thermomechanical summary names the
+//! prescribed temperature profile the assembly applied; solved-state assembly reads
+//! the solved thermal field instead and records none.
 
 use runmat_analysis_core::SourceImplementation;
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ThermoMechanicalAssemblySummary {
-    pub enabled: bool,
-    #[serde(with = "runmat_types::physical::canonical_scalar")]
-    pub reference_temperature_k: runmat_types::physical::Temperature,
-    #[serde(with = "runmat_types::physical::canonical_scalar")]
-    pub applied_temperature_delta_k: runmat_types::physical::TemperatureDifference,
-    #[serde(with = "runmat_types::physical::canonical_scalar")]
-    pub thermal_expansion_coefficient: runmat_types::physical::ThermalExpansion,
-    pub thermal_strain_scale: f64,
-    pub thermal_load_scale: f64,
-    pub constitutive_temperature_factor: f64,
-    pub constitutive_poisson_coupling: f64,
-    pub effective_modulus_scale: f64,
-    pub constitutive_material_spread_ratio: f64,
-    pub assignment_heterogeneity_index: f64,
-    pub spatial_gradient_index: f64,
-    pub spatial_coverage_ratio: f64,
+    /// Number of authored region temperature deltas applied to the thermoelastic load.
     pub region_delta_count: usize,
-    pub coupling_fingerprint: u64,
+    /// Sources of the prescribed temperature profile the thermoelastic load used.
     pub profile_sources: Vec<SourceImplementation>,
 }
 

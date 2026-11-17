@@ -543,16 +543,3 @@ pub fn fea_thermo_mechanical_von_mises_field_id(step_index: usize) -> String {
 pub fn fea_thermo_mechanical_coupling_residual_field_id(step_index: usize) -> String {
     format!("thermo_mechanical.coupling_residual.{step_index}")
 }
-
-pub const FEA_FIELD_ELECTRO_THERMAL_ELECTRIC_POTENTIAL: &str = "electro_thermal.electric_potential";
-pub const FEA_FIELD_ELECTRO_THERMAL_ELECTRIC_FIELD: &str = "electro_thermal.electric_field";
-pub const FEA_FIELD_ELECTRO_THERMAL_CURRENT_DENSITY: &str = "electro_thermal.current_density";
-pub const FEA_FIELD_ELECTRO_THERMAL_JOULE_HEAT: &str = "electro_thermal.joule_heat";
-
-pub fn fea_electro_thermal_temperature_field_id(step_index: usize) -> String {
-    format!("electro_thermal.temperature.{step_index}")
-}
-
-pub fn fea_electro_thermal_thermal_residual_field_id(step_index: usize) -> String {
-    format!("electro_thermal.thermal_residual.{step_index}")
-}

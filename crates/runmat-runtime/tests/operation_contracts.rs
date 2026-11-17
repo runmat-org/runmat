@@ -2073,10 +2073,6 @@ fn analysis_trends_contract_is_v1_and_typed() {
         // Missing timing stays absent rather than becoming a fabricated zero sample.
         assert_eq!(nonlinear.median_solve_ms, None);
         assert_eq!(nonlinear.p95_solve_ms, None);
-        assert!(nonlinear.thermo_coupling_enabled_rate.is_none());
-        assert!(nonlinear.thermo_nonlinear_warn_rate.is_none());
-        assert!(nonlinear.thermo_spread_breach_rate.is_none());
-        assert!(nonlinear.thermo_heterogeneity_breach_rate.is_none());
     }
 }
 
@@ -2525,25 +2521,6 @@ fn analysis_results_by_run_id_contract_roundtrip() {
         assert_eq!(results.data.summary.time_end_s, None);
         assert_eq!(results.data.summary.max_transient_residual_norm, None);
         assert_eq!(results.data.summary.final_step_converged, None);
-        assert_eq!(results.data.summary.thermo_coupling_enabled, None);
-        assert_eq!(results.data.summary.thermo_coupling_fingerprint, None);
-        assert_eq!(
-            results.data.summary.thermo_constitutive_temperature_factor,
-            None
-        );
-        assert_eq!(results.data.summary.thermo_effective_modulus_scale, None);
-        assert_eq!(
-            results
-                .data
-                .summary
-                .thermo_constitutive_material_spread_ratio,
-            None
-        );
-        assert_eq!(
-            results.data.summary.thermo_assignment_heterogeneity_index,
-            None
-        );
-        assert_eq!(results.data.summary.thermo_nonlinear_severity, None);
     }
 }
 

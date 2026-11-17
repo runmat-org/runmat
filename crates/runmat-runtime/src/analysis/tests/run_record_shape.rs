@@ -13,8 +13,8 @@ use crate::analysis::storage::record_format::shape::{
 
 /// (ARTIFACT_SCHEMA_VERSION, shape digest of the stored run record).
 const PINNED_RUN_RECORD: (&str, &str) = (
-    "analysis_run_artifact/2026-11-001",
-    "sha256:c838738fc4c98a1cba8813e523a0a9525195fa3d7194692b454abed192d7679c",
+    "analysis_run_artifact/2026-11-002",
+    "sha256:1a3b48278be8364451993fff83e7442288d43a9bc6a1ec9ff99761d22c19c00f",
 );
 
 /// (frequency record versions, shape digest of the study step record they embed).

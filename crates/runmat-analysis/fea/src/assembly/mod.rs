@@ -1191,7 +1191,7 @@ where
         let effective_modulus_scale =
             (modulus_temperature_scale * thermal_stiffening_scale).clamp(0.75, 1.2);
         let mut dof_adjustments = vec![0.0_f64; dof_count];
-        let assignment_heterogeneity_index = apply_thermo_material_heterogeneity(
+        apply_thermo_material_heterogeneity(
             model,
             dof_count,
             constitutive_temperature_factor,
@@ -1199,7 +1199,7 @@ where
             context.applied_temperature_delta_k.canonical_value(),
             &mut dof_adjustments,
         );
-        let spatial_field = apply_thermo_spatial_field(context, dof_count, &mut dof_adjustments);
+        apply_thermo_spatial_field(context, dof_count, &mut dof_adjustments);
         let mut local_modulus_scales = vec![effective_modulus_scale; dof_count];
         for i in 0..mesh_dof_count {
             let thermal_bias = 1.0 + thermal_strain_scale * (1.0 + (i % 3) as f64 * 0.1);
@@ -1225,50 +1225,8 @@ where
                 physical_load[index] += value;
             }
         }
-        let min_modulus_scale = local_modulus_scales
-            .iter()
-            .copied()
-            .fold(f64::INFINITY, f64::min);
-        let max_modulus_scale = local_modulus_scales.iter().copied().fold(0.0_f64, f64::max);
-        let constitutive_material_spread_ratio =
-            if min_modulus_scale.is_finite() && min_modulus_scale > 0.0 {
-                max_modulus_scale / min_modulus_scale
-            } else {
-                1.0
-            };
         thermo_mechanical = Some(ThermoMechanicalAssemblySummary {
-            enabled: true,
-            reference_temperature_k: runmat_types::physical::Temperature::new(
-                context.reference_temperature_k.canonical_value(),
-            ),
-            applied_temperature_delta_k: runmat_types::physical::TemperatureDifference::new(
-                context.applied_temperature_delta_k.canonical_value(),
-            ),
-            thermal_expansion_coefficient: runmat_types::physical::ThermalExpansion::new(
-                context.thermal_expansion_coefficient.canonical_value(),
-            ),
-            thermal_strain_scale,
-            thermal_load_scale,
-            constitutive_temperature_factor,
-            constitutive_poisson_coupling,
-            effective_modulus_scale,
-            constitutive_material_spread_ratio,
-            assignment_heterogeneity_index,
-            spatial_gradient_index: spatial_field.gradient_index,
-            spatial_coverage_ratio: spatial_field.coverage_ratio,
             region_delta_count: context.region_temperature_deltas.len(),
-            coupling_fingerprint: thermo_mechanical_fingerprint(
-                context,
-                ThermoMechanicalFingerprintInputs {
-                    dof_count,
-                    constitutive_temperature_factor,
-                    constitutive_poisson_coupling,
-                    effective_modulus_scale,
-                    constitutive_material_spread_ratio,
-                    assignment_heterogeneity_index,
-                    spatial_gradient_index: spatial_field.gradient_index,
-                },
-            ),
             profile_sources: thermomechanical_profile_sources(context),
         });
     }
@@ -1918,69 +1876,15 @@ pub(crate) fn resolve_solid_constraint_matrix(
     Ok(matrix)
 }
 
-#[derive(Debug, Clone, Copy)]
-struct ThermoMechanicalFingerprintInputs {
-    dof_count: usize,
-    constitutive_temperature_factor: f64,
-    constitutive_poisson_coupling: f64,
-    effective_modulus_scale: f64,
-    constitutive_material_spread_ratio: f64,
-    assignment_heterogeneity_index: f64,
-    spatial_gradient_index: f64,
-}
-
-fn thermo_mechanical_fingerprint(
-    context: &FeaThermoMechanicalContext,
-    inputs: ThermoMechanicalFingerprintInputs,
-) -> u64 {
-    let mut hash = 1469598103934665603_u64;
-    for value in [
-        inputs.dof_count as u64,
-        context.reference_temperature_k.canonical_value().to_bits(),
-        context
-            .applied_temperature_delta_k
-            .canonical_value()
-            .to_bits(),
-        context
-            .thermal_expansion_coefficient
-            .canonical_value()
-            .to_bits(),
-        inputs.constitutive_temperature_factor.to_bits(),
-        inputs.constitutive_poisson_coupling.to_bits(),
-        inputs.effective_modulus_scale.to_bits(),
-        inputs.constitutive_material_spread_ratio.to_bits(),
-        inputs.assignment_heterogeneity_index.to_bits(),
-        inputs.spatial_gradient_index.to_bits(),
-    ] {
-        hash ^= value;
-        hash = hash.wrapping_mul(1099511628211_u64);
-    }
-    hash
-}
-
-#[derive(Debug, Clone, Copy, PartialEq)]
-struct ThermoSpatialFieldSummary {
-    gradient_index: f64,
-    coverage_ratio: f64,
-}
-
 fn apply_thermo_spatial_field(
     context: &FeaThermoMechanicalContext,
     dof_count: usize,
     dof_adjustments: &mut [f64],
-) -> ThermoSpatialFieldSummary {
+) {
     if dof_count == 0 || context.region_temperature_deltas.is_empty() {
-        return ThermoSpatialFieldSummary {
-            gradient_index: 0.0,
-            coverage_ratio: 0.0,
-        };
+        return;
     }
-    let mut touched = vec![false; dof_count];
-    let mut min_delta = f64::INFINITY;
-    let mut max_delta = -f64::INFINITY;
     for (idx, region_delta) in context.region_temperature_deltas.iter().enumerate() {
-        min_delta = min_delta.min(region_delta.temperature_delta_k);
-        max_delta = max_delta.max(region_delta.temperature_delta_k);
         let normalized = ((region_delta.temperature_delta_k
             - context.applied_temperature_delta_k.canonical_value())
             / 240.0)
@@ -1999,20 +1903,8 @@ fn apply_thermo_spatial_field(
             }
             let wave = 1.0 + ((hop + idx) % 7) as f64 * 0.02;
             dof_adjustments[cursor] += normalized * wave;
-            touched[cursor] = true;
             cursor = (cursor + stride) % dof_count;
         }
-    }
-    if !min_delta.is_finite() || !max_delta.is_finite() {
-        return ThermoSpatialFieldSummary {
-            gradient_index: 0.0,
-            coverage_ratio: 0.0,
-        };
-    }
-    let touched_count = touched.iter().filter(|entry| **entry).count() as f64;
-    ThermoSpatialFieldSummary {
-        gradient_index: ((max_delta - min_delta).abs() / 240.0).clamp(0.0, 1.0),
-        coverage_ratio: (touched_count / dof_count as f64).clamp(0.0, 1.0),
     }
 }
 

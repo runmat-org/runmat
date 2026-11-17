@@ -105,12 +105,6 @@ pub enum QualityReasonCode {
     TransientResidualExceeded,
     TransientStabilityExceeded,
     TransientStepFailure,
-    ThermoMechanicalConstitutiveSpreadHigh,
-    ThermoMechanicalAssignmentHeterogeneityHigh,
-    ThermoMechanicalGradientInstability,
-    ThermoMechanicalFieldCoverageLow,
-    ElectroThermalTransientStress,
-    ElectroThermalNonlinearStress,
     ElectromagneticSolveQualityLow,
     ElectromagneticConductivitySpreadHigh,
     ElectromagneticMaterialHeterogeneityHigh,
@@ -139,7 +133,6 @@ pub enum QualityReasonCode {
     ContactNonlinearStress,
     NonlinearResidualExceeded,
     NonlinearIncrementFailure,
-    ThermoMechanicalNonlinearStress,
     ThermalResidualExceeded,
     ThermalConstitutiveSpreadHigh,
     AccuracyEvidenceIndeterminate,
@@ -1317,7 +1310,6 @@ fn infer_field_topology_id(
         return Some("analysis_mesh");
     }
     if normalized.starts_with("thermal.")
-        || normalized.starts_with("electro_thermal.")
         || normalized.starts_with("em.")
         || normalized.starts_with("acoustic.")
         || normalized.starts_with("cfd.")
@@ -1396,21 +1388,6 @@ pub struct AnalysisResultsSummary {
     pub nonlinear_iteration_spike_count: Option<usize>,
     pub nonlinear_convergence_stall_count: Option<usize>,
     pub nonlinear_backtrack_burst_count: Option<usize>,
-    pub thermo_coupling_enabled: Option<bool>,
-    pub thermo_coupling_fingerprint: Option<u64>,
-    pub thermo_constitutive_temperature_factor: Option<f64>,
-    pub thermo_effective_modulus_scale: Option<f64>,
-    pub thermo_constitutive_material_spread_ratio: Option<f64>,
-    pub thermo_assignment_heterogeneity_index: Option<f64>,
-    pub thermo_region_delta_count: Option<f64>,
-    pub thermo_spatial_coverage_ratio: Option<f64>,
-    pub thermo_nonlinear_severity: Option<f64>,
-    pub electro_thermal_coupling_enabled: Option<bool>,
-    pub electro_thermal_coupling_fingerprint: Option<u64>,
-    pub electro_joule_heating_scale: Option<f64>,
-    pub electro_conductivity_spread_ratio: Option<f64>,
-    pub electro_transient_severity: Option<f64>,
-    pub electro_nonlinear_severity: Option<f64>,
     pub plastic_nonlinear_severity: Option<f64>,
     pub plastic_nonlinear_severity_mean: Option<f64>,
     pub plastic_load_realization_ratio: Option<f64>,
@@ -2027,13 +2004,6 @@ pub struct AnalysisTrendKindSummary {
     pub failed_increment_rate: Option<f64>,
     pub mean_spike_count: Option<f64>,
     pub mean_stall_count: Option<f64>,
-    pub thermo_coupling_enabled_rate: Option<f64>,
-    pub thermo_nonlinear_warn_rate: Option<f64>,
-    pub thermo_spread_breach_rate: Option<f64>,
-    pub thermo_heterogeneity_breach_rate: Option<f64>,
-    pub electro_thermal_coupling_enabled_rate: Option<f64>,
-    pub electro_transient_warn_rate: Option<f64>,
-    pub electro_nonlinear_warn_rate: Option<f64>,
     pub plastic_nonlinear_warn_rate: Option<f64>,
     pub contact_nonlinear_warn_rate: Option<f64>,
     pub thermal_stability_warn_rate: Option<f64>,
@@ -2168,10 +2138,6 @@ pub struct TransientResultsData {
     pub energy_balance_residual_snapshots: Vec<AnalysisField>,
     pub relative_energy_balance_error_snapshots: Vec<AnalysisField>,
     pub dynamic_balance_snapshots: Vec<runmat_analysis_fea::StructuralDynamicBalanceSnapshot>,
-    #[serde(default)]
-    pub electro_thermal_temperature_snapshots: Vec<AnalysisField>,
-    #[serde(default)]
-    pub electro_thermal_thermal_residual_snapshots: Vec<AnalysisField>,
     pub residual_norms: Vec<f64>,
     pub integration_method: TransientIntegrationMethod,
 }
@@ -2235,14 +2201,6 @@ impl TransientResultsData {
             ),
             ("von Mises", self.von_mises_snapshots.len()),
             ("reaction moment", self.reaction_moment_snapshots.len()),
-            (
-                "electro-thermal temperature",
-                self.electro_thermal_temperature_snapshots.len(),
-            ),
-            (
-                "electro-thermal residual",
-                self.electro_thermal_thermal_residual_snapshots.len(),
-            ),
         ];
         if let Some((name, actual)) = optional
             .into_iter()
@@ -2285,22 +2243,6 @@ pub struct NonlinearResultsData {
     pub load_factor_snapshots: Vec<AnalysisField>,
     #[serde(default)]
     pub residual_norm_snapshots: Vec<AnalysisField>,
-    #[serde(default)]
-    pub thermo_mechanical_temperature_snapshots: Vec<AnalysisField>,
-    #[serde(default)]
-    pub thermo_mechanical_thermal_strain_snapshots: Vec<AnalysisField>,
-    #[serde(default)]
-    pub thermo_mechanical_thermal_stress_snapshots: Vec<AnalysisField>,
-    #[serde(default)]
-    pub thermo_mechanical_displacement_snapshots: Vec<AnalysisField>,
-    #[serde(default)]
-    pub thermo_mechanical_von_mises_snapshots: Vec<AnalysisField>,
-    #[serde(default)]
-    pub thermo_mechanical_coupling_residual_snapshots: Vec<AnalysisField>,
-    #[serde(default)]
-    pub electro_thermal_temperature_snapshots: Vec<AnalysisField>,
-    #[serde(default)]
-    pub electro_thermal_thermal_residual_snapshots: Vec<AnalysisField>,
     pub residual_norms: Vec<f64>,
     #[serde(default)]
     pub increment_norms: Vec<f64>,

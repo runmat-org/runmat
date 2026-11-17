@@ -447,8 +447,6 @@ fn create_persisted_results_object(
             "nonlinear_iteration_spike_count",
             "nonlinear_convergence_stall_count",
             "nonlinear_backtrack_burst_count",
-            "thermo_coupling_fingerprint",
-            "electro_thermal_coupling_fingerprint",
             "iteration_counts",
             "failed_increments",
             "line_search_backtracks",

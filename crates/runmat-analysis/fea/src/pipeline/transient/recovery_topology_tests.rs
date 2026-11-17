@@ -240,5 +240,4 @@ fn recovery_consumes_reporting_assemblies_in_accepted_order() {
     assert_eq!(recovered.acceleration_snapshots.len(), 3);
     assert_eq!(recovered.reaction_force_snapshots.len(), 3);
     assert_eq!(recovered.connector_results.len(), 3);
-    assert_eq!(recovered.electro_thermal_summaries.len(), 3);
 }
