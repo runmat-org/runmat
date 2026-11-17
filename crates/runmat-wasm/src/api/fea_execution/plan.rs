@@ -2,6 +2,7 @@
 use super::*;
 use runmat_runtime::analysis::{
     AnalysisExecutionCandidate, AnalysisExecutionChoices, AnalysisExecutionMode,
+    AnalysisOperationEstimate,
 };
 
 pub(in crate::api) fn browser_fea_plan(
@@ -55,6 +56,11 @@ pub(in crate::api) fn browser_fea_plan(
                 estimated_element_count: preflight.estimate.map(|estimate| estimate.element_count),
                 estimated_node_count: preflight.estimate.map(|estimate| estimate.node_count),
                 resource_limit: limit.map(|limit| limit.resource_limit()),
+                estimated_operations: preflight
+                    .estimate
+                    .and_then(|estimate| estimate.operations(instance_budget_bytes()))
+                    .as_ref()
+                    .and_then(AnalysisOperationEstimate::from_estimate),
             },
             AnalysisExecutionCandidate {
                 mode: AnalysisExecutionMode::MultiCore,
@@ -67,6 +73,7 @@ pub(in crate::api) fn browser_fea_plan(
                 estimated_element_count: None,
                 estimated_node_count: None,
                 resource_limit: None,
+                estimated_operations: None,
             },
         ],
     })

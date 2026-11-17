@@ -31,8 +31,12 @@ assert.doesNotThrow(()=>admit(plan({...estimated,readiness:"desktop_required",du
 assert.throws(()=>admit(plan({...estimated,resourceLimit:limit})),/resource limit/);
 assert.throws(()=>admit(plan({...estimated,readiness:"unavailable",resourceLimit:{...limit,requiredBytes:1}})),/resource limit/);
 assert.throws(()=>admit(plan({...estimated,estimatedElementCount:-1})),/mesh estimate/);
+const operations = {meshing:"0",assembly:"22100000000",factorization:"11400000000",solve:"340000000",other:"1000",total:"33840001000",solveIterations:null};
+assert.doesNotThrow(()=>admit(plan({...estimated,estimatedOperations:operations})));
+assert.doesNotThrow(()=>admit(plan({...estimated,estimatedOperations:{...operations,solveIterations:500}})));
+for (const invalid of [{...operations,total:61e9},{...operations,solve:"-1"},{...operations,assembly:"01"},{...operations,solveIterations:0}]) assert.throws(()=>admit(plan({...estimated,estimatedOperations:invalid})),/operations estimate/);
 const generated=fs.readFileSync(path.join(root,"src/generated/fea-analysis-contracts.ts"),"utf8");
 assert.match(generated,/durationEvidence\?: FeaExecutionDuration;/);
 assert.match(generated,/export interface FeaExecutionDuration \{/);
 assert.match(generated,/resourceLimit: FeaResourceLimit \| null;/);
-console.log("Execution duration evidence: valid observed range accepted; sparse, non-finite, fractional and inconsistent evidence rejected; unknown remains absent. Mesh estimates and resource limits: a limit is never ready and always exceeds its maximum.");
+console.log("Execution duration evidence: valid observed range accepted; sparse, non-finite, fractional and inconsistent evidence rejected; unknown remains absent. Mesh estimates and resource limits: a limit is never ready and always exceeds its maximum. Operations estimates are decimal counts.");

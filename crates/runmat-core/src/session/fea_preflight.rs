@@ -6,9 +6,14 @@
 //! its target is refused with numbers before Run instead of after meshing.
 use super::fea_browser_budget::{BrowserResourceLimit, BrowserResourceTerm};
 use super::CheckedFeaSessionSource;
+use runmat_analysis_fea::planning::operations::{
+    estimate_static_solid_operations_from_counts, FeaOperationEstimate,
+};
 use runmat_analysis_fea::planning::resource::estimate_static_solid_from_counts;
 use runmat_geometry_core::GeometryDefinitionSource;
-use runmat_meshing_core::{estimate_solid_mesh_size, MeshDimension, MeshingRequestSettings};
+use runmat_meshing_core::{
+    estimate_solid_mesh_size, MeshDimension, MeshingRequestSettings, SolidMeshCounts,
+};
 use runmat_runtime::analysis::{AnalysisResourceLimit, ResolvedFeaRoot};
 
 /// The code of a native refusal at check time.
@@ -37,12 +42,28 @@ pub struct FeaCheckEstimate {
     pub scratch_bytes: Option<u64>,
     /// The study's authored resident ceiling; `u64::MAX` without one.
     pub authored_resident_bytes: u64,
+    /// The estimated mesh and the share of its boundary on curved surfaces, in parts per
+    /// million, which size the operations estimate; absent for studies other than one linear
+    /// static solid step.
+    pub static_solid_operations: Option<(SolidMeshCounts, u32)>,
 }
 
 impl FeaCheckEstimate {
     /// The admitted budget of a target offering `platform_bytes`: min(authored, platform).
     pub fn admitted_bytes(&self, platform_bytes: u64) -> u64 {
         self.authored_resident_bytes.min(platform_bytes)
+    }
+
+    /// The operations the run is estimated to charge on a target offering `platform_bytes`,
+    /// which chooses its solve path; `None` without a static solid estimate.
+    pub fn operations(&self, platform_bytes: u64) -> Option<FeaOperationEstimate> {
+        let (counts, curved_parts_per_million) = self.static_solid_operations?;
+        estimate_static_solid_operations_from_counts(
+            counts,
+            f64::from(curved_parts_per_million) / 1.0e6,
+            self.admitted_bytes(platform_bytes),
+        )
+        .ok()
     }
 
     /// The browser refusal when the estimate exceeds one numerical worker's budget.
@@ -92,13 +113,15 @@ impl CheckedFeaSessionSource {
         };
         let counts =
             measure.and_then(|measure| solid_mesh_counts(measure, &resolved.mesh.settings));
-        let element_estimate = |memory: Option<(u64, u64)>, authored: u64| {
+        let curved_share = measure.map_or(0, curved_parts_per_million);
+        let element_estimate = |memory: Option<(u64, u64)>, authored: u64, operations: bool| {
             counts.map(|counts| FeaCheckEstimate {
                 element_count: counts.tetrahedra,
                 node_count: counts.nodes(),
                 memory_bytes: memory.map(|(memory, _)| memory),
                 scratch_bytes: memory.map(|(_, scratch)| scratch),
                 authored_resident_bytes: authored,
+                static_solid_operations: operations.then_some((counts, curved_share)),
             })
         };
         if !resolved.study.inputs.is_empty()
@@ -110,7 +133,7 @@ impl CheckedFeaSessionSource {
             })
         {
             return Ok(FeaExecutionPreflight {
-                estimate: element_estimate(None, u64::MAX),
+                estimate: element_estimate(None, u64::MAX, false),
                 browser_supported: false,
                 desktop_reason: Some(
                     "Run simulations with custom input or assessment functions in the desktop app.",
@@ -142,11 +165,23 @@ impl CheckedFeaSessionSource {
             .and_then(|counts| estimate_static_solid_from_counts(counts).ok())
             .map(|plan| (plan.memory_bytes, plan.scratch_bytes));
         Ok(FeaExecutionPreflight {
-            estimate: element_estimate(memory, authored),
+            estimate: element_estimate(memory, authored, supported),
             browser_supported: supported,
             desktop_reason: (!supported).then_some("Run this simulation type in the desktop app."),
         })
     }
+}
+
+/// The share of the preview surface on curved patches, where quadratic elements curve, in parts
+/// per million.
+fn curved_parts_per_million(measure: &runmat_geometry_core::PreviewMeasure) -> u32 {
+    let curved: f64 = measure
+        .patches
+        .iter()
+        .filter(|patch| patch.radius_m.is_some())
+        .map(|patch| patch.area_m2)
+        .sum();
+    ((curved / measure.area_m2).clamp(0.0, 1.0) * 1.0e6).ceil() as u32
 }
 
 fn solid_mesh_counts(
@@ -170,6 +205,7 @@ mod tests {
             memory_bytes: Some(memory),
             scratch_bytes: Some(scratch),
             authored_resident_bytes: authored,
+            static_solid_operations: None,
         }
     }
 
