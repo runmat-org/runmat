@@ -119,13 +119,53 @@ pub unsafe extern "C" fn runmat_occt_exact_execute(request: *const c_char) -> *m
             .map_err(|e| runmat_analysis_execution::SerialGeometryMeshingError::from(e.to_string()))
             .and_then(|request| execution::execute(request, progress::page_handler()))
     };
-    let response = match result {
-        Ok(value) => serde_json::json!({"result":value}),
-        Err(error) => {
-            serde_json::json!({"error":{"message":error.to_string(),"meshingFailure":error.meshing_failure()}})
+    match result {
+        Ok(value) => response_c_string(&ResultResponse { result: &value }),
+        Err(error) => response_c_string(
+            &serde_json::json!({"error":{"message":error.to_string(),"meshingFailure":error.meshing_failure()}}),
+        ),
+    }
+    .into_raw()
+}
+
+#[derive(serde::Serialize)]
+struct ResultResponse<'a> {
+    result: &'a str,
+}
+
+/// Encodes a response into one buffer of its exact size: a counting pass first, then the
+/// write. A result holds the whole mesh, so the encoder must not copy it into a JSON value or
+/// grow its output buffer by doubling; either holds a second full copy after the run's
+/// memory ceiling has been released.
+fn response_c_string(response: &impl serde::Serialize) -> CString {
+    struct Count(usize);
+    impl std::io::Write for Count {
+        fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+            self.0 += bytes.len();
+            Ok(bytes.len())
         }
-    };
-    CString::new(response.to_string())
-        .expect("JSON contains no NUL bytes")
-        .into_raw()
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
+    let mut count = Count(0);
+    serde_json::to_writer(&mut count, response).expect("a response serializes");
+    let mut bytes = Vec::with_capacity(count.0 + 1);
+    serde_json::to_writer(&mut bytes, response).expect("a response serializes");
+    bytes.push(0);
+    CString::from_vec_with_nul(bytes).expect("JSON contains no NUL bytes")
+}
+
+#[cfg(test)]
+mod response_tests {
+    use super::*;
+
+    #[test]
+    fn a_result_encodes_as_before_in_one_exact_buffer() {
+        let value = "{\"artifact\":[1,2,3],\"note\":\"tab\\t, quote \\\" and \u{e9}\"}".to_owned();
+        let encoded = response_c_string(&ResultResponse { result: &value });
+        let expected = serde_json::json!({ "result": value }).to_string();
+        assert_eq!(encoded.to_str().unwrap(), expected);
+        assert_eq!(encoded.as_bytes_with_nul().len(), expected.len() + 1);
+    }
 }
