@@ -10,7 +10,7 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use runmat_geometry_core::{CadSemanticKind, LengthUnit};
+use runmat_geometry_core::{CadSemanticKind, GeometryRegionRole, LengthUnit};
 use runmat_geometry_io::{
     import_exact_cad, import_materialized_geometry_preview, ExactCadImportOptions, GeometryFormat,
     GeometryImportContext, GeometryImportOptions,
@@ -43,11 +43,7 @@ fn shared_interface_face_previews_once_and_joins_its_exact_face() {
     }
     assert!(uses.values().any(|count| *count == 2), "no shared face");
 
-    let names: BTreeMap<String, String> = exact
-        .entity_names
-        .iter()
-        .map(|(id, names)| (id.analysis_selection_id().unwrap(), names[0].clone()))
-        .collect();
+    let names = exact.display_names().unwrap();
     let preview = import_materialized_geometry_preview(
         "arm_study.brep",
         &exact.representation,
@@ -117,11 +113,7 @@ fn materialized_preview_faces_name_their_owning_body() {
         &GeometryImportContext::new(),
     )
     .unwrap();
-    let names: BTreeMap<String, String> = exact
-        .entity_names
-        .iter()
-        .map(|(id, names)| (id.analysis_selection_id().unwrap(), names[0].clone()))
-        .collect();
+    let names = exact.display_names().unwrap();
     let preview = import_materialized_geometry_preview(
         "arm_study.brep",
         &exact.representation,
@@ -142,6 +134,10 @@ fn materialized_preview_faces_name_their_owning_body() {
         .filter(|region| region.tag.as_deref() == Some("occt_face"))
         .collect();
     assert_eq!(faces.len(), exact.source_face_ids.len());
+    let check_faces = exact
+        .authored_names_by_role()
+        .remove("face")
+        .unwrap_or_default();
     let mut owners = BTreeSet::new();
     let mut named = 0;
     for region in faces {
@@ -159,6 +155,24 @@ fn materialized_preview_faces_name_their_owning_body() {
                 assert_eq!(label.kind, CadSemanticKind::Face);
                 assert_eq!(region.name, label.name);
                 assert_eq!(label.name, names[&region.region_id]);
+                // The picker's name is one the check lists and one `select name` resolves to
+                // this very face.
+                assert!(
+                    check_faces.contains(&region.name),
+                    "check does not list {}",
+                    region.name
+                );
+                let selected: Vec<String> = exact
+                    .entities_named(GeometryRegionRole::Face, &region.name)
+                    .unwrap()
+                    .iter()
+                    .map(|id| id.analysis_selection_id().unwrap())
+                    .collect();
+                assert!(
+                    selected.contains(&region.region_id),
+                    "select name \"{}\" does not resolve to the picked face",
+                    region.name
+                );
                 assert_eq!(ownership.owner_path.last(), Some(label));
             }
             // An unnamed face keeps its numbered display name.
