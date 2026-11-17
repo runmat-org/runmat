@@ -180,7 +180,10 @@ pub fn import_geometry_with_context(
 }
 
 /// Tessellate an already admitted exact geometry without assigning it a second identity.
-/// The supplied topology and source-face join must come from the same materialization.
+/// The supplied topology, source-face join and display names (each named face's and solid's
+/// first authored name, by analysis selection ID) must come from the same materialization. The
+/// kernel representation carries no CAD names, so each display face takes its name and its
+/// owning body's name from `display_names`.
 pub fn import_materialized_geometry_preview(
     path: &str,
     bytes: &[u8],
@@ -188,8 +191,10 @@ pub fn import_materialized_geometry_preview(
     context: &GeometryImportContext,
     topology: &runmat_geometry_core::ExactBRepTopology,
     source_faces: &std::collections::BTreeMap<u64, runmat_geometry_core::PersistentEntityId>,
+    display_names: &std::collections::BTreeMap<String, String>,
 ) -> Result<ImportResult, GeometryImportError> {
-    let selection = crate::ExactSelectionProjection::new(topology, source_faces);
+    let selection = crate::ExactSelectionProjection::new(topology, source_faces)
+        .with_authored_names(display_names.clone());
     import_geometry_with_selection_projection(path, bytes, options, context, Some(&selection))
 }
 

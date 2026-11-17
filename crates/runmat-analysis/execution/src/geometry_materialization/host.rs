@@ -359,6 +359,7 @@ where
     )
     .map_err(|error| error.to_string())?;
     let source_face_ids = geometry.source_face_ids.clone();
+    let display_names = display_names(&geometry)?;
     let exact_objects = prepare_exact_geometry_objects(
         document,
         geometry.topology,
@@ -388,6 +389,7 @@ where
         document: exact_result.geometry_objects().document.clone(),
         geometry_root: exact_result.root_input().clone(),
         source_face_ids,
+        display_names,
         regions,
         feature_history: materialized.feature_history,
         feature_resources: materialized.feature_resources,
@@ -441,6 +443,34 @@ where
         );
         options.analysis.healing = document.healing.clone();
         options
+    }
+
+    /// The first authored name of each named face and solid, the entities a display draws and
+    /// names, keyed by analysis selection ID.
+    fn display_names(
+        imported: &ImportedExactCad,
+    ) -> Result<std::collections::BTreeMap<String, String>, String> {
+        use runmat_geometry_core::PersistentEntityKind;
+        imported
+            .entity_names
+            .iter()
+            .filter(|(entity, _)| {
+                matches!(
+                    entity.kind,
+                    PersistentEntityKind::Face | PersistentEntityKind::Solid
+                )
+            })
+            .filter_map(|(entity, names)| {
+                let name = names.iter().find(|name| !name.trim().is_empty())?;
+                Some((entity, name))
+            })
+            .map(|(entity, name)| {
+                let key = entity
+                    .analysis_selection_id()
+                    .map_err(|error| error.to_string())?;
+                Ok((key, name.clone()))
+            })
+            .collect()
     }
 
     struct ImportedRegionEvidence<'a> {

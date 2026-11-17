@@ -10,7 +10,7 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use runmat_geometry_core::LengthUnit;
+use runmat_geometry_core::{CadSemanticKind, LengthUnit};
 use runmat_geometry_io::{
     import_exact_cad, import_materialized_geometry_preview, ExactCadImportOptions, GeometryFormat,
     GeometryImportContext, GeometryImportOptions,
@@ -43,6 +43,11 @@ fn shared_interface_face_previews_once_and_joins_its_exact_face() {
     }
     assert!(uses.values().any(|count| *count == 2), "no shared face");
 
+    let names: BTreeMap<String, String> = exact
+        .entity_names
+        .iter()
+        .map(|(id, names)| (id.analysis_selection_id().unwrap(), names[0].clone()))
+        .collect();
     let preview = import_materialized_geometry_preview(
         "arm_study.brep",
         &exact.representation,
@@ -53,6 +58,7 @@ fn shared_interface_face_previews_once_and_joins_its_exact_face() {
         &GeometryImportContext::new(),
         &exact.topology,
         &exact.source_face_ids,
+        &names,
     )
     .unwrap();
 
@@ -83,13 +89,85 @@ fn shared_interface_face_previews_once_and_joins_its_exact_face() {
             region.region_id
         );
     }
-    // Both solids project as bodies (a materialized B-rep carries no product names; the Desktop
-    // names them from the study's resolved regions).
-    let bodies = preview
+    // Both solids project as bodies under their part names, though the B-rep carries none.
+    let mut bodies: Vec<_> = preview
         .asset
         .regions
         .iter()
         .filter(|region| region.tag.as_deref() == Some("cad_body"))
-        .count();
-    assert_eq!(bodies, exact.topology.solids.len());
+        .map(|region| region.name.as_str())
+        .collect();
+    bodies.sort();
+    assert_eq!(bodies, ["arm", "motor_pod"]);
+}
+
+/// A materialized study's B-rep carries no CAD names, so the preview names each face and its
+/// owning body from the exact import's authored names: Measure reads "Face 19 of arm".
+#[test]
+fn materialized_preview_faces_name_their_owning_body() {
+    let options = ExactCadImportOptions {
+        source_units: Some(LengthUnit::Millimeter),
+        ..ExactCadImportOptions::default()
+    };
+    let exact = import_exact_cad(
+        "drone_arm_study.step",
+        DRONE_ARM,
+        GeometryFormat::Step,
+        &options,
+        &GeometryImportContext::new(),
+    )
+    .unwrap();
+    let names: BTreeMap<String, String> = exact
+        .entity_names
+        .iter()
+        .map(|(id, names)| (id.analysis_selection_id().unwrap(), names[0].clone()))
+        .collect();
+    let preview = import_materialized_geometry_preview(
+        "arm_study.brep",
+        &exact.representation,
+        GeometryImportOptions {
+            source_units: Some(LengthUnit::Millimeter),
+            ..GeometryImportOptions::default()
+        },
+        &GeometryImportContext::new(),
+        &exact.topology,
+        &exact.source_face_ids,
+        &names,
+    )
+    .unwrap();
+    let faces: Vec<_> = preview
+        .asset
+        .regions
+        .iter()
+        .filter(|region| region.tag.as_deref() == Some("occt_face"))
+        .collect();
+    assert_eq!(faces.len(), exact.source_face_ids.len());
+    let mut owners = BTreeSet::new();
+    let mut named = 0;
+    for region in faces {
+        let ownership = region.cad_ownership.as_ref().unwrap();
+        let body = ownership
+            .owner_path
+            .iter()
+            .find(|label| label.kind == CadSemanticKind::Body)
+            .unwrap_or_else(|| panic!("{} has no owning body", region.name));
+        owners.insert(body.name.clone());
+        match &ownership.label {
+            // A named face reads its CAD name, which is also its first authored name.
+            Some(label) => {
+                named += 1;
+                assert_eq!(label.kind, CadSemanticKind::Face);
+                assert_eq!(region.name, label.name);
+                assert_eq!(label.name, names[&region.region_id]);
+                assert_eq!(ownership.owner_path.last(), Some(label));
+            }
+            // An unnamed face keeps its numbered display name.
+            None => assert!(region.name.starts_with("Face "), "{}", region.name),
+        }
+    }
+    assert!(named > 0, "the fixture names some faces");
+    assert_eq!(
+        owners,
+        BTreeSet::from(["arm".to_string(), "motor_pod".to_string()])
+    );
 }

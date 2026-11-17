@@ -12,6 +12,9 @@ use runmat_geometry_core::{
 pub struct ExactSelectionProjection {
     faces: BTreeMap<u64, PersistentEntityId>,
     solids: Vec<(PersistentEntityId, BTreeSet<u64>)>,
+    /// The CAD author's name for each named face and solid, by analysis selection ID, when the
+    /// display tessellates a representation that carries none of its own (a materialized B-rep).
+    authored_names: Option<BTreeMap<String, String>>,
 }
 
 impl ExactSelectionProjection {
@@ -71,7 +74,61 @@ impl ExactSelectionProjection {
         Self {
             faces: faces.clone(),
             solids,
+            authored_names: None,
         }
+    }
+
+    /// Names the display's faces and bodies from the exact product's authored names (each
+    /// entity's first name in `ImportedExactCad::entity_names`) instead of the display import's
+    /// CAD ownership. Use it when the display reads a representation without CAD names, such as
+    /// the kernel B-rep of a materialized study geometry.
+    pub fn with_authored_names(mut self, names: BTreeMap<String, String>) -> Self {
+        self.authored_names = Some(names);
+        self
+    }
+
+    /// A face's CAD ownership from the authored names: its own name, if the author gave it one,
+    /// and the name of the body (solid) that holds it, as the display import's CAD ownership
+    /// lists them (owners outermost first, the face last).
+    fn authored_face_ownership(
+        &self,
+        names: &BTreeMap<String, String>,
+        ordinal: u64,
+        face_key: &str,
+    ) -> Result<runmat_geometry_core::CadRegionOwnership, GeometryImportError> {
+        use runmat_geometry_core::{CadLabelRef, CadRegionOwnership, CadSemanticKind};
+        let first = |key: &str| {
+            names
+                .get(key)
+                .filter(|name| !name.trim().is_empty())
+                .cloned()
+        };
+        let mut owner_path = Vec::new();
+        for (solid, ordinals) in &self.solids {
+            if !ordinals.contains(&ordinal) {
+                continue;
+            }
+            let key = solid.analysis_selection_id().map_err(invalid)?;
+            if let Some(name) = first(&key) {
+                owner_path.push(CadLabelRef {
+                    label_entry: key,
+                    name,
+                    kind: CadSemanticKind::Body,
+                });
+            }
+        }
+        let label = first(face_key).map(|name| CadLabelRef {
+            label_entry: face_key.to_string(),
+            name,
+            kind: CadSemanticKind::Face,
+        });
+        owner_path.extend(label.clone());
+        Ok(CadRegionOwnership {
+            face_id: Some(ordinal),
+            label,
+            owner_path,
+            ..Default::default()
+        })
     }
 
     /// Replaces provisional tessellator regions; no source-name or ordinal fallback survives.
@@ -110,15 +167,25 @@ impl ExactSelectionProjection {
                 .push(mapping);
         }
         let mut source_ranges: BTreeMap<u64, Vec<RegionEntityMapping>> = BTreeMap::new();
+        let mut projected_faces: BTreeMap<u64, Region> = BTreeMap::new();
         for (ordinal, region) in &source_regions {
             let entity = &self.faces[ordinal];
             let key = entity.analysis_selection_id().map_err(invalid)?;
             let mut projected = (*region).clone();
             projected.region_id = key.clone();
-            projected
-                .cad_ownership
-                .get_or_insert_with(Default::default)
-                .face_id = Some(*ordinal);
+            if let Some(names) = &self.authored_names {
+                let ownership = self.authored_face_ownership(names, *ordinal, &key)?;
+                if let Some(label) = &ownership.label {
+                    projected.name = label.name.clone();
+                }
+                projected.cad_ownership = Some(ownership);
+            } else {
+                projected
+                    .cad_ownership
+                    .get_or_insert_with(Default::default)
+                    .face_id = Some(*ordinal);
+            }
+            projected_faces.insert(*ordinal, projected.clone());
             regions.push(projected);
             for mapping in by_region
                 .get(region.region_id.as_str())
@@ -150,23 +217,32 @@ impl ExactSelectionProjection {
             let key = entity.analysis_selection_id().map_err(invalid)?;
             let metadata = ordinals
                 .iter()
-                .find_map(|ordinal| source_regions.get(ordinal).copied());
+                .find_map(|ordinal| projected_faces.get(ordinal));
             // Face-local color/material and source-face ordinals never become body evidence.
             let owner_path = metadata
                 .and_then(|region| region.cad_ownership.as_ref())
                 .map(|ownership| ownership.owner_path.as_slice())
                 .unwrap_or_default();
+            // An owner is this solid's label when it is the solid's occurrence or the solid itself.
             let label = owner_path
                 .iter()
                 .rev()
-                .find(|label| entity.assembly_path.contains(&label.label_entry))
+                .find(|label| {
+                    entity.assembly_path.contains(&label.label_entry) || label.label_entry == key
+                })
                 .cloned();
-            // A body takes its product's name, or its occurrence's when the product is unnamed,
-            // as the exact import names solids (`select name` resolves the same either way).
+            // A body takes its own authored name, else its product's, else its occurrence's when
+            // the product is unnamed, as the exact import names solids (`select name` resolves
+            // the same either way).
             let product = owner_path
                 .iter()
-                .rev()
-                .find(|label| label.kind == runmat_geometry_core::CadSemanticKind::Body)
+                .find(|label| label.label_entry == key)
+                .or_else(|| {
+                    owner_path
+                        .iter()
+                        .rev()
+                        .find(|label| label.kind == runmat_geometry_core::CadSemanticKind::Body)
+                })
                 .filter(|label| !label.name.is_empty());
             let name = product
                 .or(label.as_ref())
@@ -255,6 +331,7 @@ mod tests {
         let projection = ExactSelectionProjection {
             faces: BTreeMap::from([(0, face.clone())]),
             solids: vec![(solid.clone(), BTreeSet::from([0]))],
+            authored_names: None,
         };
         let mut asset = asset();
         projection.bind(&mut asset).unwrap();
@@ -283,6 +360,7 @@ mod tests {
         let projection = ExactSelectionProjection {
             faces: BTreeMap::new(),
             solids: Vec::new(),
+            authored_names: None,
         };
         let mut asset = asset();
         let original = asset.clone();
@@ -298,6 +376,7 @@ mod tests {
         let projection = ExactSelectionProjection {
             faces: BTreeMap::from([(0, entity(PersistentEntityKind::Face, "part-a"))]),
             solids: Vec::new(),
+            authored_names: None,
         };
         let mut asset = asset();
         let mut twin = asset.regions[0].clone();
@@ -308,5 +387,61 @@ mod tests {
             error.contains("display face 0 is claimed by two display regions"),
             "{error}"
         );
+    }
+    /// A display without CAD names of its own (a materialized B-rep) names its faces and bodies
+    /// from the exact product: an unnamed face keeps its number and names its owning body, as
+    /// Measure reads it ("Face 1 of WallHook_30mm"); a named face reads its CAD name.
+    #[test]
+    fn authored_names_name_faces_and_their_owning_body() {
+        use runmat_geometry_core::CadSemanticKind;
+        let face = entity(PersistentEntityKind::Face, "part-a");
+        let solid = entity(PersistentEntityKind::Solid, "part-a");
+        let face_key = face.analysis_selection_id().unwrap();
+        let solid_key = solid.analysis_selection_id().unwrap();
+        let mut asset = asset();
+        asset.regions[0].name = "Face 1".into();
+        let projection = ExactSelectionProjection {
+            faces: BTreeMap::from([(0, face.clone())]),
+            solids: vec![(solid.clone(), BTreeSet::from([0]))],
+            authored_names: None,
+        }
+        .with_authored_names(BTreeMap::from([(
+            solid_key.clone(),
+            "WallHook_30mm".to_string(),
+        )]));
+        projection.bind(&mut asset).unwrap();
+        let ownership = asset.regions[0].cad_ownership.clone().unwrap();
+        assert_eq!(asset.regions[0].name, "Face 1");
+        assert_eq!(ownership.face_id, Some(0));
+        assert_eq!(ownership.label, None);
+        assert_eq!(ownership.owner_path.len(), 1);
+        assert_eq!(ownership.owner_path[0].name, "WallHook_30mm");
+        assert_eq!(ownership.owner_path[0].kind, CadSemanticKind::Body);
+        assert_eq!(ownership.owner_path[0].label_entry, solid_key);
+        // The body region takes the same name and is its own label.
+        assert_eq!(asset.regions[1].name, "WallHook_30mm");
+        let body = asset.regions[1].cad_ownership.clone().unwrap();
+        assert_eq!(body.label.unwrap().label_entry, solid_key);
+
+        // A face the author named reads that name, its body still owning it.
+        let mut asset = self::asset();
+        let projection = projection.with_authored_names(BTreeMap::from([
+            (solid_key.clone(), "WallHook_30mm".to_string()),
+            (face_key.clone(), "Hook seat".to_string()),
+        ]));
+        projection.bind(&mut asset).unwrap();
+        let ownership = asset.regions[0].cad_ownership.clone().unwrap();
+        assert_eq!(asset.regions[0].name, "Hook seat");
+        let label = ownership.label.unwrap();
+        assert_eq!(
+            (label.name.as_str(), label.kind),
+            ("Hook seat", CadSemanticKind::Face)
+        );
+        let path: Vec<_> = ownership
+            .owner_path
+            .iter()
+            .map(|l| l.name.as_str())
+            .collect();
+        assert_eq!(path, ["WallHook_30mm", "Hook seat"]);
     }
 }
