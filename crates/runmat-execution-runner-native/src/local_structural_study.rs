@@ -139,7 +139,6 @@ pub async fn execute_prepared_study_locally_with_observers(
     trace::finish(&mesh_step, &trace::mesh_result(&meshing.artifact));
     drop(mesh_step);
 
-    let assemble_step = StudyStep::Assemble.span();
     emit_local_progress(
         &observers,
         OPERATION,
@@ -158,12 +157,12 @@ pub async fn execute_prepared_study_locally_with_observers(
             composition_store,
             workers,
             &observers,
-            assemble_step,
         ))
         .await
         .map(Box::new)
         .map(LocalStudyCompletion::Family);
     }
+    let assemble_step = StudyStep::Assemble.span();
     let steps = decoded.study.sequence.steps.len();
     let outputs = decoded.study.outputs.len();
     // A solid's nodes carry three displacement unknowns each.
@@ -295,9 +294,10 @@ async fn execute_family_locally(
     composition_store: crate::FilesystemObjectStore,
     workers: u32,
     observers: &LocalStructuralStudyObservers,
-    assemble_step: tracing::Span,
 ) -> NativeExecutionResult<crate::CompletedFeaStudyResult> {
     const OPERATION: &str = "fea.typed_study";
+    // Opened where the caller announced ModelAssembly, so the step and the progress phase match.
+    let assemble_step = StudyStep::Assemble.span();
     let steps = decoded.study.sequence.steps.len();
     let outputs = decoded.study.outputs.len();
     let nodes = meshing.artifact.topology.nodes.len() as u64;

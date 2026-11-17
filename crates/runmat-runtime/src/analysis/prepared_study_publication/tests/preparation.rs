@@ -131,8 +131,10 @@ fn assessment_is_the_assess_trace_step_with_its_verdict_count() {
     use tracing_subscriber::layer::{Context, Layer, SubscriberExt};
     use tracing_subscriber::registry::LookupSpan;
 
+    /// A recorded span: its name, `step` and `result`.
+    type StepRecord = (&'static str, Option<String>, Option<String>);
     #[derive(Clone, Default)]
-    struct Steps(Arc<Mutex<Vec<(&'static str, Option<String>, Option<String>)>>>);
+    struct Steps(Arc<Mutex<Vec<StepRecord>>>);
     struct Strings<'a>(&'a mut Option<String>, &'a mut Option<String>);
     impl Visit for Strings<'_> {
         fn record_str(&mut self, field: &Field, value: &str) {
