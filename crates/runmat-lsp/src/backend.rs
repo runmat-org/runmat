@@ -24,16 +24,17 @@ use tower_lsp::jsonrpc::Result as RpcResult;
 use tower_lsp::lsp_types::notification::Notification;
 use tower_lsp::lsp_types::{
     CompletionOptions, CompletionParams, CompletionResponse, DidChangeConfigurationParams,
-    DidChangeTextDocumentParams, DidCloseTextDocumentParams, DidOpenTextDocumentParams,
-    DidSaveTextDocumentParams, DocumentFormattingParams, DocumentSymbolParams,
-    DocumentSymbolResponse, GotoDefinitionParams, GotoDefinitionResponse, Hover, HoverParams,
-    HoverProviderCapability, InitializeParams, InitializeResult, InitializedParams, Location,
-    MessageType, OneOf, PositionEncodingKind, ReferenceParams, SemanticTokensOptions,
-    SemanticTokensParams, SemanticTokensResult, SemanticTokensServerCapabilities,
-    ServerCapabilities, ServerInfo, SignatureHelp, SignatureHelpOptions, SignatureHelpParams,
-    TextDocumentContentChangeEvent, TextDocumentIdentifier, TextDocumentPositionParams,
-    TextDocumentSyncCapability, TextDocumentSyncKind, TextEdit, Url,
-    WorkspaceFoldersServerCapabilities, WorkspaceServerCapabilities, WorkspaceSymbolParams,
+    DidChangeTextDocumentParams, DidChangeWorkspaceFoldersParams, DidCloseTextDocumentParams,
+    DidOpenTextDocumentParams, DidSaveTextDocumentParams, DocumentFormattingParams,
+    DocumentSymbolParams, DocumentSymbolResponse, GotoDefinitionParams, GotoDefinitionResponse,
+    Hover, HoverParams, HoverProviderCapability, InitializeParams, InitializeResult,
+    InitializedParams, Location, MessageType, OneOf, PositionEncodingKind, ReferenceParams,
+    SemanticTokensOptions, SemanticTokensParams, SemanticTokensResult,
+    SemanticTokensServerCapabilities, ServerCapabilities, ServerInfo, SignatureHelp,
+    SignatureHelpOptions, SignatureHelpParams, TextDocumentContentChangeEvent,
+    TextDocumentIdentifier, TextDocumentPositionParams, TextDocumentSyncCapability,
+    TextDocumentSyncKind, TextEdit, Url, WorkspaceFoldersServerCapabilities,
+    WorkspaceServerCapabilities, WorkspaceSymbolParams,
 };
 use tower_lsp::{async_trait, Client, LanguageServer};
 
@@ -1031,6 +1032,17 @@ impl LanguageServer for RunMatLanguageServer {
         )))
     }
 
+    /// The client added or removed workspace folders: `.fea` studies resolve their relative
+    /// paths within the new roots, so every open study is checked again.
+    async fn did_change_workspace_folders(&self, params: DidChangeWorkspaceFoldersParams) {
+        {
+            let mut state = self.state.write().await;
+            apply_workspace_folder_change(&mut state.workspace_roots, &params);
+            state.project_cache = None;
+        }
+        fea::reanalyze_open_documents(self).await;
+    }
+
     async fn did_change_configuration(&self, params: DidChangeConfigurationParams) {
         let Some(mode) = parse_compat_mode(&params.settings) else {
             debug!("Ignoring configuration update without a valid language.compat value");
@@ -1097,6 +1109,24 @@ fn workspace_roots(params: &InitializeParams) -> Vec<PathBuf> {
         }
     }
     roots
+}
+
+fn apply_workspace_folder_change(
+    roots: &mut Vec<PathBuf>,
+    params: &DidChangeWorkspaceFoldersParams,
+) {
+    for folder in &params.event.removed {
+        if let Ok(path) = folder.uri.to_file_path() {
+            roots.retain(|root| root != &path);
+        }
+    }
+    for folder in &params.event.added {
+        if let Ok(path) = folder.uri.to_file_path() {
+            if !roots.contains(&path) {
+                roots.push(path);
+            }
+        }
+    }
 }
 
 fn compat_label(mode: CompatMode) -> &'static str {

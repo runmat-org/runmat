@@ -199,7 +199,7 @@ fn string_hover(
 ) -> Option<String> {
     let line_start = source[..start].rfind('\n').map_or(0, |i| i + 1);
     let quotes = source[line_start..start].matches('"').count();
-    if quotes % 2 == 0 {
+    if quotes.is_multiple_of(2) {
         // Not in a string; a bare material id (`material = aluminum_6061_t6`) still reads.
         let before = source[..start].trim_end();
         if before.ends_with('=') && before[..before.len() - 1].trim_end().ends_with("material") {
