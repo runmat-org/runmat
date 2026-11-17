@@ -12,7 +12,7 @@
 //! Circuit boards' 3D models are kept the same way, keyed on the layout and every circuit file
 //! it reads ([`board_key`]).
 //!
-//! The cache holds at most [`BUDGET_BYTES`] of display meshes; the least recently used entries
+//! The cache holds at most [`budget_bytes`] of display meshes; the least recently used entries
 //! go first. Entries are held by [`digest`] of their key.
 //!
 //! Entries also outlive the host. [`take_fresh`] writes each entry regenerated since the last
@@ -39,11 +39,24 @@ use serde::{Deserialize, Serialize};
 use std::cell::{Cell, RefCell};
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::rc::Rc;
+use std::sync::atomic::{AtomicUsize, Ordering};
 
-/// The display meshes the cache keeps, by their array sizes: a quarter of the browser host's
-/// 512 MB memory ceiling (`-sMAXIMUM_MEMORY` in build-exact-cad-wasm.sh), leaving the rest to
-/// OCCT and the compile in progress. The camera drone's displays take about 10 MB.
-pub const BUDGET_BYTES: usize = 128 << 20;
+/// The display meshes the cache keeps, by their array sizes. The host sets it from its measured
+/// memory ([`set_budget_bytes`]): the browser host keeps a quarter of its maximum, leaving the
+/// rest to OCCT and the compile in progress. The camera drone's displays take about 10 MB. Until
+/// a host sets a budget, the cache keeps a quarter of the address space this target can use.
+static BUDGET_BYTES: AtomicUsize = AtomicUsize::new(usize::MAX / 4);
+
+/// Sets the bytes of display meshes the cache keeps ([`BUDGET_BYTES`]); entries past it are
+/// evicted on the next insert.
+pub fn set_budget_bytes(bytes: usize) {
+    BUDGET_BYTES.store(bytes, Ordering::Relaxed);
+}
+
+/// The bytes of display meshes the cache keeps.
+pub fn budget_bytes() -> usize {
+    BUDGET_BYTES.load(Ordering::Relaxed)
+}
 
 /// A part file regenerated for an assembly: what the assembly reads of it.
 #[derive(Serialize, Deserialize)]
@@ -289,10 +302,11 @@ fn put(key: String, entry: Entry, bytes: usize) {
 fn insert(key: String, entry: Entry, bytes: usize) -> bool {
     CACHE.with(|c| {
         let mut c = c.borrow_mut();
-        if bytes > BUDGET_BYTES {
+        let budget = budget_bytes();
+        if bytes > budget {
             return false;
         }
-        while c.bytes + bytes > BUDGET_BYTES {
+        while c.bytes + bytes > budget {
             let Some(oldest) = c
                 .slots
                 .iter()
