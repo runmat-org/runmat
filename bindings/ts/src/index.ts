@@ -5,6 +5,7 @@ import type { HostRuntimeSettings, ResolvedRuntimeSettings, UserRuntimeSettingsE
 export type { HostRuntimeSettings, ResolvedRuntimeSettings, RuntimeSettingsConfig, RuntimeSettingSource, UserRuntimeSettingsEdit, SettingsJsonValue, PreparedClusterProgram } from "./settings.js";
 import type { CapturedProjectResolver } from "./package-cache/browser-resolver.js";
 import { invokeOpenTelemetry } from "./observability.js";
+import { installStudyGeometryProvider, type StudyGeometryNativeExports, type StudyGeometryProvider } from "./study-geometry.js";
 import type { OpenTelemetryNativeExports, OpenTelemetryExportStats, OpenTelemetryStartupHeaders } from "./observability.js";
 export type { OpenTelemetryExportStats, OpenTelemetryStartupHeaders } from "./observability.js";
 import { checkNativeSource } from "./source-check.js";
@@ -1597,7 +1598,7 @@ export interface GeometryScenePickResult {
 }
 
 
-interface RunMatNativeModule extends OpenTelemetryNativeExports, RuntimeSettingsNativeExports, SourceCheckNativeExports, ProjectEntrypointModuleExports {
+interface RunMatNativeModule extends OpenTelemetryNativeExports, StudyGeometryNativeExports, RuntimeSettingsNativeExports, SourceCheckNativeExports, ProjectEntrypointModuleExports {
   default: (
     module?:
       | { module_or_path: WasmInitInput | Promise<WasmInitInput> }
@@ -2329,6 +2330,13 @@ export async function setLogFilter(filter: string): Promise<void> {
   const native = await loadNativeModule();
   requireNativeFunction(native, "setLogFilter");
   native.setLogFilter(filter);
+}
+
+export type { StudyGeometryProvider } from "./study-geometry.js";
+
+/** Installs (or with `null` removes) this runtime worker's RunMat MCAD study-geometry host. */
+export async function setStudyGeometryProvider(provider: StudyGeometryProvider | null): Promise<void> {
+  installStudyGeometryProvider(await loadNativeModule(), provider);
 }
 
 export async function subscribeTraceEvents(listener: TraceEventListener): Promise<number> {

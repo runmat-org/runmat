@@ -70,6 +70,22 @@ impl FeaParser {
         }
     }
 
+    /// A design file's version header (`runmat 0.7`, `std 1`) copied into a study is named as
+    /// such, since `.fea` sources have none.
+    fn top_level_message(&self, cursor: usize) -> String {
+        let word = self.lexeme(cursor);
+        if word == crate::dialect::GenericForm::VersionHeader.word()
+            || word == crate::dialect::STD_HEADER_WORD
+        {
+            format!(
+                "`.fea` sources have no version header; remove this `{word}` line (version \
+headers start design files such as `.part` and `.assembly`)"
+            )
+        } else {
+            "expected an import or top-level FEA declaration".to_string()
+        }
+    }
+
     fn parse(mut self) -> FeaSyntaxModule {
         let mut items = Vec::new();
         let mut cursor = 0;
@@ -120,7 +136,7 @@ impl FeaParser {
                     self.diagnostics.push(FeaSyntaxDiagnostic {
                         kind: FeaSyntaxDiagnosticKind::ExpectedDeclaration,
                         span,
-                        message: "expected an import or top-level FEA declaration".to_string(),
+                        message: self.top_level_message(cursor),
                     });
                     let end = self.statement_end(cursor);
                     if let Some(syntax) = self.trimmed_range(cursor, end) {

@@ -89,6 +89,22 @@ fn authored_face_and_body_names_reach_the_exact_model() {
 //   six interface faces, keeps the names Part, Air, Outer boundary and the part's face name on the
 //   shared face, and builds its closure.
 #[test]
+fn a_single_solid_part_imports_with_shared_interfaces_requested() {
+    // One solid has nothing to join; the request must not reach the General Fuse, which
+    // rejects a single argument (BOPAlgo_AlertTooFewArguments).
+    let imported = import("named-faces.step", NAMED_FACES, true).unwrap();
+    assert!(interface_faces(&imported).is_empty());
+    assert_eq!(
+        named(&imported, PersistentEntityKind::Face, "Fixed end").len(),
+        1
+    );
+    assert_eq!(
+        named(&imported, PersistentEntityKind::Solid, "Bar").len(),
+        1
+    );
+}
+
+#[test]
 fn separate_parts_stay_independent_unless_interfaces_are_shared() {
     let independent = import("part_in_air_assembly.step", PART_IN_AIR, false).unwrap();
     assert_eq!(independent.topology.solids.len(), 2);
