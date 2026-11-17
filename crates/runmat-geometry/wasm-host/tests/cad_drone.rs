@@ -437,20 +437,24 @@ fn the_cg_sits_over_the_thrust_centre() {
         .expect("mass properties");
     let mm = |v: f64| v * 1000.0;
     for p in &r.parts {
+        let c = p.center.unwrap_or_default();
         eprintln!(
             "{:<44} {:>7.1} g  ({:>7.1}, {:>6.1}, {:>5.1}) mm",
             p.path,
             p.mass.unwrap_or(0.0) * 1000.0,
-            mm(p.center[0]),
-            mm(p.center[1]),
-            mm(p.center[2])
+            mm(c[0]),
+            mm(c[1]),
+            mm(c[2])
         );
     }
     let motors: Vec<[f64; 3]> = r
         .parts
         .iter()
         .filter(|p| p.path.ends_with("/motor/motor"))
-        .map(|p| p.center)
+        .map(|p| {
+            p.center
+                .unwrap_or_else(|| panic!("{} has no mass: {:?}", p.path, p.mass_unknown))
+        })
         .collect();
     assert_eq!(motors.len(), 4, "four motors");
     let thrust = [0, 1].map(|k| motors.iter().map(|c| c[k]).sum::<f64>() / 4.0);
@@ -475,10 +479,14 @@ fn the_cg_sits_over_the_thrust_centre() {
         "prop tips {:.1} mm apart",
         closest - 2.0 * radius
     );
-    let cg = r.total.center;
+    let total = r
+        .total
+        .as_ref()
+        .unwrap_or_else(|| panic!("the drone's mass is unknown: {:?}", r.unknown));
+    let cg = total.center;
     eprintln!(
         "total {:.1} g, CG ({:.1}, {:.1}, {:.1}) mm, thrust centre ({:.1}, {:.1}) mm",
-        r.total.mass * 1000.0,
+        total.mass * 1000.0,
         mm(cg[0]),
         mm(cg[1]),
         mm(cg[2]),
