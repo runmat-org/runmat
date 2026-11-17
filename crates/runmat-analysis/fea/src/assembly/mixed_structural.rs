@@ -544,7 +544,6 @@ where
         constraint_matrix,
         affine_constraint_reduction,
         load_count: excitations.len(),
-        structural_material: super::structural_material_summary(model),
         thermo_mechanical: None,
         electro_thermal: None,
         operator,

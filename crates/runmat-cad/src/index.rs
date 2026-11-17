@@ -193,6 +193,15 @@ pub struct PartRow {
     /// The part's display color, sRGB hex, when it sets one.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub color: Option<String>,
+    /// The density its mass properties use, kg/m³: its `density` property, else its material's.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub density: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub density_source: Option<crate::model::materials::DensitySource>,
+    /// Why its density, and so its mass, is unknown, naming the material it looked for. No
+    /// density is assumed.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub density_unknown: Option<String>,
     pub properties: Vec<Property>,
     pub body: Vec<Vec<EntityName>>,
     pub ok: bool,
@@ -383,6 +392,7 @@ pub fn build_index(
         .iter()
         .map(|p| {
             let (body, ok) = item_entities(result.parts.get(&p.name));
+            let density = crate::model::materials::part_density(p);
             PartRow {
                 name: p.name.clone(),
                 uuid: uuid(ItemPath::part(&doc.path, &p.name)),
@@ -394,6 +404,9 @@ pub fn build_index(
                         .unwrap_or_else(|| crate::drawing::bom_table::material_name(m.as_str()))
                 }),
                 color: p.color.clone(),
+                density: density.as_ref().ok().map(|d| d.0),
+                density_source: density.as_ref().ok().map(|d| d.1),
+                density_unknown: density.err(),
                 properties: p.properties.clone(),
                 body,
                 ok,

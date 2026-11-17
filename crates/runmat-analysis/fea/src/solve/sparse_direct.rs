@@ -10,9 +10,14 @@
 //! raw triplets in another summation order would certify a different floating-point operator.
 //! The factorization is the shared sparse layer's direct LU (`runmat-sparse-solvers`),
 //! run on the ambient admitted CPU plan with FEA cancellation.
+//!
+//! The caller names the factor's workspace policy. An admitted solve factors with
+//! `DirectWorkspacePolicy::CallerOwned` (simplicial LU), because its plan quotes the factor
+//! from the solve's own storage; backend-managed supernodal kernels keep packing storage no
+//! plan quotes (on x86_64 a per-thread buffer of twice the L3 cache size).
 use runmat_sparse_solvers::c64;
 use runmat_sparse_solvers::direct::{
-    DirectOptions, DirectSolveReport, DirectSolver, FactorKind, FactorScalar,
+    DirectOptions, DirectSolveReport, DirectSolver, DirectWorkspacePolicy, FactorKind, FactorScalar,
 };
 use runmat_sparse_solvers::{CsrMatrix, TripletBuilder};
 
@@ -21,12 +26,16 @@ fn shared_lu<T: FactorScalar + Send + Sync>(
     dimension: usize,
     matrix: CsrMatrix<T>,
     rhs: &[T],
+    workspace: DirectWorkspacePolicy,
 ) -> Result<(Vec<T>, DirectSolveReport, CsrMatrix<T>), SparseDirectError> {
     let plan = super::shared_sparse::ambient_plan();
     super::shared_sparse::with_plan(plan, || {
         let solver = DirectSolver::<T>::new(
             matrix.as_ref().into(),
-            DirectOptions::new(FactorKind::Lu),
+            DirectOptions {
+                workspace,
+                ..DirectOptions::new(FactorKind::Lu)
+            },
             super::shared_sparse::control(),
         )
         .map_err(|error| SparseDirectError::Factorization(error.to_string()))?;
@@ -82,6 +91,7 @@ pub fn solve_complex(
     dimension: usize,
     entries: &[ComplexEntry],
     rhs: &[(f64, f64)],
+    workspace: DirectWorkspacePolicy,
 ) -> Result<ComplexDirectSolution, SparseDirectError> {
     if rhs.len() != dimension {
         return Err(SparseDirectError::Invalid(
@@ -98,7 +108,7 @@ pub fn solve_complex(
     }
     let matrix = complex_operator(dimension, entries)?;
     let rhs_values = complex_rhs(dimension, rhs)?;
-    let (values, report, matrix) = shared_lu(dimension, matrix, &rhs_values)?;
+    let (values, report, matrix) = shared_lu(dimension, matrix, &rhs_values, workspace)?;
     if values
         .iter()
         .any(|v| !v.re.is_finite() || !v.im.is_finite())
@@ -208,6 +218,7 @@ pub fn solve_real(
     dimension: usize,
     entries: &[(usize, usize, f64)],
     rhs: &[f64],
+    workspace: DirectWorkspacePolicy,
 ) -> Result<RealDirectSolution, SparseDirectError> {
     if rhs.len() != dimension {
         return Err(SparseDirectError::Invalid(
@@ -232,7 +243,7 @@ pub fn solve_real(
     if rhs.iter().any(|v| !v.is_finite()) {
         return Err(SparseDirectError::Invalid("non-finite rhs".into()));
     }
-    let (values, _, matrix) = shared_lu(dimension, triplets.build(), rhs)?;
+    let (values, _, matrix) = shared_lu(dimension, triplets.build(), rhs, workspace)?;
     if values.iter().any(|v| !v.is_finite()) {
         return Err(SparseDirectError::Breakdown);
     }
@@ -282,7 +293,13 @@ mod tests {
                 imaginary: 1.0,
             },
         ];
-        let solved = solve_complex(2, &entries, &[(1.0, 0.0), (0.0, 0.0)]).unwrap();
+        let solved = solve_complex(
+            2,
+            &entries,
+            &[(1.0, 0.0), (0.0, 0.0)],
+            DirectWorkspacePolicy::BackendManaged,
+        )
+        .unwrap();
         assert!(solved.relative_residual < 1e-14, "{solved:?}");
         assert_eq!(
             solved.relative_residual,
@@ -316,6 +333,7 @@ mod tests {
             2,
             &[(0, 0, 1.0), (0, 0, 1.0), (0, 1, 1.0), (1, 0, 1.0)],
             &[3.0, 1.0],
+            DirectWorkspacePolicy::CallerOwned,
         )
         .unwrap();
         assert!(solved.relative_residual < 1e-14);
@@ -325,7 +343,12 @@ mod tests {
 
     #[test]
     fn singular_system_is_rejected() {
-        let result = solve_real(2, &[(0, 0, 1.0), (1, 0, 1.0)], &[1.0, 1.0]);
+        let result = solve_real(
+            2,
+            &[(0, 0, 1.0), (1, 0, 1.0)],
+            &[1.0, 1.0],
+            DirectWorkspacePolicy::BackendManaged,
+        );
         assert!(result.is_err() || result.unwrap().relative_residual > 1e-3);
     }
 }

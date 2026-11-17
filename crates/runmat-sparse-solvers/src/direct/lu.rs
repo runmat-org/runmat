@@ -1,11 +1,14 @@
 //! LU with partial pivoting (COLAMD column ordering) for general sparse matrices.
 
-use faer::sparse::linalg::lu::{factorize_symbolic_lu, LuRef, NumericLu, SymbolicLu};
+use faer::sparse::linalg::lu::{
+    factorize_symbolic_lu, LuRef, LuSymbolicParams, NumericLu, SymbolicLu,
+};
+use faer::sparse::linalg::SupernodalThreshold;
 use faer::{Conj, MatMut};
 
 use super::{
-    memory, stack_bytes, DirectOptions, FactorEstimate, FactorKind, FactorScalar, NumericInner,
-    SparseInput, SymbolicFactorization, SymbolicInner,
+    memory, stack_bytes, DirectOptions, DirectWorkspacePolicy, FactorEstimate, FactorKind,
+    FactorScalar, NumericInner, SparseInput, SymbolicFactorization, SymbolicInner,
 };
 use crate::error::{SolverError, SolverResult};
 use crate::par;
@@ -15,7 +18,19 @@ pub(super) fn analyze<T: FactorScalar>(
     options: &DirectOptions,
 ) -> SolverResult<SymbolicFactorization> {
     let (columns, transposed) = matrix.as_columns();
-    let symbolic = factorize_symbolic_lu(columns.faer_symbolic(), Default::default())?;
+    // Caller-owned workspace forces the simplicial factorization: the supernodal dense update
+    // kernel keeps backend-managed packing storage (on x86_64 a per-thread buffer of twice the
+    // L3 cache size) that no quote covers.
+    let params = LuSymbolicParams {
+        supernodal_flop_ratio_threshold: if options.workspace == DirectWorkspacePolicy::CallerOwned
+        {
+            SupernodalThreshold::FORCE_SIMPLICIAL
+        } else {
+            SupernodalThreshold::AUTO
+        },
+        ..Default::default()
+    };
+    let symbolic = factorize_symbolic_lu(columns.faer_symbolic(), params)?;
     let (estimate, reference) = nominal_estimate::<T>(matrix, &symbolic)?;
     Ok(SymbolicFactorization {
         kind: FactorKind::Lu,

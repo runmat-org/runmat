@@ -166,11 +166,13 @@ impl RunMatSession {
                 let physical_path =
                     runmat_runtime::analysis::physical_source_path(&source_root, &logical_path)
                         .map_err(|error| error.to_string())?;
-                if let Ok(source) = runmat_filesystem::read_async(&physical_path).await {
-                    snapshot.add_module(FeaSourceSnapshotBuilder::source_module(
+                // A read error is reported by the check at the module's import.
+                match runmat_filesystem::read_async(&physical_path).await {
+                    Ok(source) => snapshot.add_module(FeaSourceSnapshotBuilder::source_module(
                         logical_path,
                         source,
-                    ))?;
+                    ))?,
+                    Err(error) => snapshot.add_module_read_error(logical_path, error),
                 }
             }
         }
@@ -200,8 +202,11 @@ impl RunMatSession {
                     Ok(bytes) => prepared.add_geometry(request.logical_path, bytes)?,
                     Err(error) => prepared.add_geometry_failure(request.logical_path, error),
                 }
-            } else if let Ok(bytes) = runmat_filesystem::read_async(&physical_path).await {
-                prepared.add_geometry(request.logical_path, bytes)?;
+            } else {
+                match runmat_filesystem::read_async(&physical_path).await {
+                    Ok(bytes) => prepared.add_geometry(request.logical_path, bytes)?,
+                    Err(error) => prepared.add_geometry_read_error(request.logical_path, error),
+                }
             }
         }
         Ok(CheckedFeaSessionSource {
