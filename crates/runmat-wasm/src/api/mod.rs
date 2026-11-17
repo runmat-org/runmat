@@ -30,6 +30,8 @@ pub(crate) mod session;
 #[cfg(not(feature = "graphics-replay"))]
 pub(crate) mod streams;
 #[cfg(not(feature = "graphics-replay"))]
+pub(crate) mod study_geometry;
+#[cfg(not(feature = "graphics-replay"))]
 pub(crate) mod testing;
 
 #[cfg(not(feature = "graphics-replay"))]

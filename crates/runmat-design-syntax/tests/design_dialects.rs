@@ -244,3 +244,19 @@ fn a_name_the_fea_dialect_reserves_is_a_name_in_a_design() {
     assert!(messages.is_empty(), "{messages:?}");
     assert_eq!(syntax.syntax().text(), text);
 }
+
+#[test]
+fn a_design_version_header_in_a_study_is_named_as_such() {
+    let module = runmat_design_syntax::parse_fea("runmat 0.7\nstd 1\n\nmodel m {}\n");
+    let headers: Vec<(usize, &str)> = module
+        .diagnostics
+        .iter()
+        .map(|d| (d.span.start, d.message.as_str()))
+        .collect();
+    assert_eq!(headers.len(), 2, "{headers:?}");
+    assert_eq!(headers[0].0, 0);
+    assert_eq!(headers[1].0, 11);
+    assert!(headers
+        .iter()
+        .all(|(_, message)| message.contains("`.fea` sources have no version header")));
+}

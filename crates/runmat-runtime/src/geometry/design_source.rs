@@ -12,12 +12,28 @@
 //! The bytes are deterministic, and their header carries the digest of the design's source
 //! closure, so the geometry identity changes exactly when the design or one of its dependencies
 //! changes.
+//!
+//! Two hosts regenerate a design. Native builds with the `occt-native` feature run the OCCT
+//! kernel in process. A browser session has no kernel; its geometry host installs a
+//! [`StudyGeometryProvider`] that regenerates on its own OCCT build and returns the same bytes.
+//! Async callers ([`read_design_geometry_async`], [`captured_design_geometry`],
+//! [`design_geometry_async`]) read the design's files through the provider's async API and use
+//! the installed provider when there is one. The synchronous functions serve native hosts only:
+//! where no in-process kernel exists they fail at once, before any file is read.
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
 use runmat_cad_wasm::exchange::study;
 use runmat_cad_wasm::runtime::Files;
+
+mod closure;
+mod study_host;
+
+pub use study_host::{
+    installed_study_geometry_provider, set_study_geometry_provider, StudyGeometryFuture,
+    StudyGeometryProvider,
+};
 
 /// The design files a dependency folder is listed for.
 const FOLDER_EXTENSIONS: &[&str] = &[".part", ".assembly"];
@@ -73,7 +89,8 @@ impl DesignFileSource for CapturedDesignFiles<'_> {
     }
 }
 
-/// The exact geometry bytes of the part or assembly at `path`, read from disk.
+/// The exact geometry bytes of the part or assembly at `path`, read synchronously from disk by a
+/// native host. Without an in-process kernel it fails before reading.
 pub fn read_design_geometry(path: &Path) -> Result<Vec<u8>, String> {
     design_geometry(path, None, &DiskDesignFiles)
 }
@@ -85,21 +102,106 @@ pub fn design_geometry(
     text: Option<&[u8]>,
     source: &dyn DesignFileSource,
 ) -> Result<Vec<u8>, String> {
+    if let Some(reason) = kernel_unavailable() {
+        return Err(evaluation_error(path, reason));
+    }
+    let root = design_path(path);
+    let text = root_text(path, text, source)?;
+    let files = gather(&root, text, source);
+    evaluate(&root, &files).map_err(|message| evaluation_error(path, &message))
+}
+
+/// The exact geometry bytes of the part or assembly at `path`, its files read through the
+/// filesystem provider's async API.
+pub async fn read_design_geometry_async(path: &Path) -> Result<Vec<u8>, String> {
+    design_geometry_async(path, None).await
+}
+
+/// [`read_design_geometry_async`] with the design's own text supplied; its dependencies are read
+/// through the provider's async API.
+pub async fn design_geometry_async(path: &Path, text: Option<&[u8]>) -> Result<Vec<u8>, String> {
+    ensure_regeneration_available(path)?;
     let root = design_path(path);
     let text = match text {
-        Some(bytes) => String::from_utf8(bytes.to_vec())
-            .map_err(|_| format!("design file `{}` is not UTF-8 text", path.display()))?,
-        None => source
-            .read(&root)
+        Some(bytes) => utf8_text(path, bytes)?,
+        None => closure::read_text(&root)
+            .await
             .ok_or_else(|| format!("cannot read design file `{}`", path.display()))?,
     };
-    let files = gather(&root, text, source);
-    evaluate(&root, &files).map_err(|message| {
-        format!(
-            "cannot evaluate design `{}` as study geometry: {message}",
-            path.display()
-        )
-    })
+    let files = closure::capture(&root, text).await;
+    regenerate(path, &root, &files).await
+}
+
+/// The exact geometry bytes of the part or assembly at `path`, evaluated from a checked capture
+/// alone (no fallback to live files).
+pub async fn captured_design_geometry(
+    path: &Path,
+    captured: &BTreeMap<PathBuf, Vec<u8>>,
+) -> Result<Vec<u8>, String> {
+    ensure_regeneration_available(path)?;
+    let root = design_path(path);
+    let source = CapturedDesignFiles(captured);
+    let text = root_text(path, None, &source)?;
+    let files = gather(&root, text, &source);
+    regenerate(path, &root, &files).await
+}
+
+/// Every file the part or assembly at `path` reads, its own text included, read through the
+/// provider's async API. Keys are the design compilers' slash-separated paths. A host that
+/// captures sources for a later check (the browser's working check) captures these too.
+pub async fn design_closure_files(path: &Path) -> Result<Files, String> {
+    let root = design_path(path);
+    let text = closure::read_text(&root)
+        .await
+        .ok_or_else(|| format!("cannot read design file `{}`", path.display()))?;
+    Ok(closure::capture(&root, text).await)
+}
+
+/// Fails at once when neither an installed provider nor an in-process kernel can regenerate a
+/// design, before any file is read.
+fn ensure_regeneration_available(path: &Path) -> Result<(), String> {
+    if installed_study_geometry_provider().is_some() {
+        return Ok(());
+    }
+    match kernel_unavailable() {
+        Some(reason) => Err(evaluation_error(path, reason)),
+        None => Ok(()),
+    }
+}
+
+/// Regenerates on the installed provider, else on the in-process kernel.
+async fn regenerate(path: &Path, root: &str, files: &Files) -> Result<Vec<u8>, String> {
+    let pending = installed_study_geometry_provider().map(|host| host.study_geometry(root, files));
+    let result = match pending {
+        Some(pending) => pending.await,
+        None => evaluate(root, files),
+    };
+    result.map_err(|message| evaluation_error(path, &message))
+}
+
+fn evaluation_error(path: &Path, message: &str) -> String {
+    format!(
+        "cannot evaluate design `{}` as study geometry: {message}",
+        path.display()
+    )
+}
+
+fn root_text(
+    path: &Path,
+    text: Option<&[u8]>,
+    source: &dyn DesignFileSource,
+) -> Result<String, String> {
+    match text {
+        Some(bytes) => utf8_text(path, bytes),
+        None => source
+            .read(&design_path(path))
+            .ok_or_else(|| format!("cannot read design file `{}`", path.display())),
+    }
+}
+
+fn utf8_text(path: &Path, bytes: &[u8]) -> Result<String, String> {
+    String::from_utf8(bytes.to_vec())
+        .map_err(|_| format!("design file `{}` is not UTF-8 text", path.display()))
 }
 
 /// A native path in the design compilers' slash-separated namespace.
@@ -159,7 +261,24 @@ fn evaluate(root: &str, files: &Files) -> Result<Vec<u8>, String> {
 
 #[cfg(not(all(not(target_arch = "wasm32"), feature = "occt-native")))]
 fn evaluate(_root: &str, _files: &Files) -> Result<Vec<u8>, String> {
-    Err("this build has no OCCT design kernel; open the study in RunMat Desktop or the CLI".into())
+    Err(kernel_unavailable()
+        .unwrap_or("this build has no OCCT design kernel")
+        .to_string())
+}
+
+/// Why this process cannot regenerate a design in process, or `None` when it can.
+fn kernel_unavailable() -> Option<&'static str> {
+    if cfg!(all(not(target_arch = "wasm32"), feature = "occt-native")) {
+        None
+    } else if cfg!(target_arch = "wasm32") {
+        Some(
+            "this browser session can't regenerate RunMat MCAD geometry: its geometry host has \
+not installed a study-geometry provider. Open the study in RunMat Desktop or the CLI, or point \
+`file =` at a STEP export of the design",
+        )
+    } else {
+        Some("this build has no OCCT design kernel; open the study in RunMat Desktop or the CLI")
+    }
 }
 
 #[cfg(all(not(target_arch = "wasm32"), feature = "occt-native"))]
@@ -280,8 +399,16 @@ mod tests {
                 .unwrap(),
             &CapturedDesignFiles(&memory.0),
         );
-        assert!(files.contains_key("/p/mech/arm/arm.part"), "{:?}", files.keys());
-        assert!(files.contains_key("/p/mech/arm/arm.step"), "{:?}", files.keys());
+        assert!(
+            files.contains_key("/p/mech/arm/arm.part"),
+            "{:?}",
+            files.keys()
+        );
+        assert!(
+            files.contains_key("/p/mech/arm/arm.step"),
+            "{:?}",
+            files.keys()
+        );
         assert!(!files.contains_key("/p/elsewhere/unrelated.part"));
         assert!(!files.contains_key("/p/mech/arm/notes.md"));
     }
@@ -300,9 +427,15 @@ mod tests {
         let path = Path::new("/p/sim/puck.part");
         let first = design_geometry(path, None, &CapturedDesignFiles(&view("13 mm"))).unwrap();
         let text = String::from_utf8(first.clone()).unwrap();
-        assert!(text.contains("ADVANCED_FACE('top'"), "the region names its face");
+        assert!(
+            text.contains("ADVANCED_FACE('top'"),
+            "the region names its face"
+        );
         assert!(text.contains("PRODUCT('puck'"), "the output names its body");
-        assert!(text.contains("sources sha256:"), "the header names the source closure");
+        assert!(
+            text.contains("sources sha256:"),
+            "the header names the source closure"
+        );
         // The same sources give the same bytes; a dimension edit gives different ones.
         let again = design_geometry(path, None, &CapturedDesignFiles(&view("13 mm"))).unwrap();
         assert_eq!(first, again);
@@ -322,7 +455,10 @@ mod tests {
         let stack = "runmat 0.7\nstd 1\n\nassembly stack {\n    use part puck as lower\n    use part puck as upper {\n        placement = { placement = offset, offset = { translation = [0 mm, 0 mm, 20 mm] } }\n    }\n}\n";
         let view = BTreeMap::from([
             (PathBuf::from("/p/sim/puck.part"), puck.as_bytes().to_vec()),
-            (PathBuf::from("/p/sim/stack.assembly"), stack.as_bytes().to_vec()),
+            (
+                PathBuf::from("/p/sim/stack.assembly"),
+                stack.as_bytes().to_vec(),
+            ),
         ]);
         let path = Path::new("/p/sim/stack.assembly");
         let bytes = design_geometry(path, None, &CapturedDesignFiles(&view)).unwrap();
@@ -343,12 +479,19 @@ mod tests {
             let both = imported.entities_named(face, "top").unwrap();
             let lower = imported.entities_named(face, "lower/top").unwrap();
             let upper = imported.entities_named(face, "upper/top").unwrap();
-            assert_eq!(both.len(), 2, "both occurrences publish `top` (shared {shared})");
+            assert_eq!(
+                both.len(),
+                2,
+                "both occurrences publish `top` (shared {shared})"
+            );
             assert_eq!((lower.len(), upper.len()), (1, 1), "shared {shared}");
             assert_ne!(lower, upper);
             assert!(
                 imported.entities_named(face, "stack/lower/top").is_err()
-                    || imported.entities_named(face, "stack/lower/top").unwrap().is_empty(),
+                    || imported
+                        .entities_named(face, "stack/lower/top")
+                        .unwrap()
+                        .is_empty(),
                 "the top-level assembly is not part of the path"
             );
             // The authored name stays first, so displays keep showing it.
