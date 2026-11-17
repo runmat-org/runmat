@@ -541,6 +541,49 @@ mod tests {
         );
     }
 
+    /// A study of a part checks `select name` against the regions the part publishes: a name
+    /// the part does not carry is refused with the names it does carry.
+    #[cfg(all(not(target_arch = "wasm32"), feature = "occt-native"))]
+    #[test]
+    fn a_study_refuses_a_region_name_the_part_does_not_publish() {
+        let part = "runmat 0.7\nstd 1\n\npart puck {\n    feature base = plane.offset(base = origin.xy, distance = 0 mm)\n    sketch s on plane.base {\n        c = circle(center = [0 mm, 0 mm], radius = 7 mm)\n    }\n    feature puck = extrude(profile = sketch.s, distance = 5 mm)\n    region top : face = { select = [feature.puck.face.end], expect = exactly_one }\n    region mount : face = { select = [feature.puck.face.start], expect = exactly_one }\n    output puck = { body = feature.puck.body, material = \"aluminum_6061\" }\n}\n";
+        let _filesystem = runmat_filesystem::provider_override_lock();
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("puck.part"), part).unwrap();
+        let check = |name: &str| {
+            crate::analysis::check_fea_source_in_root(
+                dir.path(),
+                &dir.path().join("pressed.fea"),
+                format!("geometry puck {{ file = \"./puck.part\"\n    region pressed : face {{ select name \"{name}\"; expect exactly_one }}\n}}\n"),
+            )
+            .unwrap()
+        };
+        let refused = check("mounting");
+        let messages = refused
+            .diagnostics
+            .iter()
+            .map(|diagnostic| diagnostic.message.as_str())
+            .collect::<Vec<_>>();
+        assert!(
+            messages
+                .iter()
+                .any(|message| message.contains("selects face name \"mounting\"")
+                    && message.contains("named faces: ")
+                    && message.contains("\"mount\"")
+                    && message.contains("\"top\"")),
+            "{messages:#?}"
+        );
+        let admitted = check("mount");
+        assert!(
+            !admitted
+                .diagnostics
+                .iter()
+                .any(|diagnostic| diagnostic.message.contains("\"mount\"")),
+            "{:#?}",
+            admitted.diagnostics
+        );
+    }
+
     #[test]
     fn only_parts_and_assemblies_are_design_geometry() {
         assert!(is_design_geometry("sim/arm.part"));

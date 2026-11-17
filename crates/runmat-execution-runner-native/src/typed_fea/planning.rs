@@ -2,7 +2,7 @@
 use runmat_core::CheckedFeaSessionSource;
 use runmat_runtime::analysis::{
     AnalysisExecutionCandidate, AnalysisExecutionChoices, AnalysisExecutionMode,
-    AnalysisExecutionReadiness,
+    AnalysisExecutionReadiness, AnalysisOperationEstimate,
 };
 pub async fn plan_checked_fea_locally(
     source: &CheckedFeaSessionSource,
@@ -44,6 +44,14 @@ async fn plan_checked_fea(
             limit.next_action
         )
     });
+    // The operations the run charges, on the path this machine's memory selects. Hosts compare
+    // the total with the allowance left and refuse before Run; admission refuses it too.
+    let operations = estimate
+        .and_then(|estimate| {
+            estimate.operations(crate::machine_capacity::memory_bytes().unwrap_or(u64::MAX))
+        })
+        .as_ref()
+        .and_then(AnalysisOperationEstimate::from_estimate);
     let cores = (crate::machine_capacity::cpu_millicores() / 1000).min(32);
     let parallel_memory = None;
     let duration = |cores| {
@@ -80,6 +88,7 @@ async fn plan_checked_fea(
                 estimated_element_count: estimate.map(|estimate| estimate.element_count),
                 estimated_node_count: estimate.map(|estimate| estimate.node_count),
                 resource_limit: limit.clone(),
+                estimated_operations: operations.clone(),
             },
             AnalysisExecutionCandidate {
                 mode: AnalysisExecutionMode::MultiCore,
@@ -98,6 +107,7 @@ async fn plan_checked_fea(
                 estimated_element_count: estimate.map(|estimate| estimate.element_count),
                 estimated_node_count: estimate.map(|estimate| estimate.node_count),
                 resource_limit: limit,
+                estimated_operations: operations,
             },
         ],
     })

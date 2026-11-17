@@ -98,6 +98,7 @@ const progressEnumTypes = [
 const analysisStructTypes = [
   ["AnalysisExecutionDuration", "FeaExecutionDuration", { renameAll: "camelCase" }],
   ["AnalysisResourceLimit", "FeaResourceLimit", { renameAll: "camelCase" }],
+  ["AnalysisOperationEstimate", "FeaOperationEstimate", { renameAll: "camelCase" }],
   ["AnalysisExecutionCandidate", "FeaExecutionCandidate", { renameAll: "camelCase" }],
   ["AnalysisExecutionChoices", "FeaExecutionChoices", { renameAll: "camelCase" }],
   ["AnalysisRuntimeCapabilities", "FeaCapabilities", { renameAll: "camelCase" }],
@@ -179,6 +180,9 @@ function rustTypeToTs(type) {
       return { type: "PublishedStudyReassessment", nullable: false };
     case "runmat_execution::Digest":
       return { type: '`sha256:${string}`', nullable: false };
+    case "runmat_simulation_usage::OperationCount":
+      // Canonical decimal string of an exact operation count; read it with BigInt.
+      return { type: "string", nullable: false };
     case "String":
     case "&'static str":
       return { type: "string", nullable: false };

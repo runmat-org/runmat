@@ -98,6 +98,7 @@ pub(super) fn denied_to_js(denied: FeaRunDenied) -> JsValue {
         FeaRunDenied::ServerUnreachable => "serverUnreachable",
         FeaRunDenied::AllowanceUnpublished => "allowanceUnpublished",
         FeaRunDenied::BudgetUnavailable { .. } => "budgetUnavailable",
+        FeaRunDenied::AllowanceInsufficient { .. } => "allowanceInsufficient",
         FeaRunDenied::Accounting(_) => "accountingInvalid",
     };
     let payload = js_sys::Object::new();
@@ -116,6 +117,15 @@ pub(super) fn denied_to_js(denied: FeaRunDenied) -> JsValue {
             &"availableOps".into(),
             &available.to_string().into(),
         );
+    }
+    if let FeaRunDenied::AllowanceInsufficient {
+        estimated_ops,
+        available_ops,
+    } = &denied
+    {
+        for (key, count) in [("estimatedOps", estimated_ops), ("availableOps", available_ops)] {
+            let _ = js_sys::Reflect::set(&payload, &key.into(), &count.to_string().into());
+        }
     }
     if let FeaRunDenied::AllowanceUsed {
         refills_at_unix_seconds: Some(seconds),
@@ -220,6 +230,15 @@ pub(super) fn denial_from_js(error: JsValue) -> FeaRunDenied {
         };
         FeaRunDenied::BudgetUnavailable {
             available_ops: serde_wasm_bindgen::from_value(available).ok(),
+        }
+    } else if reason.as_deref() == Some("allowanceInsufficient") {
+        let count = |key: &str| serde_wasm_bindgen::from_value(field(&denied, key)).ok();
+        match (count("estimatedOps"), count("availableOps")) {
+            (Some(estimated_ops), Some(available_ops)) => FeaRunDenied::AllowanceInsufficient {
+                estimated_ops,
+                available_ops,
+            },
+            _ => FeaRunDenied::LicenseInvalid,
         }
     } else if reason.as_deref() == Some("signInRequired") || status == Some(401.0) {
         FeaRunDenied::SignInRequired
