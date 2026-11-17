@@ -323,9 +323,9 @@ This file is generated from the command catalog.
   - Required: `parent` (pick: view); `center` (pick: edge); `radius` (number in mm, default 5); `label` (text); `scale` (text)
   - Optional: `at` (pick: point)
   - Runs on the `selection`: `view`
-- `drawing.edit-view`: Edit the view's scale, orientation, display style, label and place.
+- `drawing.edit-view`: Edit the view's scale, orientation, display style, tangent edges, label and place.
   - Required: `scale` (text); `orientation` (one of `front`, `back`, `top`, `bottom`, `left`, `right`, `isometric`, `dimetric`, `trimetric`, default `front`); `display` (one of `hidden_removed`, `hidden_visible`, `shaded`, default `hidden_removed`)
-  - Optional: `label` (text); `at` (pick: point)
+  - Optional: `tangent_edges` (one of `thin`, `show`, `hide`, default `thin`); `label` (text); `at` (pick: point)
   - Runs on the `selection`: `view`
 - `drawing.export`: Export as PDF, DXF, DWG or SVG.
   - Required: `format` (one of `pdf`, `dxf`, `dwg`, `svg`, default `pdf`); `sheets` (one of `all`, `current`, default `all`)
