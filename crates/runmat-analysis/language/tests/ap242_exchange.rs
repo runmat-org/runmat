@@ -303,6 +303,7 @@ fn parameterized_geometry_inspection() -> GeometryInspection {
         capabilities: vec![
             GeometryInspectionCapability::Topology,
             GeometryInspectionCapability::PersistentIds,
+            GeometryInspectionCapability::AuthoredNames,
             GeometryInspectionCapability::Parameters,
             GeometryInspectionCapability::EngineeringProperties,
             GeometryInspectionCapability::MaterialCandidates,

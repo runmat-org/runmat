@@ -79,6 +79,7 @@ study steady { geometry = geometry.part; mesh = mesh.part; model = model.flow; a
             capabilities: vec![
                 GeometryInspectionCapability::Topology,
                 GeometryInspectionCapability::PersistentIds,
+                GeometryInspectionCapability::AuthoredNames,
             ],
             exchange: None,
             resolved_units: None,
