@@ -1,3 +1,4 @@
+mod authored_names;
 mod command;
 mod cross_section;
 mod feature;
@@ -131,13 +132,7 @@ fn definition(
             error(declaration, file_span, message, diagnostics);
             return None;
         };
-        if inspection
-            .facts
-            .capabilities
-            .contains(&GeometryInspectionCapability::PersistentIds)
-        {
-            check_authored_names(declaration, &regions, inspection, diagnostics);
-        }
+        authored_names::check(declaration, &regions, inspection, diagnostics);
         imported_source(declaration, inspection, diagnostics)?
     } else if let Some(statements) = construct {
         if declaration.source.is_some() {
@@ -259,75 +254,6 @@ fn imported_interfaces(
 }
 
 /// A `select name` must match a name the inspected source carries for that role.
-fn check_authored_names(
-    declaration: &CheckedFeaDeclaration,
-    regions: &[GeometryRegionDefinition],
-    inspection: &CheckedGeometryInspection,
-    diagnostics: &mut Vec<FeaDiagnostic>,
-) {
-    for region in regions {
-        let GeometryRegionSelector::Name(name) = &region.selector else {
-            continue;
-        };
-        let role = match region.role {
-            GeometryRegionRole::Vertex => "vertex",
-            GeometryRegionRole::Edge => "edge",
-            GeometryRegionRole::Face => "face",
-            GeometryRegionRole::Solid | GeometryRegionRole::Cell => "solid",
-        };
-        let roles = if role == "vertex" {
-            "vertices".to_string()
-        } else {
-            format!("{role}s")
-        };
-        let available = inspection
-            .facts
-            .authored_names
-            .get(role)
-            .map(Vec::as_slice)
-            .unwrap_or_default();
-        let matches = available
-            .iter()
-            .filter(|candidate| *candidate == name)
-            .count();
-        if matches > 1 && region.cardinality == GeometryRegionCardinality::ExactlyOne {
-            error(
-                declaration,
-                declaration.span,
-                format!(
-                    "region `{}` selects {role} name \"{name}\", which {matches} {roles} in `{}` carry; it expects exactly_one (name each entity uniquely in the CAD file, or use expect one_or_more)",
-                    region.region_id, inspection.source_path
-                ),
-                diagnostics,
-            );
-            continue;
-        }
-        if matches > 0 {
-            continue;
-        }
-        let mut available = available.to_vec();
-        available.dedup();
-        let message = if available.is_empty() {
-            format!(
-                "region `{}` selects {role} name \"{name}\", but `{}` names no {roles}",
-                region.region_id, inspection.source_path
-            )
-        } else {
-            format!(
-                "region `{}` selects {role} name \"{name}\", which `{}` does not carry; named {roles}: {}",
-                region.region_id,
-                inspection.source_path,
-                available
-                    .iter()
-                    .map(|candidate| format!("\"{candidate}\""))
-                    .collect::<Vec<_>>()
-                    .join(", ")
-            )
-        };
-        error(declaration, declaration.span, message, diagnostics);
-    }
-}
-
 fn named_block<'a>(
     statements: &'a [CheckedFeaStatement],
     name: &str,
