@@ -443,5 +443,20 @@ mod tests {
             .map(|l| l.name.as_str())
             .collect();
         assert_eq!(path, ["WallHook_30mm", "Hook seat"]);
+
+        // A STEP that names neither the face nor its body (or names them blank): the face keeps
+        // its number with no owner entry, so Measure reads "Face 1", never an empty owner.
+        let mut asset = self::asset();
+        asset.regions[0].name = "Face 1".into();
+        let projection =
+            projection.with_authored_names(BTreeMap::from([(solid_key.clone(), " ".to_string())]));
+        projection.bind(&mut asset).unwrap();
+        let ownership = asset.regions[0].cad_ownership.clone().unwrap();
+        assert_eq!(asset.regions[0].name, "Face 1");
+        assert_eq!(ownership.face_id, Some(0));
+        assert_eq!(ownership.label, None);
+        assert!(ownership.owner_path.is_empty());
+        assert_eq!(asset.regions[1].name, "Solid");
+        assert_eq!(asset.regions[1].cad_ownership, None);
     }
 }
