@@ -177,6 +177,9 @@ impl CheckedFeaSessionSource {
                 &access,
             )
             .await?;
+        use runmat_analysis_fea::progress::trace::{self, StudyStep};
+        use tracing::Instrument;
+        let mesh_step = StudyStep::Mesh.span();
         runmat_analysis_fea::progress::emit_phase(
             "fea.prepare",
             runmat_analysis_fea::FeaProgressPhase::GeometryLoad,
@@ -187,7 +190,11 @@ impl CheckedFeaSessionSource {
         );
         let geometry = host
             .materialize_and_mesh(program, geometry_source, resolved.mesh.settings)
+            .instrument(mesh_step.clone())
             .await?;
+        trace::finish(&mesh_step, &trace::mesh_result(&geometry.mesh));
+        drop(mesh_step);
+        let assemble_step = StudyStep::Assemble.span();
         geometry
             .geometry
             .validate_against(&geometry_request)
@@ -209,22 +216,25 @@ impl CheckedFeaSessionSource {
             None,
             None,
         );
-        let compiled = compile_analysis_study(AnalysisStudyCompilationInput {
-            study: &realized,
-            geometry: &geometry.geometry.document,
-            regions: &geometry.geometry.regions,
-            materials: &resolved.material_catalog,
-            mesh: &geometry.mesh,
-        })
-        .map_err(|e| e.to_string())?;
-        let workloads = plan_structural_study(
-            &compiled,
-            StructuralStudyPlanningPolicy {
-                backend: runmat_analysis_fea::ComputeBackend::Cpu,
-                numerics: StructuralNumericalPlanningPolicy::production(),
-            },
-        )
-        .map_err(|e| e.to_string())?;
+        let (compiled, workloads) = assemble_step.in_scope(|| {
+            let compiled = compile_analysis_study(AnalysisStudyCompilationInput {
+                study: &realized,
+                geometry: &geometry.geometry.document,
+                regions: &geometry.geometry.regions,
+                materials: &resolved.material_catalog,
+                mesh: &geometry.mesh,
+            })
+            .map_err(|e| e.to_string())?;
+            let workloads = plan_structural_study(
+                &compiled,
+                StructuralStudyPlanningPolicy {
+                    backend: runmat_analysis_fea::ComputeBackend::Cpu,
+                    numerics: StructuralNumericalPlanningPolicy::production(),
+                },
+            )
+            .map_err(|e| e.to_string())?;
+            Ok::<_, String>((compiled, workloads))
+        })?;
         let frozen_project_digest = self
             .frozen_project()
             .map(|project| Digest::from_bytes(*project.graph_digest().bytes()));
@@ -240,7 +250,15 @@ impl CheckedFeaSessionSource {
             },
             worker_budget_bytes,
         )
+        .instrument(assemble_step.clone())
         .await?;
+        // The browser runs static structural studies on solid meshes: three displacement
+        // unknowns per node.
+        trace::finish(
+            &assemble_step,
+            &trace::dof_result(3 * geometry.mesh.topology.nodes.len() as u64),
+        );
+        drop(assemble_step);
         let mut study = PreparedSerialFeaStudy {
             compiled,
             mesh: geometry.mesh,

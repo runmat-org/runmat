@@ -155,6 +155,13 @@ pub(super) fn prepare_static_preassembly(
         )
         .into());
     }
+    // Refuse before assembly reserves anything when this solve cannot finish within the
+    // allowance the run has left.
+    crate::planning::operations::admit_planned_static_operations(
+        &resource_plan,
+        options.solver_mesh.as_ref(),
+    )
+    .map_err(FeaRunError::Usage)?;
     // Both PCG and saddle-point GMRES prove a prepared SPD operator (reduced where needed).
     // The multiplier's Krylov workspace still needs measured reconciliation.
     let solver_admission = match &resource_plan.input.demand {

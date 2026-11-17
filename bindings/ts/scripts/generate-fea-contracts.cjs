@@ -98,6 +98,7 @@ const progressEnumTypes = [
 const analysisStructTypes = [
   ["AnalysisExecutionDuration", "FeaExecutionDuration", { renameAll: "camelCase" }],
   ["AnalysisResourceLimit", "FeaResourceLimit", { renameAll: "camelCase" }],
+  ["AnalysisOperationEstimate", "FeaOperationEstimate", { renameAll: "camelCase" }],
   ["AnalysisExecutionCandidate", "FeaExecutionCandidate", { renameAll: "camelCase" }],
   ["AnalysisExecutionChoices", "FeaExecutionChoices", { renameAll: "camelCase" }],
   ["AnalysisRuntimeCapabilities", "FeaCapabilities", { renameAll: "camelCase" }],
@@ -126,6 +127,20 @@ const analysisStructTypes = [
   ["ContactEnforcementOptions", "FeaContactEnforcementOptions", {}],
   ["AnalysisNonlinearRunOptions", "FeaStructuralNonlinearOptions", {}],
   ["AnalysisMaxwellRunOptions", "FeaMaxwellHarmonicOptions", {}],
+];
+// Progress timing and metadata keys of crates/runmat-analysis/fea/src/progress/rate.rs. Hosts
+// that draw heartbeats from their own timer read these instead of copying the numbers.
+const rustFeaProgressRatePath = path.resolve(
+  repoRoot,
+  "crates/runmat-analysis/fea/src/progress/rate.rs"
+);
+const progressConstants = [
+  ["MINIMUM_EVENT_INTERVAL_MS", "FEA_PROGRESS_MINIMUM_EVENT_INTERVAL_MS"],
+  ["HEARTBEAT_INTERVAL_MS", "FEA_PROGRESS_HEARTBEAT_INTERVAL_MS"],
+  ["HEARTBEAT_POLL_INTERVAL_MS", "FEA_PROGRESS_HEARTBEAT_POLL_INTERVAL_MS"],
+  ["UNIT_METADATA", "FEA_PROGRESS_UNIT_METADATA"],
+  ["HEARTBEAT_METADATA", "FEA_PROGRESS_HEARTBEAT_METADATA"],
+  ["ELAPSED_METADATA", "FEA_PROGRESS_ELAPSED_METADATA"],
 ];
 const progressStructTypes = [
   ["FeaProgressEvent", "FeaProgressEvent", { renameAll: "camelCase" }],
@@ -179,6 +194,9 @@ function rustTypeToTs(type) {
       return { type: "PublishedStudyReassessment", nullable: false };
     case "runmat_execution::Digest":
       return { type: '`sha256:${string}`', nullable: false };
+    case "runmat_simulation_usage::OperationCount":
+      // Canonical decimal string of an exact operation count; read it with BigInt.
+      return { type: "string", nullable: false };
     case "String":
     case "&'static str":
       return { type: "string", nullable: false };
@@ -479,10 +497,17 @@ function main() {
   const geometryAuthoringSource = fs.readFileSync(rustGeometryAuthoringPath, "utf8");
   const meshingRequestSource = fs.readFileSync(rustMeshingRequestPath, "utf8");
   const feaContractsSource = fs.readFileSync(rustFeaContractsPath, "utf8");
-  const constants = analysisConstants.map(([rustName, tsName]) => ({
-    tsName,
-    value: readAnalysisConstant(analysisSource, rustName),
-  }));
+  const progressRateSource = fs.readFileSync(rustFeaProgressRatePath, "utf8");
+  const constants = [
+    ...analysisConstants.map(([rustName, tsName]) => ({
+      tsName,
+      value: readAnalysisConstant(analysisSource, rustName),
+    })),
+    ...progressConstants.map(([rustName, tsName]) => ({
+      tsName,
+      value: readAnalysisConstant(progressRateSource, rustName),
+    })),
+  ];
   const analysisEnumValues = analysisEnumTypes.map(([rustName, tsName]) => ({
     rustName,
     tsName,
