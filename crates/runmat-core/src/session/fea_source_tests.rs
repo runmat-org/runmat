@@ -235,3 +235,183 @@ fn the_working_and_full_checks_report_the_same_syntax() {
     let full = syntax(&full_check(project(&[(study, body.as_bytes())]), study));
     assert!(full.is_empty(), "{full:#?}");
 }
+
+/// Fails reads of the named paths with the given error kind; everything else reaches the
+/// in-memory project.
+struct FailingReads {
+    inner: Arc<MemoryFsProvider>,
+    failures: Vec<(&'static str, std::io::ErrorKind)>,
+}
+
+#[async_trait::async_trait(?Send)]
+impl FsProvider for FailingReads {
+    fn path_namespace(&self) -> runmat_filesystem::FsPathNamespace {
+        self.inner.path_namespace()
+    }
+    fn current_dir_override(&self) -> Option<std::path::PathBuf> {
+        self.inner.current_dir_override()
+    }
+    fn open(
+        &self,
+        path: &Path,
+        flags: &runmat_filesystem::OpenFlags,
+    ) -> std::io::Result<Box<dyn runmat_filesystem::FileHandle>> {
+        self.inner.open(path, flags)
+    }
+    async fn read(&self, path: &Path) -> std::io::Result<Vec<u8>> {
+        match self
+            .failures
+            .iter()
+            .find(|(failing, _)| path == Path::new(failing))
+        {
+            Some((_, kind)) => Err(std::io::Error::new(*kind, "the project service timed out")),
+            None => self.inner.read(path).await,
+        }
+    }
+    async fn write(&self, path: &Path, data: &[u8]) -> std::io::Result<()> {
+        self.inner.write(path, data).await
+    }
+    async fn remove_file(&self, path: &Path) -> std::io::Result<()> {
+        self.inner.remove_file(path).await
+    }
+    async fn metadata(&self, path: &Path) -> std::io::Result<runmat_filesystem::FsMetadata> {
+        self.inner.metadata(path).await
+    }
+    async fn symlink_metadata(
+        &self,
+        path: &Path,
+    ) -> std::io::Result<runmat_filesystem::FsMetadata> {
+        self.inner.symlink_metadata(path).await
+    }
+    async fn read_dir(&self, path: &Path) -> std::io::Result<Vec<runmat_filesystem::DirEntry>> {
+        self.inner.read_dir(path).await
+    }
+    async fn canonicalize(&self, path: &Path) -> std::io::Result<std::path::PathBuf> {
+        self.inner.canonicalize(path).await
+    }
+    async fn create_dir(&self, path: &Path) -> std::io::Result<()> {
+        self.inner.create_dir(path).await
+    }
+    async fn create_dir_all(&self, path: &Path) -> std::io::Result<()> {
+        self.inner.create_dir_all(path).await
+    }
+    async fn remove_dir(&self, path: &Path) -> std::io::Result<()> {
+        self.inner.remove_dir(path).await
+    }
+    async fn remove_dir_all(&self, path: &Path) -> std::io::Result<()> {
+        self.inner.remove_dir_all(path).await
+    }
+    async fn rename(&self, from: &Path, to: &Path) -> std::io::Result<()> {
+        self.inner.rename(from, to).await
+    }
+    async fn set_readonly(&self, path: &Path, readonly: bool) -> std::io::Result<()> {
+        self.inner.set_readonly(path, readonly).await
+    }
+}
+
+const READ_ERROR_STUDY: &str = r#"import material steel from "./materials.fea"
+
+geometry plate {
+    file = "./plate.step"
+    region body : solid { select name "plate"; expect exactly_one }
+}
+"#;
+
+/// Checks `READ_ERROR_STUDY` with reads of `materials.fea` and `plate.step` failing with
+/// `kind`, and returns each diagnostic's code, message and the study text it points at.
+fn check_with_failing_reads(kind: std::io::ErrorKind) -> Vec<(String, String, Option<String>)> {
+    let study = "/project/simulation/study.fea";
+    let provider = Arc::new(FailingReads {
+        inner: project(&[
+            (study, READ_ERROR_STUDY.as_bytes()),
+            ("/project/simulation/materials.fea", b"material steel {}\n"),
+            ("/project/simulation/plate.step", b"ISO-10303-21;\n"),
+        ]),
+        failures: vec![
+            ("/project/simulation/materials.fea", kind),
+            ("/project/simulation/plate.step", kind),
+        ],
+    });
+    let result = runmat_filesystem::with_provider_override(provider, || {
+        let mut session = RunMatSession::with_options(false, false).unwrap();
+        futures::executor::block_on(session.check_fea_source_path(Path::new(study))).unwrap()
+    });
+    result
+        .diagnostics
+        .iter()
+        .map(|diagnostic| {
+            let at = diagnostic.location.as_ref().map(|location| {
+                READ_ERROR_STUDY[location.span.start..location.span.end].to_string()
+            });
+            (diagnostic.code.clone(), diagnostic.message.clone(), at)
+        })
+        .collect()
+}
+
+/// G106: a provider read error reaches the user at the import or `file =` that asked for the
+/// file, with the provider's own text.
+#[test]
+fn a_failed_read_reports_the_provider_error_where_the_file_is_named() {
+    let _guard = runmat_filesystem::provider_override_lock();
+    let diagnostics = check_with_failing_reads(std::io::ErrorKind::TimedOut);
+    let at = |needle: &str| {
+        diagnostics
+            .iter()
+            .find(|(_, message, _)| message.contains(needle))
+            .unwrap_or_else(|| panic!("no diagnostic mentions {needle}: {diagnostics:#?}"))
+    };
+    let (code, message, location) = at("cannot read FEA module");
+    assert_eq!(code, "fea.host.module_unavailable");
+    assert_eq!(
+        message,
+        "cannot read FEA module `materials.fea`: the project service timed out"
+    );
+    assert!(
+        location
+            .as_deref()
+            .is_some_and(|text| text.contains("./materials.fea")),
+        "{diagnostics:#?}"
+    );
+    let (code, message, location) = at("cannot read geometry");
+    assert_eq!(code, "fea.host.geometry_unavailable");
+    assert_eq!(
+        message,
+        "cannot read geometry `plate.step`: the project service timed out"
+    );
+    assert!(
+        location
+            .as_deref()
+            .is_some_and(|text| text.contains("./plate.step")),
+        "{diagnostics:#?}"
+    );
+    assert!(
+        diagnostics
+            .iter()
+            .all(|(_, message, _)| !message.contains("immutable source snapshot")),
+        "{diagnostics:#?}"
+    );
+}
+
+/// A file that does not exist still reads as absent.
+#[test]
+fn a_missing_file_still_reads_as_absent() {
+    let _guard = runmat_filesystem::provider_override_lock();
+    let diagnostics = check_with_failing_reads(std::io::ErrorKind::NotFound);
+    for absent in [
+        "FEA module `materials.fea` is absent from the immutable source snapshot",
+        "geometry `plate.step` is absent from the immutable source snapshot",
+    ] {
+        assert!(
+            diagnostics
+                .iter()
+                .any(|(_, message, _)| message.contains(absent)),
+            "{absent}: {diagnostics:#?}"
+        );
+    }
+    assert!(
+        diagnostics
+            .iter()
+            .all(|(_, message, _)| !message.contains("cannot read")),
+        "{diagnostics:#?}"
+    );
+}

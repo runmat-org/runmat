@@ -1,5 +1,6 @@
 use std::cell::RefCell;
 use std::collections::BTreeMap;
+use std::io;
 use std::path::{Path, PathBuf};
 
 use runmat_analysis_language::{
@@ -28,6 +29,8 @@ pub struct FeaSourceSnapshotBuilder {
     logical_root: LogicalSourcePath,
     root: LogicalSourcePath,
     modules: BTreeMap<LogicalSourcePath, SourceModule>,
+    /// Modules the host found but could not read, reported by the check at their import.
+    module_failures: BTreeMap<LogicalSourcePath, SourceDiagnostic>,
 }
 
 impl FeaSourceSnapshotBuilder {
@@ -46,6 +49,7 @@ impl FeaSourceSnapshotBuilder {
             logical_root,
             root: root_path,
             modules,
+            module_failures: BTreeMap::new(),
         })
     }
 
@@ -81,16 +85,31 @@ impl FeaSourceSnapshotBuilder {
         Ok(())
     }
 
+    /// Records the host's error for a module it could not read. A module that does not exist
+    /// stays absent, and the check reports it as absent from the snapshot.
+    pub fn add_module_read_error(&mut self, logical_path: LogicalSourcePath, error: io::Error) {
+        if error.kind() != io::ErrorKind::NotFound {
+            let failure = diagnostic(
+                "fea.host.module_unavailable",
+                format!("cannot read FEA module `{logical_path}`: {error}"),
+                SourceAvailability::Unavailable,
+            );
+            self.module_failures.insert(logical_path, failure);
+        }
+    }
+
     pub fn missing_module_paths(&self) -> Result<Vec<LogicalSourcePath>, String> {
         let geometry = BTreeMap::new();
-        let host = SnapshotFeaHost::new(&self.modules, &geometry, Vec::new(), Vec::new())?;
+        let mut host = SnapshotFeaHost::new(&self.modules, &geometry, Vec::new(), Vec::new())?;
+        host.module_failures = &self.module_failures;
         let _ = self.build_graph(&host)?;
         Ok(host.take_requests().modules)
     }
 
     pub fn prepare(self) -> Result<PreparedFeaSourceSnapshot, String> {
         let geometry = BTreeMap::new();
-        let host = SnapshotFeaHost::new(&self.modules, &geometry, Vec::new(), Vec::new())?;
+        let mut host = SnapshotFeaHost::new(&self.modules, &geometry, Vec::new(), Vec::new())?;
+        host.module_failures = &self.module_failures;
         let graph = self.build_graph(&host)?;
         Ok(PreparedFeaSourceSnapshot {
             physical_root: self.physical_root,
@@ -120,9 +139,10 @@ pub struct PreparedFeaSourceSnapshot {
     graph: FeaModuleGraph,
     modules: BTreeMap<LogicalSourcePath, SourceModule>,
     geometry: BTreeMap<LogicalSourcePath, Vec<u8>>,
-    /// Geometry sources the host could not produce (a part that does not regenerate), with
-    /// the host's reason, reported by the check at the geometry's `file =`.
-    geometry_failures: BTreeMap<LogicalSourcePath, String>,
+    /// Geometry sources the host could not produce (a part that does not regenerate or a file
+    /// it could not read), with the host's reason, reported by the check at the geometry's
+    /// `file =`.
+    geometry_failures: BTreeMap<LogicalSourcePath, SourceDiagnostic>,
 }
 
 impl PreparedFeaSourceSnapshot {
@@ -191,7 +211,25 @@ impl PreparedFeaSourceSnapshot {
 
     /// Records why the host could not produce the geometry at `logical_path`.
     pub fn add_geometry_failure(&mut self, logical_path: LogicalSourcePath, message: String) {
-        self.geometry_failures.insert(logical_path, message);
+        let failure = diagnostic(
+            "fea.host.design_geometry_failed",
+            message,
+            SourceAvailability::Available,
+        );
+        self.geometry_failures.insert(logical_path, failure);
+    }
+
+    /// Records the host's error for a geometry file it could not read. A file that does not
+    /// exist stays absent, and the check reports it as absent from the snapshot.
+    pub fn add_geometry_read_error(&mut self, logical_path: LogicalSourcePath, error: io::Error) {
+        if error.kind() != io::ErrorKind::NotFound {
+            let failure = diagnostic(
+                "fea.host.geometry_unavailable",
+                format!("cannot read geometry `{logical_path}`: {error}"),
+                SourceAvailability::Unavailable,
+            );
+            self.geometry_failures.insert(logical_path, failure);
+        }
     }
 
     pub fn check(
@@ -203,7 +241,7 @@ impl PreparedFeaSourceSnapshot {
         profiles.sort_by(|left, right| left.profile.cmp(&right.profile));
         let mut host =
             SnapshotFeaHost::new(&self.modules, &self.geometry, functions, profiles.clone())?;
-        host.failures = &self.geometry_failures;
+        host.geometry_failures = &self.geometry_failures;
         if self.graph.catalog_fingerprint != host.fingerprint() {
             return Err(
                 "FEA operation catalog changed between source preparation and checking".into(),
@@ -232,7 +270,8 @@ struct SnapshotRequestLog {
 struct SnapshotFeaHost<'a> {
     modules: &'a BTreeMap<LogicalSourcePath, SourceModule>,
     geometry: &'a BTreeMap<LogicalSourcePath, Vec<u8>>,
-    failures: &'a BTreeMap<LogicalSourcePath, String>,
+    module_failures: &'a BTreeMap<LogicalSourcePath, SourceDiagnostic>,
+    geometry_failures: &'a BTreeMap<LogicalSourcePath, SourceDiagnostic>,
     functions: BTreeMap<(LogicalSourcePath, SourceSymbol), FunctionFacts>,
     profiles: BTreeMap<ExecutionProfileIdentity, ExecutionProfileFacts>,
     catalog: ComposedOperationCatalog,
@@ -261,11 +300,12 @@ impl<'a> SnapshotFeaHost<'a> {
                 );
             }
         }
-        static NO_FAILURES: BTreeMap<LogicalSourcePath, String> = BTreeMap::new();
+        static NO_FAILURES: BTreeMap<LogicalSourcePath, SourceDiagnostic> = BTreeMap::new();
         Ok(Self {
             modules,
             geometry,
-            failures: &NO_FAILURES,
+            module_failures: &NO_FAILURES,
+            geometry_failures: &NO_FAILURES,
             functions: function_facts,
             profiles: profile_facts,
             catalog: fea_operation_catalog()?,
@@ -280,6 +320,9 @@ impl<'a> SnapshotFeaHost<'a> {
 
 impl FeaModuleSource for SnapshotFeaHost<'_> {
     fn load(&self, request: &ModuleRequest) -> Result<SourceModule, SourceDiagnostic> {
+        if let Some(failure) = self.module_failures.get(&request.logical_path) {
+            return Err(failure.clone());
+        }
         self.modules
             .get(&request.logical_path)
             .cloned()
@@ -323,12 +366,8 @@ impl GeometryInspectionSource for SnapshotFeaHost<'_> {
         &self,
         request: &GeometryInspectionRequest,
     ) -> Result<GeometryInspection, SourceDiagnostic> {
-        if let Some(message) = self.failures.get(&request.logical_path) {
-            return Err(diagnostic(
-                "fea.host.design_geometry_failed",
-                message.clone(),
-                SourceAvailability::Available,
-            ));
+        if let Some(failure) = self.geometry_failures.get(&request.logical_path) {
+            return Err(failure.clone());
         }
         let Some(bytes) = self.geometry.get(&request.logical_path) else {
             push_unique(&mut self.requests.borrow_mut().geometry, request.clone());
