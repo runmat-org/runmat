@@ -45,7 +45,7 @@ pub(super) fn cost(
     let part = report.parts.first();
     let density = part.and_then(|p| p.density);
     let mass = part.and_then(|p| p.mass);
-    let volume = report.total.volume;
+    let volume = report.volume;
     // Machining's stock: the part's box (from its display) with the allowance on each side.
     let allowance = number(values, "allowance").unwrap_or(0.0).max(0.0) / 1000.0;
     let mut facts = std::collections::BTreeMap::new();
