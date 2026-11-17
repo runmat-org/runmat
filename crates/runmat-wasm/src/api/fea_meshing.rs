@@ -27,7 +27,8 @@ pub(super) async fn execute(
         .clone()
         .ok_or(runmat_runtime::analysis::fea_run_admission::FeaRunDenied::SignInRequired)?;
     active.control.check()?;
-    let bytes = runmat_filesystem::read(&request.source_path)
+    let bytes = runmat_filesystem::read_async(&request.source_path)
+        .await
         .map_err(|error| MeshingExecutionError::Provider(error.to_string().into()))?;
     let expected = Digest::from_bytes(request.expected_source_sha256);
     if Digest::sha256(&bytes) != expected {

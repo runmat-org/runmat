@@ -1,5 +1,8 @@
 use super::*;
-use runmat_meshing_core::work_count::MeshingWorkCount;
+use runmat_analysis_fea::progress::rate::UNIT_METADATA;
+use runmat_analysis_fea::FeaProgressPhase;
+use runmat_meshing_core::work_count::{MeshingWorkCount, MeshingWorkUnit};
+use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex};
 
 fn recording() -> (ProgressObserverSlot, Arc<Mutex<Vec<FeaProgressEvent>>>) {
@@ -21,8 +24,8 @@ fn work_frame(sequence: u64, count: MeshingWorkCount) -> ProgramProgress {
     }
 }
 
-fn faces(index: u32, faces: u64) -> PartitionFaces {
-    PartitionFaces {
+fn faces(index: u32, faces: u64) -> MeshingPartitionFaces {
+    MeshingPartitionFaces {
         index,
         faces: Some(faces),
     }
@@ -71,7 +74,7 @@ fn surface_partitions_sum_to_a_model_wide_face_count_that_ends_at_its_total() {
 fn volume_points_and_quadratic_edges_become_mesh_events() {
     let (slot, events) = recording();
     let mut tracker = MeshingProgressTracker::new(slot);
-    let whole = PartitionFaces {
+    let whole = MeshingPartitionFaces {
         index: 0,
         faces: None,
     };

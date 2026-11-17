@@ -18,7 +18,9 @@ pub(crate) struct Bound<'a> {
     pub canonical: f64,
     pub maximum: bool,
     pub measured: Option<f64>,
-    /// The run field the assessed result reads (G77 evidence), when it reads one.
+    /// The run field the assessed result reads (G77 evidence), when it reads one. Only the
+    /// field legend reads it, and the legend exists only with `plot-core`.
+    #[cfg_attr(not(feature = "plot-core"), allow(dead_code))]
     pub source_field_id: Option<&'a str>,
 }
 

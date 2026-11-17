@@ -5,6 +5,7 @@ import type { HostRuntimeSettings, ResolvedRuntimeSettings, UserRuntimeSettingsE
 export type { HostRuntimeSettings, ResolvedRuntimeSettings, RuntimeSettingsConfig, RuntimeSettingSource, UserRuntimeSettingsEdit, SettingsJsonValue, PreparedClusterProgram } from "./settings.js";
 import type { CapturedProjectResolver } from "./package-cache/browser-resolver.js";
 import { invokeOpenTelemetry } from "./observability.js";
+import { installStudyGeometryProvider, type StudyGeometryNativeExports, type StudyGeometryProvider } from "./study-geometry.js";
 import type { OpenTelemetryNativeExports, OpenTelemetryExportStats, OpenTelemetryStartupHeaders } from "./observability.js";
 export type { OpenTelemetryExportStats, OpenTelemetryStartupHeaders } from "./observability.js";
 import { checkNativeSource } from "./source-check.js";
@@ -1597,7 +1598,7 @@ export interface GeometryScenePickResult {
 }
 
 
-interface RunMatNativeModule extends OpenTelemetryNativeExports, RuntimeSettingsNativeExports, SourceCheckNativeExports, ProjectEntrypointModuleExports {
+interface RunMatNativeModule extends OpenTelemetryNativeExports, StudyGeometryNativeExports, RuntimeSettingsNativeExports, SourceCheckNativeExports, ProjectEntrypointModuleExports {
   default: (
     module?:
       | { module_or_path: WasmInitInput | Promise<WasmInitInput> }
@@ -2329,6 +2330,13 @@ export async function setLogFilter(filter: string): Promise<void> {
   const native = await loadNativeModule();
   requireNativeFunction(native, "setLogFilter");
   native.setLogFilter(filter);
+}
+
+export type { StudyGeometryProvider } from "./study-geometry.js";
+
+/** Installs (or with `null` removes) this runtime worker's RunMat MCAD study-geometry host. */
+export async function setStudyGeometryProvider(provider: StudyGeometryProvider | null): Promise<void> {
+  installStudyGeometryProvider(await loadNativeModule(), provider);
 }
 
 export async function subscribeTraceEvents(listener: TraceEventListener): Promise<number> {
@@ -3451,6 +3459,8 @@ function admitFeaExecutionChoices(value: FeaExecutionChoices): FeaExecutionChoic
   for (const candidate of value.candidates) {
     if (!candidate || !["single_core", "multi_core"].includes(candidate.mode) || modes.has(candidate.mode) || (candidate.cores !== null && (!Number.isSafeInteger(candidate.cores) || candidate.cores < 1)) || !["ready", "desktop_required", "unavailable"].includes(candidate.readiness) || [candidate.memoryBytes, candidate.estimatedMillis].some(number => number !== null && (!Number.isSafeInteger(number) || number < 0))) throw new Error("Invalid simulation execution candidate returned by the runtime.");
     if ([candidate.estimatedElementCount, candidate.estimatedNodeCount].some(number => number != null && (!Number.isSafeInteger(number) || number < 0))) throw new Error("Invalid simulation mesh estimate returned by the runtime.");
+    const operations = candidate.estimatedOperations;
+    if (operations != null && ((["meshing", "assembly", "factorization", "solve", "other", "total"] as const).some(key => typeof operations[key] !== "string" || !/^(0|[1-9][0-9]{0,19})$/.test(operations[key])) || (operations.solveIterations != null && (!Number.isSafeInteger(operations.solveIterations) || operations.solveIterations < 1)))) throw new Error("Invalid simulation operations estimate returned by the runtime.");
     const limit = candidate.resourceLimit;
     if (limit != null && (typeof limit.code !== "string" || !limit.code || typeof limit.term !== "string" || !limit.term || typeof limit.nextAction !== "string" || !Number.isSafeInteger(limit.maximumBytes) || limit.maximumBytes < 0 || (limit.requiredBytes != null && (!Number.isSafeInteger(limit.requiredBytes) || limit.requiredBytes <= limit.maximumBytes)) || candidate.readiness === "ready")) throw new Error("Invalid simulation resource limit returned by the runtime.");
     const evidence = candidate.durationEvidence;

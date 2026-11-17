@@ -50,3 +50,4 @@ pub use error::{SolverError, SolverResult};
 pub use operator::{IdentityPreconditioner, LinearOperator, Preconditioner};
 pub use scalar::{c32, c64, Scalar};
 pub mod testutil;
+pub mod trace;

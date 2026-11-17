@@ -50,6 +50,7 @@
     "test:pinned-wasm": "node ./scripts/test-pinned-wasm.mjs",
     "test:fea-assessments:wasm": "node ./scripts/test-fea-assessment-authoring-wasm.mjs",
     "test:exact-cad:wasm": "node ./scripts/test-exact-cad-host-wasm.mjs",
+    "test:log-bridge:wasm": "node ./scripts/test-runtime-log-bridge-wasm.mjs",
     "sync:wasm": "node ./scripts/sync-wasm-artifacts.cjs",
     "prepublishOnly": "npm run build && npm run test:fea-assessments:wasm"
   },
