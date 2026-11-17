@@ -16,6 +16,20 @@ impl AnalysisSolverOptions {
             _ => None,
         }
     }
+    /// Whether the step solves a structural (or thermomechanical) displacement system.
+    pub(in crate::analysis) fn is_structural(&self) -> bool {
+        matches!(
+            self,
+            Self::StructuralLinear(_)
+                | Self::StructuralFrequency(_)
+                | Self::StructuralModes(_)
+                | Self::StructuralResponseSpectrum(_)
+                | Self::StructuralRandomResponse(_)
+                | Self::StructuralBuckling(_)
+                | Self::StructuralTransient(_)
+                | Self::StructuralNonlinear(_)
+        )
+    }
     pub(in crate::analysis) fn clear_solver_mesh_artifact_path(&mut self) {
         match self {
             Self::ElectricalStatic(_) | Self::Magnetostatic(_) | Self::MaxwellHarmonic(_) => {}

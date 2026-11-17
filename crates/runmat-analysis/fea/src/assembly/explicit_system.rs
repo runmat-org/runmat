@@ -1,14 +1,13 @@
 use super::{
     apply_direct_constraints, apply_structural_load_plan, assemble_explicit_connectors,
     assemble_explicit_elements_with_owner, compile_explicit_load_plan, requested_moment_norm,
-    resolve_constraint_matrix, rotational_row_count, structural_material_summary,
-    structural_source_implementations, validate_explicit_topology, validate_structural_inputs,
-    AnalysisModel, AssembledRealSystem, AssemblySummary, BoundaryTransferImplementation,
-    CanonicalRealOperators, CanonicalStructuralConstraintPlan, ConstraintEnforcement,
-    DirectConstraintAssignments, ExplicitElementAssembly, MatrixProperties,
-    NullspaceEliminationEvidence, OperatorRole, RealSparseAssembler, RealSparseMatrix,
-    RealizedExcitationKind, RealizedExcitations, StructuralAssemblyError, StructuralDofLayout,
-    StructuralNodeDofSet, StructuralProjectionBasis,
+    resolve_constraint_matrix, rotational_row_count, structural_source_implementations,
+    validate_explicit_topology, validate_structural_inputs, AnalysisModel, AssembledRealSystem,
+    AssemblySummary, BoundaryTransferImplementation, CanonicalRealOperators,
+    CanonicalStructuralConstraintPlan, ConstraintEnforcement, DirectConstraintAssignments,
+    ExplicitElementAssembly, MatrixProperties, NullspaceEliminationEvidence, OperatorRole,
+    RealSparseAssembler, RealSparseMatrix, RealizedExcitationKind, RealizedExcitations,
+    StructuralAssemblyError, StructuralDofLayout, StructuralNodeDofSet, StructuralProjectionBasis,
 };
 
 pub(super) async fn assemble_explicit_structural_system_with_owner<O, F, A>(
@@ -36,7 +35,6 @@ where
         excitations,
         StructuralProjectionBasis::ExplicitConnectivity,
     )?;
-    let structural_material = structural_material_summary(model);
     let node_count = structural.nodes.len();
     let canonical_node_indices = (0..node_count).collect::<Vec<_>>();
     validate_explicit_topology(structural, &canonical_node_indices)?;
@@ -282,7 +280,6 @@ where
         constraint_matrix,
         affine_constraint_reduction,
         load_count: excitations.len(),
-        structural_material,
         thermo_mechanical: None,
         electro_thermal: None,
         operator,

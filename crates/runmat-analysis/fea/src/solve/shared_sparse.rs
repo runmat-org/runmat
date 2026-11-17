@@ -137,8 +137,8 @@ pub(crate) struct SpdSolveRequest<'a> {
     pub strategy: SpdStrategy,
     /// Degrees of freedom per node for block smoothing in multigrid (1 when unknown).
     pub block_size: usize,
-    /// A factorization of exactly `matrix` (from the coercivity proof) to reuse.
-    pub factor: Option<&'a runmat_sparse_solvers::direct::DirectSolver<f64>>,
+    /// The proof's factorization of exactly `matrix`, or how a Cholesky strategy makes one.
+    pub factor: super::CholeskyFactor<'a>,
     /// Accelerator for a multigrid strategy: the hierarchy is built on the host and applied on
     /// the device as an inner single-precision CG (the outer f64 loop and its true-residual
     /// certificate stay on the host). `None`, or a provider without device multigrid, keeps the
@@ -188,7 +188,7 @@ pub(crate) async fn solve_cholesky_with_owner<O, F, A>(
     rhs: &[f64],
     initial_guess: Option<&[f64]>,
     relative_tolerance: f64,
-    factor: Option<&runmat_sparse_solvers::direct::DirectSolver<f64>>,
+    factor: super::CholeskyFactor<'_>,
     mut before_capacity: O,
 ) -> Result<SpdSolveOutcome, crate::algebra::coercivity::NumericalCapacityError<LedgerError, A>>
 where
@@ -196,9 +196,7 @@ where
     F: std::future::Future<Output = Result<(), A>>,
 {
     use crate::algebra::{coercivity::NumericalCapacityError, NumericalCapacityPhase};
-    use runmat_sparse_solvers::direct::{
-        DirectOptions, DirectOwnedError, DirectSolver, FactorKind,
-    };
+    use runmat_sparse_solvers::direct::{DirectOwnedError, DirectSolver};
     let n = a.nrows();
     let mut x = match initial_guess {
         Some(guess) if guess.len() == n => guess.to_vec(),
@@ -234,16 +232,10 @@ where
     }
     let owned;
     let solver = match factor {
-        Some(solver) => solver,
-        None => {
-            owned = match DirectSolver::<f64>::new(
-                a.into(),
-                DirectOptions {
-                    refinement_steps: 2,
-                    ..DirectOptions::new(FactorKind::Cholesky)
-                },
-                control(),
-            ) {
+        super::CholeskyFactor::Reuse(solver) => solver,
+        super::CholeskyFactor::Make(workspace) => {
+            let options = super::CholeskyFactor::options(workspace);
+            owned = match DirectSolver::<f64>::new(a.into(), options, control()) {
                 Ok(solver) => solver,
                 Err(runmat_sparse_solvers::SolverError::Usage(error)) => return Err(error.into()),
                 Err(error) => {

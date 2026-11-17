@@ -58,24 +58,39 @@ pub enum MaxwellError {
     NotConverged(String),
 }
 
-/// Solve one frequency of a compiled harmonic input.
+/// Solve one frequency of a compiled harmonic input outside any resource admission: the LU
+/// may use backend-managed kernels.
 pub fn solve(
     mesh: &SolverMeshArtifact,
     input: &MaxwellInput,
     residual_target: f64,
 ) -> Result<MaxwellResponse, MaxwellError> {
     let plan = MaxwellSystemPlan::derive(mesh, &input.grounded_faces)?;
-    solve_with_plan(mesh, input, residual_target, &plan)
+    system::solve(
+        mesh,
+        input,
+        residual_target,
+        &plan,
+        runmat_sparse_solvers::direct::DirectWorkspacePolicy::BackendManaged,
+    )
 }
 
-/// Same solve with a precomputed plan; the plan is re-derived and compared, never trusted.
+/// The admitted solve on its precomputed plan; the plan is re-derived and compared, never
+/// trusted. The LU factors with caller-owned workspace, so it allocates only what the
+/// resource plan's factor envelope quotes and no backend-retained packing storage.
 pub fn solve_with_plan(
     mesh: &SolverMeshArtifact,
     input: &MaxwellInput,
     residual_target: f64,
     plan: &MaxwellSystemPlan,
 ) -> Result<MaxwellResponse, MaxwellError> {
-    system::solve(mesh, input, residual_target, plan)
+    system::solve(
+        mesh,
+        input,
+        residual_target,
+        plan,
+        runmat_sparse_solvers::direct::DirectWorkspacePolicy::CallerOwned,
+    )
 }
 
 fn invalid(error: impl std::fmt::Display) -> MaxwellError {
