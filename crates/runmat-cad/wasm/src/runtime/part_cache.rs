@@ -41,21 +41,32 @@ use std::collections::{BTreeMap, HashMap, HashSet};
 use std::rc::Rc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
-/// The display meshes the cache keeps, by their array sizes. The host sets it from its measured
-/// memory ([`set_budget_bytes`]): the browser host keeps a quarter of its maximum, leaving the
-/// rest to OCCT and the compile in progress. The camera drone's displays take about 10 MB. Until
-/// a host sets a budget, the cache keeps a quarter of the address space this target can use.
-static BUDGET_BYTES: AtomicUsize = AtomicUsize::new(usize::MAX / 4);
+/// The display meshes the cache keeps, by their array sizes, once a host sets it
+/// ([`set_budget_bytes`]); 0 until then. The browser host keeps a quarter of its measured
+/// maximum, leaving the rest to OCCT and the compile in progress. The camera drone's displays
+/// take about 10 MB.
+static BUDGET_BYTES: AtomicUsize = AtomicUsize::new(0);
 
-/// Sets the bytes of display meshes the cache keeps ([`BUDGET_BYTES`]); entries past it are
-/// evicted on the next insert.
+/// Sets the bytes of display meshes the cache keeps; entries past it are evicted on the next
+/// insert.
 pub fn set_budget_bytes(bytes: usize) {
     BUDGET_BYTES.store(bytes, Ordering::Relaxed);
 }
 
-/// The bytes of display meshes the cache keeps.
+/// The bytes of display meshes the cache keeps: what the host set, else a quarter of the
+/// process's memory capacity ([`super::memory_capacity`]), else, on a target that measures no
+/// capacity, a quarter of its address space.
 pub fn budget_bytes() -> usize {
-    BUDGET_BYTES.load(Ordering::Relaxed)
+    match BUDGET_BYTES.load(Ordering::Relaxed) {
+        0 => default_budget_bytes(super::memory_capacity::process_memory_capacity()),
+        set => set,
+    }
+}
+
+fn default_budget_bytes(capacity: Option<u64>) -> usize {
+    capacity.map_or(usize::MAX / 4, |bytes| {
+        usize::try_from(bytes / 4).unwrap_or(usize::MAX / 4)
+    })
 }
 
 /// A part file regenerated for an assembly: what the assembly reads of it.
@@ -660,6 +671,36 @@ impl DynamicValueEvaluator for Watched<'_> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn native_budget_is_a_quarter_of_the_measured_process_capacity() {
+        use super::{budget_bytes, default_budget_bytes, BUDGET_BYTES};
+        use crate::runtime::memory_capacity::{capacity_from, process_memory_capacity};
+        use std::sync::atomic::Ordering;
+        const GIB: u64 = 1 << 30;
+        // The rule: a cgroup limit, else a finite address-space limit, else physical memory.
+        assert_eq!(
+            capacity_from(Some(2 * GIB), Some(8 * GIB), Some(64 * GIB)),
+            Some(2 * GIB)
+        );
+        assert_eq!(
+            capacity_from(Some(u64::MAX), Some(8 * GIB), Some(64 * GIB)),
+            Some(8 * GIB)
+        );
+        assert_eq!(
+            capacity_from(None, Some(u64::MAX >> 1), Some(64 * GIB)),
+            Some(64 * GIB)
+        );
+        assert_eq!(capacity_from(None, None, None), None);
+        // This machine measures a capacity, and with no host budget set the cache keeps a
+        // quarter of it.
+        let capacity = process_memory_capacity().expect("a native process measures its capacity");
+        assert_eq!(default_budget_bytes(Some(capacity)) as u64, capacity / 4);
+        assert_eq!(default_budget_bytes(None), usize::MAX / 4);
+        if BUDGET_BYTES.load(Ordering::Relaxed) == 0 {
+            assert_eq!(budget_bytes() as u64, capacity / 4);
+        }
+    }
+
     use super::{clear, probe, seed, stats, take_fresh};
     use crate::runtime::{compile_json, Files};
     use serde_json::Value;
