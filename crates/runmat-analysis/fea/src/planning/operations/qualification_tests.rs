@@ -220,7 +220,8 @@ fn calibrate(label: &str, mesh: &SolverMeshArtifact, factor: bool) {
         ),
     ];
     for (path, preconditioner) in paths.into_iter().skip(usize::from(!factor)) {
-        let estimate = super::estimate_static_solid_operations_from_plan(&static_plan(mesh, path), mesh)
+        let plan = static_plan(mesh, path);
+        let estimate = super::estimate_static_solid_operations_from_plan(&plan, mesh)
             .unwrap()
             .expect("a static solid plan has an estimate");
         let (measured, iterations) = measured_static(mesh, preconditioner);

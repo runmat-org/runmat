@@ -1,13 +1,20 @@
 //! Operations estimate of a linear static solid solve: assembly, factorization or multigrid
 //! setup, the solve, and field recovery.
 //!
-//! Assembly and recovery reserve fixed batches per element: an affine element's reference
-//! counts, and for a curved quadratic element the tensor Gauss rules its stiffness moments may
-//! need (8, 12 and 16 points per axis at 2,399 operations per point, the full sequence the shared
-//! Tet10 rule may run). The proving factorization charges its symbolic reference work, which the
-//! plan bounds by the factor work envelope. The multigrid path charges its hierarchy setup and
-//! each preconditioned CG iteration; the estimate covers [`MULTIGRID_ITERATIONS_COVERED`]
-//! iterations.
+//! Assembly reserves fixed batches per element: an affine element's reference counts, and for a
+//! curved quadratic element the tensor Gauss rules its stiffness moments may need (8, 12 and 16
+//! points per axis at 2,399 operations per point, the full sequence the shared Tet10 rule may
+//! run). Quadratic strain recovery runs in the element kernels and charges assembly too; element
+//! stress, energy and the static balance charge the solve.
+//!
+//! The proving factorization charges the reference work of the symbolic factor it builds, and the
+//! factor admission refuses that factor when its work or stored nonzeros exceed the plan's
+//! envelope. The envelope is therefore the factorization estimate, and its nonzero bound sizes
+//! the substitutions of the direct solve; neither takes a further margin. The multigrid path
+//! charges its hierarchy setup and each preconditioned CG iteration; the estimate covers
+//! [`MULTIGRID_ITERATIONS_COVERED`] iterations.
+//!
+//! No kernel of a static solid run charges the `other` category, so its estimate is zero.
 
 use super::FeaOperationEstimate;
 use crate::planning::resource::{
@@ -31,14 +38,19 @@ const CURVED_TET10_ASSEMBLY: u64 = 8_000_000;
 /// Global scatter and operator preparation per stored stiffness nonzero; the per-element
 /// batches already cover them on the measured meshes.
 const ASSEMBLY_PER_STIFFNESS_NONZERO: u64 = 0;
-/// Field recovery charges no ledger category today; these stay zero until it does.
-const OTHER_PER_ELEMENT: [u64; 2] = [0, 0];
-const CURVED_TET10_OTHER: u64 = 0;
-const OTHER_PER_STIFFNESS_NONZERO: u64 = 0;
-/// Forward and backward substitution per stored factor nonzero, with refinement.
-const SOLVE_PER_FACTOR_NONZERO: u64 = 8;
-/// Residual products per stored stiffness nonzero around a direct solve.
-const SOLVE_PER_STIFFNESS_NONZERO: u64 = 8;
+/// Forward and backward substitution per stored factor nonzero: 4 operations per off-diagonal
+/// entry in each of three passes (the initial solve and the proving factor's two refinement
+/// steps).
+const SOLVE_PER_FACTOR_NONZERO: u64 = 12;
+/// Residual products per stored stiffness nonzero around a direct solve: two around the
+/// correction, up to three inside the refined solve and the static balance's internal force,
+/// at 2 operations per entry.
+const SOLVE_PER_STIFFNESS_NONZERO: u64 = 12;
+/// Norms, correction updates and balance dot products per unknown around a direct solve.
+const SOLVE_PER_UNKNOWN: u64 = 48;
+/// Element stress, strain energy and averaging that recovery charges to the solve, per Tet4 and
+/// Tet10 element (446 and 307 operations at four recovery points).
+const SOLVE_RECOVERY_PER_ELEMENT: [u64; 2] = [600, 400];
 /// Multigrid hierarchy setup per stored stiffness nonzero (aggregation, smoothed prolongation
 /// and Galerkin products), beside the coarse factor.
 const MULTIGRID_SETUP_PER_STIFFNESS_NONZERO: u64 = 200;
@@ -51,16 +63,18 @@ const MULTIGRID_COARSE_ROWS: u64 = 3_000;
 const MULTIGRID_ITERATION_PER_STIFFNESS_NONZERO: u64 = 14;
 
 /// Pre-mesh model of the proving factor on a compact tetrahedral solid under nested dissection:
-/// factor nonzeros ≈ `FILL · n^(4/3)` and reference work ≈ `WORK · n²` for `n` unknowns. A thin or
+/// factor nonzeros ≈ `FILL · n^(4/3)` and reference work ≈ `WORK · n²` for `n` unknowns, the work
+/// including the admission envelope's 25% headroom that a planned factor carries. A thin or
 /// slender part fills less, so the model reads high for those.
 const FACTOR_FILL_COEFFICIENT: f64 = 6.0;
-const FACTOR_WORK_COEFFICIENT: f64 = 4.0;
+const FACTOR_WORK_COEFFICIENT: f64 = 5.0;
 /// Factor bytes per stored nonzero (value, column index) when choosing the path before meshing.
 const FACTOR_BYTES_PER_NONZERO: f64 = 16.0;
 /// Elements behind one boundary facet on a curved surface: the facet's own element and the
 /// elements that share only one of its edges.
 const CURVED_ELEMENTS_PER_CURVED_FACET: f64 = 2.0;
-/// Margin on the summed estimate for counts the model does not trace batch by batch.
+/// Margin on the measured per-element and per-nonzero figures (assembly and the multigrid path)
+/// for counts the model does not trace batch by batch.
 const MARGIN_NUMERATOR: u64 = 5;
 const MARGIN_DENOMINATOR: u64 = 4;
 
@@ -106,41 +120,40 @@ pub fn estimate_static_solid_operations(
         product(curved, CURVED_TET10_ASSEMBLY)?,
         product(nonzeros, ASSEMBLY_PER_STIFFNESS_NONZERO)?,
     ])?;
-    let other = sum([
-        product(counts.elements, OTHER_PER_ELEMENT[order])?,
-        product(curved, CURVED_TET10_OTHER)?,
-        product(nonzeros, OTHER_PER_STIFFNESS_NONZERO)?,
-    ])?;
     let (factorization, solve, solve_iterations) = match solve {
+        // Admission bounds: the factor's work and nonzeros never exceed them, so they take no
+        // margin.
         StaticSolveOperations::Factorization {
             factor_work,
             factor_nonzeros,
         } => (
-            factor_work,
-            sum([
+            OperationCount::from_operations(factor_work),
+            OperationCount::from_operations(sum([
                 product(factor_nonzeros, SOLVE_PER_FACTOR_NONZERO)?,
                 product(nonzeros, SOLVE_PER_STIFFNESS_NONZERO)?,
-            ])?,
+                product(counts.unknowns, SOLVE_PER_UNKNOWN)?,
+                product(counts.elements, SOLVE_RECOVERY_PER_ELEMENT[order])?,
+            ])?),
             None,
         ),
         StaticSolveOperations::Multigrid => (
-            sum([
+            with_margin(sum([
                 product(nonzeros, MULTIGRID_SETUP_PER_STIFFNESS_NONZERO)?,
                 dense_factor_work(counts.unknowns.min(MULTIGRID_COARSE_ROWS))?,
-            ])?,
-            product(
+            ])?)?,
+            with_margin(product(
                 product(nonzeros, MULTIGRID_ITERATION_PER_STIFFNESS_NONZERO)?,
                 u64::from(MULTIGRID_ITERATIONS_COVERED),
-            )?,
+            )?)?,
             Some(MULTIGRID_ITERATIONS_COVERED),
         ),
     };
     Ok(FeaOperationEstimate {
         meshing: OperationCount::ZERO,
         assembly: with_margin(assembly)?,
-        factorization: with_margin(factorization)?,
-        solve: with_margin(solve)?,
-        other: with_margin(other)?,
+        factorization,
+        solve,
+        other: OperationCount::ZERO,
         solve_iterations,
     })
 }
@@ -327,7 +340,7 @@ mod tests {
     }
 
     #[test]
-    fn curved_surfaces_raise_only_quadratic_assembly_and_recovery() {
+    fn curved_surfaces_raise_only_quadratic_assembly() {
         let flat = estimate_static_solid_operations_from_counts(
             mesh(ElementOrder::Tet10, 5_000),
             0.0,
@@ -345,8 +358,12 @@ mod tests {
             curved.assembly.operations() - flat.assembly.operations()
                 >= 2_500 * CURVED_TET10_ASSEMBLY
         );
-        assert!(curved.other > flat.other);
+        // Curved recovery points evaluate their Jacobian inside the element kernels, which
+        // charge assembly; no static solid kernel charges `other`.
+        assert_eq!(curved.other, OperationCount::ZERO);
+        assert_eq!(flat.other, OperationCount::ZERO);
         assert_eq!(curved.factorization, flat.factorization);
+        assert_eq!(curved.solve, flat.solve);
         let linear = |fraction| {
             estimate_static_solid_operations_from_counts(
                 mesh(ElementOrder::Tet4, 5_000),
