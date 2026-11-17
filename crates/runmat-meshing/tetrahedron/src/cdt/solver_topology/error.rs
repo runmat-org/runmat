@@ -57,7 +57,8 @@ pub(super) fn volume(
         | DelaunayVolumeMeshErrorKind::UnsatisfiableConstraint => {
             DelaunaySolverTopologyErrorKind::InvalidGeometry
         }
-        DelaunayVolumeMeshErrorKind::ResourceLimit => {
+        DelaunayVolumeMeshErrorKind::ResourceLimit
+        | DelaunayVolumeMeshErrorKind::MemoryBudgetExceeded { .. } => {
             DelaunaySolverTopologyErrorKind::ResourceLimit
         }
         DelaunayVolumeMeshErrorKind::Cancelled => DelaunaySolverTopologyErrorKind::Cancelled,

@@ -28,6 +28,7 @@ mod constraint_star;
 mod construction;
 mod quality_replay;
 mod representation;
+mod residency;
 pub use construction::{
     construct_delaunay_volume_mesh, construct_delaunay_volume_mesh_with_quality_observer,
 };
@@ -133,6 +134,11 @@ pub enum DelaunayVolumeMeshErrorKind {
     InvalidMetric,
     InvalidQuality,
     ResourceLimit,
+    /// The construction needed `required_bytes` of resident memory, which the run's memory
+    /// authority refused before the mesh grew into it.
+    MemoryBudgetExceeded {
+        required_bytes: u64,
+    },
     Cancelled,
 }
 
@@ -164,6 +170,7 @@ fn construct_component_mesh(
     options: DelaunayVolumeMeshOptions,
     cancellation: &dyn MeshingCancellationSignal,
     observer: &dyn quality_replay::VolumeQualityObserver,
+    memory: Option<&dyn runmat_geometry_core::GeometryEvaluationControl>,
 ) -> Result<DelaunayVolumeMesh, DelaunayVolumeMeshError> {
     let constraints = &owned_constraints;
     let component_span = tracing::info_span!(
@@ -340,6 +347,7 @@ fn construct_component_mesh(
             quality_convergence::QualityExecution {
                 cancellation,
                 observer,
+                memory,
             },
         )
     })?;

@@ -220,6 +220,7 @@ pub fn replay_volume_quality_observed(
         quality_convergence::QualityExecution {
             cancellation,
             observer,
+            memory: None,
         },
     )?;
     Ok(VolumeQualityReplayResult {

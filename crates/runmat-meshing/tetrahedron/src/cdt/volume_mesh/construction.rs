@@ -1,6 +1,7 @@
 //! Construction entry points and component scheduling.
 use super::quality_replay::{NoopQualityObserver, VolumeQualityObserver};
 use super::*;
+use runmat_geometry_core::GeometryEvaluationControl;
 
 /// Constructs one checked general CDT volume from the authoritative exact surface closure.
 /// Scheduling and artifact publication remain outside this geometry-kernel boundary.
@@ -11,17 +12,21 @@ pub fn construct_delaunay_volume_mesh(
     options: DelaunayVolumeMeshOptions,
     cancellation: &dyn MeshingCancellationSignal,
 ) -> Result<DelaunayVolumeMesh, DelaunayVolumeMeshError> {
-    construct_delaunay_volume_mesh_with_quality_observer(
+    construct_charged(
         topology,
         surface,
         metric_request,
         options,
         cancellation,
         &NoopQualityObserver,
+        None,
     )
     .map(ValidatedDelaunayVolumeMesh::into_mesh)
 }
 
+/// Constructs and validates one volume mesh, charging the heap the construction holds to
+/// `memory` (the run's memory authority) before its working mesh grows. A mesh that needs more
+/// than the authority admits stops with [`DelaunayVolumeMeshErrorKind::MemoryBudgetExceeded`].
 pub fn construct_delaunay_volume_mesh_with_quality_observer(
     topology: &ExactBRepTopology,
     surface: &ExactSurfaceMesh,
@@ -29,6 +34,27 @@ pub fn construct_delaunay_volume_mesh_with_quality_observer(
     options: DelaunayVolumeMeshOptions,
     cancellation: &dyn MeshingCancellationSignal,
     observer: &dyn VolumeQualityObserver,
+    memory: &dyn GeometryEvaluationControl,
+) -> Result<ValidatedDelaunayVolumeMesh, DelaunayVolumeMeshError> {
+    construct_charged(
+        topology,
+        surface,
+        metric_request,
+        options,
+        cancellation,
+        observer,
+        Some(memory),
+    )
+}
+
+fn construct_charged(
+    topology: &ExactBRepTopology,
+    surface: &ExactSurfaceMesh,
+    metric_request: &MetricFieldRequest,
+    options: DelaunayVolumeMeshOptions,
+    cancellation: &dyn MeshingCancellationSignal,
+    observer: &dyn VolumeQualityObserver,
+    memory: Option<&dyn GeometryEvaluationControl>,
 ) -> Result<ValidatedDelaunayVolumeMesh, DelaunayVolumeMeshError> {
     validate_option_consistency(options)?;
     let result = construct_with_observer(
@@ -38,7 +64,11 @@ pub fn construct_delaunay_volume_mesh_with_quality_observer(
         options,
         cancellation,
         observer,
+        memory,
     )?;
+    // The finished mesh stays charged while validation rebuilds its constraints beside it.
+    let mut charge = super::residency::ResidentCharge::new(memory);
+    charge.hold(result.resident_bytes())?;
     validate_delaunay_volume_mesh(
         topology,
         surface,
@@ -57,6 +87,7 @@ fn construct_with_observer(
     options: DelaunayVolumeMeshOptions,
     cancellation: &dyn MeshingCancellationSignal,
     observer: &dyn VolumeQualityObserver,
+    memory: Option<&dyn GeometryEvaluationControl>,
 ) -> Result<DelaunayVolumeMesh, DelaunayVolumeMeshError> {
     validate_option_consistency(options)?;
     trace_surface_contract(surface);
@@ -87,6 +118,7 @@ fn construct_with_observer(
             component_options,
             cancellation,
             observer,
+            memory,
         )?;
         let insertion_count = mesh.refinement_insertions().count() as u64;
         remaining_insertions = remaining_insertions.saturating_sub(insertion_count);

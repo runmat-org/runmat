@@ -28,6 +28,36 @@ pub(in crate::cdt) enum TopologyEdit {
     },
 }
 
+impl TopologyEdit {
+    /// Heap bytes of this edit's vectors.
+    fn payload_bytes(&self) -> u64 {
+        use runmat_meshing_core::resident_bytes::vec_bytes;
+        match self {
+            Self::AppendNode(_) => 0,
+            Self::ReplaceNode { affected, .. } => {
+                vec_bytes::<[StableDigest; 4]>(affected.capacity())
+            }
+            Self::RelocateCavity {
+                replacements,
+                removed,
+                created,
+            } => vec_bytes::<(StableDigest, DelaunayVolumeNode)>(replacements.capacity())
+                .saturating_add(vec_bytes::<[StableDigest; 4]>(removed.capacity()))
+                .saturating_add(
+                    vec_bytes::<([StableDigest; 4], Option<PersistentEntityId>)>(
+                        created.capacity(),
+                    ),
+                ),
+            Self::ReplaceCavity { removed, created } => vec_bytes::<[StableDigest; 4]>(
+                removed.capacity(),
+            )
+            .saturating_add(
+                vec_bytes::<([StableDigest; 4], Option<PersistentEntityId>)>(created.capacity()),
+            ),
+        }
+    }
+}
+
 impl TopologyMutation {
     pub(in crate::cdt) fn enable_edit_trace(&mut self) {
         assert!(
