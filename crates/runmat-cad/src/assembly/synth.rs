@@ -113,6 +113,7 @@ fn part(
         bbox: Some(bbox),
         mass: Some(bbox.volume() * 2700.0),
         center_of_mass: None,
+        inertia: None,
         part_number: None,
         publishes: publishes
             .into_iter()

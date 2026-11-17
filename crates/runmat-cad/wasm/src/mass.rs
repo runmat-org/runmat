@@ -11,6 +11,9 @@
 //! rotated tensor and its parallel-axis term. A part with no density is listed, carries no
 //! mass, and makes the result incomplete.
 //!
+//! A component at the envelope representation (a sub-assembly's, everything under it) weighs
+//! its parts as above: the envelope changes what is drawn and checked for interference.
+//!
 //! A circuit board occurrence weighs what its layout holds ([`runmat_circuit::mass`]): the
 //! stackup's laminate, copper and mask, and its placed components (each at the mass its part
 //! gives, else its package's default), in the board's 3D frame.
@@ -318,6 +321,56 @@ fn board_mass(file: &str, files: &Files) -> Result<Mass, String> {
 
 /// The mass properties of the assembly `path` in its named configuration, over every placed
 /// part occurrence.
+/// Writes each placed part's mass, centre of mass and inertia (about the centre, part axes)
+/// into its configured summary in `source`, the facts a dynamic motion study reads
+/// ([`runmat_cad::assembly::motion::dynamics`]). Each part is integrated once per file and
+/// configuration (and kept by content); a part with no density, or whose bodies the kernel
+/// can't integrate, keeps no mass, and the study names it.
+pub fn fill_part_masses(
+    resolved: &runmat_cad::assembly::resolve::ResolvedAssembly,
+    documents: &BTreeMap<String, PartDocument>,
+    source: &mut runmat_cad::assembly::source::MemorySource,
+    files: &Files,
+) {
+    use std::sync::Arc;
+    let mut done = std::collections::BTreeSet::new();
+    for node in &resolved.nodes {
+        if node.parent.is_none() || node.failed || node.definition.kind != DefinitionKind::Part {
+            continue;
+        }
+        let file = node.definition.file.0.clone();
+        let digest = node.configuration.digest();
+        if !done.insert((node.definition.clone(), node.revision.clone(), digest.clone())) {
+            continue;
+        }
+        let content = crate::evaluate::content_key(&file, &digest, files);
+        let found = match content.and_then(kept::get) {
+            Some(found) => found,
+            None => {
+                let Some(document) = documents.get(&file) else { continue };
+                let configured = document.in_configuration(node.configuration.name.as_ref());
+                let (result, kernel) = regenerate_configured(document, &node.configuration);
+                let Ok(found) = integrate(&configured, &result, kernel.as_ref()) else { continue };
+                if let Some(k) = content {
+                    kept::put(k, found.clone());
+                }
+                found
+            }
+        };
+        let Some((density, _)) = found.density else { continue };
+        let m = scaled(&found.unit, density);
+        let Some(part) = source.parts.get_mut(&(node.definition.clone(), node.revision.clone())) else {
+            continue;
+        };
+        let Some(summary) = part.configured.get(&digest) else { continue };
+        let mut filled = (**summary).clone();
+        filled.mass = Some(m.mass);
+        filled.center_of_mass = Some(m.center);
+        filled.inertia = Some(m.inertia);
+        part.configured.insert(digest, Arc::new(filled));
+    }
+}
+
 pub fn assembly_mass(
     path: &str,
     text: &str,
@@ -331,11 +384,14 @@ pub fn assembly_mass(
     let mut report = MassReport::default();
     let mut placed_masses = Vec::new();
     for (id, node) in resolved.nodes.iter().enumerate() {
-        if node.parent.is_none() || node.failed || node.represented_by_ancestor {
+        // A component drawn as its envelope still weighs what its parts weigh: the envelope
+        // stands in for its geometry in the view and in interference, not for its mass.
+        // A reference component (a skeleton) weighs nothing in the product.
+        if node.parent.is_none() || node.failed || node.reference {
             continue;
         }
         if node.definition.kind == DefinitionKind::Circuit {
-            let file = node.definition.file.0.clone();
+            let file = node.source_key();
             let occurrence = resolved.path(id as u32);
             match board_mass(&file, files) {
                 Err(e) => report.problems.push(format!("{occurrence}: {e}")),
@@ -361,7 +417,7 @@ pub fn assembly_mass(
         if node.definition.kind != DefinitionKind::Part {
             continue;
         }
-        let file = node.definition.file.0.clone();
+        let file = node.source_key();
         let occurrence = resolved.path(id as u32);
         let key = (file.clone(), node.configuration.digest());
         let content = crate::evaluate::content_key(&file, &key.1, files);

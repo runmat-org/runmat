@@ -24,6 +24,9 @@ A part file declares one part: `part <name> { … }`. The name matches the file 
 | `annotation <name> = <kind>(…)`, `view <name> = { from, up }` | 3D annotations and annotation views | [3D annotations](/docs/mcad/part/regions-and-publish#3d-annotations) |
 | `configuration <name> = { … }` | a member of the product family | [Configurations](/docs/mcad/part/configurations) |
 | `link <kind> <item> to "<target>"` | a traceable link | [Links](/docs/mcad/part/regions-and-publish#links) |
+| `settings = { units, decimals, standard, tolerance }` | the units and decimals readouts use, the drafting standard and the ISO 2768-1 general tolerance | [Document settings](/docs/mcad/guides/model-a-part#document-settings) |
+| `sheet_metal = { gauges, gauge, bend_table, k }` | the gauge and bend rule every sheet body follows | [Gauges and bend tables](/docs/mcad/guides/sheet-metal#gauges-and-bend-tables) |
+| `feature_def <name> = { params, features }` | a reusable feature other parts insert with `library(def = …)` | [Library features and parts](/docs/mcad/part/features#library-features-and-parts) |
 
 ## `.assembly`
 
@@ -118,4 +121,5 @@ A drawing file declares one drawing: `drawing <name> { … }`.
 - A part is self-contained. It can read published values from other parts (a skeleton) and `.m` functions in its folder.
 - An assembly places parts and assemblies by name, picks their configurations or sets their inputs, and mates them.
 - A drawing shows parts and assemblies by name and reads their PMI, properties and configurations.
+- A part reads library features and parts from the `library/` folder beside it, and the Profile library offers the custom profiles in `library/profiles/` (one `.part` each, holding a sketch named `profile`); see [Library features and parts](/docs/mcad/part/features#library-features-and-parts) and [Structural profiles](/docs/mcad/part/features#structural-profiles).
 - A study (`.fea`) reads the exported geometry with the region names the part gives it; see [Import and export](/docs/mcad/import-export).

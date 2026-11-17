@@ -1,4 +1,4 @@
-use crate::core::plot_renderer::GeometryScreenAnnotation;
+use crate::core::plot_renderer::{GeometryScreenAnnotation, GeometryScreenDimension};
 use crate::core::CameraViewPreset;
 use crate::geometry_scene::{
     GeometrySceneAnnotationKind, GeometrySceneAssemblyNode, GeometrySceneCompleteness,
@@ -139,6 +139,48 @@ impl CadOverlayState {
             font_scale.clamp(0.9, 1.0),
             &CadOverlayTheme::from_context(ctx),
         );
+    }
+
+    /// Each measured value in a box centered on its dimension line's middle, so it reads as the
+    /// line's label. Values are never dropped for crowding: each is the answer to a pick.
+    pub(crate) fn render_dimension_labels(
+        &self,
+        ctx: &egui::Context,
+        plot_rect: egui::Rect,
+        dimensions: &[GeometryScreenDimension],
+        font_scale: f32,
+    ) {
+        if dimensions.is_empty() {
+            return;
+        }
+        let theme = CadOverlayTheme::from_context(ctx);
+        let scale = font_scale.clamp(0.9, 1.25);
+        let painter = ctx.layer_painter(egui::LayerId::new(
+            egui::Order::Foreground,
+            egui::Id::new("runmat_geometry_dimension_labels"),
+        ));
+        for dimension in dimensions {
+            let middle = plot_rect.min + egui::vec2(dimension.position[0], dimension.position[1]);
+            if !plot_rect.contains(middle) {
+                continue;
+            }
+            let galley = painter.layout_no_wrap(
+                dimension.label.clone(),
+                egui::FontId::proportional(11.0 * scale),
+                theme.primary_text,
+            );
+            let padding = egui::vec2(5.0 * scale, 2.0 * scale);
+            let rect = egui::Rect::from_center_size(middle, galley.size() + 2.0 * padding);
+            let color = annotation_color(dimension.color);
+            painter.rect_filled(rect, 3.0 * scale, theme.strip_bg.gamma_multiply(0.96));
+            painter.rect_stroke(
+                rect,
+                3.0 * scale,
+                egui::Stroke::new(1.0, color),
+                egui::StrokeKind::Inside,
+            );
+            painter.galley(rect.min + padding, galley, theme.primary_text);
+        }
     }
 
     fn render_annotations(

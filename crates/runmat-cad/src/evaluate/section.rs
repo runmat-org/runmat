@@ -41,7 +41,7 @@ pub struct PlaneSection {
 
 /// Area moments of a counter-clockwise polygon (clockwise holes subtract) about the origin:
 /// (A, ∫x, ∫y, ∫x², ∫y², ∫xy).
-fn polygon_moments(p: &[[f64; 2]]) -> [f64; 6] {
+pub(crate) fn polygon_moments(p: &[[f64; 2]]) -> [f64; 6] {
     let mut m = [0.0; 6];
     for i in 0..p.len() {
         let (a, b) = (p[i], p[(i + 1) % p.len()]);

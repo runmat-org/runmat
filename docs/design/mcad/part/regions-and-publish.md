@@ -1,6 +1,6 @@
 ---
 description: Reference for what a RunMat part file exposes to other files and to manufacturing. Outputs and part numbers, materials, regions, published values, semantic PMI (datums, GD&T, size and location tolerances, surface finish), properties and links.
-keywords: [part output, part number, material, regions, publish, PMI, GD&T, datum, flatness, parallelism, tolerance, surface finish, coating, weld symbol, 3D annotation, model-based definition, MBD, annotation view, auto-dimension, traceability, links]
+keywords: [part output, part number, material, regions, representation, defeature, midsurface, beam, publish, PMI, GD&T, datum, flatness, parallelism, tolerance, surface finish, coating, weld symbol, 3D annotation, model-based definition, MBD, annotation view, auto-dimension, traceability, links]
 ---
 # Outputs, regions and published values
 
@@ -66,6 +66,43 @@ part bracket {
 ## Regions
 
 A region names a selection and checks its count. The selection forms and `expect` values are in [Names and selectors](/docs/design-language/names-and-selectors#regions). Regions travel with the geometry: a STEP export names the faces by the region's `label` (or its name), so a study writes `select name "Mounting bores"` and keeps working when the part changes.
+
+To add a region in the editor, run **Simulate › Region**. Give it a name, choose the kind (faces, edges, bodies or vertices), pick the items in the viewport and choose how many the region expects. The command writes one `region` line into the part and the region appears in the Outline's Regions folder. Picks of another kind, a name the part already uses, or a count that `expect = exactly_one` does not allow are refused in the bottom strip, and nothing is written.
+
+A study reads the part's face regions by name. With the `top` region above, this study geometry selects the face:
+
+```fea fragment
+geometry bracket {
+    file = "./bracket.part"
+    region top : face { select name "top"; expect exactly_one }
+}
+```
+
+A study reads a body by its output's name (`select name "bracket"`). Edge and vertex regions name items for drawings and assemblies; a study does not read them yet.
+
+## Analysis representations
+
+A representation is simplified geometry for meshing. The part's source declares it, and RunMat builds it from the regenerated part each time it is drawn. The design's features stay as they are.
+
+```part fragment
+representation simple : defeatured = { max_fillet = 2 mm, max_hole = 8 mm, max_chamfer = 1 mm }
+representation shell : midsurface = { body = feature.body.body }
+representation spar : beam = { body = feature.body.body }
+```
+
+| Kind | What RunMat builds | Refused when |
+|---|---|---|
+| `defeatured` | The bodies with every fillet at or below `max_fillet` (radius), hole at or below `max_hole` (diameter) and chamfer at or below `max_chamfer` (distance) removed. The kernel extends the neighboring faces over each gap. A hole is a hole feature's faces or any full concave cylinder, so cut and imported holes count too. | No threshold is set. |
+| `midsurface` | The kernel's mid-surface of the body, from every pair of opposite parallel planar faces closer than half the width of their overlap, with each pair's wall thickness. | The body has no such pair: it isn't a thin wall. |
+| `beam` | The centerline of a prismatic body between the centroids of its two end faces, and the end section's area and principal second moments of area. | The body isn't prismatic: the message names the face that isn't parallel to the line between the end faces, or says the end faces differ in area. |
+
+`body` names the body a mid-surface or beam is made from; without it the part must have one body. `keep_regions` (on by default) keeps every face a region holds, so a study's loads and supports keep their faces; a fillet or hole kept this way is listed with the region's name. A fillet, hole or chamfer the kernel cannot remove stays, and is listed with the kernel's reason.
+
+In the editor, **Simulate › Defeature** adds a `defeatured` representation and **Simulate › Representation** adds any of the three. Each is built before it is written, so a beam of a body that isn't prismatic is refused and nothing is written. The new representation is drawn at once. The **Representation** menu in the bottom strip switches between **full** (the design) and each representation; beside it, the strip lists what the drawn one removed, its wall thicknesses or its beam section, or why it could not be built.
+
+Each representation has a row in the Outline's **Representations** folder. Select a defeatured representation's row to change its thresholds or **Keep named regions** in Properties; RunMat rebuilds it at once and refuses a change it cannot build. A mid-surface or beam has no thresholds to edit. Right-click a row and choose **Delete** to remove the representation. If it was the one drawn, the strip goes back to **full**.
+
+A study reads a part in its full representation. A `.fea` geometry cannot yet select a part's `defeatured`, `midsurface` or `beam` representation, so meshing one of them in a study is not available yet.
 
 ## Published values
 

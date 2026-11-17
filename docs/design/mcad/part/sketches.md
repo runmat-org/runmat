@@ -48,6 +48,36 @@ part link {
 
 A sketch on a face moves with the face when an earlier feature changes.
 
+To move a sketch to another plane, select it in the Outline and click **Edit plane** (`part.edit-sketch-plane`), then pick an origin plane, a datum plane or a planar face. The entities keep their sketch coordinates, so the drawing moves with the plane, and features built on the sketch follow on the next rebuild. A face made by the sketch's own feature or a later one is refused, because the sketch regenerates before that feature.
+
+## Converted edges (Use edges)
+
+**Use edges** (`sketch.use-edges`) brings the part's own edges and faces into the open sketch. Each new entity records where it comes from, and every rebuild reads it again from the model as it stands just before the sketch, carries it onto the sketch plane along the sketch normal and holds it fixed. The rest of the sketch can be dimensioned and related to it, and it follows the model when an earlier feature changes.
+
+| Type | Picks | What comes into the sketch | Written |
+|---|---|---|---|
+| Project | Edges; a face (each edge round it); a body (every edge) | Each edge, projected | `from = project(<edge>)` |
+| Intersection | Faces; a body (every face that crosses the plane) | Where each face crosses the sketch plane, one entity per connected piece | `from = intersection(<face>, chain = 0)` |
+| Silhouette | Curved faces; a body (every curved face) | Where each face turns edge-on, seen square to the sketch, one entity per piece | `from = silhouette(<face>, chain = 0)` |
+| Offset on surface | A planar face (each edge round it); or edges, with the planar face to offset them across | Each edge moved `distance` across the face, into it for a positive distance, then projected | `from = offset_on_surface(<edge>, face = <face>, distance = 3 mm)` |
+
+For example, a pocket inset 4 mm from the top face's outline:
+
+```text
+sketch inset on feature.body.face.end {
+    l1 = line(start = [-16 mm, -6 mm], end = [16 mm, -6 mm], from = offset_on_surface(edges_between(feature.body.face.end, feature.body.face.side(s1.l1)), face = feature.body.face.end, distance = 4 mm))
+    ...
+}
+```
+
+- The geometry written in the file is where the source was at the last edit. Each rebuild replaces it.
+- The source is read as a line when it runs straight, as a circle when it closes on one radius, as an arc on one radius, and otherwise as a spline through it (to 0.01 mm).
+- A cut through a cylinder reads as its exact circle, and a cylinder seen from the side outlines as its two exact generator lines. Other curved faces read as splines through the cut or the outline.
+- `chain` picks one piece when a face gives several, numbered by where each piece's centre sits on the sketch plane (left to right, then bottom to top). A face that gives fewer pieces after a change is reported on the sketch.
+- Offset on surface moves a straight edge along the face, square to the edge, and changes a circular edge's radius. Offsets of edges that met at a corner meet again where the two offset curves cross, so the inset of a face's outline is a closed profile. It takes planar faces; a curved face is refused by name.
+- A source that projects to a single point (an edge along the sketch normal) and a planar face picked for Silhouette are reported by name.
+- In an assembly, Use edges projects component edges instead; see [Assembly sketches](/docs/mcad/assembly/sketches#converted-edges).
+
 ## Entities
 
 | Entity | Form |
@@ -78,7 +108,7 @@ sketch label on feature.body.face.end {
     t1 = text(text = "RUNMAT", at = [8 mm, 6 mm], height = 6 mm, font = single_line, stroke = 1 mm)
     constrain fix(t1.at)
 }
-feature engrave = extrude(profile = sketch.label, distance = 0.5 mm, reverse, mode = cut)
+feature engrave = extrude(profile = sketch.label, distance = 0.5 mm, mode = cut)
 ```
 
 The text's anchor is the point `t1.at`, so constraints place it like any other point. Text along a curve is not in the sketch model yet.

@@ -498,6 +498,7 @@ fn drawing() -> DrawingDocument {
         exploded: None,
         title: None,
         centerlines: true,
+        tangent_edges: None,
     };
     DrawingDocument {
         path: FilePath::new("rig.drawing"),

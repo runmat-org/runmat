@@ -26,6 +26,7 @@ impl<'a, 'b> Run<'a, 'b> {
             BendRule::Allowance { value } => BendRuleValue::Allowance {
                 value: self.value(id, "rules.allowance", value, Dimension::LENGTH)?,
             },
+            BendRule::Din6935 => BendRuleValue::Din6935,
         };
         if let Some((table, gauge)) = &r.gauge {
             let Some(row) = table.rows.iter().find(|g| &g.gauge == gauge) else {

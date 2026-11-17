@@ -1,4 +1,5 @@
-//! `design.render`: a part or assembly view through the Desktop's renderer.
+//! `design.render`: a part or assembly view through the Desktop's renderer. A drawing renders
+//! its sheet from the layout the Desktop's sheet draws ([`crate::render_sheet`]).
 //!
 //! The model scene ([`crate::scene`]) is the figure scene the model canvas imports; it becomes
 //! a `runmat_plot` geometry scene and renders headless on wgpu with the canvas's presentation
@@ -83,6 +84,10 @@ fn camera(framed: &FramedCamera, aspect: f32) -> Camera {
 }
 
 pub fn render(input: &RenderInput, files: &Files) -> Result<RenderOutput, ToolError> {
+    // A drawing draws its sheet, as the Desktop's sheet does.
+    if kind_of(&input.path)? == DesignKind::Drawing {
+        return crate::render_sheet::render(input, files);
+    }
     let display = model_display(&input.path, files)?;
     let built = build_model_scene(&display);
     let Some(bounds) = built.bounds else {

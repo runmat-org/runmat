@@ -11,7 +11,6 @@ use runmat_types::physical::{
 };
 
 use super::design::{design_dialect, DesignDocumentAnalysis, DesignFiles, DesignValues};
-use super::fea::FeaDocumentAnalysis;
 use super::position::position_to_offset;
 
 const LAYOUT: &str =
@@ -174,13 +173,14 @@ mesh volume on geometry.part {{
     );
     std::fs::write(&main_path, &source).unwrap();
     let roots: Vec<PathBuf> = vec![temporary.path().to_path_buf()];
-    let analysis = FeaDocumentAnalysis::from_checked(
-        FeaDocumentAnalysis::prepare_with_overlays(&source, &main_path, &roots, &[])
-            .unwrap()
-            .check(Vec::new(), Vec::new())
-            .unwrap(),
-        BTreeMap::new(),
-    );
+    let analysis = futures::executor::block_on(crate::core::fea::analyze_fea_source(
+        &source,
+        &main_path,
+        &roots,
+        &BTreeMap::new(),
+        crate::core::analysis::CompatMode::RunMat,
+    ))
+    .unwrap();
     let uri = Url::from_file_path(&main_path).unwrap();
     let message = expected_message(subject, case);
     let (underlined, code, fixes) = report(
@@ -265,13 +265,14 @@ model loaded {{
     );
     std::fs::write(&main_path, &source).unwrap();
     let roots: Vec<PathBuf> = vec![temporary.path().to_path_buf()];
-    let analysis = FeaDocumentAnalysis::from_checked(
-        FeaDocumentAnalysis::prepare_with_overlays(&source, &main_path, &roots, &[])
-            .unwrap()
-            .check(Vec::new(), Vec::new())
-            .unwrap(),
-        BTreeMap::new(),
-    );
+    let analysis = futures::executor::block_on(crate::core::fea::analyze_fea_source(
+        &source,
+        &main_path,
+        &roots,
+        &BTreeMap::new(),
+        crate::core::analysis::CompatMode::RunMat,
+    ))
+    .unwrap();
     let uri = Url::from_file_path(&main_path).unwrap();
     let message = unit_mismatch_message(
         "force",

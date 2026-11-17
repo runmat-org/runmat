@@ -261,7 +261,7 @@ fn what_is_under(ctx: &Ctx<'_>, b: &BoxR, owner: &str) -> String {
             ("title", _) => "the title block".into(),
             (o, _) if o.starts_with("table:") => format!("table {}", &o[6..]),
             (o, Class::View) if o.starts_with("view:") => format!("view {}", &o[5..]),
-            (o, _) if o.starts_with("annotation:") => format!("{}", &o[11..]),
+            (o, _) if o.starts_with("annotation:") => o[11..].to_string(),
             _ => "the sheet's marks".into(),
         })
         .unwrap_or_else(|| "the centring marks".into())

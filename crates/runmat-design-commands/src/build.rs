@@ -214,6 +214,10 @@ pub fn quantity_spec(name: &str) -> QuantitySpec {
         "speed" => "mm/s",
         "angular_speed" => "rpm",
         "stiffness" => "N/mm",
+        // A spring and damper on a revolute mate (Basic motion), and a damper on a slider.
+        "rotational_stiffness" => "N*m/rad",
+        "torsional_damping" => "N*m*s/rad",
+        "damping" => "N*s/m",
         "voltage" => "V",
         "power" => "W",
         "current" => "A",

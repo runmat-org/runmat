@@ -360,6 +360,61 @@ pub struct View {
     /// without crosses.
     #[serde(default = "drawn", skip_serializing_if = "is_drawn")]
     pub centerlines: bool,
+    /// How the view draws tangent edges, where two faces meet tangent-continuously (a fillet's
+    /// or a round's boundaries, a hole rim rounded into its wall): `tangent_edges = thin`.
+    /// Unset, the view takes its kind's default ([`TangentEdges::default_for`]).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tangent_edges: Option<TangentEdges>,
+}
+
+/// How a view draws tangent edges: the edges where two faces meet tangent-continuously (G1),
+/// which no sharp edge marks.
+///
+/// - `thin`: as continuous narrow lines (ISO 128-2 line type 01.1, the line it gives imaginary
+///   lines of intersection), so a filleted outline and a rounded hole rim still read.
+/// - `show`: as visible edges, in the wide continuous line.
+/// - `hide`: not at all; the view draws only sharp edges and outlines (silhouettes).
+///
+/// The rule a view takes when unset: pictorial views (isometric, dimetric, trimetric, and the
+/// views drawn from one) draw them `thin`, because without them a part rounded on every edge
+/// keeps only its curved faces' outlines and loses its shape. Orthographic views `hide` them,
+/// as they always have: a principal view of a rounded part already shows its shape by its
+/// outlines, and a line at each fillet's boundary would read as a step in the face.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum TangentEdges {
+    Show,
+    Hide,
+    Thin,
+}
+
+impl TangentEdges {
+    /// The default for a view drawn in `orientation`.
+    pub fn default_for(orientation: Orientation) -> TangentEdges {
+        if orientation.is_pictorial() {
+            TangentEdges::Thin
+        } else {
+            TangentEdges::Hide
+        }
+    }
+
+    pub fn word(self) -> &'static str {
+        match self {
+            TangentEdges::Show => "show",
+            TangentEdges::Hide => "hide",
+            TangentEdges::Thin => "thin",
+        }
+    }
+}
+
+impl Orientation {
+    /// An axonometric (pictorial) orientation: isometric, dimetric or trimetric.
+    pub fn is_pictorial(self) -> bool {
+        matches!(
+            self,
+            Orientation::Isometric | Orientation::Dimetric | Orientation::Trimetric
+        )
+    }
 }
 
 fn drawn() -> bool {

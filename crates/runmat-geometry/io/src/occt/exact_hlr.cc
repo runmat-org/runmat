@@ -385,7 +385,7 @@ rust::Vec<KProjected> kernel_project(rust::Slice<const std::uint64_t> ids,
       BRepLib::EncodeRegularity(body.shape, 1e-6);
       // One edge (placed), split into visible and hidden runs: `kind` 0 for a summary edge
       // (`entity` its index), 1 for a face's outline (`entity` the face).
-      auto project_edge = [&](const TopoDS_Edge& e, std::uint8_t kind, std::size_t entity) {
+      auto project_edge = [&](const TopoDS_Edge& e, std::uint8_t kind, std::size_t entity, bool is_smooth) {
         BRepAdaptor_Curve c(e);
         GCPnts_QuasiUniformDeflection pts(c, std::max(tolerance, 1e-9));
         if (!pts.IsDone() || pts.NbPoints() < 2) return;
@@ -413,6 +413,7 @@ rust::Vec<KProjected> kernel_project(rust::Slice<const std::uint64_t> ids,
           run.body = static_cast<std::uint32_t>(bi);
           run.kind = kind;
           run.entity = static_cast<std::uint32_t>(entity);
+          run.smooth = is_smooth;
           run.visible = v;
           vis = v;
           have = true;
@@ -452,16 +453,15 @@ rust::Vec<KProjected> kernel_project(rust::Slice<const std::uint64_t> ids,
         flush();
       };
       for (std::size_t ei = 0; ei < body.edges.size(); ++ei) {
-        if (!smooth) {
-          // Smooth edges between tangent faces are left out unless asked for.
-          bool is_smooth = false;
-          const TopTools_ListOfShape& fs = ef.FindFromKey(body.edges[ei]);
-          if (fs.Extent() == 2)
-            is_smooth = BRep_Tool::Continuity(body.edges[ei], TopoDS::Face(fs.First()), TopoDS::Face(fs.Last())) >= GeomAbs_G1 &&
-                        !on_silhouette(TopoDS::Edge(body.edges[ei]), TopoDS::Face(fs.First()), tr, to_viewer);
-          if (is_smooth) continue;
-        }
-        project_edge(TopoDS::Edge(body.edges[ei].Moved(TopLoc_Location(tr))), 0, ei);
+        // A smooth edge lies between tangent faces and off the outline under this view. It is
+        // left out unless asked for, and comes flagged when it is.
+        bool is_smooth = false;
+        const TopTools_ListOfShape& fs = ef.FindFromKey(body.edges[ei]);
+        if (fs.Extent() == 2)
+          is_smooth = BRep_Tool::Continuity(body.edges[ei], TopoDS::Face(fs.First()), TopoDS::Face(fs.Last())) >= GeomAbs_G1 &&
+                      !on_silhouette(TopoDS::Edge(body.edges[ei]), TopoDS::Face(fs.First()), tr, to_viewer);
+        if (is_smooth && !smooth) continue;
+        project_edge(TopoDS::Edge(body.edges[ei].Moved(TopLoc_Location(tr))), 0, ei, is_smooth);
       }
       // A closed face's seam that lies on its outline under this view (a hole whose seam faces
       // sideways): the hidden-line algorithm draws no outline along a seam, and the summary
@@ -473,7 +473,7 @@ rust::Vec<KProjected> kernel_project(rust::Slice<const std::uint64_t> ids,
           const TopoDS_Edge& e = TopoDS::Edge(ex.Current());
           if (BRep_Tool::Degenerated(e) || !BRep_Tool::IsClosed(e, f) || done.Contains(e)) continue;
           done.Add(e);
-          if (on_silhouette(e, f, tr, to_viewer)) project_edge(TopoDS::Edge(e.Moved(TopLoc_Location(tr))), 1, fi);
+          if (on_silhouette(e, f, tr, to_viewer)) project_edge(TopoDS::Edge(e.Moved(TopLoc_Location(tr))), 1, fi, false);
         }
       }
       // Silhouettes of curved faces from OCCT's exact hidden-line algorithm, attributed to
@@ -513,6 +513,7 @@ rust::Vec<KProjected> kernel_project(rust::Slice<const std::uint64_t> ids,
           k.kind = 1;
           k.entity = static_cast<std::uint32_t>(face);
           k.visible = pass == 0;
+          k.smooth = false;
           for (int i = 1; i <= pts.NbPoints(); ++i) {
             k.points.push_back(pts.Value(i).X());
             k.points.push_back(pts.Value(i).Y());

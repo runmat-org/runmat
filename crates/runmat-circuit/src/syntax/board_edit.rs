@@ -653,6 +653,13 @@ pub enum BoardEdit {
     Lock { items: Vec<Site>, locked: bool },
     /// Deletes items.
     Delete { items: Vec<Site> },
+    /// `board.place` and `board.align`: footprints to new origins (each `(footprint, at)`), on
+    /// `side` when given. A locked footprint refuses.
+    Arrange {
+        moves: Vec<(Site, Point)>,
+        side: Option<Side>,
+        command: &'static str,
+    },
     /// `board.room`: adds a room around components, or replaces the room of that name.
     Room {
         name: String,
@@ -730,6 +737,7 @@ impl BoardEdit {
             BoardEdit::Flip { .. } => "board.flip",
             BoardEdit::Lock { .. } => "board.move",
             BoardEdit::Delete { .. } => "board.select",
+            BoardEdit::Arrange { command, .. } => command,
             BoardEdit::Room { .. } => "board.room",
             BoardEdit::Route { .. } => "board.route",
             BoardEdit::Via { .. } => "board.place-via",
@@ -835,6 +843,22 @@ pub fn apply_board_edit(
                     t.angle = (t.angle + rotation).rem_euclid(360.0);
                 } else {
                     return Err("that item does not move".into());
+                }
+            }
+        }
+        BoardEdit::Arrange { moves, side, .. } => {
+            for (site, at) in moves {
+                let id = resolve(board, sites, site)?;
+                let f = board
+                    .footprints
+                    .get_mut(&id)
+                    .ok_or("only footprints are placed and aligned")?;
+                if f.locked {
+                    return Err(format!("{} is locked", f.reference));
+                }
+                f.at = *at;
+                if let Some(side) = side {
+                    f.side = *side;
                 }
             }
         }

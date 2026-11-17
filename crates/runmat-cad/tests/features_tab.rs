@@ -149,8 +149,7 @@ fn cut_up_to_next_goes_through_the_material_it_starts_in() {
     let mut d = block();
     d.features
         .push(sketch("s2", square(top(), 10.0, 10.0, 30.0, 30.0)));
-    let mut e = ext("s2", Extent::UpToNext, BodyMode::cut());
-    e.reverse = true;
+    let e = ext("s2", Extent::UpToNext, BodyMode::cut());
     d.features.push(feature("pocket", FeatureKind::Extrude(e)));
     let r = env.regen(&d);
     assert_clean(&r);
@@ -949,14 +948,13 @@ fn pocket_doc(depth: ValueExpr) -> PartDocument {
     d.inputs.push(InputDecl::new("pd", "length", depth));
     d.features
         .push(sketch("sp", square(top(), 4.0, 4.0, 8.0, 8.0)));
-    let mut e = ext(
+    let e = ext(
         "sp",
         Extent::Blind {
             distance: input("pd"),
         },
         BodyMode::cut(),
     );
-    e.reverse = true;
     d.features.push(feature("pocket", FeatureKind::Extrude(e)));
     d
 }

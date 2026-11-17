@@ -741,8 +741,14 @@ pub fn sketch_edit(
     if command == "part.sketch" {
         return Some(new_sketch(path, text, values, picks_of));
     }
+    if command == "part.edit-sketch-plane" {
+        return Some(edit_plane(path, text, values, picks_of));
+    }
     if !command.starts_with("sketch.") {
         return None;
+    }
+    if command == "sketch.use-edges" {
+        return Some(use_edges::use_edges(path, text, values));
     }
     let Some(id) = values
         .get("sketch")
@@ -865,7 +871,10 @@ pub(crate) fn delete_entities(sketch: &mut Sketch, ids: &[String]) -> Result<Str
 
 /// A tool's values with the editor's selection as `values.selection` when the tool started from
 /// one and its form has no field for it (Construction toggles the selected curves).
-pub(crate) fn with_selection(values: &Map<String, Value>, selection: &[String]) -> Map<String, Value> {
+pub(crate) fn with_selection(
+    values: &Map<String, Value>,
+    selection: &[String],
+) -> Map<String, Value> {
     let mut out = values.clone();
     if !selection.is_empty() && !out.contains_key("selection") {
         out.insert(
@@ -895,7 +904,14 @@ fn picked_points(values: &Map<String, Value>, sketch: &Sketch, id: &str) -> Map<
             continue;
         };
         let at = solved(sketch, &entity.0, role).or_else(|| {
-            modify::position(sketch, &PointExpr::Of { entity: entity.clone(), role }, 0)
+            modify::position(
+                sketch,
+                &PointExpr::Of {
+                    entity: entity.clone(),
+                    role,
+                },
+                0,
+            )
         });
         if let Some((x, y)) = at {
             out.insert(
@@ -905,6 +921,66 @@ fn picked_points(values: &Map<String, Value>, sketch: &Sketch, id: &str) -> Map<
         }
     }
     out
+}
+
+/// `part.edit-sketch-plane`: the selected (or open) sketch moves to the picked plane or planar
+/// face. Its entities keep their sketch coordinates, so the drawing moves with the plane; a
+/// face of a feature after the sketch is refused, since the sketch can't read what follows it.
+fn edit_plane(
+    path: &str,
+    text: &str,
+    values: &Map<String, Value>,
+    picks_of: &crate::picks::Picks<'_>,
+) -> Result<(SourceChange, String), EditFailure> {
+    let id = values
+        .get("sketch")
+        .and_then(Value::as_str)
+        .map(str::to_owned)
+        .or_else(|| {
+            picks(values, "selection").into_iter().find_map(|p| {
+                let id = p
+                    .strip_prefix("sketch:")
+                    .or_else(|| p.strip_prefix("feature:"))?;
+                picks_of
+                    .document
+                    .features
+                    .iter()
+                    .any(|f| f.id.0 == id && matches!(f.kind, FeatureKind::Sketch(_)))
+                    .then(|| id.to_owned())
+            })
+        })
+        .ok_or_else(|| model("select the sketch to move"))?;
+    let pick = picks(values, "plane").into_iter().next().ok_or_else(|| {
+        model(format!(
+            "pick the plane or planar face to move {id} to. {}",
+            crate::picks::PLANE_PICK_FORMS
+        ))
+    })?;
+    let plane: PlaneRef = serde_json::from_value(picks_of.plane(&pick)?)
+        .map_err(|e| model(format!("the sketch plane: {e}")))?;
+    // A face the sketch's own feature or a later one made: the sketch can't sit on it.
+    let at = picks_of.document.features.iter().position(|f| f.id.0 == id);
+    if let (Some(at), PlaneRef::Face { face }) = (at, &plane) {
+        let text = runmat_cad::syntax::refs::print_reference(face).unwrap_or_default();
+        if let Some(later) = picks_of.document.features[at..]
+            .iter()
+            .find(|f| text.contains(&format!("feature.{}.", f.id.0)))
+        {
+            return Err(model(format!(
+                "`{pick}` is made by `{}`, which comes after {id}; pick a plane or a face made before it",
+                later.id
+            )));
+        }
+    }
+    let change = edit_part(text, path, |document| {
+        let sketch = sketch_mut(document, &id)?;
+        if sketch.plane == plane {
+            return Err(model(format!("{id} is already on that plane")));
+        }
+        sketch.plane = plane.clone();
+        Ok(())
+    })?;
+    Ok((change, format!("Moved {id} to {pick}")))
 }
 
 /// `part.sketch`: an empty sketch on the picked plane or planar face, after the last feature.
@@ -951,6 +1027,7 @@ mod infer;
 mod modify;
 mod repeat;
 mod text;
+mod use_edges;
 
 #[cfg(test)]
 mod tests;
@@ -960,3 +1037,6 @@ mod ellipse_tests;
 
 #[cfg(test)]
 mod text_tests;
+
+#[cfg(test)]
+mod use_edges_tests;

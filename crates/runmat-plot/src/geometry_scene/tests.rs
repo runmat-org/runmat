@@ -55,6 +55,13 @@ fn pick_index_returns_region_for_triangle() {
     assert_eq!(hit.region_id, Some("face_a".to_string()));
     assert_eq!(hit.vertex_indices, [0, 1, 2]);
     assert!((hit.barycentric_coordinates.iter().sum::<f32>() - 1.0).abs() < 1.0e-5);
+    // The face's normal comes with the pick, so two face picks give the angle between them.
+    assert_eq!(hit.normal, Some([0.0, 0.0, 1.0]));
+    // And its planar face's triangles, so Measure can draw a normal distance between faces.
+    assert_eq!(
+        hit.face_triangles,
+        vec![-1.0, -1.0, 0.0, 1.0, -1.0, 0.0, 0.0, 1.0, 0.0]
+    );
 }
 
 #[test]

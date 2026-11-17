@@ -184,7 +184,14 @@ pub(super) fn add(c: &mut Catalog) {
             .inputs(vec![radio("scope", "Check", &[("all", "Whole board"), ("selection", "Selection")]), flag("live", "Live checking", true)])
             .edit(check("drc")),
         brd("board.rules", "Rules", "rules", "Add or edit a design rule: clearance, width, via, pair, length, impedance, plane, mask or silk.")
-            .inputs(vec![choice("kind", "Rule", RULES), text("applies", "Applies to", Some("InNetClass('power')")), text("value", "Value", Some("0.2 mm")), count("priority", "Priority", 1, 1)])
+            .inputs(vec![
+                choice("kind", "Rule", RULES),
+                text("applies", "Applies to", Some(":net-class(power)")).help("A selector: :net-class(power), track:net(USB*), pad.smd, :layer(outer)."),
+                text("value", "Value", Some("0.2 mm")).help("A length (0.2 mm, 8 mil); impedance in ohms (50 ohm); a via as drill/diameter (0.3 mm/0.6 mm)."),
+                count("priority", "Priority", 1, 1),
+                text("name", "Name", Some("power_width")).optional().help("Empty: named from its kind. A selected rule keeps its name, so it is replaced."),
+            ])
+            .on(&[K::Rule])
             .edit(add_to("rule", Section::Rules)),
         brd("board.capability", "Board house", "rules", "Load a board-house capability set: the fabrication limits every design rule falls back to.")
             .kw(&["capability", "fab house", "fabrication limits", "manufacturing limits", "hdi"])

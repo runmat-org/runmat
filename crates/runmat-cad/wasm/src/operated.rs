@@ -239,7 +239,7 @@ pub fn operated_displays(
     };
     for (id, tools) in tools {
         let node = resolved.node(id);
-        let file = node.definition.file.as_str().to_string();
+        let file = node.source_key();
         let Some(part) = documents.get(&file) else {
             continue;
         };

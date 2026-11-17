@@ -13,16 +13,23 @@ pub(super) fn manage() -> Vec<CommandDescriptor> {
             "Define product options and the serial ranges they apply to.",
         )
         .inputs(vec![
-            text("option", "Option", Some("engine")),
-            text("values", "Values", Some("a, b")),
-            text("effectivity", "Effectivity", Some("MSN 1-99")).optional(),
+            text("option", "Option", Some("engine")).help(
+                "An existing option's name changes it.",
+            ),
+            text("values", "Values", Some("a, b")).help(
+                "The values the option takes, the first one standard; `1-99` makes a serial-number range.",
+            ),
+            text("effectivity", "Effectivity", Some("MSN 1-99")).optional().help(
+                "The serial range the option's other values apply in, as `MSN 1-99` (or `LOT 3-5`); left empty, they apply everywhere.",
+            ),
         ])
+        .on(&[K::ProductOption])
         .edit(edit(EditOp::Add, Section::Options).item("option")),
         asm(
             "assembly.configurations",
             "Configurations and display states",
             "configuration",
-            "Add configurations and display states.",
+            "Add or change a configuration (input values and suppressed components) or a display state (hidden components).",
         )
         .inputs(vec![
             radio(
@@ -33,8 +40,21 @@ pub(super) fn manage() -> Vec<CommandDescriptor> {
                     ("display_state", "Display state"),
                 ],
             ),
-            text("name", "Name", Some("open")),
+            text("name", "Name", Some("open"))
+                .help("An existing configuration's or display state's name changes it."),
+            text("values", "Input values", None)
+                .optional()
+                .shown("kind", &["configuration"])
+                .help("The assembly's inputs this configuration sets, as `width = 40 mm, depth = 20 mm`."),
+            picks("suppress", "Suppressed components", &[K::Occurrence])
+                .optional()
+                .shown("kind", &["configuration"]),
+            picks("hidden", "Hidden components", &[K::Occurrence])
+                .optional()
+                .shown("kind", &["display_state"])
+                .help("The components the view leaves out while this display state is applied."),
         ])
+        .on(&[K::Configuration, K::DisplayState])
         .edit(edit(EditOp::Add, Section::Configurations).item("configuration")),
         asm(
             "assembly.document-settings",
@@ -53,14 +73,28 @@ pub(super) fn manage() -> Vec<CommandDescriptor> {
         )])
         .edit(edit(EditOp::Set, Section::Settings).item("document")),
         asm(
+            "assembly.release",
+            "Release",
+            "release",
+            "Save the selected components' files, or this assembly, as their next released revision.",
+        )
+        .kw(&["revision", "release", "freeze", "version"])
+        .inputs(vec![picks("components", "Components", &[K::Occurrence])
+            .optional()
+            .help("Leave empty to release this assembly.")])
+        .on(&[K::Occurrence])
+        .edit(edit(EditOp::Set, Section::Occurrences).item("release")),
+        asm(
             "assembly.update-pins",
             "References and pins",
             "pin",
-            "Review pinned revisions of components and update them.",
+            "Pin components to their file's latest released revision, or set them to follow the file live.",
         )
         .kw(&["revision", "update", "version"])
         .inputs(vec![
-            picks("components", "Components", &[K::Occurrence]).optional(),
+            picks("components", "Components", &[K::Occurrence])
+                .optional()
+                .help("Leave empty to update every component."),
             radio(
                 "to",
                 "Update to",
@@ -132,27 +166,45 @@ pub(super) fn manage() -> Vec<CommandDescriptor> {
             "assembly.delete",
             "Delete",
             "delete",
-            "Delete components, mates, mate connectors, publishes, sketches, assembly features or sketch curves.",
+            "Delete components, mates, mate connectors, publishes, configurations, display states, envelopes, contact regions, options, sketches, assembly features, sketch curves, exploded views or explode steps.",
         )
         .when(selected(&[
             K::Occurrence,
             K::Mate,
             K::MateConnector,
             K::Publish,
+            K::Configuration,
+            K::DisplayState,
+            K::Envelope,
+            K::Contact,
+            K::ProductOption,
+            K::MotionStudy,
+            K::MatePosition,
             K::Sketch,
             K::Feature,
             K::SketchEntity,
             K::SketchPoint,
+            K::ExplodedView,
+            K::ExplodeStep,
         ]))
         .on(&[
             K::Occurrence,
             K::Mate,
             K::MateConnector,
             K::Publish,
+            K::Configuration,
+            K::DisplayState,
+            K::Envelope,
+            K::Contact,
+            K::ProductOption,
+            K::MotionStudy,
+            K::MatePosition,
             K::Sketch,
             K::Feature,
             K::SketchEntity,
             K::SketchPoint,
+            K::ExplodedView,
+            K::ExplodeStep,
         ])
         .edit(edit(EditOp::Remove, Section::Occurrences)),
         asm(
