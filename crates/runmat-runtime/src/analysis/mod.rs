@@ -75,6 +75,8 @@ pub(crate) mod field_selection;
 #[cfg(feature = "plot-core")]
 mod figures;
 mod formulation_admission;
+mod study_mesh_requirement;
+use study_mesh_requirement::{require_structural_solver_mesh_source, structural_study_mesh_required};
 mod frequency_result;
 mod linear_static_execution;
 mod linear_static_result;
@@ -702,21 +704,7 @@ pub fn analysis_prepare_structural_study_op(
         "RM.FEA.RUN_STUDY.PORTABLE_MESH_REQUIRED",
         &study.context,
     )?
-    .ok_or_else(|| {
-        operation_error(
-            ANALYSIS_RUN_STUDY_OPERATION,
-            ANALYSIS_RUN_STUDY_OP_VERSION,
-            &study.context,
-            OperationErrorSpec {
-                error_code: "RM.FEA.RUN_STUDY.PORTABLE_MESH_REQUIRED",
-                error_type: OperationErrorType::Input,
-                retryable: false,
-                severity: OperationErrorSeverity::Error,
-            },
-            "portable structural study execution requires a canonical solver mesh",
-            BTreeMap::from([("study_id".to_string(), study.spec.study_id.clone())]),
-        )
-    })?;
+    .ok_or_else(|| structural_study_mesh_required(&study.spec.study_id, &study.context))?;
 
     if let [step] = study.steps.as_slice() {
         if let AnalysisSolverOptions::StructuralModes(mut options) =
@@ -1323,18 +1311,9 @@ pub fn analysis_prepare_structural_study_op(
             study.context.clone(),
         )?;
         if linear.solver_mesh.is_none() {
-            return Err(operation_error(
-                ANALYSIS_RUN_STUDY_OPERATION,
-                ANALYSIS_RUN_STUDY_OP_VERSION,
+            return Err(structural_study_mesh_required(
+                &study.spec.study_id,
                 &study.context,
-                OperationErrorSpec {
-                    error_code: "RM.FEA.RUN_STUDY.PORTABLE_MESH_REQUIRED",
-                    error_type: OperationErrorType::Input,
-                    retryable: false,
-                    severity: OperationErrorSeverity::Error,
-                },
-                "portable structural study execution requires a canonical solver mesh",
-                BTreeMap::from([("study_id".to_string(), study.spec.study_id.clone())]),
             ));
         }
         if linears
@@ -1543,6 +1522,7 @@ fn prepare_study_semantics(
             .collect::<Vec<_>>(),
     );
     analysis_validate(&model, &CoordinateFrame::Global, context.clone())?;
+    require_structural_solver_mesh_source(spec, &steps, &context)?;
     Ok(PreparedStudySequence {
         spec: spec.clone(),
         context,
