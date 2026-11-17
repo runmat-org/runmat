@@ -116,7 +116,8 @@ pub fn mesh_exact_geometry(
             capacity.min(config.authored_worker_memory_bytes.unwrap_or(u64::MAX)),
             &job.request.limits,
         ),
-        None => crate::machine_capacity::meshing_execution_ceilings(&job.request.limits),
+        None => crate::machine_capacity::meshing_execution_ceilings(&job.request.limits)
+            .map_err(|error| NativeExecutionError::Configuration(error.to_string()))?,
     };
     config.worker_memory_bytes = config
         .worker_memory_bytes

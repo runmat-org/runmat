@@ -26,7 +26,23 @@ impl<T> Clone for Entries<T> {
     }
 }
 
+impl<T> Page<T> {
+    fn resident_bytes(&self) -> u64 {
+        use crate::resident_bytes::{arc_bytes, box_bytes, vec_bytes};
+        arc_bytes::<Self>().saturating_add(match self {
+            Page::Leaf(points) => vec_bytes::<SpatialPoint<T>>(points.capacity()),
+            Page::Branch(children) => children.iter().flatten().fold(
+                box_bytes::<[Option<Arc<Page<T>>>; PAGE_SIZE]>(),
+                |sum, child| sum.saturating_add(child.resident_bytes()),
+            ),
+        })
+    }
+}
+
 impl<T> Entries<T> {
+    pub(super) fn resident_bytes(&self) -> u64 {
+        self.root.as_deref().map_or(0, Page::resident_bytes)
+    }
     pub fn from_points<E>(
         points: Vec<SpatialPoint<T>>,
         checkpoint: &mut impl FnMut() -> Result<(), E>,

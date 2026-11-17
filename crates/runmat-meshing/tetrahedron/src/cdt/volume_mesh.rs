@@ -28,6 +28,7 @@ mod constraint_star;
 mod construction;
 mod quality_replay;
 mod representation;
+mod residency;
 pub use construction::{
     construct_delaunay_volume_mesh, construct_delaunay_volume_mesh_with_quality_observer,
 };
@@ -133,6 +134,11 @@ pub enum DelaunayVolumeMeshErrorKind {
     InvalidMetric,
     InvalidQuality,
     ResourceLimit,
+    /// The construction needed `required_bytes` of resident memory, which the run's memory
+    /// authority refused before the mesh grew into it.
+    MemoryBudgetExceeded {
+        required_bytes: u64,
+    },
     Cancelled,
 }
 
@@ -162,9 +168,10 @@ fn construct_component_mesh(
     metric_request: &MetricFieldRequest,
     frame: &frame::CanonicalVolumeFrame,
     options: DelaunayVolumeMeshOptions,
-    cancellation: &dyn MeshingCancellationSignal,
-    observer: &dyn quality_replay::VolumeQualityObserver,
+    execution: quality_convergence::QualityExecution<'_>,
 ) -> Result<DelaunayVolumeMesh, DelaunayVolumeMeshError> {
+    let cancellation = execution.cancellation;
+    let observer = execution.observer;
     let constraints = &owned_constraints;
     let component_span = tracing::info_span!(
         "meshing.tetrahedron.component",
@@ -337,10 +344,7 @@ fn construct_component_mesh(
             provenance,
             &seeded.node_identities,
             options,
-            quality_convergence::QualityExecution {
-                cancellation,
-                observer,
-            },
+            execution,
         )
     })?;
     Ok(DelaunayVolumeMesh {

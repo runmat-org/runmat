@@ -78,6 +78,10 @@ impl<'a> MeshingGeometryEvaluationControl<'a> {
         self
     }
 
+    pub fn maximum_allocation_bytes(&self) -> u64 {
+        self.maximum_allocation_bytes
+    }
+
     pub fn remaining_allocation_bytes(&self) -> u64 {
         self.maximum_allocation_bytes
             .saturating_sub(self.usage.allocation_bytes.load(Ordering::Relaxed))

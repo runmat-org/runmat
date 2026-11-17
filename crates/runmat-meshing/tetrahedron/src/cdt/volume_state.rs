@@ -244,6 +244,39 @@ impl<'ctx> WorkingState<'ctx> {
     }
 }
 
+impl WorkingState<'_> {
+    /// An upper bound on the heap bytes this working state holds now.
+    pub(in crate::cdt) fn resident_bytes(&self) -> u64 {
+        runmat_meshing_core::resident_bytes::btree_bytes::<StableDigest, ()>(
+            self.protected_nodes.len(),
+        )
+        .saturating_add(self.topology.resident_bytes())
+        .saturating_add(self.quality.resident_bytes())
+    }
+
+    /// Heap bytes of the canonical topology and quality that [`Self::finish`] builds from this
+    /// state: vectors collected at their exact lengths, one quality record and one vertex-star
+    /// entry per corner of each active tetrahedron, at most one boundary facet per boundary face
+    /// and one region entry per tetrahedron.
+    pub(in crate::cdt) fn handoff_bytes(&self) -> u64 {
+        use crate::cdt::{DelaunayBoundaryFacet, DelaunayVolumeTetrahedron};
+        use runmat_meshing_core::resident_bytes::vec_bytes;
+        let nodes = self.topology.nodes.len();
+        let tetrahedra = self.topology.active_tetrahedron_count();
+        [
+            self.quality.handoff_bytes(),
+            vec_bytes::<DelaunayVolumeNode>(nodes),
+            vec_bytes::<DelaunayVolumeTetrahedron>(tetrahedra),
+            vec_bytes::<Vec<u32>>(nodes),
+            vec_bytes::<u32>(tetrahedra.saturating_mul(4)),
+            vec_bytes::<DelaunayBoundaryFacet>(self.topology.boundary_faces.len()),
+            vec_bytes::<u32>(tetrahedra.saturating_mul(2)),
+        ]
+        .into_iter()
+        .fold(0, u64::saturating_add)
+    }
+}
+
 impl<'ctx> SearchState<'ctx> for WorkingState<'ctx> {
     fn preparation(&self) -> &'ctx PreparedLocalQuality<'ctx> {
         self.prepared

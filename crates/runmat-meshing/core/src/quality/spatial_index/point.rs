@@ -52,6 +52,13 @@ pub struct PointSpatialIndex<T> {
     root: Option<Arc<Node>>,
 }
 impl<T> PointSpatialIndex<T> {
+    /// Heap bytes of the entry pages and the routing tree, counting every shared branch as if
+    /// this index owned it alone. Payloads are stored inline; heap they own is not counted.
+    pub fn resident_bytes(&self) -> u64 {
+        self.entries
+            .resident_bytes()
+            .saturating_add(self.root.as_deref().map_or(0, Node::resident_bytes))
+    }
     pub fn len(&self) -> usize {
         self.entries.len()
     }

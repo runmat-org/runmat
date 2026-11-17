@@ -9,6 +9,7 @@ pub mod estimate;
 pub mod fixtures;
 pub mod interpolation;
 pub mod quality;
+pub mod resident_bytes;
 pub mod work_count;
 pub use contracts::canonical::{
     build_chunked_stage_payload, build_chunked_stage_payload_with_cancellation,

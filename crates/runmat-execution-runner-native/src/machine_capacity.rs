@@ -94,11 +94,12 @@ fn footprint_and_peak() -> io::Result<(u64, u64)> {
 
 /// Execution ceilings for one local meshing run: sized from the memory this host admits for work
 /// (the same authority as publication staging and the thread plan) and from the requested mesh
-/// size. They bound whether the run completes, never what it produces.
+/// size. They bound whether the run completes, never what it produces. A host whose available
+/// memory cannot be read gets an error; no portable constant stands in for its capacity.
 pub fn meshing_execution_ceilings(
     limits: &runmat_meshing_core::MeshingSizeLimits,
-) -> runmat_meshing_core::MeshingExecutionCeilings {
-    meshing_execution_ceilings_for(memory_bytes().unwrap_or(0), limits)
+) -> io::Result<runmat_meshing_core::MeshingExecutionCeilings> {
+    Ok(meshing_execution_ceilings_for(memory_bytes()?, limits))
 }
 
 /// Ceilings for a run admitted `capacity_bytes` of memory: the pool's own admitted capacity,

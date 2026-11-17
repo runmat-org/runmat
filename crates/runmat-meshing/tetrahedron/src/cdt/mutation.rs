@@ -16,6 +16,7 @@ mod point_update;
 mod relocation;
 pub(in crate::cdt) use relocation::CavityRelocation;
 mod replace;
+mod resident;
 mod spatial;
 mod spatial_cells;
 mod storage;
@@ -26,7 +27,7 @@ mod trial;
 mod tests;
 
 pub(in crate::cdt) use storage::{
-    TopologyMutation, TopologyMutationError, TopologyMutationErrorKind,
+    MutableTetrahedron, TopologyMutation, TopologyMutationError, TopologyMutationErrorKind,
 };
 pub(in crate::cdt) use trace::{TopologyEdit, TopologyEdits};
 pub(in crate::cdt) use trial::CavityTrial;
