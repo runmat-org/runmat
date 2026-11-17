@@ -241,6 +241,12 @@ fn overlaps(sheet: &str, layout: &Value, out: &mut Vec<Finding>) {
                 lines.push((owner.clone(), a.iter().filter_map(Value::as_f64).collect()));
             }
         }
+        // A view's extent is its model lines and hatching. Its marks (centerlines, and a section's
+        // cutting-plane line with its arrows, drawn on the parent view under the section's id)
+        // don't count, or a section would always overlap the view it was cut from.
+        if kind == "view" && matches!(p["style"].as_str(), Some("center" | "thick" | "dimink")) {
+            continue;
+        }
         let b = geometry.entry(owner).or_default();
         let nums: Vec<f64> = match ty {
             "polyline" => shape["points"]
@@ -941,6 +947,24 @@ mod tests {
             "{}",
             out[1].message
         );
+    }
+
+    /// A section's cutting-plane line is drawn on its parent under the section's id; it doesn't
+    /// make the section overlap the parent.
+    #[test]
+    fn a_sections_cutting_line_on_its_parent_is_not_an_overlap() {
+        let line = |id: &str, style: &str, pts: [f64; 4]| json!({ "id": id, "kind": "view", "style": style, "shape": { "type": "polyline", "points": pts } });
+        let layout = json!({ "primitives": [
+            line("view:front", "visible", [60.0, 120.0, 180.0, 240.0]),
+            line("view:a_a", "visible", [60.0, 60.0, 180.0, 80.0]),
+            line("view:a_a", "hatch", [60.0, 60.0, 180.0, 80.0]),
+            line("view:a_a", "center", [52.0, 180.0, 188.0, 180.0]),
+            line("view:a_a", "thick", [52.0, 180.0, 58.0, 180.0]),
+            line("view:a_a", "dimink", [55.0, 180.0, 55.0, 187.0]),
+        ] });
+        let mut out = Vec::new();
+        overlaps("1", &layout, &mut out);
+        assert!(out.is_empty(), "{out:#?}");
     }
 
     /// A figure set on a view's model lines (a dimension's 50 on a hole) is an overlap finding;
