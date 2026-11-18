@@ -1,12 +1,13 @@
 {
  "schema_version": 1,
- "source_revision": "8b33ada88547516ec40c25ca08f215a2b314019f",
+ "source_revision": "d12aa51b491a1e1203cd4610ba99fe735c0783dd",
  "previous_revision": "3583e216622e45db0732caaa314ce109ed5565c1",
  "measured_revision": "912f34e3cd484efcb72e2bbda9d018fded199b56",
  "changed_scientific_inputs": [
   "crates/runmat-analysis/core/src/lib.rs",
   "crates/runmat-analysis/core/src/study/output/quantity/source_names.rs",
   "crates/runmat-analysis/execution/src/geometry_materialization/host.rs",
+  "crates/runmat-analysis/fea/src/adaptation/structural_recovery/qualification_tests.rs",
   "crates/runmat-analysis/fea/src/execution/source_field_locations_tests.rs",
   "crates/runmat-analysis/fea/src/planning/operations/qualification_tests.rs",
   "crates/runmat-analysis/fea/src/planning/operations/static_solid.rs",
@@ -147,6 +148,7 @@
   "crates/runmat-circuit/src/syntax/values.rs",
   "crates/runmat-circuit/tests/context_commands.rs",
   "crates/runmat-circuit/tests/review_rules.rs",
+  "crates/runmat-cli/tests/check_cli.rs",
   "crates/runmat-constraint/src/rows.rs",
   "crates/runmat-design-syntax/grammar/fea.tmLanguage.json",
   "crates/runmat-design-syntax/src/dialect.rs",
@@ -158,15 +160,24 @@
   "crates/runmat-design-tools/tests/tools.rs",
   "crates/runmat-filesystem/src/pinned/tests.rs",
   "crates/runmat-geometry/io/src/exact.rs",
+  "crates/runmat-geometry/io/src/occt/exact_step_writer.cc",
   "crates/runmat-geometry/kernel/src/stroke.rs",
   "crates/runmat-geometry/kernel/src/stroke/tests.rs",
+  "crates/runmat-geometry/wasm-host/src/cad.rs",
   "crates/runmat-geometry/wasm-host/tests/cad_direct.rs",
   "crates/runmat-geometry/wasm-host/tests/cad_direct_imported.rs",
   "crates/runmat-geometry/wasm-host/tests/cad_drawing_tangent.rs",
   "crates/runmat-geometry/wasm-host/tests/cad_evaluate.rs",
+  "crates/runmat-geometry/wasm-host/tests/cad_face_profiles.rs",
   "crates/runmat-geometry/wasm-host/tests/cad_motion.rs",
+  "crates/runmat-geometry/wasm-host/tests/cad_pattern_split.rs",
+  "crates/runmat-geometry/wasm-host/tests/cad_picked_references.rs",
   "crates/runmat-geometry/wasm-host/tests/cad_representations.rs",
+  "crates/runmat-geometry/wasm-host/tests/cad_sheet_metal_commands.rs",
+  "crates/runmat-geometry/wasm-host/tests/cad_sheet_metal_convert.rs",
   "crates/runmat-geometry/wasm-host/tests/cad_sketch_geometry.rs",
+  "crates/runmat-geometry/wasm-host/tests/cad_surface_commands.rs",
+  "crates/runmat-geometry/wasm-host/tests/cad_surfaces.rs",
   "crates/runmat-geometry/wasm-host/tests/meshing_progress.rs",
   "crates/runmat-logging/src/lib.rs",
   "crates/runmat-logging/tests/event_without_message.rs",
@@ -252,5 +263,5 @@
    "results": "runtime plotting+compatibility 1370 passed 1 failed before the meta.json regeneration (the catalog test, fixed by the same commit); runmat-vm plotting 68 passed 0 failed"
   }
  ],
- "review": "Conserves the fresh 0.7.2 scientific measurements across the CI repairs. cargo fmt --all on the measured source (3583e21662, whose scientific inputs equal the measured 912f34e3cd inventory) reproduces the 191 formatted Rust files of bd7dd3a4d1 blob for blob. Two more inputs change: the regenerated FEA highlighting grammar, which adds one field-quantity word and no execution path reads it, and the subplot axes-slot repair in runtime plotting state (8b33ada885), which no cohort exercises. Solver arithmetic, model inputs, dependencies, features and thresholds are unchanged. This review is not a rerun of the scientific or performance measurements."
+ "review": "Conserves the fresh 0.7.2 scientific measurements across the CI repairs. cargo fmt --all on the measured source (3583e21662, whose scientific inputs equal the measured 912f34e3cd inventory) reproduces the 191 formatted Rust files of bd7dd3a4d1 blob for blob. Other changed inputs: the regenerated FEA highlighting grammar, which adds one field-quantity word and no execution path reads it; the subplot axes-slot repair in runtime plotting state (8b33ada885), which no cohort exercises; the OCCT host's per-thread STEP import table (a6fb58c3ad; the airliner cohort imports no STEP file, so its table is empty either way); the STEP exporter's direct-surface pass (d36e979417; no cohort exports STEP); and test-only edits that no cohort runs (eight OCCT CAD tests read the always-known mass-properties volume; the G128 multigrid memory test is ignored). Solver arithmetic, model inputs, dependencies, features and thresholds are unchanged. This review is not a rerun of the scientific or performance measurements."
 }

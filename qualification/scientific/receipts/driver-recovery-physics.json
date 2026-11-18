@@ -111,14 +111,14 @@
       "encoding": "git-mode-type-blob-path-tuples-v1"
     },
     "accepted_inputs": {
-      "sha256": "54af7b43a9ae54e781fd6c6e007bfc3cfc52912028c7aebeaa5ec693c5b60edf",
+      "sha256": "40fb35d2c5b167d974385a292a180c793376aba7148d12b7b783e2e013aa4cdc",
       "files": 26439,
       "encoding": "git-mode-type-blob-path-tuples-v1"
     },
-    "reason": "Conserves the fresh 0.7.2 scientific measurements across the CI repairs. cargo fmt --all on the measured source (3583e21662, whose scientific inputs equal the measured 912f34e3cd inventory) reproduces the 191 formatted Rust files of bd7dd3a4d1 blob for blob. Two more inputs change: the regenerated FEA highlighting grammar, which adds one field-quantity word and no execution path reads it, and the subplot axes-slot repair in runtime plotting state (8b33ada885), which no cohort exercises. Solver arithmetic, model inputs, dependencies, features and thresholds are unchanged. This review is not a rerun of the scientific or performance measurements.",
+    "reason": "Conserves the fresh 0.7.2 scientific measurements across the CI repairs. cargo fmt --all on the measured source (3583e21662, whose scientific inputs equal the measured 912f34e3cd inventory) reproduces the 191 formatted Rust files of bd7dd3a4d1 blob for blob. Other changed inputs: the regenerated FEA highlighting grammar, which adds one field-quantity word and no execution path reads it; the subplot axes-slot repair in runtime plotting state (8b33ada885), which no cohort exercises; the OCCT host's per-thread STEP import table (a6fb58c3ad; the airliner cohort imports no STEP file, so its table is empty either way); the STEP exporter's direct-surface pass (d36e979417; no cohort exports STEP); and test-only edits that no cohort runs (eight OCCT CAD tests read the always-known mass-properties volume; the G128 multigrid memory test is ignored). Solver arithmetic, model inputs, dependencies, features and thresholds are unchanged. This review is not a rerun of the scientific or performance measurements.",
     "review": {
       "path": "qualification/scientific/reviews/cargo-fmt-072-20261118-driver-recovery-physics.json",
-      "sha256": "9d744298c3425f2df94afd132f1c8a1a6c0c0fce9105d8d10994d0c5b386edda"
+      "sha256": "71463cd412cc712b31fd197b54a07c620053f3241e9399f8e0b9eebb7ef72353"
     }
   }
 }

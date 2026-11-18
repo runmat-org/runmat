@@ -6,7 +6,7 @@
   "encoding": "git-mode-type-blob-path-tuples-v1"
  },
  "accepted_inputs": {
-  "sha256": "54af7b43a9ae54e781fd6c6e007bfc3cfc52912028c7aebeaa5ec693c5b60edf",
+  "sha256": "40fb35d2c5b167d974385a292a180c793376aba7148d12b7b783e2e013aa4cdc",
   "files": 26439,
   "encoding": "git-mode-type-blob-path-tuples-v1"
  },
@@ -16,7 +16,7 @@
  "qualification_evidence": [
   {
    "path": "qualification/scientific/evidence/cargo-fmt-072-20261118.json",
-   "sha256": "b950db081308e9ddfb1d22560eeaf571c08c7bccce990c63a91601a1294a12b6"
+   "sha256": "9637171e5c36d97ef502452e4f2c8ee06a1556aef1a00a1bd7fd0a165de5bd34"
   }
  ],
  "changed_inputs": [
@@ -61,6 +61,20 @@
     "0ca678c29c6279ba0dc101015585491ac4c4b42e"
    ],
    "reason": "Formatting only: cargo fmt --all with the pinned rustfmt (rustc 1.90.0) and the repository rustfmt.toml. Tokens, expressions, arguments and control flow are unchanged."
+  },
+  {
+   "path": "crates/runmat-analysis/fea/src/adaptation/structural_recovery/qualification_tests.rs",
+   "before": [
+    "100644",
+    "blob",
+    "ce9a6232a08d423ec5bc410adad9b6a373352276"
+   ],
+   "after": [
+    "100644",
+    "blob",
+    "b557e3d5886cd30ea5536127c7d36d4c98dd6ede"
+   ],
+   "reason": "Test only: 9a71c20da8 adds #[ignore] to multigrid_static_plan_covers_the_measured_solve (G128, FEA-approved): the multigrid plan under-reports the measured solve by about 9 MB. The plan and the solver are unchanged. No cohort runs this test."
   },
   {
    "path": "crates/runmat-analysis/fea/src/execution/source_field_locations_tests.rs",
@@ -2023,6 +2037,20 @@
    "reason": "Formatting only: cargo fmt --all with the pinned rustfmt (rustc 1.90.0) and the repository rustfmt.toml. Tokens, expressions, arguments and control flow are unchanged."
   },
   {
+   "path": "crates/runmat-cli/tests/check_cli.rs",
+   "before": [
+    "100644",
+    "blob",
+    "64be22962969b845956584773731573e40a56227"
+   ],
+   "after": [
+    "100644",
+    "blob",
+    "3c45b2255e9be1c82bcdadabc4a6eed03668e146"
+   ],
+   "reason": "Test only: FEA's 9eea056cac expects the earlier Lowering diagnostic fea.semantic.output.field_location for an observation its family doesn't publish. No cohort runs this test, and the checker is unchanged."
+  },
+  {
    "path": "crates/runmat-constraint/src/rows.rs",
    "before": [
     "100644",
@@ -2177,6 +2205,20 @@
    "reason": "Formatting only: cargo fmt --all with the pinned rustfmt (rustc 1.90.0) and the repository rustfmt.toml. Tokens, expressions, arguments and control flow are unchanged."
   },
   {
+   "path": "crates/runmat-geometry/io/src/occt/exact_step_writer.cc",
+   "before": [
+    "100644",
+    "blob",
+    "5ea243d9c67f3c67bb6e37ccadcfc66be2742d5d"
+   ],
+   "after": [
+    "100644",
+    "blob",
+    "8e104abbd2f26441b201c9c5bf7b8396fa97ee05"
+   ],
+   "reason": "STEP export only; no cohort exports STEP. d36e979417 makes each exported part's surfaces direct (ShapeCustom_DirectModification) before the OCCT writer, so OCCT 8.0 no longer drops a cone face with a negative semi-angle. Import, healing and meshing are unchanged."
+  },
+  {
    "path": "crates/runmat-geometry/kernel/src/stroke.rs",
    "before": [
     "100644",
@@ -2205,6 +2247,20 @@
    "reason": "Formatting only: cargo fmt --all with the pinned rustfmt (rustc 1.90.0) and the repository rustfmt.toml. Tokens, expressions, arguments and control flow are unchanged."
   },
   {
+   "path": "crates/runmat-geometry/wasm-host/src/cad.rs",
+   "before": [
+    "100644",
+    "blob",
+    "132b70e830af2395bfe1fbca7517989dd2537710"
+   ],
+   "after": [
+    "100644",
+    "blob",
+    "52f81f39768db05f313f04724b5b9a644c6b0f86"
+   ],
+   "reason": "STEP import table per thread; the cohort imports no STEP file. a6fb58c3ad and the following commit keep the OCCT host's table of the current request's STEP files per thread and clear it when the call ends. cad_airliner_drawing calls cad::call but imports no STEP file, so its table is empty before and after; the other three cohorts don't link this host."
+  },
+  {
    "path": "crates/runmat-geometry/wasm-host/tests/cad_direct.rs",
    "before": [
     "100644",
@@ -2228,9 +2284,9 @@
    "after": [
     "100644",
     "blob",
-    "084d7540747494c3c25b443de3091a3eedcc17fc"
+    "0fee185b1e91c06f47f9589ba59e55f8a75a9bd6"
    ],
-   "reason": "Formatting only: cargo fmt --all with the pinned rustfmt (rustc 1.90.0) and the repository rustfmt.toml. Tokens, expressions, arguments and control flow are unchanged."
+   "reason": "Formatted by the cargo fmt pass, then 5de5f69b59 makes this OCCT CAD test read the mass-properties report's always-known volume (data.volume) instead of data.total.volume, which 97188de511 leaves null for a part with no density. No production code changes. No cohort runs it: typed_fea_geometry_cli, remote::driver_replacement_tests, runtime_scale and cad_airliner_drawing are other test targets."
   },
   {
    "path": "crates/runmat-geometry/wasm-host/tests/cad_drawing_tangent.rs",
@@ -2261,6 +2317,20 @@
    "reason": "Formatting only: cargo fmt --all with the pinned rustfmt (rustc 1.90.0) and the repository rustfmt.toml. Tokens, expressions, arguments and control flow are unchanged."
   },
   {
+   "path": "crates/runmat-geometry/wasm-host/tests/cad_face_profiles.rs",
+   "before": [
+    "100644",
+    "blob",
+    "c12c22aaeb384e2569a5340c06beed1e3d650234"
+   ],
+   "after": [
+    "100644",
+    "blob",
+    "9e6380d0da9f22604443251514cca9979442e083"
+   ],
+   "reason": "Test only: 5de5f69b59 makes this OCCT CAD test read the mass-properties report's always-known volume (data.volume) instead of data.total.volume, which 97188de511 leaves null for a part with no density. No production code changes. No cohort runs it: typed_fea_geometry_cli, remote::driver_replacement_tests, runtime_scale and cad_airliner_drawing are other test targets."
+  },
+  {
    "path": "crates/runmat-geometry/wasm-host/tests/cad_motion.rs",
    "before": [
     "100644",
@@ -2273,6 +2343,34 @@
     "fe4ccdb6c3367067e494f2cec6a701ed5b38f0d1"
    ],
    "reason": "Formatting only: cargo fmt --all with the pinned rustfmt (rustc 1.90.0) and the repository rustfmt.toml. Tokens, expressions, arguments and control flow are unchanged."
+  },
+  {
+   "path": "crates/runmat-geometry/wasm-host/tests/cad_pattern_split.rs",
+   "before": [
+    "100644",
+    "blob",
+    "1b427db20a7c09b9c951356df24cf1be0badbebf"
+   ],
+   "after": [
+    "100644",
+    "blob",
+    "20d5692452f279b2e417167383637ca53111cfdc"
+   ],
+   "reason": "Test only: 5de5f69b59 makes this OCCT CAD test read the mass-properties report's always-known volume (data.volume) instead of data.total.volume, which 97188de511 leaves null for a part with no density. No production code changes. No cohort runs it: typed_fea_geometry_cli, remote::driver_replacement_tests, runtime_scale and cad_airliner_drawing are other test targets."
+  },
+  {
+   "path": "crates/runmat-geometry/wasm-host/tests/cad_picked_references.rs",
+   "before": [
+    "100644",
+    "blob",
+    "e49218c3351b2cf6411537c386a6e8f239ac9125"
+   ],
+   "after": [
+    "100644",
+    "blob",
+    "2a273e886b8f5dbe3aac6bdf4c9867857b86da23"
+   ],
+   "reason": "Test only: 5de5f69b59 makes this OCCT CAD test read the mass-properties report's always-known volume (data.volume) instead of data.total.volume, which 97188de511 leaves null for a part with no density. No production code changes. No cohort runs it: typed_fea_geometry_cli, remote::driver_replacement_tests, runtime_scale and cad_airliner_drawing are other test targets."
   },
   {
    "path": "crates/runmat-geometry/wasm-host/tests/cad_representations.rs",
@@ -2289,6 +2387,34 @@
    "reason": "Formatting only: cargo fmt --all with the pinned rustfmt (rustc 1.90.0) and the repository rustfmt.toml. Tokens, expressions, arguments and control flow are unchanged."
   },
   {
+   "path": "crates/runmat-geometry/wasm-host/tests/cad_sheet_metal_commands.rs",
+   "before": [
+    "100644",
+    "blob",
+    "b9c58709ab858c6af270df613286bbbd787a2346"
+   ],
+   "after": [
+    "100644",
+    "blob",
+    "6b45050c3932ab7a6a5867a585120f46a1a354fd"
+   ],
+   "reason": "Test only: 5de5f69b59 makes this OCCT CAD test read the mass-properties report's always-known volume (data.volume) instead of data.total.volume, which 97188de511 leaves null for a part with no density. No production code changes. No cohort runs it: typed_fea_geometry_cli, remote::driver_replacement_tests, runtime_scale and cad_airliner_drawing are other test targets."
+  },
+  {
+   "path": "crates/runmat-geometry/wasm-host/tests/cad_sheet_metal_convert.rs",
+   "before": [
+    "100644",
+    "blob",
+    "8c3f9d88fa51f2189edc8d63b05b33f233d6ccbc"
+   ],
+   "after": [
+    "100644",
+    "blob",
+    "e1af35a04b7c9277846608aeb464f305e94e1bb8"
+   ],
+   "reason": "Test only: 5de5f69b59 makes this OCCT CAD test read the mass-properties report's always-known volume (data.volume) instead of data.total.volume, which 97188de511 leaves null for a part with no density. No production code changes. No cohort runs it: typed_fea_geometry_cli, remote::driver_replacement_tests, runtime_scale and cad_airliner_drawing are other test targets."
+  },
+  {
    "path": "crates/runmat-geometry/wasm-host/tests/cad_sketch_geometry.rs",
    "before": [
     "100644",
@@ -2301,6 +2427,34 @@
     "84877308e0d3e43124e25ae834e98296b4ec18b9"
    ],
    "reason": "Formatting only: cargo fmt --all with the pinned rustfmt (rustc 1.90.0) and the repository rustfmt.toml. Tokens, expressions, arguments and control flow are unchanged."
+  },
+  {
+   "path": "crates/runmat-geometry/wasm-host/tests/cad_surface_commands.rs",
+   "before": [
+    "100644",
+    "blob",
+    "3a03e957a8727a688c2f7bd0806182ef3fb517cf"
+   ],
+   "after": [
+    "100644",
+    "blob",
+    "00671042ace28a8da2bf89eb6c173f3e0b9f4ae8"
+   ],
+   "reason": "Test only: 5de5f69b59 makes this OCCT CAD test read the mass-properties report's always-known volume (data.volume) instead of data.total.volume, which 97188de511 leaves null for a part with no density. No production code changes. No cohort runs it: typed_fea_geometry_cli, remote::driver_replacement_tests, runtime_scale and cad_airliner_drawing are other test targets."
+  },
+  {
+   "path": "crates/runmat-geometry/wasm-host/tests/cad_surfaces.rs",
+   "before": [
+    "100644",
+    "blob",
+    "fa8e2588452b7cc6ebc0f16a67c1c686bdcadde3"
+   ],
+   "after": [
+    "100644",
+    "blob",
+    "37a25956cfcfe39d24042531b918d0d8df1163ea"
+   ],
+   "reason": "Test only: 5de5f69b59 makes this OCCT CAD test read the mass-properties report's always-known volume (data.volume) instead of data.total.volume, which 97188de511 leaves null for a part with no density. No production code changes. No cohort runs it: typed_fea_geometry_cli, remote::driver_replacement_tests, runtime_scale and cad_airliner_drawing are other test targets."
   },
   {
    "path": "crates/runmat-geometry/wasm-host/tests/meshing_progress.rs",
@@ -2723,5 +2877,5 @@
    "reason": "Formatting only: cargo fmt --all with the pinned rustfmt (rustc 1.90.0) and the repository rustfmt.toml. Tokens, expressions, arguments and control flow are unchanged."
   }
  ],
- "reason": "Conserves the fresh 0.7.2 scientific measurements across the CI repairs. cargo fmt --all on the measured source (3583e21662, whose scientific inputs equal the measured 912f34e3cd inventory) reproduces the 191 formatted Rust files of bd7dd3a4d1 blob for blob. Two more inputs change: the regenerated FEA highlighting grammar, which adds one field-quantity word and no execution path reads it, and the subplot axes-slot repair in runtime plotting state (8b33ada885), which no cohort exercises. Solver arithmetic, model inputs, dependencies, features and thresholds are unchanged. This review is not a rerun of the scientific or performance measurements."
+ "reason": "Conserves the fresh 0.7.2 scientific measurements across the CI repairs. cargo fmt --all on the measured source (3583e21662, whose scientific inputs equal the measured 912f34e3cd inventory) reproduces the 191 formatted Rust files of bd7dd3a4d1 blob for blob. Other changed inputs: the regenerated FEA highlighting grammar, which adds one field-quantity word and no execution path reads it; the subplot axes-slot repair in runtime plotting state (8b33ada885), which no cohort exercises; the OCCT host's per-thread STEP import table (a6fb58c3ad; the airliner cohort imports no STEP file, so its table is empty either way); the STEP exporter's direct-surface pass (d36e979417; no cohort exports STEP); and test-only edits that no cohort runs (eight OCCT CAD tests read the always-known mass-properties volume; the G128 multigrid memory test is ignored). Solver arithmetic, model inputs, dependencies, features and thresholds are unchanged. This review is not a rerun of the scientific or performance measurements."
 }
