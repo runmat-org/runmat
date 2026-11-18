@@ -32,6 +32,13 @@ and emission count matches the prior inventory. No new exception was added.
 The retained JSONL SHA-256 is
 `152dc4f633b477b298d30de7361b9961fd68fd1dc1bf3b00ff682f97019c82d3`.
 
+On the 0.7.2 candidate, `solve_policy` in
+`planning/resource/preflight/solve_workspace.rs` gained a ninth parameter
+(`preparation_bytes`, 69f99121ff). Its existing `too_many_arguments` finding
+now reads 9/7 in place of 8/7. The ledger records that one identity with its
+unchanged count of two emissions. Sites, identities and emissions stay at 179,
+166 and 265.
+
 CI retains the separate FEA lint log and checks it against the ledger. The
 expected Clippy failure under `-D warnings` is accepted only when that exact
 comparison passes. Numerical test selection and assertions remain unchanged.
