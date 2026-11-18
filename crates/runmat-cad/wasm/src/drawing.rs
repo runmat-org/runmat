@@ -941,8 +941,7 @@ pub fn compile_json_in(
                 continue;
             }
             runmat_cad::drawing::AnnotationKind::DoorSwing { door, hinge, swing } => {
-                if let Some(s) =
-                    occurrences::door_swing(display, &door.to_string(), *hinge, *swing)
+                if let Some(s) = occurrences::door_swing(display, &door.to_string(), *hinge, *swing)
                 {
                     swings.insert(a.id.clone(), s);
                 }

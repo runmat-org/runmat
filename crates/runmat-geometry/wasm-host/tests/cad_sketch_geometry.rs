@@ -28,7 +28,12 @@ fn volume(text: &str) -> f64 {
     assert!(errors.is_empty(), "{errors:?}\n{text}");
     let mass = call(
         "analyze",
-        &["/p/p.part", text, "{}", &json!({ "command": "evaluate.mass-properties" }).to_string()],
+        &[
+            "/p/p.part",
+            text,
+            "{}",
+            &json!({ "command": "evaluate.mass-properties" }).to_string(),
+        ],
     );
     assert_eq!(mass["ok"], true, "{mass}\n{text}");
     mass["data"]["total"]["volume"].as_f64().unwrap() * 1e9
@@ -48,7 +53,10 @@ fn an_extruded_ellipse_is_an_exact_elliptic_cylinder() {
         "sketch.ellipse",
         json!({ "sketch": "s1", "type": "full", "center": { "x": 0, "y": 0 }, "major": 20, "minor": 10, "angle": 30 }),
     );
-    let text = with_feature(&text, "feature boss = extrude(profile = sketch.s1, distance = 5 mm)");
+    let text = with_feature(
+        &text,
+        "feature boss = extrude(profile = sketch.s1, distance = 5 mm)",
+    );
     let want = std::f64::consts::PI * 20.0 * 10.0 * 5.0;
     let got = volume(&text);
     assert!((got - want).abs() < 1e-6 * want, "{got} mm³, want {want}");
@@ -66,7 +74,10 @@ fn half_an_ellipse_closed_by_a_line_extrudes_to_half_the_volume() {
         "    }\n}\n",
         "        l1 = line(start = e1.end, end = e1.start)\n    }\n}\n",
     );
-    let text = with_feature(&text, "feature boss = extrude(profile = sketch.s1, distance = 5 mm)");
+    let text = with_feature(
+        &text,
+        "feature boss = extrude(profile = sketch.s1, distance = 5 mm)",
+    );
     let want = std::f64::consts::PI * 20.0 * 10.0 * 5.0 / 2.0;
     let got = volume(&text);
     assert!((got - want).abs() < 1e-6 * want, "{got} mm³, want {want}");
@@ -83,9 +94,15 @@ fn engraved_text_cuts_its_outline_area_times_its_depth() {
         json!({ "sketch": "s1", "text": "HI", "at": { "x": 10, "y": 7 }, "height": 6, "font": "single_line", "stroke": 1 }),
     );
     assert!(text.contains("t1 = text(text = \"HI\""), "{text}");
-    let text = with_feature(&text, "feature engrave = extrude(profile = sketch.s1, distance = 1 mm, mode = cut)");
+    let text = with_feature(
+        &text,
+        "feature engrave = extrude(profile = sketch.s1, distance = 1 mm, mode = cut)",
+    );
     let cut = 24.0 + std::f64::consts::PI;
     let got = volume(&text);
     let want = 40.0 * 20.0 * 5.0 - cut;
-    assert!((got - want).abs() < 1e-4, "{got} mm³, want {want} (cut {cut})");
+    assert!(
+        (got - want).abs() < 1e-4,
+        "{got} mm³, want {want} (cut {cut})"
+    );
 }

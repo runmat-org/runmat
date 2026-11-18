@@ -61,11 +61,11 @@ use crate::ir::{
     Fitting, HarnessDecl, InterfaceDef, NetClass, NetDecl, Param, ParamValue, PartRef, PortDecl,
     PortDir, PortKind, SheetDef, SheetInstance, Tolerance, ValueCall, VariantDef,
 };
+use crate::units::RegistryUnits;
 use runmat_design_syntax::ast::{self, Expr, Headed, Item, Statement};
 use runmat_design_syntax::json::{format_f64, is_bare_key, is_bare_word, quote, INDENT};
 use runmat_design_syntax::{parse_source, Dialect, FeaSyntaxDiagnostic, FeaSyntaxDiagnosticKind};
 use runmat_rules::{parse_quantity, Dim, Quantity, SourceKey};
-use crate::units::RegistryUnits;
 use runmat_types::Span;
 use std::collections::BTreeMap;
 

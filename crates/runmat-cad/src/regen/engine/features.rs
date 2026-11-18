@@ -454,10 +454,7 @@ impl<'a, 'b> Run<'a, 'b> {
                         Vec::new(),
                     ));
                 };
-                (
-                    a,
-                    self.arg(id, "extrude", "thin.second_thickness", b)?,
-                )
+                (a, self.arg(id, "extrude", "thin.second_thickness", b)?)
             }
         };
         if inside + outside <= 0.0 {
@@ -699,9 +696,7 @@ impl<'a, 'b> Run<'a, 'b> {
             }
         };
         let drill_point = match (&h.drill_point, &end) {
-            (Some(a), HoleDepth::Blind { .. }) => {
-                Some(self.arg(id, "hole", "drill_point", a)?)
-            }
+            (Some(a), HoleDepth::Blind { .. }) => Some(self.arg(id, "hole", "drill_point", a)?),
             _ => None,
         };
         // Thread length: as given; blind holes stop one and a half pitches short of the drill
@@ -934,7 +929,12 @@ impl<'a, 'b> Run<'a, 'b> {
             let h = *r.entities().iter().next().expect("one");
             distances.push((
                 h,
-                self.arg(id, "fillet", &format!("setbacks[{}].distance", k), &s.distance)?,
+                self.arg(
+                    id,
+                    "fillet",
+                    &format!("setbacks[{}].distance", k),
+                    &s.distance,
+                )?,
             ));
         }
         for (h, _) in &distances {
@@ -1160,7 +1160,12 @@ impl<'a, 'b> Run<'a, 'b> {
             let p = format!("faces[{}].faces", k);
             let set = self.list(i, id, &p, &ft.faces, Some(TopoKind::Face))?;
             on_body(self, &set, &p)?;
-            let t = self.arg(id, "shell", &format!("faces[{}].thickness", k), &ft.thickness)?;
+            let t = self.arg(
+                id,
+                "shell",
+                &format!("faces[{}].thickness", k),
+                &ft.thickness,
+            )?;
             if t <= 0.0 {
                 return Err(self.error(
                     id,

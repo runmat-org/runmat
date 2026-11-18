@@ -7,8 +7,8 @@
 //! to the free spot nearest it.
 
 use super::marks::{line, prim, text};
-use super::solver::{nearest_free, BoxR, Class};
 use super::notes::NotesList;
+use super::solver::{nearest_free, BoxR, Class};
 use super::{xy, Ctx, Prim, Shape, Xy};
 use serde_json::Value;
 
@@ -342,7 +342,8 @@ fn notes_list(st: &super::Std, kind: &Value, shown: &Value) -> NotesList {
         .filter_map(Value::as_str)
         .map(str::to_owned)
         .collect();
-    let width = super::notes::width_of(kind).unwrap_or(runmat_cad::drawing::title_layout::BLOCK_WIDTH);
+    let width =
+        super::notes::width_of(kind).unwrap_or(runmat_cad::drawing::title_layout::BLOCK_WIDTH);
     NotesList::new(st, &rows, width)
 }
 
@@ -433,7 +434,13 @@ pub fn place(ctx: &mut Ctx<'_>) {
         let (grid, corner) = match t["kind"]["table"].as_str() {
             Some("notes") => {
                 let notes = notes_list(&ctx.std, &t["kind"], &data["notes"][&name]);
-                list.push((format!("table:{name}"), Block::Notes(notes), Corner::AboveTitle, at, false));
+                list.push((
+                    format!("table:{name}"),
+                    Block::Notes(notes),
+                    Corner::AboveTitle,
+                    at,
+                    false,
+                ));
                 continue;
             }
             Some("bom") => match data["bom_tables"].get(&name) {
@@ -461,7 +468,13 @@ pub fn place(ctx: &mut Ctx<'_>) {
         };
         // A revision table is placed by its top-right corner.
         let top_right = corner == Corner::TopRight;
-        list.push((format!("table:{name}"), Block::Grid(grid), corner, at, top_right));
+        list.push((
+            format!("table:{name}"),
+            Block::Grid(grid),
+            corner,
+            at,
+            top_right,
+        ));
     }
     // A flat view with bends and no bend table of its own gets one.
     for v in doc["views"].as_array().into_iter().flatten() {
@@ -470,7 +483,13 @@ pub fn place(ctx: &mut Ctx<'_>) {
             continue;
         }
         if let Some(g) = bend_grid(&data["hlr"][name]["flat"]) {
-            list.push((format!("view:{name}"), Block::Grid(g), Corner::TopLeft, None, false));
+            list.push((
+                format!("view:{name}"),
+                Block::Grid(g),
+                Corner::TopLeft,
+                None,
+                false,
+            ));
         }
     }
     let f = ctx.frame;
@@ -493,7 +512,13 @@ pub fn place(ctx: &mut Ctx<'_>) {
                     // A ruled table sits on the title block; the notes' text keeps a space.
                     Corner::AboveTitle => [
                         f.x1 - w,
-                        stacks[k] + h + if matches!(grid, Block::Notes(_)) { SPACE } else { 0.0 },
+                        stacks[k]
+                            + h
+                            + if matches!(grid, Block::Notes(_)) {
+                                SPACE
+                            } else {
+                                0.0
+                            },
                     ],
                     Corner::TopLeft => [f.x0, stacks[k]],
                 };

@@ -6,10 +6,10 @@
 
 use crate::model::items::Cardinality;
 use crate::model::PartDocument;
-use crate::refs::resolve::{ResolveOutcome, Resolver};
-use crate::regen::engine::RegenResult;
 use crate::refs::history::{EdgeCurve, FaceGeom, SurfaceKind};
 use crate::refs::name::TopoKind;
+use crate::refs::resolve::{ResolveOutcome, Resolver};
+use crate::regen::engine::RegenResult;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 

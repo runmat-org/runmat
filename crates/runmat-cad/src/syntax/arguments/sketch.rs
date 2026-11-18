@@ -4,7 +4,11 @@
 use super::Quantity::*;
 use super::{opt, req, Argument, Group, Operation};
 
-const fn entity(word: &'static str, summary: &'static str, arguments: &'static [Argument]) -> Operation {
+const fn entity(
+    word: &'static str,
+    summary: &'static str,
+    arguments: &'static [Argument],
+) -> Operation {
     Operation {
         word,
         group: Group::SketchEntity,
@@ -13,7 +17,11 @@ const fn entity(word: &'static str, summary: &'static str, arguments: &'static [
     }
 }
 
-const fn constraint(word: &'static str, summary: &'static str, arguments: &'static [Argument]) -> Operation {
+const fn constraint(
+    word: &'static str,
+    summary: &'static str,
+    arguments: &'static [Argument],
+) -> Operation {
     Operation {
         word,
         group: Group::SketchConstraint,
@@ -44,26 +52,51 @@ pub(super) const ENTITIES: &[Operation] = &[
             opt("stroke", Length, "The stroke width of a single-line font."),
         ],
     ),
-    entity("point", "A sketch point.", &[req("at", Point, "Where it sits: `[x, y]`."), CONSTRUCTION]),
+    entity(
+        "point",
+        "A sketch point.",
+        &[req("at", Point, "Where it sits: `[x, y]`."), CONSTRUCTION],
+    ),
     entity(
         "line",
         "A straight sketch line; its points are `start` and `end`.",
-        &[req("start", Point, "The start point: `[x, y]` or another entity's point."), req("end", Point, "The end point."), CONSTRUCTION],
+        &[
+            req(
+                "start",
+                Point,
+                "The start point: `[x, y]` or another entity's point.",
+            ),
+            req("end", Point, "The end point."),
+            CONSTRUCTION,
+        ],
     ),
     entity(
         "arc",
         "A circular arc counter-clockwise from `start` to `end` about `center`.",
-        &[req("center", Point, "The center."), req("start", Point, "The start point."), req("end", Point, "The end point."), CONSTRUCTION],
+        &[
+            req("center", Point, "The center."),
+            req("start", Point, "The start point."),
+            req("end", Point, "The end point."),
+            CONSTRUCTION,
+        ],
     ),
     entity(
         "circle",
         "A circle; its point is `center`.",
-        &[req("center", Point, "The center."), req("radius", Length, "The radius."), CONSTRUCTION],
+        &[
+            req("center", Point, "The center."),
+            req("radius", Length, "The radius."),
+            CONSTRUCTION,
+        ],
     ),
     entity(
         "spline",
         "An interpolating cubic through points in order: `start`, `p1` … and `end`.",
-        &[req("points", Record, "The points, in order."), opt("closed", Flag, "Run back to the first point."), CONSTRUCTION],
+        &[
+            req("points", Record, "The points, in order."),
+            opt("closed", Flag, "Run back to the first point."),
+            CONSTRUCTION,
+        ],
     ),
     entity(
         "ellipse",
@@ -72,7 +105,12 @@ pub(super) const ENTITIES: &[Operation] = &[
             req("center", Point, "The center."),
             req("major", Length, "The semi-major axis."),
             req("minor", Length, "The semi-minor axis."),
-            opt("angle", Angle, "The major axis's turn from the sketch x axis.").default("0 deg"),
+            opt(
+                "angle",
+                Angle,
+                "The major axis's turn from the sketch x axis.",
+            )
+            .default("0 deg"),
             opt("start", Point, "An arc's start point."),
             opt("end", Point, "An arc's end point."),
             CONSTRUCTION,
@@ -81,38 +119,97 @@ pub(super) const ENTITIES: &[Operation] = &[
 ];
 
 pub(super) const CONSTRAINTS: &[Operation] = &[
-    constraint("coincident", "Two points meet, or a point lies on a curve.", &[A, B]),
-    constraint("horizontal", "A line runs along the sketch x axis.", &[req("line", Reference, "The line.")]),
-    constraint("vertical", "A line runs along the sketch y axis.", &[req("line", Reference, "The line.")]),
+    constraint(
+        "coincident",
+        "Two points meet, or a point lies on a curve.",
+        &[A, B],
+    ),
+    constraint(
+        "horizontal",
+        "A line runs along the sketch x axis.",
+        &[req("line", Reference, "The line.")],
+    ),
+    constraint(
+        "vertical",
+        "A line runs along the sketch y axis.",
+        &[req("line", Reference, "The line.")],
+    ),
     constraint("parallel", "Two lines are parallel.", &[A, B]),
     constraint("perpendicular", "Two lines meet at a right angle.", &[A, B]),
     constraint("tangent", "Two curves touch without crossing.", &[A, B]),
-    constraint("equal", "Two lines have the same length, or two circles the same radius.", &[A, B]),
-    constraint("fix", "Holds an entity or point where it is.", &[req("target", Reference, "The entity or point.")]),
+    constraint(
+        "equal",
+        "Two lines have the same length, or two circles the same radius.",
+        &[A, B],
+    ),
+    constraint(
+        "fix",
+        "Holds an entity or point where it is.",
+        &[req("target", Reference, "The entity or point.")],
+    ),
     constraint(
         "midpoint",
         "A point sits at the middle of a line.",
-        &[req("point", Reference, "The point."), req("line", Reference, "The line.")],
+        &[
+            req("point", Reference, "The point."),
+            req("line", Reference, "The line."),
+        ],
     ),
     constraint("concentric", "Two circles or arcs share a center.", &[A, B]),
-    constraint("coradial", "Two circles or arcs share a center and a radius.", &[A, B]),
+    constraint(
+        "coradial",
+        "Two circles or arcs share a center and a radius.",
+        &[A, B],
+    ),
     constraint("collinear", "Two lines lie on one infinite line.", &[A, B]),
     constraint(
         "symmetric",
         "Points `a` and `b` are mirror images in the line `axis`.",
         &[A, B, req("axis", Reference, "The mirror line.")],
     ),
-    constraint("distance", "The distance between two entities or points.", &[A, B, VALUE_LENGTH]),
-    constraint("length", "A line's length.", &[req("line", Reference, "The line."), VALUE_LENGTH]),
-    constraint("radius", "A circle's or arc's radius.", &[req("curve", Reference, "The circle or arc."), VALUE_LENGTH]),
-    constraint("diameter", "A circle's diameter.", &[req("curve", Reference, "The circle."), VALUE_LENGTH]),
-    constraint("major_radius", "An ellipse's semi-major axis.", &[req("curve", Reference, "The ellipse."), VALUE_LENGTH]),
-    constraint("minor_radius", "An ellipse's semi-minor axis.", &[req("curve", Reference, "The ellipse."), VALUE_LENGTH]),
-    constraint("angle", "The angle between two lines.", &[A, B, req("value", Angle, "The angle.")]),
+    constraint(
+        "distance",
+        "The distance between two entities or points.",
+        &[A, B, VALUE_LENGTH],
+    ),
+    constraint(
+        "length",
+        "A line's length.",
+        &[req("line", Reference, "The line."), VALUE_LENGTH],
+    ),
+    constraint(
+        "radius",
+        "A circle's or arc's radius.",
+        &[req("curve", Reference, "The circle or arc."), VALUE_LENGTH],
+    ),
+    constraint(
+        "diameter",
+        "A circle's diameter.",
+        &[req("curve", Reference, "The circle."), VALUE_LENGTH],
+    ),
+    constraint(
+        "major_radius",
+        "An ellipse's semi-major axis.",
+        &[req("curve", Reference, "The ellipse."), VALUE_LENGTH],
+    ),
+    constraint(
+        "minor_radius",
+        "An ellipse's semi-minor axis.",
+        &[req("curve", Reference, "The ellipse."), VALUE_LENGTH],
+    ),
+    constraint(
+        "angle",
+        "The angle between two lines.",
+        &[A, B, req("value", Angle, "The angle.")],
+    ),
     constraint(
         "limit",
         "Keeps a dimension within a range and leaves it free inside it.",
-        &[req("dimension", Record, "The dimension limited."), req("min", Length, "The lower bound."), req("max", Length, "The upper bound.")],
+        &[
+            req("dimension", Record, "The dimension limited."),
+            req("min", Length, "The lower bound."),
+            req("max", Length, "The upper bound."),
+        ],
     ),
 ];
 

@@ -24,9 +24,15 @@ fn a_skeleton_is_a_new_reference_part_left_out_of_the_parts_list() {
         .iter()
         .find(|f| f["path"] == "/p/layout.part")
         .unwrap_or_else(|| panic!("{out}"));
-    assert!(created["text"].as_str().unwrap().contains("part layout"), "{created}");
+    assert!(
+        created["text"].as_str().unwrap().contains("part layout"),
+        "{created}"
+    );
     let text = out["files"][0]["text"].as_str().unwrap().to_owned();
-    assert!(text.contains("use part layout as layout {") && text.contains("reference = true"), "{text}");
+    assert!(
+        text.contains("use part layout as layout {") && text.contains("reference = true"),
+        "{text}"
+    );
     // An existing part placed as the skeleton: plate, as plate2 (plate is taken).
     let out = skeleton(RIG, "plate");
     assert_eq!(out["ok"], true, "{out}");
@@ -54,5 +60,8 @@ fn a_skeleton_is_a_new_reference_part_left_out_of_the_parts_list() {
     let mut all = files();
     all.insert("/p/rig.assembly".into(), text.clone());
     let report = crate::mass::assembly_mass("/p/rig.assembly", &text, &all, None).unwrap();
-    assert!(report.parts.iter().all(|p| p.path != "plate2"), "{report:?}");
+    assert!(
+        report.parts.iter().all(|p| p.path != "plate2"),
+        "{report:?}"
+    );
 }

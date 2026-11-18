@@ -50,12 +50,9 @@ pub(super) fn set(
             Ok(format!("Made {} {word}", names.join(", ")))
         }
         "representation" => representation(document, &names, value.as_str().unwrap_or("")),
-        "configuration" => configure::configure(
-            document,
-            files,
-            &names,
-            value.as_str().unwrap_or(""),
-        ),
+        "configuration" => {
+            configure::configure(document, files, &names, value.as_str().unwrap_or(""))
+        }
         other => Err(model(format!(
             "`{other}` isn't a component property Properties can set"
         ))),

@@ -83,7 +83,9 @@ fn published(
         return match found {
             Some(p) => {
                 let what = match p.target {
-                    AssemblyPublishTarget::Connector { connector } => format!("connector {connector}"),
+                    AssemblyPublishTarget::Connector { connector } => {
+                        format!("connector {connector}")
+                    }
                     AssemblyPublishTarget::Envelope { envelope } => {
                         return (
                             format!("{def} · {name}"),
@@ -308,7 +310,12 @@ pub fn interface_check(
     // Occurrences attached to another file's published frame.
     for occ in doc.occurrences.iter().filter(|o| !o.suppressed) {
         let Placement::Attach {
-            to: FrameRef::Interface { file, name, context },
+            to:
+                FrameRef::Interface {
+                    file,
+                    name,
+                    context,
+                },
             ..
         } = &occ.placement
         else {
@@ -375,7 +382,12 @@ pub fn interface_check(
             AssemblyPublishTarget::Connector { connector } => {
                 let (what, finding, sev, item) =
                     connector_row(&doc, resolved, source, connector, tolerance);
-                (format!("connector {connector} · {what}"), finding, sev, item)
+                (
+                    format!("connector {connector} · {what}"),
+                    finding,
+                    sev,
+                    item,
+                )
             }
             AssemblyPublishTarget::Envelope { envelope } => {
                 if doc.envelopes.iter().any(|e| &e.name == envelope) {

@@ -9,7 +9,10 @@ pub fn solve_spd(a: &[f64], b: &[f64], n: usize) -> Option<Vec<f64>> {
     if n == 0 {
         return Some(Vec::new());
     }
-    let scale = (0..n).map(|i| a[i * n + i].abs()).fold(0.0_f64, f64::max).max(1e-300);
+    let scale = (0..n)
+        .map(|i| a[i * n + i].abs())
+        .fold(0.0_f64, f64::max)
+        .max(1e-300);
     let eps = 1e-12 * scale;
     let mut l = vec![0.0; n * n];
     for i in 0..n {
@@ -106,7 +109,8 @@ pub fn scale(a: [f64; 3], s: f64) -> [f64; 3] {
 
 /// The inverse of a symmetric positive definite 3 × 3 matrix (an inertia tensor).
 pub fn inverse3(m: &[[f64; 3]; 3]) -> Option<[[f64; 3]; 3]> {
-    let c = |r0: usize, c0: usize, r1: usize, c1: usize| m[r0][c0] * m[r1][c1] - m[r0][c1] * m[r1][c0];
+    let c =
+        |r0: usize, c0: usize, r1: usize, c1: usize| m[r0][c0] * m[r1][c1] - m[r0][c1] * m[r1][c0];
     let det = m[0][0] * c(1, 1, 2, 2) - m[0][1] * c(1, 0, 2, 2) + m[0][2] * c(1, 0, 2, 1);
     if det.is_nan() || det.abs() <= 1e-300 || !det.is_finite() {
         return None;
@@ -135,7 +139,9 @@ mod tests {
         let m = [[4.0, 1.0, 0.5], [1.0, 3.0, 0.2], [0.5, 0.2, 2.0]];
         let inv = inverse3(&m).unwrap();
         let e = mat3_vec(&inv, mat3_vec(&m, [1.0, -2.0, 0.5]));
-        assert!((e[0] - 1.0).abs() < 1e-12 && (e[1] + 2.0).abs() < 1e-12 && (e[2] - 0.5).abs() < 1e-12);
+        assert!(
+            (e[0] - 1.0).abs() < 1e-12 && (e[1] + 2.0).abs() < 1e-12 && (e[2] - 0.5).abs() < 1e-12
+        );
     }
 
     #[test]

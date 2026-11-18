@@ -69,7 +69,12 @@ fn item_references(path: &str, text: &str, item: &str) -> Result<Analysis, Strin
                 .get(&f.id)
                 .is_some_and(|s| s.iter().any(|i| i.as_str() == input));
             if reads {
-                rows.push(row("Child", f.id.as_str(), &kind_of(&document, &f.id), format!("feature:{}", f.id)));
+                rows.push(row(
+                    "Child",
+                    f.id.as_str(),
+                    &kind_of(&document, &f.id),
+                    format!("feature:{}", f.id),
+                ));
                 children.push(f.id.to_string());
             }
         }
@@ -85,13 +90,23 @@ fn item_references(path: &str, text: &str, item: &str) -> Result<Analysis, Strin
             .map(|(_, d)| d.clone())
             .unwrap_or_default();
         for f in document.features.iter().filter(|f| deps.contains(&f.id)) {
-            rows.push(row("Parent", f.id.as_str(), &kind_of(&document, &f.id), format!("feature:{}", f.id)));
+            rows.push(row(
+                "Parent",
+                f.id.as_str(),
+                &kind_of(&document, &f.id),
+                format!("feature:{}", f.id),
+            ));
             parents.push(f.id.to_string());
         }
         for p in &document.publishes {
             let target = serde_json::to_value(&p.target).unwrap_or(Value::Null);
             if target.get("region").and_then(Value::as_str) == Some(region) {
-                rows.push(row("Child", p.name.as_str(), "Publish", format!("publish:{}", p.name)));
+                rows.push(row(
+                    "Child",
+                    p.name.as_str(),
+                    "Publish",
+                    format!("publish:{}", p.name),
+                ));
                 children.push(p.name.to_string());
             }
         }
@@ -99,7 +114,8 @@ fn item_references(path: &str, text: &str, item: &str) -> Result<Analysis, Strin
     } else {
         return Err("select one feature, sketch, input or region".into());
     };
-    let count = |n: usize, one: &str, many: &str| format!("{n} {}", if n == 1 { one } else { many });
+    let count =
+        |n: usize, one: &str, many: &str| format!("{n} {}", if n == 1 { one } else { many });
     Ok(Analysis {
         title: format!("References of {name}"),
         summary: format!(
@@ -124,7 +140,10 @@ pub fn parents_children(path: &str, text: &str, selection: &[String]) -> Result<
     }
     let selected: Vec<&str> = selection
         .iter()
-        .filter_map(|s| s.strip_prefix("feature:").or_else(|| s.strip_prefix("sketch:")))
+        .filter_map(|s| {
+            s.strip_prefix("feature:")
+                .or_else(|| s.strip_prefix("sketch:"))
+        })
         .collect();
     let [id] = selected.as_slice() else {
         return Err("select one feature or sketch to list its parents and children".into());
@@ -166,13 +185,23 @@ pub fn parents_children(path: &str, text: &str, selection: &[String]) -> Result<
 
     let mut rows = Vec::new();
     for p in &parents {
-        rows.push(row("Parent", p.as_str(), &kind_of(&document, p), format!("feature:{p}")));
+        rows.push(row(
+            "Parent",
+            p.as_str(),
+            &kind_of(&document, p),
+            format!("feature:{p}"),
+        ));
     }
     for i in &inputs {
         rows.push(row("Parent", i, "Input", format!("input:{i}")));
     }
     for c in &children {
-        rows.push(row("Child", c.as_str(), &kind_of(&document, c), format!("feature:{c}")));
+        rows.push(row(
+            "Child",
+            c.as_str(),
+            &kind_of(&document, c),
+            format!("feature:{c}"),
+        ));
     }
     for r in &regions {
         rows.push(row("Child", r, "Region", format!("region:{r}")));
@@ -183,7 +212,8 @@ pub fn parents_children(path: &str, text: &str, selection: &[String]) -> Result<
     for o in &outputs {
         rows.push(row("Child", o, "Part", format!("part:{o}")));
     }
-    let count = |n: usize, one: &str, many: &str| format!("{n} {}", if n == 1 { one } else { many });
+    let count =
+        |n: usize, one: &str, many: &str| format!("{n} {}", if n == 1 { one } else { many });
     let parent_count = parents.len() + inputs.len();
     let child_count = children.len() + regions.len() + publishes.len() + outputs.len();
     Ok(Analysis {

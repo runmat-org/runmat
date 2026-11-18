@@ -145,7 +145,11 @@ pub(super) fn callee(source: &str, at: usize, word: &str) -> Option<Callee> {
     let stack = open_brackets(source, at);
     let sketch = in_sketch(source, &stack);
     let groups: &[Group] = if sketch {
-        &[Group::SketchEntity, Group::SketchConstraint, Group::Reference]
+        &[
+            Group::SketchEntity,
+            Group::SketchConstraint,
+            Group::Reference,
+        ]
     } else {
         &[Group::Feature, Group::Reference]
     };

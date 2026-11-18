@@ -49,22 +49,47 @@ fn defeature_removes_small_holes_fillets_and_chamfers_and_lists_them() {
     assert!(summary.contains("fillet round, r 1.5 mm"), "{summary}");
     assert!(summary.contains("chamfer bevel, 0.5 mm"), "{summary}");
     assert!(summary.contains("hole small, ⌀ 6 mm"), "{summary}");
-    assert!(!summary.contains("large"), "the 20 mm hole is above the threshold: {summary}");
+    assert!(
+        !summary.contains("large"),
+        "the 20 mm hole is above the threshold: {summary}"
+    );
     // The design is unchanged; the representation draws fewer faces.
     let full = compile(&text, "full");
     let simple = compile(&text, "simple");
     assert!(full.get("representation").is_none());
-    assert_eq!(simple["representation"]["kind"], "defeatured", "{}", simple["representation"]);
-    assert!(faces(&simple) < faces(&full), "{} < {}", faces(&simple), faces(&full));
-    assert_eq!(full["projection"]["data"]["document"]["features"].as_array().unwrap().len(), 6);
+    assert_eq!(
+        simple["representation"]["kind"], "defeatured",
+        "{}",
+        simple["representation"]
+    );
+    assert!(
+        faces(&simple) < faces(&full),
+        "{} < {}",
+        faces(&simple),
+        faces(&full)
+    );
+    assert_eq!(
+        full["projection"]["data"]["document"]["features"]
+            .as_array()
+            .unwrap()
+            .len(),
+        6
+    );
 }
 
 #[test]
 fn a_thin_plate_has_a_mid_surface_with_its_thickness() {
-    let out = edit(PLATE, "simulate.representation", json!({ "kind": "midsurface", "name": "shell" }));
+    let out = edit(
+        PLATE,
+        "simulate.representation",
+        json!({ "kind": "midsurface", "name": "shell" }),
+    );
     assert_eq!(out["ok"], true, "{out}");
     let text = out["files"][0]["text"].as_str().unwrap().to_owned();
-    assert!(text.contains("representation shell : midsurface = {"), "{text}");
+    assert!(
+        text.contains("representation shell : midsurface = {"),
+        "{text}"
+    );
     let shell = compile(&text, "shell");
     let report = &shell["representation"];
     assert_eq!(report["kind"], "midsurface", "{report}");
@@ -83,17 +108,39 @@ fn a_bar_is_a_beam_and_a_holed_plate_is_refused_by_name() {
     let options = json!({ "representation": "spar" }).to_string();
     let compiled = call("compile", &["/p/bar.part", &text, "{}", &options]);
     let beam = &compiled["representation"]["beam"];
-    assert!((beam["length"].as_f64().unwrap() - 0.3).abs() < 1e-6, "{beam}");
-    assert!((beam["area"].as_f64().unwrap() - 200e-6).abs() < 1e-9, "{beam}");
+    assert!(
+        (beam["length"].as_f64().unwrap() - 0.3).abs() < 1e-6,
+        "{beam}"
+    );
+    assert!(
+        (beam["area"].as_f64().unwrap() - 200e-6).abs() < 1e-9,
+        "{beam}"
+    );
     // 20 × 10 mm: b h³ / 12 about each axis.
     let major = 10.0 * 20f64.powi(3) / 12.0 * 1e-12;
     let minor = 20.0 * 10f64.powi(3) / 12.0 * 1e-12;
-    assert!((beam["i_major"].as_f64().unwrap() - major).abs() < 1e-3 * major, "{beam}");
-    assert!((beam["i_minor"].as_f64().unwrap() - minor).abs() < 1e-3 * minor, "{beam}");
+    assert!(
+        (beam["i_major"].as_f64().unwrap() - major).abs() < 1e-3 * major,
+        "{beam}"
+    );
+    assert!(
+        (beam["i_minor"].as_f64().unwrap() - minor).abs() < 1e-3 * minor,
+        "{beam}"
+    );
     // The plate's fillet and chamfer break the prism: refused, naming a face, nothing written.
-    let refused = edit(PLATE, "simulate.representation", json!({ "kind": "beam", "name": "spar" }));
+    let refused = edit(
+        PLATE,
+        "simulate.representation",
+        json!({ "kind": "beam", "name": "spar" }),
+    );
     assert_eq!(refused["ok"], false, "{refused}");
-    assert!(refused["message"].as_str().unwrap().contains("isn't prismatic"), "{refused}");
+    assert!(
+        refused["message"]
+            .as_str()
+            .unwrap()
+            .contains("isn't prismatic"),
+        "{refused}"
+    );
     // Full writes nothing.
     let full = edit(PLATE, "simulate.representation", json!({ "kind": "full" }));
     assert_eq!(full["ok"], true, "{full}");
@@ -105,7 +152,19 @@ fn a_component_at_beam_draws_its_parts_beam() {
     let bar = "runmat 0.7\nstd 1\n\npart bar {\n    sketch s1 on origin.xy {\n        l1 = line(start = [0 mm, 0 mm], end = [20 mm, 0 mm])\n        l2 = line(start = [20 mm, 0 mm], end = [20 mm, 10 mm])\n        l3 = line(start = [20 mm, 10 mm], end = [0 mm, 10 mm])\n        l4 = line(start = [0 mm, 10 mm], end = [0 mm, 0 mm])\n    }\n    feature body = extrude(profile = sketch.s1, distance = 300 mm)\n    representation spar : beam = {}\n}\n";
     let frame = "runmat 0.7\nstd 1\n\nassembly frame {\n    use part bar as a\n}\n";
     let files = json!({ "/p/bar.part": bar }).to_string();
-    let pick = |c: &Value| format!("occurrence:{}", c["projection"]["data"]["occurrences"].as_array().unwrap().iter().find(|o| o["path"] == "a").unwrap()["uuid"].as_str().unwrap());
+    let pick = |c: &Value| {
+        format!(
+            "occurrence:{}",
+            c["projection"]["data"]["occurrences"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .find(|o| o["path"] == "a")
+                .unwrap()["uuid"]
+                .as_str()
+                .unwrap()
+        )
+    };
     let compiled = call("compile", &["/p/frame.assembly", frame, &files, "{}"]);
     let request = json!({ "command": "assembly.representation", "values": { "components": [pick(&compiled)], "representation": "beam" } }).to_string();
     let out = call("edit", &["/p/frame.assembly", frame, &files, &request]);
@@ -113,17 +172,26 @@ fn a_component_at_beam_draws_its_parts_beam() {
     let text = out["files"][0]["text"].as_str().unwrap().to_owned();
     assert!(text.contains("representation = beam"), "{text}");
     let compiled = call("compile", &["/p/frame.assembly", &text, &files, "{}"]);
-    let prototypes = compiled["display"]["data"]["prototypes"].as_array().unwrap();
+    let prototypes = compiled["display"]["data"]["prototypes"]
+        .as_array()
+        .unwrap();
     let body = &prototypes[0]["part"]["bodies"][0];
     assert_eq!(body["reference"], "representation.spar", "{body}");
-    assert_eq!(body["faces"].as_array().unwrap().len(), 2, "the section at both ends");
+    assert_eq!(
+        body["faces"].as_array().unwrap().len(),
+        2,
+        "the section at both ends"
+    );
     assert_eq!(body["edges"].as_array().unwrap().len(), 1, "the centerline");
 }
 
-
 #[test]
 fn a_defeatured_representation_is_edited_from_its_properties_and_rebuilt() {
-    let out = edit(PLATE, "simulate.defeature", json!({ "name": "simple", "max_fillet": 2.0, "max_hole": 10.0, "max_chamfer": 1.0 }));
+    let out = edit(
+        PLATE,
+        "simulate.defeature",
+        json!({ "name": "simple", "max_fillet": 2.0, "max_hole": 10.0, "max_chamfer": 1.0 }),
+    );
     let text = out["files"][0]["text"].as_str().unwrap().to_owned();
     let set = |text: &str, values: Value| {
         let request = json!({ "command": "part.set-property", "selection": ["representation:simple"], "values": values }).to_string();
@@ -134,12 +202,28 @@ fn a_defeatured_representation_is_edited_from_its_properties_and_rebuilt() {
     assert_eq!(edited["ok"], true, "{edited}");
     let text = edited["files"][0]["text"].as_str().unwrap().to_owned();
     assert!(text.contains("max_hole = 25 mm"), "{text}");
-    assert!(edited["summary"].as_str().unwrap().contains("hole large, ⌀ 20 mm"), "{edited}");
+    assert!(
+        edited["summary"]
+            .as_str()
+            .unwrap()
+            .contains("hole large, ⌀ 20 mm"),
+        "{edited}"
+    );
     // A mid-surface has no thresholds: refused by name, nothing written.
-    let shell = edit(&text, "simulate.representation", json!({ "kind": "midsurface", "name": "shell" }));
+    let shell = edit(
+        &text,
+        "simulate.representation",
+        json!({ "kind": "midsurface", "name": "shell" }),
+    );
     let text = shell["files"][0]["text"].as_str().unwrap().to_owned();
     let request = json!({ "command": "part.set-property", "selection": ["representation:shell"], "values": { "max_hole": 5.0 } }).to_string();
     let refused = call("edit", &["/p/plate.part", &text, "{}", &request]);
     assert_eq!(refused["ok"], false, "{refused}");
-    assert!(refused["message"].as_str().unwrap().contains("only a defeatured one has thresholds"), "{refused}");
+    assert!(
+        refused["message"]
+            .as_str()
+            .unwrap()
+            .contains("only a defeatured one has thresholds"),
+        "{refused}"
+    );
 }

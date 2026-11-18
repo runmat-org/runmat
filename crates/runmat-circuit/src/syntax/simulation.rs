@@ -13,10 +13,10 @@ use crate::simulation::{
     MeasureKind, SimAnalysis, SimMeasure, SimModel, SimProbe, SimSource, SimTolerance, SimWave,
     SimulationDef, SourceKind,
 };
+use crate::units::RegistryUnits;
 use runmat_design_syntax::ast::{self, Expr, Headed, Statement};
 use runmat_design_syntax::json::format_f64;
-use runmat_rules::{parse_quantity};
-use crate::units::RegistryUnits;
+use runmat_rules::parse_quantity;
 use runmat_types::Span;
 use std::collections::BTreeMap;
 

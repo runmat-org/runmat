@@ -76,17 +76,29 @@ fn a_study_drives_the_hinge_and_compiles_solved_frames() {
     assert_eq!(frames[0].as_array().unwrap().len(), 1, "{}", frames[0]);
     let mid = numbers(&frames[12][0]["transform"]);
     let (c, s) = (45f64.to_radians().cos(), 45f64.to_radians().sin());
-    assert!((mid[0] - c).abs() < 1e-6 && (mid[3] - s).abs() < 1e-6, "{mid:?}");
+    assert!(
+        (mid[0] - c).abs() < 1e-6 && (mid[3] - s).abs() < 1e-6,
+        "{mid:?}"
+    );
     let last = numbers(&frames[24][0]["transform"]);
-    assert!(last[0].abs() < 1e-6 && (last[3] - 1.0).abs() < 1e-6, "{last:?}");
-    assert!((last[11] - 0.015).abs() < 1e-9, "the arm stays on the base: {last:?}");
+    assert!(
+        last[0].abs() < 1e-6 && (last[3] - 1.0).abs() < 1e-6,
+        "{last:?}"
+    );
+    assert!(
+        (last[11] - 0.015).abs() < 1e-9,
+        "the arm stays on the base: {last:?}"
+    );
     // The arm's box centre (10, 10) mm from the axis turns at 45 deg/s: 14.14 mm × 0.785 rad/s.
     let plot = &study["plot"];
     assert_eq!(plot["occurrence"], "arm");
     let speed = numbers(&plot["speed"]);
     let expected = 200f64.sqrt() * 45f64.to_radians();
     for v in &speed {
-        assert!((v - expected).abs() / expected < 0.01, "{speed:?} vs {expected}");
+        assert!(
+            (v - expected).abs() / expected < 0.01,
+            "{speed:?} vs {expected}"
+        );
     }
     let w = numbers(&plot["angular_speed"]);
     assert!((w[12] - 45.0).abs() < 0.01, "{w:?}");
@@ -197,14 +209,23 @@ fn a_mate_position_is_saved_moved_to_and_deleted() {
 /// reaction on the arm is projected per frame.
 #[test]
 fn a_dynamic_study_swings_the_arm_under_gravity() {
-    let solid = BLOCK.replace("output block = { body = feature.body.body }", "output block = { body = feature.body.body, material = \"aluminum_6061\" }");
-    let files: Files = [("/p/block.part", solid.as_str())].map(|(p, t)| (p.to_owned(), t.to_owned())).into();
+    let solid = BLOCK.replace(
+        "output block = { body = feature.body.body }",
+        "output block = { body = feature.body.body, material = \"aluminum_6061\" }",
+    );
+    let files: Files = [("/p/block.part", solid.as_str())]
+        .map(|(p, t)| (p.to_owned(), t.to_owned()))
+        .into();
     let text = HINGE.replace(
         "    mate hinge",
         "    motion fall = { kind = dynamic, duration = 0.5 s, gravity = [0 m/s^2, -9.80665 m/s^2, 0 m/s^2] }\n    mate hinge",
     );
-    let (index, _, problems) = compile_assembly(PATH, &text, &files).unwrap_or_else(|d| panic!("{d:?}"));
-    assert!(problems.iter().all(|d| d.severity != "error"), "{problems:?}");
+    let (index, _, problems) =
+        compile_assembly(PATH, &text, &files).unwrap_or_else(|d| panic!("{d:?}"));
+    assert!(
+        problems.iter().all(|d| d.severity != "error"),
+        "{problems:?}"
+    );
     let study = &index["motion"][0];
     assert_eq!(study["kind"], "dynamic", "{study}");
     assert_eq!(study["problems"], json!([]), "{study}");
@@ -214,9 +235,14 @@ fn a_dynamic_study_swings_the_arm_under_gravity() {
     // The arm turns: its transform at the end differs from the start.
     let first = numbers(&frames[0][0]["transform"]);
     let last = numbers(&frames[frames.len() - 1][0]["transform"]);
-    assert!(first.iter().zip(&last).any(|(a, b)| (a - b).abs() > 1e-3), "{first:?} {last:?}");
+    assert!(
+        first.iter().zip(&last).any(|(a, b)| (a - b).abs() > 1e-3),
+        "{first:?} {last:?}"
+    );
     let energy = numbers(&study["energy"]);
-    let spread = energy.iter().fold(0.0_f64, |m, e| m.max((e - energy[0]).abs()));
+    let spread = energy
+        .iter()
+        .fold(0.0_f64, |m, e| m.max((e - energy[0]).abs()));
     assert!(spread < 1e-5, "energy {energy:?}");
     let hinge = &study["reactions"][0];
     assert_eq!(hinge["mate"], "hinge");
@@ -228,7 +254,13 @@ fn a_dynamic_study_swings_the_arm_under_gravity() {
 
 #[test]
 fn a_dynamic_study_names_a_part_without_a_material() {
-    let text = HINGE.replace("    mate hinge", "    motion fall = { kind = dynamic, duration = 0.5 s }\n    mate hinge");
+    let text = HINGE.replace(
+        "    mate hinge",
+        "    motion fall = { kind = dynamic, duration = 0.5 s }\n    mate hinge",
+    );
     let problems = index(&text)["motion"][0]["problems"].to_string();
-    assert!(problems.contains("has no mass: give its part a material"), "{problems}");
+    assert!(
+        problems.contains("has no mass: give its part a material"),
+        "{problems}"
+    );
 }

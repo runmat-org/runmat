@@ -156,7 +156,11 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("runmat-project-root-{}", std::process::id()));
         let drawings = dir.join("house/drawings");
         std::fs::create_dir_all(&drawings).unwrap();
-        std::fs::write(dir.join("house/runmat.toml"), "[package]\nname = \"house\"\n").unwrap();
+        std::fs::write(
+            dir.join("house/runmat.toml"),
+            "[package]\nname = \"house\"\n",
+        )
+        .unwrap();
         let drawing = drawings.join("plans.drawing");
         // The project's folder, from a drawing one folder down.
         assert_eq!(super::project_root(&drawing), dir.join("house"));

@@ -21,10 +21,10 @@ fn curved_tet10_static_solve_runs_under_an_exclusive_capacity_owner() {
         .unwrap();
     let mut coordinates = bent_node.coordinates_m.canonical_value();
     coordinates[1] = -0.05;
-    bent_node.coordinates_m =
-        runmat_types::physical::Quantity::<runmat_types::physical::kind::Position, _>::new(
-            coordinates,
-        );
+    bent_node.coordinates_m = runmat_types::physical::Quantity::<
+        runmat_types::physical::kind::Position,
+        _,
+    >::new(coordinates);
     mesh.canonical_digest = runmat_meshing_core::StableDigest::ZERO;
     mesh.seal_canonical_digest().unwrap();
     mesh.validate_canonical().unwrap();

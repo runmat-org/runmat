@@ -564,8 +564,17 @@ fn d04_assembly_view_annotations_resolve_on_their_occurrences() {
         .collect();
     let has = |m: &str| messages.iter().any(|x| x.contains(m));
     assert!(has("names 1 occurrences for 2 references"), "{messages:#?}");
-    assert!(has("on `bolts/b9` is on an occurrence the model doesn't have"), "{messages:#?}");
-    assert!(has("`bolts/b1` publishes no datum `grid_9`"), "{messages:#?}");
-    assert!(has("`doors/d1`, which is not in the model"), "{messages:#?}");
+    assert!(
+        has("on `bolts/b9` is on an occurrence the model doesn't have"),
+        "{messages:#?}"
+    );
+    assert!(
+        has("`bolts/b1` publishes no datum `grid_9`"),
+        "{messages:#?}"
+    );
+    assert!(
+        has("`doors/d1`, which is not in the model"),
+        "{messages:#?}"
+    );
     assert!(has("level `both` takes a face"), "{messages:#?}");
 }

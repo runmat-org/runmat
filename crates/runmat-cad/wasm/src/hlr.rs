@@ -231,12 +231,9 @@ fn add_bodies(model: &mut Model, bodies: &Value, t: &[f64], material: Option<&st
         let base = model.faces.len();
         let body_index = model.bodies;
         model.bodies += 1;
-        model.materials.push(
-            body["material"]
-                .as_str()
-                .or(material)
-                .map(str::to_owned),
-        );
+        model
+            .materials
+            .push(body["material"].as_str().or(material).map(str::to_owned));
         let faces: &[Value] = body["faces"]
             .as_array()
             .map(Vec::as_slice)
@@ -514,7 +511,9 @@ fn model_of(display: &Value) -> Model {
                             body: model.bodies,
                         });
                         model.bodies += 1;
-                        model.materials.push(proto["material"].as_str().map(str::to_owned));
+                        model
+                            .materials
+                            .push(proto["material"].as_str().map(str::to_owned));
                         for (i, j) in [
                             (0, 1),
                             (2, 3),

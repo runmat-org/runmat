@@ -51,7 +51,10 @@ fn sketch_of(document: &AssemblyDocument, values: &Values) -> Result<String, Edi
         .ok_or_else(|| model("pick the sketch the feature uses"))?;
     let name = pick
         .strip_prefix("feature:")
-        .or_else(|| pick.strip_prefix("sketch.").and_then(|r| r.split('.').next()))
+        .or_else(|| {
+            pick.strip_prefix("sketch.")
+                .and_then(|r| r.split('.').next())
+        })
         .unwrap_or(&pick)
         .to_owned();
     if !document.features.iter().any(|f| f.id.0 == name) {
@@ -76,7 +79,12 @@ fn extent(values: &Values, allow_symmetric: bool) -> Result<(Extent, bool), Edit
         ),
         "through_all_both" if allow_symmetric => (Extent::ThroughAll, true),
         "" | "through_all" => (Extent::ThroughAll, false),
-        other => return Err(model(format!("an assembly {} can't end `{other}`", if allow_symmetric { "cut" } else { "hole" }))),
+        other => {
+            return Err(model(format!(
+                "an assembly {} can't end `{other}`",
+                if allow_symmetric { "cut" } else { "hole" }
+            )))
+        }
     })
 }
 
@@ -117,7 +125,11 @@ fn hole(values: &Values, sketch: String) -> Result<OperationKind, EditFailure> {
             .ok_or_else(|| model("give the fastener size or the hole diameter"))?;
         mm(row.clearance(fit))
     };
-    let from_row = |which: &str| model(format!("give the {which}'s sizes, or a standard fastener size"));
+    let from_row = |which: &str| {
+        model(format!(
+            "give the {which}'s sizes, or a standard fastener size"
+        ))
+    };
     let (counterbore, countersink) = match text(values, "hole_type") {
         "counterbore" => {
             let (d, h) = match (given(values, "cbore_diameter"), &row) {
@@ -131,7 +143,13 @@ fn hole(values: &Values, sketch: String) -> Result<OperationKind, EditFailure> {
                 }
                 (false, None) => return Err(from_row("counterbore")),
             };
-            (Some(Counterbore { diameter: d, depth: h }), None)
+            (
+                Some(Counterbore {
+                    diameter: d,
+                    depth: h,
+                }),
+                None,
+            )
         }
         "countersink" => {
             let (d, a) = match (given(values, "csk_diameter"), &row) {
@@ -145,11 +163,20 @@ fn hole(values: &Values, sketch: String) -> Result<OperationKind, EditFailure> {
                 ),
                 (false, Some(r)) => {
                     let (d, a) = r.countersink.ok_or_else(|| from_row("countersink"))?;
-                    (mm(d), ValueExpr::qty((a.to_degrees() * 1e3).round() / 1e3, "deg"))
+                    (
+                        mm(d),
+                        ValueExpr::qty((a.to_degrees() * 1e3).round() / 1e3, "deg"),
+                    )
                 }
                 (false, None) => return Err(from_row("countersink")),
             };
-            (None, Some(Countersink { diameter: d, angle: a }))
+            (
+                None,
+                Some(Countersink {
+                    diameter: d,
+                    angle: a,
+                }),
+            )
         }
         _ => (None, None),
     };
@@ -183,7 +210,11 @@ fn kind(document: &AssemblyDocument, values: &Values) -> Result<OperationKind, E
             size: field(values, "weld_size", "mm")?,
             flip: flag(values, "flip"),
         },
-        other => return Err(model(format!("an assembly feature is a cut, hole or weld, not `{other}`"))),
+        other => {
+            return Err(model(format!(
+                "an assembly feature is a cut, hole or weld, not `{other}`"
+            )))
+        }
     })
 }
 

@@ -46,8 +46,16 @@ const BODY_OPS: &[(&str, &str)] = &[
 /// the value labels ("" for the first, "Second " for the second), so no two fields share a label.
 fn end_fields(prefix: &str, label: &str, which: &str) -> Vec<Field> {
     let id = |s: &str| format!("{prefix}{s}");
-    let depth = if which.is_empty() { "Depth".to_owned() } else { format!("{which}depth") };
-    let up_to = if which.is_empty() { "Up to".to_owned() } else { format!("{which}up to") };
+    let depth = if which.is_empty() {
+        "Depth".to_owned()
+    } else {
+        format!("{which}depth")
+    };
+    let up_to = if which.is_empty() {
+        "Up to".to_owned()
+    } else {
+        format!("{which}up to")
+    };
     vec![
         choice(&id("end"), label, END_CONDITIONS),
         length(&id("distance"), &depth, 10.0)

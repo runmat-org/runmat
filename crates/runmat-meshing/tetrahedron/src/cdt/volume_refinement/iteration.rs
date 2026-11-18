@@ -81,7 +81,7 @@ pub(in crate::cdt) fn refine_owned_with_schedule(
                         .min(MAXIMUM_REFINEMENT_BATCH_SIZE);
                     insertion_count += batch.inserted_nodes.len() as u64;
                     runmat_meshing_core::work_count::add_volume_points(
-                        batch.inserted_nodes.len() as u64,
+                        batch.inserted_nodes.len() as u64
                     );
                     insertions.extend(batch.inserted_nodes);
                     topology = batch.step.topology;

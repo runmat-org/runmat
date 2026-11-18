@@ -102,14 +102,33 @@ impl BodyState {
     /// The inertia load on a body in this state (d'Alembert): the force `−m a` and the moment
     /// about the centre of mass `−(J α + ω × J ω)`, world axes, with `J` the body's inertia
     /// turned into world axes by `rotation` (body to world).
-    pub fn inertia_load(&self, mass: f64, inertia: &[[f64; 3]; 3], rotation: &[[f64; 3]; 3]) -> ([f64; 3], [f64; 3]) {
+    pub fn inertia_load(
+        &self,
+        mass: f64,
+        inertia: &[[f64; 3]; 3],
+        rotation: &[[f64; 3]; 3],
+    ) -> ([f64; 3], [f64; 3]) {
         // J_world = R J Rᵀ.
         let j: [[f64; 3]; 3] = std::array::from_fn(|a| {
-            std::array::from_fn(|b| (0..3).map(|k| (0..3).map(|l| rotation[a][k] * inertia[k][l] * rotation[b][l]).sum::<f64>()).sum())
+            std::array::from_fn(|b| {
+                (0..3)
+                    .map(|k| {
+                        (0..3)
+                            .map(|l| rotation[a][k] * inertia[k][l] * rotation[b][l])
+                            .sum::<f64>()
+                    })
+                    .sum()
+            })
         });
         let (w, al) = (self.angular_velocity, self.angular_acceleration);
-        let m = dense::add(dense::mat3_vec(&j, al), dense::cross(w, dense::mat3_vec(&j, w)));
-        (dense::scale(self.acceleration, -mass), dense::scale(m, -1.0))
+        let m = dense::add(
+            dense::mat3_vec(&j, al),
+            dense::cross(w, dense::mat3_vec(&j, w)),
+        );
+        (
+            dense::scale(self.acceleration, -mass),
+            dense::scale(m, -1.0),
+        )
     }
 }
 
@@ -150,8 +169,13 @@ fn measure_of(doc: &AssemblyDocument, mate: &str, angle: bool) -> Result<MateMea
         .ok_or_else(|| format!("no mate `{mate}` in the assembly"))?;
     let fits = matches!(
         (&m.kind, angle),
-        (MateKind::Revolute { .. } | MateKind::Cylindrical { .. }, true)
-            | (MateKind::Slider { .. } | MateKind::Cylindrical { .. }, false)
+        (
+            MateKind::Revolute { .. } | MateKind::Cylindrical { .. },
+            true
+        ) | (
+            MateKind::Slider { .. } | MateKind::Cylindrical { .. },
+            false
+        )
     );
     if !fits {
         let has = drivable(&m.kind).unwrap_or("no value");
@@ -203,19 +227,53 @@ fn loads(
     let mut out = Vec::new();
     for s in &study.springs {
         let what = |f: &str| format!("spring on `{}` {f}", s.mate);
-        let k = optional(ev, env, &s.stiffness, &[(kind(QuantityKind::RotationalStiffness), true), (kind(QuantityKind::Stiffness), false)], &what("stiffness"))?;
-        let c = optional(ev, env, &s.damping, &[(kind(QuantityKind::TorsionalDamping), true), (kind(QuantityKind::Damping), false)], &what("damping"))?;
+        let k = optional(
+            ev,
+            env,
+            &s.stiffness,
+            &[
+                (kind(QuantityKind::RotationalStiffness), true),
+                (kind(QuantityKind::Stiffness), false),
+            ],
+            &what("stiffness"),
+        )?;
+        let c = optional(
+            ev,
+            env,
+            &s.damping,
+            &[
+                (kind(QuantityKind::TorsionalDamping), true),
+                (kind(QuantityKind::Damping), false),
+            ],
+            &what("damping"),
+        )?;
         let angle = match (k, c) {
             (Some((_, a)), Some((_, b))) if a != b => {
-                return Err(format!("spring on `{}`: stiffness and damping measure different motions", s.mate))
+                return Err(format!(
+                    "spring on `{}`: stiffness and damping measure different motions",
+                    s.mate
+                ))
             }
             (Some((_, a)), _) | (None, Some((_, a))) => a,
-            (None, None) => return Err(format!("spring on `{}` has no stiffness or damping", s.mate)),
+            (None, None) => {
+                return Err(format!(
+                    "spring on `{}` has no stiffness or damping",
+                    s.mate
+                ))
+            }
         };
         let free = match &s.free {
             None => 0.0,
             Some(e) => ev
-                .eval_as(e, env, if angle { Dimension::ANGLE } else { Dimension::LENGTH })
+                .eval_as(
+                    e,
+                    env,
+                    if angle {
+                        Dimension::ANGLE
+                    } else {
+                        Dimension::LENGTH
+                    },
+                )
                 .map_err(|e| what(&format!("free: {e}")))?,
         };
         let (a, b) = ends(&s.mate)?;
@@ -231,9 +289,22 @@ fn loads(
     }
     for m in &study.motors {
         let value = match (&m.torque, &m.force) {
-            (Some(_), Some(_)) => return Err(format!("motor on `{}`: a torque or a force, not both", m.mate)),
-            (Some(t), None) => (ev.eval_as(t, env, kind(QuantityKind::Moment)).map_err(|e| format!("motor on `{}` torque: {e}", m.mate))?, true),
-            (None, Some(f)) => (ev.eval_as(f, env, kind(QuantityKind::Force)).map_err(|e| format!("motor on `{}` force: {e}", m.mate))?, false),
+            (Some(_), Some(_)) => {
+                return Err(format!(
+                    "motor on `{}`: a torque or a force, not both",
+                    m.mate
+                ))
+            }
+            (Some(t), None) => (
+                ev.eval_as(t, env, kind(QuantityKind::Moment))
+                    .map_err(|e| format!("motor on `{}` torque: {e}", m.mate))?,
+                true,
+            ),
+            (None, Some(f)) => (
+                ev.eval_as(f, env, kind(QuantityKind::Force))
+                    .map_err(|e| format!("motor on `{}` force: {e}", m.mate))?,
+                false,
+            ),
             (None, None) => return Err(format!("motor on `{}` has no torque or force", m.mate)),
         };
         let (a, b) = ends(&m.mate)?;
@@ -252,7 +323,12 @@ fn loads(
 
 /// The mass properties of body `node` in its own frame: every part under it (and it, if a
 /// part), from the source's configured summaries.
-fn body_mass(tree: &ResolvedAssembly, node: NodeId, bodies: &[NodeId], ctx: &MotionContext<'_>) -> Result<BodyMass, String> {
+fn body_mass(
+    tree: &ResolvedAssembly,
+    node: NodeId,
+    bodies: &[NodeId],
+    ctx: &MotionContext<'_>,
+) -> Result<BodyMass, String> {
     let frame = tree.node(node).world.inverse();
     let mut parts: Vec<(f64, [f64; 3], [[f64; 3]; 3])> = Vec::new();
     let mut queue = vec![node];
@@ -267,14 +343,22 @@ fn body_mass(tree: &ResolvedAssembly, node: NodeId, bodies: &[NodeId], ctx: &Mot
             .source
             .configured(&o.definition, o.revision.as_ref(), &o.configuration)
             .map_err(|e| format!("`{}`: {e}", tree.path(n)))?;
-        let (Some(m), Some(c), Some(j)) = (summary.mass, summary.center_of_mass, summary.inertia) else {
-            return Err(format!("`{}` has no mass: give its part a material", tree.path(n)));
+        let (Some(m), Some(c), Some(j)) = (summary.mass, summary.center_of_mass, summary.inertia)
+        else {
+            return Err(format!(
+                "`{}` has no mass: give its part a material",
+                tree.path(n)
+            ));
         };
         let rel = frame.compose(&o.world);
         let r = rel.rotation;
         // R J Rᵀ: the part's inertia in the body's axes.
         let jb: [[f64; 3]; 3] = std::array::from_fn(|a| {
-            std::array::from_fn(|b| (0..3).map(|k| (0..3).map(|l| r[a][k] * j[k][l] * r[b][l]).sum::<f64>()).sum())
+            std::array::from_fn(|b| {
+                (0..3)
+                    .map(|k| (0..3).map(|l| r[a][k] * j[k][l] * r[b][l]).sum::<f64>())
+                    .sum()
+            })
         });
         parts.push((m, rel.apply(c), jb));
     }
@@ -282,7 +366,8 @@ fn body_mass(tree: &ResolvedAssembly, node: NodeId, bodies: &[NodeId], ctx: &Mot
     if mass.is_nan() || mass <= 0.0 {
         return Err(format!("`{}` has no mass", tree.path(node)));
     }
-    let center: [f64; 3] = std::array::from_fn(|k| parts.iter().map(|p| p.0 * p.1[k]).sum::<f64>() / mass);
+    let center: [f64; 3] =
+        std::array::from_fn(|k| parts.iter().map(|p| p.0 * p.1[k]).sum::<f64>() / mass);
     let mut inertia = [[0.0; 3]; 3];
     for (m, c, j) in &parts {
         let d = dense::sub(*c, center);
@@ -294,7 +379,11 @@ fn body_mass(tree: &ResolvedAssembly, node: NodeId, bodies: &[NodeId], ctx: &Mot
             }
         }
     }
-    Ok(BodyMass { mass, center, inertia })
+    Ok(BodyMass {
+        mass,
+        center,
+        inertia,
+    })
 }
 
 /// Solves dynamic study `study` of `doc` (the top assembly of `base`) into `run`, whose
@@ -309,7 +398,9 @@ pub(super) fn run_dynamic(
     run: &mut MotionRun,
 ) {
     if !study.drives.is_empty() {
-        run.problems.push("a dynamic study moves under its loads: drive mates with motors, not drives".into());
+        run.problems.push(
+            "a dynamic study moves under its loads: drive mates with motors, not drives".into(),
+        );
         return;
     }
     let g = match gravity(study, ev, env) {
@@ -323,7 +414,9 @@ pub(super) fn run_dynamic(
     };
     let tree = resolve(&base.top, &request, ctx.resolve);
     let Some(system) = tree.mate_system.as_deref() else {
-        return run.problems.push("the assembly has no mates to move it".into());
+        return run
+            .problems
+            .push("the assembly has no mates to move it".into());
     };
     if !system.held_pass.is_empty() {
         return run.problems.push(format!(
@@ -335,7 +428,12 @@ pub(super) fn run_dynamic(
         Ok(l) => l,
         Err(e) => return run.problems.push(e),
     };
-    let free: Vec<NodeId> = system.bodies.iter().filter(|b| !b.ground).map(|b| b.node).collect();
+    let free: Vec<NodeId> = system
+        .bodies
+        .iter()
+        .filter(|b| !b.ground)
+        .map(|b| b.node)
+        .collect();
     let all: Vec<NodeId> = system.bodies.iter().map(|b| b.node).collect();
     let mut masses = Vec::new();
     for b in system.bodies.iter().filter(|b| !b.ground) {
@@ -353,7 +451,8 @@ pub(super) fn run_dynamic(
     };
     let limits = runmat_constraint::constraint_rows(&system.system, &system.values).limits;
     if !limits.is_empty() {
-        run.problems.push("joint limits are not enforced in a dynamic study; the run ignores them".into());
+        run.problems
+            .push("joint limits are not enforced in a dynamic study; the run ignores them".into());
     }
     // Each node rides on its nearest body (itself, or the body above it).
     let carried: Vec<Option<(usize, Transform)>> = (0..tree.nodes.len() as NodeId)
@@ -371,7 +470,8 @@ pub(super) fn run_dynamic(
         .collect();
     // The frames the index can carry: each holds a pose per carried node, three vectors per
     // mate end and four per body, its time and its energy.
-    let numbers = 12 * carried.iter().flatten().count() + 18 * system.mates.len() + 12 * free.len() + 2;
+    let numbers =
+        12 * carried.iter().flatten().count() + 18 * system.mates.len() + 12 * free.len() + 2;
     let most = (ctx.frame_bytes / (numbers * BYTES_PER_NUMBER)).max(2) - 1;
     let duration = run.duration;
     let rate = study.rate.filter(|r| *r > 0.0 && r.is_finite());
@@ -383,7 +483,10 @@ pub(super) fn run_dynamic(
             let per = (duration / intervals as f64 / MAX_STEP).ceil().max(1.0) as usize;
             (intervals * per, Some(per))
         }
-        None => (STEP_GRID * (duration / (MAX_STEP * STEP_GRID as f64)).ceil().max(1.0) as usize, None),
+        None => (
+            STEP_GRID * (duration / (MAX_STEP * STEP_GRID as f64)).ceil().max(1.0) as usize,
+            None,
+        ),
     };
     let h = duration / steps as f64;
     let u0 = vec![0.0; 6 * free.len()];
@@ -393,7 +496,10 @@ pub(super) fn run_dynamic(
     let mut reactions: Vec<MateReaction> = system
         .mates
         .iter()
-        .map(|m| MateReaction { mate: m.name.clone(), frames: Vec::new() })
+        .map(|m| MateReaction {
+            mate: m.name.clone(),
+            frames: Vec::new(),
+        })
         .collect();
     let mut bodies: Vec<BodyMotion> = free
         .iter()
@@ -440,7 +546,11 @@ pub(super) fn run_dynamic(
                 center: model.center(&s.q, i),
                 acceleration: [s.udot[6 * i], s.udot[6 * i + 1], s.udot[6 * i + 2]],
                 angular_velocity: turn(model.body_rate(&s.u, i)),
-                angular_acceleration: turn([s.udot[6 * i + 3], s.udot[6 * i + 4], s.udot[6 * i + 5]]),
+                angular_acceleration: turn([
+                    s.udot[6 * i + 3],
+                    s.udot[6 * i + 4],
+                    s.udot[6 * i + 5],
+                ]),
             });
         }
     }
@@ -469,38 +579,69 @@ fn frame_stride(model: &Model<'_>, states: &[State], steps: usize, h: f64, most:
         for s in states {
             need = need.max((duration * norm(model.body_rate(&s.u, i)) / FRAME_TURN).ceil());
             if size > 0.0 {
-                need = need.max((duration * norm(model.center_velocity(&s.u, i)) / (FRAME_TRAVEL * size)).ceil());
+                need = need.max(
+                    (duration * norm(model.center_velocity(&s.u, i)) / (FRAME_TRAVEL * size))
+                        .ceil(),
+                );
             }
         }
     }
     let need = (need.min(usize::MAX as f64) as usize).clamp(1, most);
     let divisors: Vec<usize> = (1..=steps).filter(|&d| steps.is_multiple_of(d)).collect();
     // The longest stride giving `need` intervals, unless that is more than the index can carry.
-    let fine = divisors.iter().rev().copied().find(|&d| steps / d >= need).unwrap_or(1);
+    let fine = divisors
+        .iter()
+        .rev()
+        .copied()
+        .find(|&d| steps / d >= need)
+        .unwrap_or(1);
     if steps / fine <= most {
         fine
     } else {
-        divisors.iter().copied().find(|&d| steps / d <= most).unwrap_or(steps)
+        divisors
+            .iter()
+            .copied()
+            .find(|&d| steps / d <= most)
+            .unwrap_or(steps)
     }
 }
 
 /// Mate `mate`'s load on each free component it joins at sample `s`.
-fn joint_loads(model: &Model<'_>, tree: &ResolvedAssembly, free: &[NodeId], s: &Sample, mate: &crate::assembly::resolve::MateRows) -> Vec<JointLoad> {
-    let rows: Vec<usize> = (0..s.owners.len()).filter(|&r| mate.constraints.contains(&s.owners[r])).collect();
+fn joint_loads(
+    model: &Model<'_>,
+    tree: &ResolvedAssembly,
+    free: &[NodeId],
+    s: &Sample,
+    mate: &crate::assembly::resolve::MateRows,
+) -> Vec<JointLoad> {
+    let rows: Vec<usize> = (0..s.owners.len())
+        .filter(|&r| mate.constraints.contains(&s.owners[r]))
+        .collect();
     let mut out = Vec::new();
     for connector in [mate.a, mate.b] {
-        let runmat_constraint::EntityKind::Connector { body, .. } = &model.sys.entity(connector).kind else {
+        let runmat_constraint::EntityKind::Connector { body, .. } =
+            &model.sys.entity(connector).kind
+        else {
             continue;
         };
-        let Some(i) = model.body_index(*body) else { continue };
+        let Some(i) = model.body_index(*body) else {
+            continue;
+        };
         // The joint's reaction, then the mate's springs, dampers and motors: a force at the
         // centre of mass and a moment about it.
         let (mut force, mut moment) = model.reaction_on(s, &rows, i);
         let center = model.center(&s.q, i);
-        for load in model.loads.iter().filter(|l| (l.a, l.b) == (mate.a, mate.b)) {
+        for load in model
+            .loads
+            .iter()
+            .filter(|l| (l.a, l.b) == (mate.a, mate.b))
+        {
             if let Some((at, f, t)) = model.mate_load_on(&s.q, &s.u, load, i) {
                 force = dense::add(force, f);
-                moment = dense::add(moment, dense::add(t, dense::cross(dense::sub(at, center), f)));
+                moment = dense::add(
+                    moment,
+                    dense::add(t, dense::cross(dense::sub(at, center), f)),
+                );
             }
         }
         let point = model.connector(&s.q, connector).translation;

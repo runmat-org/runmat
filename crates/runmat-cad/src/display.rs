@@ -807,9 +807,7 @@ pub fn assembly_display_operated(
             Some(p) => *p,
             None if envelope => {
                 let shape = match crate::assembly::representation::envelope_box(
-                    resolved,
-                    source,
-                    id as u32,
+                    resolved, source, id as u32,
                 ) {
                     Some(b) => PrototypeShape::Box {
                         bounds: Bounds {
@@ -993,8 +991,17 @@ fn text_rings(loops: &[Vec<runmat_geometry_kernel::op::ProfileSegment>]) -> Vec<
                 .into_iter()
                 .collect();
             for s in l {
-                let n = if matches!(s.kind, SegmentKind::Line) { 1 } else { 12 };
-                ring.extend(s.polyline(n).into_iter().skip(1).map(|p| p.map(|x| x as f32)));
+                let n = if matches!(s.kind, SegmentKind::Line) {
+                    1
+                } else {
+                    12
+                };
+                ring.extend(
+                    s.polyline(n)
+                        .into_iter()
+                        .skip(1)
+                        .map(|p| p.map(|x| x as f32)),
+                );
             }
             ring
         })

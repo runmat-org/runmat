@@ -22,10 +22,10 @@ use runmat_cad::assembly::motion::{
     MatePosition, MateValue, MotionDrive, MotionKind, MotionMotor, MotionProfile, MotionSpring,
     MotionStudy,
 };
-use runmat_cad::value::ValueExpr;
-use runmat_cad::units::{Dimension, Units};
-use runmat_cad::value::{Evaluator, NoDynamicValues};
 use runmat_cad::syntax::edit::EditFailure;
+use runmat_cad::units::{Dimension, Units};
+use runmat_cad::value::ValueExpr;
+use runmat_cad::value::{Evaluator, NoDynamicValues};
 use serde_json::{Map, Value};
 
 type Values = Map<String, Value>;
@@ -108,7 +108,12 @@ pub(super) fn animation(
         .or(Some(name.as_str()))
         .and_then(|n| document.motions.iter().position(|s| s.name == n));
     if let (Some(i), Some(t)) = (existing, &typed) {
-        if document.motions.iter().enumerate().any(|(k, s)| k != i && &s.name == t) {
+        if document
+            .motions
+            .iter()
+            .enumerate()
+            .any(|(k, s)| k != i && &s.name == t)
+        {
             return Err(model(format!("there is already a motion study `{t}`")));
         }
     }
@@ -187,26 +192,51 @@ pub(super) fn basic(
         .and_then(Value::as_str)
         .filter(|s| !s.trim().is_empty())
         .map(identifier);
-    let name = typed.clone().or_else(|| editing.clone()).unwrap_or_else(|| "swing".into());
+    let name = typed
+        .clone()
+        .or_else(|| editing.clone())
+        .unwrap_or_else(|| "swing".into());
     let existing = editing
         .as_deref()
         .or(Some(name.as_str()))
         .and_then(|n| document.motions.iter().position(|s| s.name == n));
     if let (Some(i), Some(t)) = (existing, &typed) {
-        if document.motions.iter().enumerate().any(|(k, s)| k != i && &s.name == t) {
+        if document
+            .motions
+            .iter()
+            .enumerate()
+            .any(|(k, s)| k != i && &s.name == t)
+        {
             return Err(model(format!("there is already a motion study `{t}`")));
         }
     }
     let duration = field(values, "duration", "s")?;
-    let g = |x: f64, y: f64, z: f64| Some([x, y, z].map(|v| ValueExpr::Quantity { value: v, unit: "m/s^2".into() }).to_vec());
+    let g = |x: f64, y: f64, z: f64| {
+        Some(
+            [x, y, z]
+                .map(|v| ValueExpr::Quantity {
+                    value: v,
+                    unit: "m/s^2".into(),
+                })
+                .to_vec(),
+        )
+    };
     const G: f64 = 9.80665;
-    let gravity = match values.get("gravity").and_then(Value::as_str).unwrap_or("-z") {
+    let gravity = match values
+        .get("gravity")
+        .and_then(Value::as_str)
+        .unwrap_or("-z")
+    {
         "-z" => None,
         "-y" => g(0.0, -G, 0.0),
         "-x" => g(-G, 0.0, 0.0),
         "+z" => g(0.0, 0.0, G),
         "none" => g(0.0, 0.0, 0.0),
-        other => return Err(model(format!("gravity `{other}`: pick a direction or none"))),
+        other => {
+            return Err(model(format!(
+                "gravity `{other}`: pick a direction or none"
+            )))
+        }
     };
     let mut springs = Vec::new();
     let mut motors = Vec::new();
@@ -214,9 +244,17 @@ pub(super) fn basic(
         let mate = mate_name(document, pick)?;
         let angle = values.get("quantity").and_then(Value::as_str) != Some("distance");
         let (k, c, load) = if angle {
-            (field(values, "stiffness", "N*m/rad")?, field(values, "damping", "N*m*s/rad")?, field(values, "torque", "N*m")?)
+            (
+                field(values, "stiffness", "N*m/rad")?,
+                field(values, "damping", "N*m*s/rad")?,
+                field(values, "torque", "N*m")?,
+            )
         } else {
-            (field(values, "stiffness_linear", "N/mm")?, field(values, "damping_linear", "N*s/m")?, field(values, "force", "N")?)
+            (
+                field(values, "stiffness_linear", "N/mm")?,
+                field(values, "damping_linear", "N*s/m")?,
+                field(values, "force", "N")?,
+            )
         };
         if !is_zero(&k) || !is_zero(&c) {
             springs.push(MotionSpring {
@@ -311,7 +349,12 @@ pub(super) fn controller(
     let mut saved = Vec::new();
     for pick in &picked {
         let mate = mate_name(document, pick)?;
-        let kind = &document.mates.iter().find(|m| m.name == mate).expect("checked").kind;
+        let kind = &document
+            .mates
+            .iter()
+            .find(|m| m.name == mate)
+            .expect("checked")
+            .kind;
         let value = mate_value(kind).cloned().ok_or_else(|| {
             model(format!(
                 "`{mate}` has no value to save; give it one with Edit mate first"
@@ -328,10 +371,15 @@ pub(super) fn controller(
                         .mates
                         .iter()
                         .find(|m| m.name == v.mate)
-                        .ok_or_else(|| model(format!("the assembly has no mate `{}` any more", v.mate)))?
+                        .ok_or_else(|| {
+                            model(format!("the assembly has no mate `{}` any more", v.mate))
+                        })?
                         .kind;
                     let value = mate_value(kind).cloned().unwrap_or(v.value);
-                    saved.push(MateValue { mate: v.mate, value });
+                    saved.push(MateValue {
+                        mate: v.mate,
+                        value,
+                    });
                 }
             }
             None => return Err(model("pick the mates whose values the position keeps")),

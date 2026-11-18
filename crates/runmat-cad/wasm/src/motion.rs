@@ -102,7 +102,9 @@ pub fn drag(
 /// Study `name` of the top assembly, solved.
 pub fn run(resolved: &ResolvedAssembly, source: &MemorySource, name: &str) -> Option<MotionRun> {
     let doc = source.assembly(&resolved.top, None).ok()?;
-    Some(with_context(resolved, source, |ctx| run_study(&doc, resolved, name, ctx)))
+    Some(with_context(resolved, source, |ctx| {
+        run_study(&doc, resolved, name, ctx)
+    }))
 }
 
 /// Every node under (and including) the moving nodes.
@@ -117,7 +119,12 @@ fn moving_nodes(resolved: &ResolvedAssembly, run: &MotionRun) -> Vec<usize> {
     out
 }
 
-fn study_json(resolved: &ResolvedAssembly, run: &MotionRun, profile: &str, track: Option<&str>) -> Value {
+fn study_json(
+    resolved: &ResolvedAssembly,
+    run: &MotionRun,
+    profile: &str,
+    track: Option<&str>,
+) -> Value {
     let nodes = moving_nodes(resolved, run);
     let frames: Vec<Value> = run
         .frames
@@ -222,19 +229,31 @@ pub fn motion_studies(
 /// axes, inertia in kg·m² about it; per frame the centre in mm, its acceleration in m/s², the
 /// angular velocity in rad/s and angular acceleration in rad/s², world axes). The loads and the
 /// body motion keep full precision: Results to .fea balances them against each other.
-fn dynamic_rows(row: &mut Value, run: &MotionRun, study: &runmat_cad::assembly::motion::MotionStudy) {
+fn dynamic_rows(
+    row: &mut Value,
+    run: &MotionRun,
+    study: &runmat_cad::assembly::motion::MotionStudy,
+) {
     let Some(o) = row.as_object_mut() else { return };
     o.insert("kind".into(), json!("dynamic"));
     // What the study loads the mechanism with, as written, for the command that edits it.
     // As the run evaluated it (a written `-9.80665 m/s^2` is a negation, not a plain quantity).
     let gravity: Vec<f64> = run
         .gravity
-        .unwrap_or([0.0, 0.0, -runmat_cad::assembly::motion::dynamics::STANDARD_GRAVITY])
+        .unwrap_or([
+            0.0,
+            0.0,
+            -runmat_cad::assembly::motion::dynamics::STANDARD_GRAVITY,
+        ])
         .to_vec();
     let spring = study.springs.first();
     let motor = study.motors.first();
     let angle = spring
-        .map(|s| [&s.stiffness, &s.damping].iter().any(|e| e.as_ref().is_some_and(|e| shown(e).contains("rad"))))
+        .map(|s| {
+            [&s.stiffness, &s.damping]
+                .iter()
+                .any(|e| e.as_ref().is_some_and(|e| shown(e).contains("rad")))
+        })
         .or(motor.map(|m| m.torque.is_some()))
         .unwrap_or(true);
     o.insert(
@@ -248,7 +267,10 @@ fn dynamic_rows(row: &mut Value, run: &MotionRun, study: &runmat_cad::assembly::
             "load": motor.and_then(|m| m.torque.as_ref().or(m.force.as_ref())).map(shown),
         }),
     );
-    o.insert("energy".into(), json!(run.energy.iter().map(|e| round(*e, 6)).collect::<Vec<_>>()));
+    o.insert(
+        "energy".into(),
+        json!(run.energy.iter().map(|e| round(*e, 6)).collect::<Vec<_>>()),
+    );
     o.insert(
         "reactions".into(),
         Value::Array(

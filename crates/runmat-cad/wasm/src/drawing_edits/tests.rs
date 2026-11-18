@@ -315,10 +315,16 @@ fn a_drawing_is_built_by_hand_from_an_empty_sheet() {
         "Added general notes notes"
     );
     assert_eq!(
-        b.run("table.notes", json!({ "text": "MATERIAL: {material}." }), &[]),
+        b.run(
+            "table.notes",
+            json!({ "text": "MATERIAL: {material}." }),
+            &[]
+        ),
         "Added note 2 to notes"
     );
-    assert!(b.try_run("table.notes", json!({ "text": " " }), &[]).is_err());
+    assert!(b
+        .try_run("table.notes", json!({ "text": " " }), &[])
+        .is_err());
     assert!(
         b.text.contains("table notes = notes(")
             && b.text.find("BREAK SHARP EDGES.") < b.text.find("MATERIAL: {material}."),

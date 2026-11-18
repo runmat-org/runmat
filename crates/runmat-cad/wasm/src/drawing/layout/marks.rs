@@ -262,19 +262,25 @@ impl Std {
             ),
             self.arrowhead(id, tip, d),
         ];
-        out.extend(lines.iter().enumerate().filter(|(_, t)| !t.is_empty()).map(|(i, t)| {
-            mark(
-                id,
-                "dimtext",
-                text(
-                    shoulder[0] + s * 1.0,
-                    elbow[1] - self.text / 2.0 - i as f64 * pitch,
-                    t,
-                    self.text,
-                    if right { "start" } else { "end" },
-                ),
-            )
-        }));
+        out.extend(
+            lines
+                .iter()
+                .enumerate()
+                .filter(|(_, t)| !t.is_empty())
+                .map(|(i, t)| {
+                    mark(
+                        id,
+                        "dimtext",
+                        text(
+                            shoulder[0] + s * 1.0,
+                            elbow[1] - self.text / 2.0 - i as f64 * pitch,
+                            t,
+                            self.text,
+                            if right { "start" } else { "end" },
+                        ),
+                    )
+                }),
+        );
         out
     }
 
@@ -284,7 +290,12 @@ impl Std {
     }
 
     /// The box of [`Std::leader_lines`]' text.
-    pub fn leader_lines_box(&self, elbow: Xy, right: bool, lines: &[String]) -> super::solver::BoxR {
+    pub fn leader_lines_box(
+        &self,
+        elbow: Xy,
+        right: bool,
+        lines: &[String],
+    ) -> super::solver::BoxR {
         let w = lines
             .iter()
             .map(|t| Std::text_width(t, self.text))

@@ -1040,7 +1040,10 @@ impl DesignDocumentAnalysis {
             ..CompletionItem::default()
         };
         // The compile's pool: the standard library, declared parts and `use` libraries.
-        let pool = || self.pool().unwrap_or_else(runmat_circuit::fixture::standard_pool);
+        let pool = || {
+            self.pool()
+                .unwrap_or_else(runmat_circuit::fixture::standard_pool)
+        };
         match (self.dialect, field) {
             (Dialect::Circuit, "part") => {
                 let pool = pool();

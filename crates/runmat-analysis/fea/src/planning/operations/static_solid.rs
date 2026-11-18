@@ -294,9 +294,9 @@ fn product(count: u64, per_item: u64) -> Result<u64, CountOverflow> {
 }
 
 fn sum<const N: usize>(terms: [u64; N]) -> Result<u64, CountOverflow> {
-    terms
-        .into_iter()
-        .try_fold(0_u64, |total, term| total.checked_add(term).ok_or(CountOverflow))
+    terms.into_iter().try_fold(0_u64, |total, term| {
+        total.checked_add(term).ok_or(CountOverflow)
+    })
 }
 
 fn with_margin(operations: u64) -> Result<OperationCount, CountOverflow> {
@@ -334,7 +334,10 @@ mod tests {
         let factor = estimate_static_solid_operations_from_counts(counts, 0.0, u64::MAX).unwrap();
         assert_eq!(factor.solve_iterations, None);
         let multigrid = estimate_static_solid_operations_from_counts(counts, 0.0, 1 << 20).unwrap();
-        assert_eq!(multigrid.solve_iterations, Some(MULTIGRID_ITERATIONS_COVERED));
+        assert_eq!(
+            multigrid.solve_iterations,
+            Some(MULTIGRID_ITERATIONS_COVERED)
+        );
         assert_eq!(factor.assembly, multigrid.assembly);
         assert!(factor.total().unwrap() > OperationCount::ZERO);
     }

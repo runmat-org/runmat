@@ -27,11 +27,15 @@ pub fn summary(word: &str) -> Option<&'static str> {
         "source" => "A stimulus source in a simulation.",
         "model" => "A device model a simulation uses.",
         "tolerance" => "Component tolerances a Monte Carlo analysis varies.",
-        "analysis" => "One simulation analysis: op, dc, ac, tran, noise, monte_carlo or temperature.",
+        "analysis" => {
+            "One simulation analysis: op, dc, ac, tran, noise, monte_carlo or temperature."
+        }
         "probe" => "A signal recorded during a simulation.",
         "measure" => "A value computed from a simulation result, with an optional spec.",
         "option" => "A simulator option.",
-        "part" => "A catalog part declared in the file: manufacturer part number, package and pins.",
+        "part" => {
+            "A catalog part declared in the file: manufacturer part number, package and pins."
+        }
         "footprint" => "A footprint: the pads and outline a package places on the board.",
         "symbol" => "A schematic symbol.",
         // Layout statements.
@@ -65,7 +69,9 @@ pub fn summary(word: &str) -> Option<&'static str> {
         "dc" => "DC sweep: the operating point as a source steps through a range.",
         "ac" => "AC small-signal analysis over a frequency range.",
         "tran" => "Transient analysis: voltages and currents over time.",
-        "monte_carlo" => "Repeats an analysis with component values varied within their tolerances.",
+        "monte_carlo" => {
+            "Repeats an analysis with component values varied within their tolerances."
+        }
         "noise" => "Noise analysis over a frequency range.",
         "temperature" => "Repeats an analysis at several temperatures.",
         // Measures.

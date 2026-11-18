@@ -67,13 +67,10 @@ pub fn collision(
     let resolution = resolve_assembly_in(path, text, files, configuration)
         .map_err(|d| d.first().map(|d| d.message.clone()).unwrap_or_default())?;
     let base = &resolution.resolved;
-    let studies: Vec<String> = runmat_cad::assembly::source::DesignSource::assembly(
-        &resolution.source,
-        &base.top,
-        None,
-    )
-    .map(|d| d.motions.iter().map(|m| m.name.clone()).collect())
-    .unwrap_or_default();
+    let studies: Vec<String> =
+        runmat_cad::assembly::source::DesignSource::assembly(&resolution.source, &base.top, None)
+            .map(|d| d.motions.iter().map(|m| m.name.clone()).collect())
+            .unwrap_or_default();
     let name = study_name(values, selection, &studies)?;
     let stop = values.get("mode").and_then(Value::as_str) != Some("highlight");
     let run = crate::motion::run(base, &resolution.source, &name)
@@ -117,13 +114,8 @@ pub fn collision(
         for (node, world) in frame_tree.nodes.iter_mut().zip(frame) {
             node.world = *world;
         }
-        let found = crate::evaluate::clearance_in(
-            &resolution,
-            &frame_tree,
-            files,
-            0.0,
-            Some(&changed),
-        )?;
+        let found =
+            crate::evaluate::clearance_in(&resolution, &frame_tree, files, 0.0, Some(&changed))?;
         checked += 1;
         for e in found.errors {
             if !problems.contains(&e) {
@@ -145,7 +137,8 @@ pub fn collision(
             });
             c.to = *t;
             c.volume = c.volume.max(o.volume);
-            if stop && k > 0 && stopped.is_none() && !at_start.contains(&(o.a.clone(), o.b.clone())) {
+            if stop && k > 0 && stopped.is_none() && !at_start.contains(&(o.a.clone(), o.b.clone()))
+            {
                 stopped = Some((*t, o.a.clone(), o.b.clone()));
             }
         }

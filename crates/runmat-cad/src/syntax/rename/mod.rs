@@ -22,7 +22,9 @@
 //! (features), assemblies (inputs) and `.fea` studies (regions).
 
 mod follow;
-pub use follow::{assemblies_in, rename_in_drawing, rename_input_in_assembly, rename_region_in_study};
+pub use follow::{
+    assemblies_in, rename_in_drawing, rename_input_in_assembly, rename_region_in_study,
+};
 
 use super::edit::{diff_source, EditFailure, SourceChange};
 use super::{parse_part, PART};

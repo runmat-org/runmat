@@ -15,13 +15,10 @@ const LISTED: &str = include_str!("../../runmat-cad/tests/fixtures/notes/l_brack
 /// The L bracket and `drawing` as `/p/<name>.drawing`.
 fn files(name: &str, drawing: &str) -> Files {
     let path = format!("/p/{name}.drawing");
-    [
-        ("/p/l_bracket.part", PART),
-        (path.as_str(), drawing),
-    ]
-    .into_iter()
-    .map(|(k, v)| (k.to_owned(), v.to_owned()))
-    .collect()
+    [("/p/l_bracket.part", PART), (path.as_str(), drawing)]
+        .into_iter()
+        .map(|(k, v)| (k.to_owned(), v.to_owned()))
+        .collect()
 }
 
 /// The lines the layout sets for `id`: (text, x, baseline y).
@@ -92,7 +89,10 @@ fn wrapped_general_notes_export_as_the_same_lines_to_dxf_and_pdf() {
     let body = String::from_utf8_lossy(&body);
     // Each line is its own run; lines with symbols the font lacks split around them.
     for (t, _, _) in lines.iter().filter(|(t, _, _)| t.is_ascii()) {
-        assert!(body.contains(&format!("({t}) Tj")), "no line {t:?} in the PDF");
+        assert!(
+            body.contains(&format!("({t}) Tj")),
+            "no line {t:?} in the PDF"
+        );
     }
 }
 
@@ -120,8 +120,14 @@ fn the_check_reports_a_note_that_had_no_room_where_it_was_put() {
         .collect();
     assert!(!warnings.is_empty(), "{:#}", out["diagnostics"]);
     for w in &warnings {
-        assert!(w["message"].as_str().unwrap().contains("has no room there"), "{w}");
-        assert!(w["range"].is_object(), "the warning points at the note: {w}");
+        assert!(
+            w["message"].as_str().unwrap().contains("has no room there"),
+            "{w}"
+        );
+        assert!(
+            w["range"].is_object(),
+            "the warning points at the note: {w}"
+        );
     }
     let clean = call(
         "design.check",

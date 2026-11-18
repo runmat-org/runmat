@@ -105,10 +105,17 @@ pub fn part_file_state(doc: &PartDocument) -> FileState {
         .materials
         .iter()
         .map(|m| m.material.0.as_str())
-        .chain(doc.parts.iter().filter_map(|p| p.material.as_ref()).map(|m| m.0.as_str()))
+        .chain(
+            doc.parts
+                .iter()
+                .filter_map(|p| p.material.as_ref())
+                .map(|m| m.0.as_str()),
+        )
         .collect();
     let any_material = |words: &[&str]| materials.iter().any(|m| names_any(m, words));
-    let sweeps = kinds().filter(|k| matches!(k, FeatureKind::Sweep(_))).count();
+    let sweeps = kinds()
+        .filter(|k| matches!(k, FeatureKind::Sweep(_)))
+        .count();
     if sweeps >= RUN_SWEEPS || (sweeps > 0 && any_material(RUN_MATERIALS)) {
         return FileState::Piping;
     }

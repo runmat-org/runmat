@@ -77,9 +77,15 @@ impl GenericForm {
     /// What the form does, for hovers and the language docs.
     pub const fn summary(self) -> &'static str {
         match self {
-            GenericForm::VersionHeader => "The language version the file is written in (`runmat 0.7`, `std 1`).",
-            GenericForm::Use => "Brings in another design, a library or a folder of designs by path.",
-            GenericForm::Constrain => "A condition the design must meet; with `=`, a relation the solver keeps.",
+            GenericForm::VersionHeader => {
+                "The language version the file is written in (`runmat 0.7`, `std 1`)."
+            }
+            GenericForm::Use => {
+                "Brings in another design, a library or a folder of designs by path."
+            }
+            GenericForm::Constrain => {
+                "A condition the design must meet; with `=`, a relation the solver keeps."
+            }
             GenericForm::When => "Statements that apply only while a condition holds.",
             GenericForm::Publish => "A named value or geometry other files may read.",
             GenericForm::Check => "A named check the design reports on.",

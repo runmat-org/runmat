@@ -161,11 +161,7 @@ pub fn assess_result(passed: usize, total: usize) -> String {
 }
 
 fn plural(count: u64, one: &str, many: &str) -> String {
-    format!(
-        "{} {}",
-        grouped(count),
-        if count == 1 { one } else { many }
-    )
+    format!("{} {}", grouped(count), if count == 1 { one } else { many })
 }
 
 /// `12180` as "12,180".

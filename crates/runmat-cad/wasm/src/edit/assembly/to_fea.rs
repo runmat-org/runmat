@@ -24,9 +24,9 @@
 //! `.fea` (supports, material and acceptance with the user, as `study.new` does).
 
 use super::model;
-use runmat_cad::assembly::motion::dynamics::BodyState;
 use crate::edit::EditOutput;
 use crate::runtime::{assembly_index, Files};
+use runmat_cad::assembly::motion::dynamics::BodyState;
 use runmat_cad::syntax::edit::EditFailure;
 use serde_json::{Map, Value};
 
@@ -39,7 +39,12 @@ fn study_name(values: &Map<String, Value>, selection: &[String]) -> Option<Strin
             values
                 .get("study")
                 .and_then(Value::as_str)
-                .map(|s| s.trim().strip_prefix("motion:").unwrap_or(s.trim()).to_owned())
+                .map(|s| {
+                    s.trim()
+                        .strip_prefix("motion:")
+                        .unwrap_or(s.trim())
+                        .to_owned()
+                })
                 .filter(|s| !s.is_empty())
         })
 }
@@ -66,7 +71,11 @@ fn seconds(values: &Map<String, Value>) -> Result<f64, EditFailure> {
         }
         Some(Value::Object(q)) => {
             let v = q.get("value").and_then(Value::as_f64).unwrap_or(0.0);
-            Ok(if q.get("unit").and_then(Value::as_str) == Some("ms") { v / 1000.0 } else { v })
+            Ok(if q.get("unit").and_then(Value::as_str) == Some("ms") {
+                v / 1000.0
+            } else {
+                v
+            })
         }
         Some(other) => Err(model(format!("`time` isn't a time: {other}"))),
     }
@@ -79,7 +88,11 @@ fn vec3(v: &Value) -> [f64; 3] {
 
 /// `R^T v`, with `t` the display transform's rotation row by row (then translation).
 fn into_part(t: &[f64], v: [f64; 3]) -> [f64; 3] {
-    let r = |i: usize, j: usize| t.get(i * 3 + j).copied().unwrap_or(if i == j { 1.0 } else { 0.0 });
+    let r = |i: usize, j: usize| {
+        t.get(i * 3 + j)
+            .copied()
+            .unwrap_or(if i == j { 1.0 } else { 0.0 })
+    };
     [0, 1, 2].map(|j| (0..3).map(|i| r(i, j) * v[i]).sum())
 }
 
@@ -88,7 +101,11 @@ fn shown(v: [f64; 3], places: i32) -> String {
     let c = |x: f64| {
         let r = (x * scale).round() / scale;
         // No "-0" in the request.
-        if r == 0.0 { "0".to_owned() } else { format!("{r}") }
+        if r == 0.0 {
+            "0".to_owned()
+        } else {
+            format!("{r}")
+        }
     };
     format!("[{}, {}, {}]", c(v[0]), c(v[1]), c(v[2]))
 }
@@ -126,7 +143,11 @@ fn add(a: [f64; 3], b: [f64; 3]) -> [f64; 3] {
 
 #[cfg(test)]
 fn cross(a: [f64; 3], b: [f64; 3]) -> [f64; 3] {
-    [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]]
+    [
+        a[1] * b[2] - a[2] * b[1],
+        a[2] * b[0] - a[0] * b[2],
+        a[0] * b[1] - a[1] * b[0],
+    ]
 }
 
 impl Handoff {
@@ -162,22 +183,28 @@ impl Handoff {
 
     /// Weight and linear inertia as one uniform body-force density, `ρ (g − a)` (N/m³).
     pub fn body_force(&self) -> Option<[f64; 3]> {
-        self.density.map(|rho| [0, 1, 2].map(|k| rho * (self.gravity[k] - self.acceleration[k])))
+        self.density
+            .map(|rho| [0, 1, 2].map(|k| rho * (self.gravity[k] - self.acceleration[k])))
     }
 
     /// Whether the part turns or spins up at this instant.
     pub fn turns(&self) -> bool {
-        self.angular_velocity.iter().chain(&self.angular_acceleration).any(|v| v.abs() > 1e-9)
+        self.angular_velocity
+            .iter()
+            .chain(&self.angular_acceleration)
+            .any(|v| v.abs() > 1e-9)
     }
 
     /// The mate loads' resultant: the force, and the moment about the centre of mass (the
     /// balance check's side of it).
     #[cfg(test)]
     pub fn joint_resultant(&self) -> ([f64; 3], [f64; 3]) {
-        self.joints.iter().fold(([0.0; 3], [0.0; 3]), |(f, m), (_, p, jf, jm)| {
-            let arm = [0, 1, 2].map(|k| (p[k] - self.center[k]) / 1000.0);
-            (add(f, *jf), add(m, add(*jm, cross(arm, *jf))))
-        })
+        self.joints
+            .iter()
+            .fold(([0.0; 3], [0.0; 3]), |(f, m), (_, p, jf, jm)| {
+                let arm = [0, 1, 2].map(|k| (p[k] - self.center[k]) / 1000.0);
+                (add(f, *jf), add(m, add(*jm, cross(arm, *jf))))
+            })
     }
 }
 
@@ -189,14 +216,19 @@ pub(crate) fn loads(
     values: &Map<String, Value>,
     selection: &[String],
 ) -> Result<Handoff, EditFailure> {
-    let (index, _) = assembly_index(path, text, files).map_err(|_| model("the assembly doesn't compile"))?;
+    let (index, _) =
+        assembly_index(path, text, files).map_err(|_| model("the assembly doesn't compile"))?;
     let studies = index["motion"].as_array().cloned().unwrap_or_default();
     let dynamic: Vec<&Value> = studies.iter().filter(|s| s["kind"] == "dynamic").collect();
     let name = match study_name(values, selection) {
         Some(n) => n,
         None => match dynamic.as_slice() {
             [only] => only["name"].as_str().unwrap_or_default().to_owned(),
-            [] => return Err(model("add a Basic motion study first: its joint loads are what a study takes")),
+            [] => {
+                return Err(model(
+                    "add a Basic motion study first: its joint loads are what a study takes",
+                ))
+            }
             _ => return Err(model("pick the motion study, from its row or by name")),
         },
     };
@@ -209,13 +241,20 @@ pub(crate) fn loads(
             "`{name}` drives its mates, so it has no loads: Results to .fea takes a Basic motion (dynamic) study"
         )));
     }
-    let times: Vec<f64> = study["times"].as_array().map(|t| t.iter().filter_map(Value::as_f64).collect()).unwrap_or_default();
+    let times: Vec<f64> = study["times"]
+        .as_array()
+        .map(|t| t.iter().filter_map(Value::as_f64).collect())
+        .unwrap_or_default();
     if times.is_empty() {
         return Err(model(format!("`{name}` solved no frames")));
     }
     let asked = seconds(values)?;
     let k = (0..times.len())
-        .min_by(|&a, &b| (times[a] - asked).abs().total_cmp(&(times[b] - asked).abs()))
+        .min_by(|&a, &b| {
+            (times[a] - asked)
+                .abs()
+                .total_cmp(&(times[b] - asked).abs())
+        })
         .unwrap_or(0);
 
     let rows = index["occurrences"].as_array().cloned().unwrap_or_default();
@@ -227,10 +266,19 @@ pub(crate) fn loads(
         .iter()
         .flat_map(|m| {
             let mate = m["mate"].as_str().unwrap_or_default().to_owned();
-            m["frames"][k].as_array().cloned().unwrap_or_default().into_iter().map(move |l| (mate.clone(), l))
+            m["frames"][k]
+                .as_array()
+                .cloned()
+                .unwrap_or_default()
+                .into_iter()
+                .map(move |l| (mate.clone(), l))
         })
         .collect();
-    let component = match values.get("component").and_then(Value::as_str).filter(|s| !s.trim().is_empty()) {
+    let component = match values
+        .get("component")
+        .and_then(Value::as_str)
+        .filter(|s| !s.trim().is_empty())
+    {
         Some(pick) => match pick.strip_prefix("occurrence:") {
             Some(uuid) => row_by_uuid(uuid.split('/').next().unwrap_or(uuid))
                 .and_then(|r| r["path"].as_str())
@@ -244,21 +292,37 @@ pub(crate) fn loads(
             .ok_or_else(|| model(format!("`{name}` has no joint loads")))?
             .to_owned(),
     };
-    let mine: Vec<&(String, Value)> = all.iter().filter(|(_, l)| l["occurrence"].as_str() == Some(component.as_str())).collect();
+    let mine: Vec<&(String, Value)> = all
+        .iter()
+        .filter(|(_, l)| l["occurrence"].as_str() == Some(component.as_str()))
+        .collect();
     if mine.is_empty() {
         return Err(model(format!(
             "no mate loads `{component}` in `{name}`: pick a moving component joined by a mate"
         )));
     }
-    let row = row_by_path(&component).ok_or_else(|| model(format!("no component `{component}`")))?;
-    let part = row["definition"]["file"].as_str().unwrap_or_default().to_owned();
+    let row =
+        row_by_path(&component).ok_or_else(|| model(format!("no component `{component}`")))?;
+    let part = row["definition"]["file"]
+        .as_str()
+        .unwrap_or_default()
+        .to_owned();
     if !part.ends_with(".part") {
-        return Err(model(format!("`{component}` is not a part: pick the part to study")));
+        return Err(model(format!(
+            "`{component}` is not a part: pick the part to study"
+        )));
     }
     let body = study["bodies"]
         .as_array()
-        .and_then(|b| b.iter().find(|b| b["occurrence"].as_str() == Some(component.as_str())))
-        .ok_or_else(|| model(format!("`{component}` doesn't move on its own in `{name}`: pick the part a mate carries")))?;
+        .and_then(|b| {
+            b.iter()
+                .find(|b| b["occurrence"].as_str() == Some(component.as_str()))
+        })
+        .ok_or_else(|| {
+            model(format!(
+                "`{component}` doesn't move on its own in `{name}`: pick the part a mate carries"
+            ))
+        })?;
     // The component's pose at frame k (a moving one), else where it is placed.
     let uuid = row["uuid"].as_str().unwrap_or_default();
     let pose: Vec<f64> = study["frames"][k]
@@ -267,23 +331,35 @@ pub(crate) fn loads(
         .and_then(|o| o["transform"].as_array())
         .map(|t| t.iter().filter_map(Value::as_f64).collect())
         .unwrap_or_else(|| world_transform(&row["world"]));
-    let origin = [pose.get(9), pose.get(10), pose.get(11)].map(|v| v.copied().unwrap_or(0.0) * 1000.0);
+    let origin =
+        [pose.get(9), pose.get(10), pose.get(11)].map(|v| v.copied().unwrap_or(0.0) * 1000.0);
     let joints = mine
         .iter()
         .map(|(mate, l)| {
             let p = vec3(&l["point"]);
             (
                 mate.clone(),
-                into_part(&pose, [p[0] - origin[0], p[1] - origin[1], p[2] - origin[2]]),
+                into_part(
+                    &pose,
+                    [p[0] - origin[0], p[1] - origin[1], p[2] - origin[2]],
+                ),
                 into_part(&pose, vec3(&l["force"])),
                 into_part(&pose, vec3(&l["moment"])),
             )
         })
         .collect();
     let state = &body["frames"][k];
-    let gravity = study["setup"]["gravity"].as_array().map(|_| vec3(&study["setup"]["gravity"])).unwrap_or([0.0, 0.0, -9.80665]);
-    let inertia = body["inertia"].as_array().map(|r| [0, 1, 2].map(|i| vec3(r.get(i).unwrap_or(&Value::Null)))).unwrap_or_default();
-    let configuration = row["configuration"].as_str().filter(|c| !c.is_empty() && *c != "default");
+    let gravity = study["setup"]["gravity"]
+        .as_array()
+        .map(|_| vec3(&study["setup"]["gravity"]))
+        .unwrap_or([0.0, 0.0, -9.80665]);
+    let inertia = body["inertia"]
+        .as_array()
+        .map(|r| [0, 1, 2].map(|i| vec3(r.get(i).unwrap_or(&Value::Null))))
+        .unwrap_or_default();
+    let configuration = row["configuration"]
+        .as_str()
+        .filter(|c| !c.is_empty() && *c != "default");
     let density = files
         .get(&part)
         .and_then(|t| crate::mass::part_mass(&part, t, configuration).ok())
@@ -317,7 +393,12 @@ pub(crate) fn request(h: &Handoff) -> String {
     lines.push(format!("Mate loads, in {file}'s own axes (points in mm, forces in N, moments in N*m about the point):"));
     lines.push(String::new());
     for (mate, p, f, m) in &h.joints {
-        lines.push(format!("- mate {mate} at {}: force {}, moment {}", shown(*p, 3), shown(*f, 6), shown(*m, 6)));
+        lines.push(format!(
+            "- mate {mate} at {}: force {}, moment {}",
+            shown(*p, 3),
+            shown(*f, 6),
+            shown(*m, 6)
+        ));
     }
     lines.push(String::new());
     let g = shown(h.gravity, 6);
@@ -367,7 +448,10 @@ pub(crate) fn handoff(
     selection: &[String],
 ) -> Result<EditOutput, EditFailure> {
     let h = loads(path, text, files, values, selection)?;
-    Ok(EditOutput { files: Vec::new(), summary: request(&h) })
+    Ok(EditOutput {
+        files: Vec::new(),
+        summary: request(&h),
+    })
 }
 
 /// An index row's `world` transform as the display's 12 numbers (rotation rows, translation m).

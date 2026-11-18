@@ -78,7 +78,13 @@ pub fn configuration_rows(
         rows.push(ConfigurationRow {
             name: c.name.as_str().to_owned(),
             kind: "configuration".into(),
-            form: form("configuration", c.name.as_str(), &values, "suppress", &items),
+            form: form(
+                "configuration",
+                c.name.as_str(),
+                &values,
+                "suppress",
+                &items,
+            ),
             values,
             components: c.suppress.iter().cloned().collect(),
             items,

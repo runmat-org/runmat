@@ -396,7 +396,9 @@ fn fillet(values: &Values, picks: &Picks) -> Result<Value, EditFailure> {
                 );
             }
             if picks_of(values, "edges").is_empty() {
-                return Err(model("a face fillet takes two face sets: pick Face set 1 and Face set 2"));
+                return Err(model(
+                    "a face fillet takes two face sets: pick Face set 1 and Face set 2",
+                ));
             }
         }
         "full_round" => {
@@ -405,10 +407,14 @@ fn fillet(values: &Values, picks: &Picks) -> Result<Value, EditFailure> {
                 face_set(values, picks, "center_set")?,
                 face_set(values, picks, "side_set2")?,
             ) {
-                return Ok(json!({ "feature": "full_round", "first": first, "center": center, "second": second }));
+                return Ok(
+                    json!({ "feature": "full_round", "first": first, "center": center, "second": second }),
+                );
             }
             if picks_of(values, "edges").is_empty() {
-                return Err(model("a full round takes three face sets: one side, the center, the other side"));
+                return Err(model(
+                    "a full round takes three face sets: one side, the center, the other side",
+                ));
             }
         }
         _ => {}

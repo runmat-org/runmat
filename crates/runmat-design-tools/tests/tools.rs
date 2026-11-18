@@ -152,7 +152,10 @@ fn inspect_reports_an_unknown_materials_mass_as_unknown() {
     let reason = mass["unknown"].as_str().unwrap();
     assert!(reason.contains("`material.unobtainium`"), "{reason}");
     assert!(mass["volume_mm3"].as_f64().unwrap() > 30_000.0, "{mass:#}");
-    assert!(mass["principal_axes"][0]["moment_kg_mm2"].is_null(), "{mass:#}");
+    assert!(
+        mass["principal_axes"][0]["moment_kg_mm2"].is_null(),
+        "{mass:#}"
+    );
     let notes = out["notes"].to_string();
     assert!(
         notes.contains("/p/bracket.part: mass unknown: no density is known for material `material.unobtainium`"),
@@ -165,7 +168,10 @@ fn inspect_reports_an_unknown_materials_mass_as_unknown() {
         &files,
     );
     assert_eq!(out["sections"]["mass"]["density"], 1000.0, "{out:#}");
-    assert_eq!(out["sections"]["mass"]["density_source"], "input", "{out:#}");
+    assert_eq!(
+        out["sections"]["mass"]["density_source"], "input",
+        "{out:#}"
+    );
     // With no material at all, the reason says so.
     let bare = BRACKET.replace(", material = \"material.aluminum\"", "");
     assert_ne!(bare, BRACKET);
@@ -176,8 +182,7 @@ fn inspect_reports_an_unknown_materials_mass_as_unknown() {
         &files,
     );
     assert_eq!(
-        out["sections"]["mass"]["unknown"],
-        "it has no material and no `density` property",
+        out["sections"]["mass"]["unknown"], "it has no material and no `density` property",
         "{out:#}"
     );
 }

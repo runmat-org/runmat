@@ -127,7 +127,10 @@ mod tests {
             store_path("/p/parts/bracket.part"),
             "/p/parts/.runmat/releases/bracket.part.json"
         );
-        assert_eq!(store_path("top.assembly"), ".runmat/releases/top.assembly.json");
+        assert_eq!(
+            store_path("top.assembly"),
+            ".runmat/releases/top.assembly.json"
+        );
         assert_eq!(store_folder("/p/parts/"), "/p/parts/.runmat/releases/");
     }
 
@@ -136,7 +139,10 @@ mod tests {
         let mut store = ReleaseStore::new("/p/bracket.part");
         assert_eq!(store.release("a").unwrap().0, "R1");
         assert_eq!(store.release("b").unwrap().0, "R2");
-        assert!(store.release("b").unwrap_err().contains("unchanged since R2"));
+        assert!(store
+            .release("b")
+            .unwrap_err()
+            .contains("unchanged since R2"));
         let read = ReleaseStore::parse(&store.to_text()).unwrap();
         assert_eq!(read, store);
         assert_eq!(read.text(&RevisionId::new("R1")), Some("a"));

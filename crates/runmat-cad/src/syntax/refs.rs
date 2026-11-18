@@ -195,7 +195,9 @@ pub fn role_summary(role: Role) -> &'static str {
 pub fn path_word_summary(word: &str) -> Option<&'static str> {
     Some(match word {
         "body" => "A body a feature made: `feature.<name>.body`.",
-        "face" => "Faces a feature made, by role: `feature.<name>.face.side(<entity>)`, `.face.end`.",
+        "face" => {
+            "Faces a feature made, by role: `feature.<name>.face.side(<entity>)`, `.face.end`."
+        }
         "edge" => "Edges a feature made, by role or between two faces.",
         "vertex" => "Vertices a feature made.",
         _ => return role_named(word).map(role_summary),

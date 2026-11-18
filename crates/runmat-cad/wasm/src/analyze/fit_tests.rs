@@ -15,7 +15,9 @@ const STACK: &str = "runmat 0.7\nstd 1\n\nassembly stack {\n    use part plate a
 const MATED: &str = "runmat 0.7\nstd 1\n\nassembly stack {\n    use part plate as lower\n    use part upper as upper {\n        fixed = false\n        placement = { placement = offset, offset = { translation = [0 mm, 0 mm, 12 mm] } }\n    }\n\n    connector deck = { occurrence = [{ name = lower }], anchor = { anchor = published, name = top } }\n    connector seat = { occurrence = [{ name = upper }] }\n\n    mate rest = { kind = { mate = fasten }, a = deck, b = seat }\n}\n";
 
 fn files(upper_x: f64) -> Files {
-    let upper = plate(upper_x).replace("part plate", "part upper").replace("output plate", "output upper");
+    let upper = plate(upper_x)
+        .replace("part plate", "part upper")
+        .replace("output plate", "output upper");
     [("/p/plate.part", plate(30.0)), ("/p/upper.part", upper)]
         .map(|(p, t)| (p.to_owned(), t))
         .into()
@@ -35,23 +37,54 @@ fn run(text: &str, files: &Files, command: &str, values: Value) -> Value {
 
 #[test]
 fn holes_that_line_up_are_aligned_and_an_offset_one_is_listed_with_its_dimension() {
-    let out = run(STACK, &files(30.0), "assembly.hole-alignment", json!({ "tolerance": 0.1 }));
+    let out = run(
+        STACK,
+        &files(30.0),
+        "assembly.hole-alignment",
+        json!({ "tolerance": 0.1 }),
+    );
     assert_eq!(out["data"]["pairs"], 1, "{out}");
     assert_eq!(out["data"]["misaligned"], 0, "{out}");
-    assert!(out["rows"][0]["cells"][3].as_str().unwrap().starts_with("Aligned"), "{out}");
-    assert!(out["dimensions"].as_array().is_none_or(Vec::is_empty), "{out}");
+    assert!(
+        out["rows"][0]["cells"][3]
+            .as_str()
+            .unwrap()
+            .starts_with("Aligned"),
+        "{out}"
+    );
+    assert!(
+        out["dimensions"].as_array().is_none_or(Vec::is_empty),
+        "{out}"
+    );
 
-    let out = run(STACK, &files(30.5), "assembly.hole-alignment", json!({ "tolerance": 0.1 }));
+    let out = run(
+        STACK,
+        &files(30.5),
+        "assembly.hole-alignment",
+        json!({ "tolerance": 0.1 }),
+    );
     assert_eq!(out["data"]["misaligned"], 1, "{out}");
     let row = &out["rows"][0];
     assert_eq!(row["severity"], "error", "{out}");
     assert_eq!(row["cells"][2], "0.50 mm", "{out}");
     // The holes' faces are the row's items, so selecting it shows them.
-    assert!(row["items"].as_array().unwrap().iter().any(|i| i.as_str().unwrap().contains("/face:")), "{out}");
+    assert!(
+        row["items"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|i| i.as_str().unwrap().contains("/face:")),
+        "{out}"
+    );
     assert_eq!(out["dimensions"][0]["label"], "0.50 mm", "{out}");
 
     // A looser tolerance accepts it.
-    let out = run(STACK, &files(30.5), "assembly.hole-alignment", json!({ "tolerance": 1.0 }));
+    let out = run(
+        STACK,
+        &files(30.5),
+        "assembly.hole-alignment",
+        json!({ "tolerance": 1.0 }),
+    );
     assert_eq!(out["data"]["misaligned"], 0, "{out}");
 }
 
@@ -61,7 +94,13 @@ fn hole_check_lists_alignment_and_says_when_there_are_no_fasteners() {
     assert_eq!(out["title"], "Hole/fastener check");
     assert_eq!(out["data"]["misaligned"], 1, "{out}");
     assert_eq!(out["data"]["fasteners"], 0, "{out}");
-    assert!(out["summary"].as_str().unwrap().contains("0 fasteners checked"), "{out}");
+    assert!(
+        out["summary"]
+            .as_str()
+            .unwrap()
+            .contains("0 fasteners checked"),
+        "{out}"
+    );
 }
 
 #[test]
@@ -79,7 +118,12 @@ fn components_limit_the_pairs() {
             .to_owned()
     };
     let lower = format!("occurrence:{}", uuid("lower"));
-    let out = run(STACK, &files(30.5), "assembly.hole-alignment", json!({ "components": [lower] }));
+    let out = run(
+        STACK,
+        &files(30.5),
+        "assembly.hole-alignment",
+        json!({ "components": [lower] }),
+    );
     assert_eq!(out["data"]["pairs"], 1, "{out}");
     let out = run(
         STACK,
@@ -97,11 +141,20 @@ fn interface_check_passes_a_mate_on_a_published_connector_and_flags_it_when_it_g
     let rows = out["rows"].as_array().unwrap();
     let mate = rows.iter().find(|r| r["cells"][1] == "fasten").unwrap();
     assert_eq!(mate["cells"][3], "Solved", "{out}");
-    let deck = rows.iter().find(|r| r["cells"][1] == "connector deck").unwrap();
+    let deck = rows
+        .iter()
+        .find(|r| r["cells"][1] == "connector deck")
+        .unwrap();
     assert!(deck["severity"].is_null(), "{out}");
-    assert!(deck["cells"][2].as_str().unwrap().contains("top (plane)"), "{out}");
+    assert!(
+        deck["cells"][2].as_str().unwrap().contains("top (plane)"),
+        "{out}"
+    );
     assert_eq!(deck["cells"][3], "Matches", "{out}");
-    let seat = rows.iter().find(|r| r["cells"][1] == "connector seat").unwrap();
+    let seat = rows
+        .iter()
+        .find(|r| r["cells"][1] == "connector seat")
+        .unwrap();
     assert_eq!(seat["severity"], "info", "{out}");
     assert_eq!(out["data"]["errors"], 0, "{out}");
 
@@ -111,9 +164,18 @@ fn interface_check_passes_a_mate_on_a_published_connector_and_flags_it_when_it_g
     broken.insert("/p/plate.part".into(), text);
     let out = run(MATED, &broken, "assembly.interface-check", json!({}));
     let rows = out["rows"].as_array().unwrap();
-    let deck = rows.iter().find(|r| r["cells"][1] == "connector deck").unwrap();
+    let deck = rows
+        .iter()
+        .find(|r| r["cells"][1] == "connector deck")
+        .unwrap();
     assert_eq!(deck["severity"], "error", "{out}");
-    assert!(deck["cells"][3].as_str().unwrap().contains("no longer publishes `top`"), "{out}");
+    assert!(
+        deck["cells"][3]
+            .as_str()
+            .unwrap()
+            .contains("no longer publishes `top`"),
+        "{out}"
+    );
     assert!(out["summary"].as_str().unwrap().contains("broken"), "{out}");
 }
 
@@ -142,4 +204,3 @@ fn the_checks_are_for_assemblies() {
     .unwrap();
     assert_eq!(out["ok"], false);
 }
-

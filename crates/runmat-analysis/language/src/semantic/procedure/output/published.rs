@@ -34,9 +34,14 @@ impl StepFieldRefusal {
             Self::Unknown => format!("`{reference}` is not a known field reference"),
             Self::Pending(text) => text.clone(),
             Self::NotProduced => {
-                let quantity = reference.rsplit('.').next().and_then(runmat_analysis_core::ObservationQuantity::from_source_name);
+                let quantity = reference
+                    .rsplit('.')
+                    .next()
+                    .and_then(runmat_analysis_core::ObservationQuantity::from_source_name);
                 match quantity {
-                    Some(quantity) => format!("analysis step `{step}` does not produce `{quantity:?}`"),
+                    Some(quantity) => {
+                        format!("analysis step `{step}` does not produce `{quantity:?}`")
+                    }
                     None => format!("analysis step `{step}` does not produce `{reference}`"),
                 }
             }
@@ -67,12 +72,15 @@ pub fn step_field_admission(
     let location = field_location(location).ok_or(StepFieldRefusal::Unknown)?;
     let (quantity_kind, _) = field_reference_type(quantity).ok_or(StepFieldRefusal::Unknown)?;
     if location == FieldLocation::Mode {
-        return Err(StepFieldRefusal::Pending(crate::semantic::pending::with_pending(
-            format!("no procedure publishes mode-located fields (`field.mode.{quantity}`) yet"),
-            Some(crate::semantic::pending::OUTPUT_MODE_LOCATION),
-        )));
+        return Err(StepFieldRefusal::Pending(
+            crate::semantic::pending::with_pending(
+                format!("no procedure publishes mode-located fields (`field.mode.{quantity}`) yet"),
+                Some(crate::semantic::pending::OUTPUT_MODE_LOCATION),
+            ),
+        ));
     }
-    if !runmat_analysis_core::family_produces_observation_quantity(family, procedure, quantity_kind) {
+    if !runmat_analysis_core::family_produces_observation_quantity(family, procedure, quantity_kind)
+    {
         return Err(StepFieldRefusal::NotProduced);
     }
     let published = runmat_analysis_core::published_locations(family, quantity_kind);
@@ -114,13 +122,26 @@ mod tests {
     #[test]
     fn a_step_publishes_its_physics_fields_and_no_mode_located_ones_yet() {
         let static_fields = fields(PhysicsFamily::Structural, AnalysisProcedure::Static);
-        for expected in ["field.node.displacement", "field.element.von_mises_stress", "field.node.von_mises_stress",
-            "field.element.stress", "field.node.reaction_force"] {
-            assert!(static_fields.iter().any(|field| field == expected), "{expected}: {static_fields:?}");
+        for expected in [
+            "field.node.displacement",
+            "field.element.von_mises_stress",
+            "field.node.von_mises_stress",
+            "field.element.stress",
+            "field.node.reaction_force",
+        ] {
+            assert!(
+                static_fields.iter().any(|field| field == expected),
+                "{expected}: {static_fields:?}"
+            );
         }
-        assert!(!static_fields.iter().any(|field| field == "field.cell.displacement" || field.contains("temperature")));
+        assert!(!static_fields
+            .iter()
+            .any(|field| field == "field.cell.displacement" || field.contains("temperature")));
         // Prestressed modal offers its mode shapes; the frequencies wait for mode-located fields.
-        let modes = fields(PhysicsFamily::Structural, AnalysisProcedure::PrestressedModalExtraction);
+        let modes = fields(
+            PhysicsFamily::Structural,
+            AnalysisProcedure::PrestressedModalExtraction,
+        );
         assert!(modes.iter().any(|field| field == "field.node.displacement"));
         assert!(!modes.iter().any(|field| field.starts_with("field.mode.")));
         assert!(matches!(
@@ -128,33 +149,78 @@ mod tests {
             Err(StepFieldRefusal::Pending(text)) if text.contains("[pending:output.mode-location]")
         ));
         let thermal = fields(PhysicsFamily::Thermal, AnalysisProcedure::Static);
-        assert!(thermal.iter().any(|field| field == "field.node.temperature"));
-        assert!(thermal.iter().any(|field| field == "field.element.heat_flux"));
+        assert!(thermal
+            .iter()
+            .any(|field| field == "field.node.temperature"));
+        assert!(thermal
+            .iter()
+            .any(|field| field == "field.element.heat_flux"));
         assert!(!thermal.iter().any(|field| field.contains("displacement")));
-        let coupled = fields(PhysicsFamily::Coupled(CoupledPhysicsFamily::Thermomechanical), AnalysisProcedure::Static);
-        assert!(coupled.iter().any(|field| field == "field.node.temperature") && coupled.iter().any(|field| field == "field.node.displacement"));
+        let coupled = fields(
+            PhysicsFamily::Coupled(CoupledPhysicsFamily::Thermomechanical),
+            AnalysisProcedure::Static,
+        );
+        assert!(
+            coupled
+                .iter()
+                .any(|field| field == "field.node.temperature")
+                && coupled
+                    .iter()
+                    .any(|field| field == "field.node.displacement")
+        );
         let fluid = fields(PhysicsFamily::Fluid, AnalysisProcedure::Static);
-        assert!(fluid.iter().any(|field| field == "field.cell.fluid_velocity") && fluid.iter().any(|field| field == "field.node.fluid_velocity"));
+        assert!(
+            fluid
+                .iter()
+                .any(|field| field == "field.cell.fluid_velocity")
+                && fluid
+                    .iter()
+                    .any(|field| field == "field.node.fluid_velocity")
+        );
         assert_eq!(
-            step_field_admission(PhysicsFamily::Thermal, AnalysisProcedure::Static, "field.node.displacement"),
+            step_field_admission(
+                PhysicsFamily::Thermal,
+                AnalysisProcedure::Static,
+                "field.node.displacement"
+            ),
             Err(StepFieldRefusal::NotProduced)
         );
         assert_eq!(
-            step_field_admission(PhysicsFamily::Thermal, AnalysisProcedure::Static, "field.node.warmth"),
+            step_field_admission(
+                PhysicsFamily::Thermal,
+                AnalysisProcedure::Static,
+                "field.node.warmth"
+            ),
             Err(StepFieldRefusal::Unknown)
         );
     }
 
     #[test]
     fn a_location_the_physics_does_not_publish_is_refused_naming_the_published_ones() {
-        let refusal = step_field_admission(PhysicsFamily::Structural, AnalysisProcedure::Static, "field.cell.displacement");
+        let refusal = step_field_admission(
+            PhysicsFamily::Structural,
+            AnalysisProcedure::Static,
+            "field.cell.displacement",
+        );
         assert_eq!(refusal, Err(StepFieldRefusal::Location(vec!["node"])));
-        let message = refusal.unwrap_err().message("load", "field.cell.displacement");
+        let message = refusal
+            .unwrap_err()
+            .message("load", "field.cell.displacement");
         assert!(message.contains("`node`"), "{message}");
         // Every published reference passes the admission, and every one parses back.
-        for family in [PhysicsFamily::Structural, PhysicsFamily::Thermal, PhysicsFamily::Electromagnetic, PhysicsFamily::Acoustic, PhysicsFamily::Fluid] {
+        for family in [
+            PhysicsFamily::Structural,
+            PhysicsFamily::Thermal,
+            PhysicsFamily::Electromagnetic,
+            PhysicsFamily::Acoustic,
+            PhysicsFamily::Fluid,
+        ] {
             for reference in fields(family, AnalysisProcedure::Static) {
-                assert_eq!(step_field_admission(family, AnalysisProcedure::Static, &reference), Ok(()), "{reference}");
+                assert_eq!(
+                    step_field_admission(family, AnalysisProcedure::Static, &reference),
+                    Ok(()),
+                    "{reference}"
+                );
             }
         }
     }

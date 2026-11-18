@@ -54,9 +54,10 @@ pub fn reserve_manual(ctx: &mut Ctx<'_>) {
                 ctx.note_spots.insert(id, (spot, block));
                 continue;
             }
-            Some("note") => ctx
-                .std
-                .leader_lines_box(at, true, &leader_note_lines(&ctx.std, &a["kind"], &t)),
+            Some("note") => {
+                ctx.std
+                    .leader_lines_box(at, true, &leader_note_lines(&ctx.std, &a["kind"], &t))
+            }
             Some("gdt") => {
                 let cells: Vec<&str> = t.split('|').collect();
                 let [w, h] = frame_size(&ctx.std, &cells);

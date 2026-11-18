@@ -14,8 +14,8 @@
 use super::marks::{clip_to_circle, line, prim, text};
 use super::solver::{nearest_free, BoxR, Class};
 use super::{floats, lining, xy, Ctx, Prim, Shape, Xy};
-use runmat_cad::model::materials::SectionSymbol;
 use crate::hlr::Axes;
+use runmat_cad::model::materials::SectionSymbol;
 use serde_json::Value;
 
 /// How far a centerline or center mark runs past its circle or face (ISO 128-2: 2 to 3 mm).

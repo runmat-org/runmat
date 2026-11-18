@@ -235,13 +235,28 @@ pub fn apply(
     repair: &Repair,
 ) -> Result<Option<(Vec<FileEdit>, String)>, EditFailure> {
     Ok(Some(match repair {
-        Repair::PinToRevision { site, file, revision } if path.ends_with(".part") => {
+        Repair::PinToRevision {
+            site,
+            file,
+            revision,
+        } if path.ends_with(".part") => {
             let change = pin_in_part(text, path, site, file, None, revision)?;
-            (vec![(path.to_owned(), text.to_owned(), change)], format!("Pinned {} to revision {revision}", file.0))
+            (
+                vec![(path.to_owned(), text.to_owned(), change)],
+                format!("Pinned {} to revision {revision}", file.0),
+            )
         }
-        Repair::UpdatePin { site, file, from, to } if path.ends_with(".part") => {
+        Repair::UpdatePin {
+            site,
+            file,
+            from,
+            to,
+        } if path.ends_with(".part") => {
             let change = pin_in_part(text, path, site, file, Some(from), to)?;
-            (vec![(path.to_owned(), text.to_owned(), change)], format!("Updated the pin on {} from {from} to {to}", file.0))
+            (
+                vec![(path.to_owned(), text.to_owned(), change)],
+                format!("Updated the pin on {} from {from} to {to}", file.0),
+            )
         }
         Repair::AddPublish { file, entry } => {
             let (edit, summary) = add_publish(files, file, |_| Ok(entry.clone()))?;
@@ -249,25 +264,40 @@ pub fn apply(
         }
         Repair::PublishAnchor { file, name } => {
             let (edit, summary) = add_publish(files, file, |document| {
-                anchor_entry(document, name).ok_or_else(|| model(format!("`{}` has no region, part, input or let named `{}` to publish", file.0, name.as_str())))
+                anchor_entry(document, name).ok_or_else(|| {
+                    model(format!(
+                        "`{}` has no region, part, input or let named `{}` to publish",
+                        file.0,
+                        name.as_str()
+                    ))
+                })
             })?;
             (vec![edit], summary)
         }
-        Repair::PinOccurrence { assembly, occurrence, revision } => {
+        Repair::PinOccurrence {
+            assembly,
+            occurrence,
+            revision,
+        } => {
             let (key, old) = if assembly.0 == path {
                 (path.to_owned(), text.to_owned())
             } else {
-                let (k, t) = find(files, assembly).ok_or_else(|| model(format!("`{}` isn't in the project", assembly.0)))?;
+                let (k, t) = find(files, assembly)
+                    .ok_or_else(|| model(format!("`{}` isn't in the project", assembly.0)))?;
                 (k.clone(), t.clone())
             };
             let change = pin_occurrence(&key, &old, files, occurrence, revision)?;
-            (vec![(key, old, change)], format!("Pinned {occurrence} to revision {revision}"))
+            (
+                vec![(key, old, change)],
+                format!("Pinned {occurrence} to revision {revision}"),
+            )
         }
         Repair::ReleaseFile { file } => {
             let (key, content) = if file.0 == path {
                 (path.to_owned(), text.to_owned())
             } else {
-                let (k, t) = find(files, file).ok_or_else(|| model(format!("`{}` isn't in the project", file.0)))?;
+                let (k, t) = find(files, file)
+                    .ok_or_else(|| model(format!("`{}` isn't in the project", file.0)))?;
                 (k.clone(), t.clone())
             };
             let (edit, revision) = crate::edit::release::release(&key, &content, files)?;

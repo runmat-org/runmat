@@ -388,7 +388,11 @@ fn a03_typed_configurations_are_checked() {
     let r = run(&src, "rig.assembly", &ResolveRequest::default());
     assert!(errors(&r).is_empty(), "{:?}", errors(&r));
     let index = build_assembly_index(&r, Some(&src));
-    let row = index.occurrences.iter().find(|o| o.name == "bracket").unwrap();
+    let row = index
+        .occurrences
+        .iter()
+        .find(|o| o.name == "bracket")
+        .unwrap();
     assert_eq!(row.inputs[0].display, "0.125 in");
     assert!((row.inputs[0].si - 0.003175).abs() < 1e-12);
     // Wrong dimension.

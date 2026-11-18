@@ -66,7 +66,10 @@ fn a_file_of_another_kind_says_what_it_holds() {
         r#"{ part = rig, from = "../rig.assembly" }"#,
         &[("/p/rig.assembly", rig)],
     );
-    assert_eq!(messages, ["`../rig.assembly` holds assembly rig, not a part"]);
+    assert_eq!(
+        messages,
+        ["`../rig.assembly` holds assembly rig, not a part"]
+    );
 }
 
 #[test]
@@ -122,15 +125,20 @@ fn an_assembly_uses_a_part_from_its_file() {
 
 #[test]
 fn file_form_uses_count_toward_folder_cycles() {
-    let a = "runmat 0.7\nstd 1\n\nassembly a {\n    use assembly b from \"../b/b.assembly\" as b\n}\n";
-    let b = "runmat 0.7\nstd 1\n\nassembly b {\n    use assembly a from \"../a/a.assembly\" as a\n}\n";
+    let a =
+        "runmat 0.7\nstd 1\n\nassembly a {\n    use assembly b from \"../b/b.assembly\" as b\n}\n";
+    let b =
+        "runmat 0.7\nstd 1\n\nassembly b {\n    use assembly a from \"../a/a.assembly\" as a\n}\n";
     let s = scope(&[("/p/a/a.assembly", a), ("/p/b/b.assembly", b)]);
     assert!(!s.problems().is_empty(), "the cycle is found");
 }
 
 #[test]
 fn relative_paths_read_from_the_folder() {
-    assert_eq!(relative("/p/drawings", "/p/l_bracket.part"), "../l_bracket.part");
+    assert_eq!(
+        relative("/p/drawings", "/p/l_bracket.part"),
+        "../l_bracket.part"
+    );
     assert_eq!(relative("/p", "/p/cabin"), "./cabin");
     assert_eq!(relative("/p", "/p"), ".");
 }

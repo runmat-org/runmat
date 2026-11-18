@@ -123,7 +123,10 @@ pub(super) fn denied_to_js(denied: FeaRunDenied) -> JsValue {
         available_ops,
     } = &denied
     {
-        for (key, count) in [("estimatedOps", estimated_ops), ("availableOps", available_ops)] {
+        for (key, count) in [
+            ("estimatedOps", estimated_ops),
+            ("availableOps", available_ops),
+        ] {
             let _ = js_sys::Reflect::set(&payload, &key.into(), &count.to_string().into());
         }
     }

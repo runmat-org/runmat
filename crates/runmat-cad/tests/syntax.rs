@@ -575,7 +575,10 @@ fn a_table_placed_at_the_origin_round_trips_and_an_unplaced_one_prints_no_at() {
             parsed.diagnostics
         );
         assert_eq!(parsed.document, Some(document), "{text}");
-        let line = text.lines().find(|l| l.trim_start().starts_with("table ")).unwrap();
+        let line = text
+            .lines()
+            .find(|l| l.trim_start().starts_with("table "))
+            .unwrap();
         assert_eq!(line.contains("at = [0, 0]"), at.is_some(), "{line}");
     }
 }
@@ -917,18 +920,35 @@ drawing plans {
         ),
         other => panic!("{other:?}"),
     }
-    assert!(matches!(kinds[1], AnnotationKind::Level { label, occurrence, .. }
-        if label == "T.O. SLAB" && occurrence == &RelPath::new(&["slab"])));
-    assert!(matches!(kinds[2], AnnotationKind::Level { datum: Some(d), on: None, .. } if d == "second_floor"));
-    let kinds: Vec<&AnnotationKind> = kinds.into_iter().filter(|k| !matches!(k, AnnotationKind::Level { on: None, .. })).collect();
-    assert!(matches!(kinds[2], AnnotationKind::Grids { datums, labels, .. }
-        if datums.len() == 2 && labels == &vec!["1".to_owned(), "2".to_owned()]));
+    assert!(
+        matches!(kinds[1], AnnotationKind::Level { label, occurrence, .. }
+        if label == "T.O. SLAB" && occurrence == &RelPath::new(&["slab"]))
+    );
+    assert!(
+        matches!(kinds[2], AnnotationKind::Level { datum: Some(d), on: None, .. } if d == "second_floor")
+    );
+    let kinds: Vec<&AnnotationKind> = kinds
+        .into_iter()
+        .filter(|k| !matches!(k, AnnotationKind::Level { on: None, .. }))
+        .collect();
+    assert!(
+        matches!(kinds[2], AnnotationKind::Grids { datums, labels, .. }
+        if datums.len() == 2 && labels == &vec!["1".to_owned(), "2".to_owned()])
+    );
     assert!(matches!(
         kinds[3],
-        AnnotationKind::DoorSwing { hinge: Hinge::End, swing: Swing::Negative, .. }
+        AnnotationKind::DoorSwing {
+            hinge: Hinge::End,
+            swing: Swing::Negative,
+            ..
+        }
     ));
     let printed = print_drawing(&document, &[]).expect("prints");
     let again = reparse_drawing("plans.drawing", &printed, &document);
-    assert!(again.diagnostics.is_empty(), "{printed}\n{:#?}", again.diagnostics);
+    assert!(
+        again.diagnostics.is_empty(),
+        "{printed}\n{:#?}",
+        again.diagnostics
+    );
     assert_eq!(again.document.expect("parses"), document);
 }

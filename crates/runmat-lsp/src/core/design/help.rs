@@ -2,8 +2,8 @@
 //! registries ([`super::words`]), and the regenerated entities a reference resolves to.
 
 use lsp_types::{
-    CompletionItem, CompletionItemKind, Documentation, MarkupContent, MarkupKind, ParameterInformation,
-    ParameterLabel, Position, SignatureHelp, SignatureInformation,
+    CompletionItem, CompletionItemKind, Documentation, MarkupContent, MarkupKind,
+    ParameterInformation, ParameterLabel, Position, SignatureHelp, SignatureInformation,
 };
 use runmat_cad::syntax::arguments::Quantity;
 use runmat_design_syntax::Dialect;
@@ -23,16 +23,24 @@ fn markdown(value: String) -> Documentation {
 
 impl DesignDocumentAnalysis {
     fn is_cad(&self) -> bool {
-        matches!(self.dialect, Dialect::Part | Dialect::Assembly | Dialect::Drawing)
+        matches!(
+            self.dialect,
+            Dialect::Part | Dialect::Assembly | Dialect::Drawing
+        )
     }
 
     /// The circuit compile's part pool: the standard library, the parts the design declares
     /// and the libraries its `use` lines bring in.
     pub(super) fn pool(&self) -> Option<runmat_circuit::library::Pool> {
         let options = runmat_circuit::runtime::CompileOptions::default();
-        runmat_circuit::runtime::design_and_pool(self.uri.path(), self.source(), &self.files, &options)
-            .ok()
-            .map(|(_, pool)| pool)
+        runmat_circuit::runtime::design_and_pool(
+            self.uri.path(),
+            self.source(),
+            &self.files,
+            &options,
+        )
+        .ok()
+        .map(|(_, pool)| pool)
     }
 
     /// Facts the Desktop's CAD host forwards for this file (`<feature>/<param>` →
@@ -63,7 +71,11 @@ impl DesignDocumentAnalysis {
         let argument = call.callee.argument(name)?;
         if !matches!(
             argument.quantity,
-            Quantity::Reference | Quantity::References | Quantity::Plane | Quantity::Axis | Quantity::Point
+            Quantity::Reference
+                | Quantity::References
+                | Quantity::Plane
+                | Quantity::Axis
+                | Quantity::Point
         ) {
             return None;
         }
@@ -85,7 +97,11 @@ impl DesignDocumentAnalysis {
     }
 
     /// Argument names and allowed values for the call around the cursor, and material ids.
-    pub(super) fn call_completions(&self, offset: usize, before: &str) -> Option<Vec<CompletionItem>> {
+    pub(super) fn call_completions(
+        &self,
+        offset: usize,
+        before: &str,
+    ) -> Option<Vec<CompletionItem>> {
         if !self.is_cad() {
             return None;
         }
@@ -99,7 +115,10 @@ impl DesignDocumentAnalysis {
             if !typed.trim_end().ends_with('=') {
                 return None;
             }
-            let argument = call.argument.as_deref().and_then(|a| call.callee.argument(a))?;
+            let argument = call
+                .argument
+                .as_deref()
+                .and_then(|a| call.callee.argument(a))?;
             let mut items: Vec<CompletionItem> = argument
                 .choices
                 .iter()
@@ -138,7 +157,11 @@ impl DesignDocumentAnalysis {
                     kind: Some(CompletionItemKind::FIELD),
                     detail: Some(a.quantity.label().to_string()),
                     documentation: Some(markdown(a.summary.to_string())),
-                    insert_text: Some(if flag { a.name.to_string() } else { format!("{} = ", a.name) }),
+                    insert_text: Some(if flag {
+                        a.name.to_string()
+                    } else {
+                        format!("{} = ", a.name)
+                    }),
                     sort_text: Some(format!("{i:03}")),
                     ..CompletionItem::default()
                 }
@@ -215,9 +238,17 @@ fn material_completions(before: &str) -> Option<Vec<CompletionItem>> {
     Some(
         runmat_types::physical::materials::materials()
             .map(|m| CompletionItem {
-                label: if quoted { m.label.to_string() } else { m.id.to_string() },
+                label: if quoted {
+                    m.label.to_string()
+                } else {
+                    m.id.to_string()
+                },
                 kind: Some(CompletionItemKind::CONSTANT),
-                detail: Some(if quoted { m.id.to_string() } else { m.label.to_string() }),
+                detail: Some(if quoted {
+                    m.id.to_string()
+                } else {
+                    m.label.to_string()
+                }),
                 documentation: Some(markdown(words::material_hover(m))),
                 ..CompletionItem::default()
             })
