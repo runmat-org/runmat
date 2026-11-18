@@ -60,6 +60,8 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 24
+      # The routing tests build a Cargo fixture; use the repository's pinned toolchain.
+      - uses: dtolnay/rust-toolchain@1.90.0
       - name: Verify distribution staging and notice archives
         run: >-
           node --test
