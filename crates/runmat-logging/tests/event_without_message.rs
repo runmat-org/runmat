@@ -44,7 +44,7 @@ fn an_event_without_a_message_is_named_by_its_target_not_its_source_path() {
     );
     assert_eq!(
         logs[0].fields.as_ref().and_then(|fields| fields.get("nodes")),
-        Some(&serde_json::json!(3))
+        Some(&serde_json::json!("3"))
     );
 
     let traces = traces.lock().unwrap();
