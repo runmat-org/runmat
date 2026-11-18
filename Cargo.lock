@@ -8629,6 +8629,7 @@ version = "0.7.1"
 dependencies = [
  "base64 0.22.1",
  "runmat-analysis-execution",
+ "runmat-analysis-fea",
  "runmat-cad",
  "runmat-cad-wasm",
  "runmat-design-tools",

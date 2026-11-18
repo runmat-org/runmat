@@ -69,7 +69,7 @@ fn with_context<T>(
     f(&MotionContext {
         resolve: &ctx,
         request: &request,
-        frame_bytes: STUDY_FRAME_BYTES,
+        frame_bytes: study_frame_bytes(),
     })
 }
 
@@ -180,9 +180,11 @@ fn study_json(resolved: &ResolvedAssembly, run: &MotionRun, profile: &str, track
 }
 
 /// The bytes one study's solved frames may take in the index: a sixteenth of the runtime's
-/// display-mesh budget ([`crate::runtime::part_cache::BUDGET_BYTES`]), the memory a compile's
-/// display data is held to.
-const STUDY_FRAME_BYTES: usize = crate::runtime::part_cache::BUDGET_BYTES / 16;
+/// display-mesh budget ([`crate::runtime::part_cache::budget_bytes`]), the memory a compile's
+/// display data is held to. The budget follows the host's measured memory, so it is read per run.
+fn study_frame_bytes() -> usize {
+    crate::runtime::part_cache::budget_bytes() / 16
+}
 
 /// The top assembly's motion studies, solved; an empty array when it has none. A dynamic
 /// study first has every placed part's mass properties written into `source`.
