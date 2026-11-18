@@ -249544,7 +249544,7 @@
               "ty": "SizeArg",
               "arity": "Required",
               "default": null,
-              "description": "1-based subplot position in row-major order."
+              "description": "One-based slot or vector of slots in row-major order. A vector selects their bounding rectangle."
             }
           ],
           "outputs": [
@@ -249562,7 +249562,7 @@
         {
           "code": "RM.SUBPLOT.INVALID_ARGUMENT",
           "identifier": "RunMat:subplot:InvalidArgument",
-          "when": "Rows/cols/position are unsupported, non-scalar, non-finite, or non-positive.",
+          "when": "Rows or columns are not positive integer scalars, position is not a nonempty vector of positive integer slots, or the grid exceeds the scene dimensions or slot-count representation.",
           "message": "subplot: invalid argument"
         },
         {
@@ -249610,7 +249610,7 @@
               ],
               "availability": "RunMatOnly",
               "scalar_double": "Allowed",
-              "notes": "The compatibility target's public data types for these controls are single and double; RunMat mode additionally parses typed integer scalars exactly."
+              "notes": "The compatibility target's public data types for these controls are single and double; RunMat mode additionally parses typed integer scalar dimensions and scalar or vector positions exactly."
             }
           ],
           "computation_domain": "Structural",
@@ -249618,7 +249618,7 @@
           "overflow": "Error",
           "backend": "HostOnly",
           "overload": "StructuralParameter",
-          "notes": "The gated scalars are converted directly to platform dimensions before any figure state changes; the graphics handle remains a host double scalar."
+          "notes": "Dimensions and slot indices are parsed exactly before figure state changes. The grid must fit its 32-bit scene dimensions and slot count; the graphics handle remains a host double scalar."
         }
       ]
     },
