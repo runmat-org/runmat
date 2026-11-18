@@ -417,6 +417,22 @@ fn now_timestamp_micros() -> i64 {
     chrono::Utc::now().timestamp_micros()
 }
 
+/// What an event without a message is called in the log and trace feeds. An event macro without a
+/// `name:` is named `event <source file>:<line>`, which holds the build machine's path; such an
+/// event is called by its target instead. A name the macro set is kept.
+fn event_label(meta: &tracing::Metadata<'_>) -> String {
+    let name = meta.name();
+    let generated = match (meta.file(), meta.line()) {
+        (Some(file), Some(line)) => name == format!("event {file}:{line}"),
+        _ => false,
+    };
+    if generated {
+        meta.target().to_string()
+    } else {
+        name.to_string()
+    }
+}
+
 impl<S> Layer<S> for LogBridgeLayer
 where
     S: Subscriber + for<'a> tracing_subscriber::registry::LookupSpan<'a>,
@@ -446,7 +462,7 @@ where
             target: event.metadata().target().to_string(),
             message: visitor
                 .message
-                .unwrap_or_else(|| event.metadata().name().to_string()),
+                .unwrap_or_else(|| event_label(event.metadata())),
             trace_id,
             span_id,
             fields: visitor
@@ -547,7 +563,7 @@ where
             .map(JsonValue::Object);
 
         let ev = TraceEvent {
-            name: visitor.message.unwrap_or_else(|| meta.name().to_string()),
+            name: visitor.message.unwrap_or_else(|| event_label(meta)),
             cat: meta.target().to_string(),
             ph: "i".to_string(), // instant event
             ts,
