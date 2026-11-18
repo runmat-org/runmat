@@ -6,7 +6,7 @@
   "encoding": "git-mode-type-blob-path-tuples-v1"
  },
  "accepted_inputs": {
-  "sha256": "ed52650cf224860be7dcccc5cfac83effdf3eba28b70de60196a7d90a6b0b0c1",
+  "sha256": "fb50e0e1c4f12212a6a588cb41e927dd6ae8de49dbde0eaf3c58ec7932dcb612",
   "files": 26439,
   "encoding": "git-mode-type-blob-path-tuples-v1"
  },
@@ -16,7 +16,7 @@
  "qualification_evidence": [
   {
    "path": "qualification/scientific/evidence/cargo-fmt-072-20261118.json",
-   "sha256": "b733fda96373ac7e6774c085142d4eb6e969d4fb7021465fbec709ed6c646b1c"
+   "sha256": "aca1aa0cfec6ceb351c8e611f8ddd5ffd6d55ab0b4fc27477f28dd079ce63a62"
   }
  ],
  "changed_inputs": [
@@ -2695,6 +2695,20 @@
    "reason": "Formatting only: cargo fmt --all with the pinned rustfmt (rustc 1.90.0) and the repository rustfmt.toml. Tokens, expressions, arguments and control flow are unchanged."
   },
   {
+   "path": "crates/runmat-runtime/src/builtins/generated_wasm_registry.rs",
+   "before": [
+    "100644",
+    "blob",
+    "4a80752722615d713bab3049d29240eb2d47cf92"
+   ],
+   "after": [
+    "100644",
+    "blob",
+    "12c6b5a59fba201397801a40449930119c810d46"
+   ],
+   "reason": "Generated: scripts/regenerate-wasm-registry.sh after the subplot axes-slot repair (8b33ada885) changed the builtin source fingerprint. Only REGISTRY_SOURCE_FINGERPRINT changes; the 3084 registry entries, builtin and constant counts and manifest digest are identical. It is read only by the wasm32 build; no cohort runs a wasm build."
+  },
+  {
    "path": "crates/runmat-runtime/src/builtins/plotting/core/state/property_mutation/layout.rs",
    "before": [
     "100644",
@@ -2891,5 +2905,5 @@
    "reason": "Formatting only: cargo fmt --all with the pinned rustfmt (rustc 1.90.0) and the repository rustfmt.toml. Tokens, expressions, arguments and control flow are unchanged."
   }
  ],
- "reason": "Conserves the fresh 0.7.2 scientific measurements across the CI repairs. cargo fmt --all on the measured source (3583e21662, whose scientific inputs equal the measured 912f34e3cd inventory) reproduces the 191 formatted Rust files of bd7dd3a4d1 blob for blob. Other changed inputs: the regenerated FEA highlighting grammar, which adds one field-quantity word and no execution path reads it; the subplot axes-slot repair in runtime plotting state (8b33ada885), which no cohort exercises; the OCCT host's per-thread STEP import table (a6fb58c3ad; the airliner cohort imports no STEP file, so its table is empty either way); the STEP exporter's direct-surface pass (d36e979417; no cohort exports STEP); and test-only edits that no cohort runs (eight OCCT CAD tests read the always-known mass-properties volume; the G128 multigrid memory test is ignored). Solver arithmetic, model inputs, dependencies, features and thresholds are unchanged. This review is not a rerun of the scientific or performance measurements."
+ "reason": "Conserves the fresh 0.7.2 scientific measurements across the CI repairs. cargo fmt --all on the measured source (3583e21662, whose scientific inputs equal the measured 912f34e3cd inventory) reproduces the 191 formatted Rust files of bd7dd3a4d1 blob for blob. Other changed inputs: the regenerated FEA highlighting grammar and the regenerated wasm builtin registry (fingerprint line only), which adds one field-quantity word and no execution path reads it; the subplot axes-slot repair in runtime plotting state (8b33ada885), which no cohort exercises; the OCCT host's per-thread STEP import table (a6fb58c3ad; the airliner cohort imports no STEP file, so its table is empty either way); the STEP exporter's direct-surface pass (d36e979417; no cohort exports STEP); and test-only edits that no cohort runs (eight OCCT CAD tests read the always-known mass-properties volume; the G128 multigrid memory test is ignored). Solver arithmetic, model inputs, dependencies, features and thresholds are unchanged. This review is not a rerun of the scientific or performance measurements."
 }
