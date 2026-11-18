@@ -87,5 +87,22 @@
       "termination": "Owner-controlled SIGTERM of the exact test process after 19m28s while the last view was computing; incomplete, not a passing measurement or an observed assertion failure.",
       "log_location": "gh-linux-20260327-125436:/home/nallana/rm1293/logs/intake-80226433e0-airliner-r2.tests.log"
     }
-  ]
+  ],
+  "conservation": {
+    "measured_inputs": {
+      "sha256": "bbf50649dc5805138f95ccfbd66d20c23944b229b17da7803bedda1f3dd051af",
+      "files": 26439,
+      "encoding": "git-mode-type-blob-path-tuples-v1"
+    },
+    "accepted_inputs": {
+      "sha256": "def858b43baece4010cef616b5ac3c1f3eb6bc54719a79e4fbdbcfe0b95f4d30",
+      "files": 26439,
+      "encoding": "git-mode-type-blob-path-tuples-v1"
+    },
+    "reason": "Conserves the fresh 0.7.2 scientific measurements across the CI formatting repair. cargo fmt --all on the measured source (3583e21662, whose scientific inputs equal the measured 912f34e3cd inventory) reproduces the 191 changed Rust files of bd7dd3a4d1 blob for blob. The only other scientific input change is the regenerated FEA highlighting grammar, which adds one field-quantity word and no execution path reads it. Solver arithmetic, model inputs, dependencies, features and thresholds are unchanged. This review is not a rerun of the scientific or performance measurements.",
+    "review": {
+      "path": "qualification/scientific/reviews/cargo-fmt-072-20261118-cad-airliner-drawing-memory.json",
+      "sha256": "9e52bcb575610b244750c6eb98fc77f7a7afc0851ca1ef57437112e93209ecff"
+    }
+  }
 }
