@@ -7,11 +7,15 @@ Every other first-party crate retains strict all-target Clippy.
 
 ## Architecture inventory
 
-`fea-architecture-debt-0.7.json` records 111 findings covering module
+`fea-architecture-debt-0.7.json` records 103 findings covering module
 concentration, module size and existing suppression sites in the listed FEA
 domains. The checker requires the exact diagnostic multiset, an ancestor review
 commit, its Git input identity and the pinned compiler. The language-surface
 ledger runs independently and covers 136 current members.
+
+The 0.7.2 candidate update removed eight findings that the 0.7.2 FEA work
+resolved and lowered the recorded line counts of others. No finding was added
+and no recorded line count rose.
 
 ## Clippy inventory
 
