@@ -38,7 +38,7 @@ fn volume(path: &str, text: &str, files: &Value) -> f64 {
         ],
     );
     assert_eq!(mass["ok"], true, "{mass}");
-    mass["data"]["total"]["volume"].as_f64().unwrap() * 1e9
+    mass["data"]["volume"].as_f64().unwrap() * 1e9
 }
 
 /// Runs a command on the part, then compiles the result: its text and volume in mm³.

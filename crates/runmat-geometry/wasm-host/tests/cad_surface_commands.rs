@@ -53,7 +53,7 @@ fn volume(text: &str) -> f64 {
         ],
     );
     assert_eq!(mass["ok"], true, "{mass}");
-    mass["data"]["total"]["volume"].as_f64().unwrap() * 1e9
+    mass["data"]["volume"].as_f64().unwrap() * 1e9
 }
 
 /// The volume after thickening `body` 1 mm centred on the sheet: its area in mm², plus any
