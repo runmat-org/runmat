@@ -1,6 +1,6 @@
 [package]
 name = "runmat-runtime"
-version = "0.7.1"
+version = "0.7.2"
 edition = "2021"
 authors = ["Dystr Team"]
 license-file = "../../LICENSE.md"
@@ -46,7 +46,7 @@ runmat-geometry-core = { workspace = true }
 runmat-geometry-io = { workspace = true }
 runmat-geometry-ops = { workspace = true }
 # RunMat MCAD parts and assemblies as geometry sources (geometry::design_source).
-runmat-cad-wasm = { path = "../runmat-cad/wasm", version = "=0.7.1", default-features = false }
+runmat-cad-wasm = { path = "../runmat-cad/wasm", version = "=0.7.2", default-features = false }
 runmat-analysis-core = { workspace = true }
 runmat-canonical-codec = { workspace = true }
 runmat-analysis-fea = { workspace = true }

@@ -500,7 +500,10 @@ jobs:
           prerelease: false
 
   publish-crates:
-    if: github.event_name == 'push'
+    # crates.io publication is off for v0.7.2 and v0.7.3 (owner, 2026-11-17) and resumes with 0.7.4.
+    # The job is skipped for those tags. Finalize the GitHub Release with
+    # finalize-release.yml and defer_crates=true, as for v0.7.1.
+    if: github.event_name == 'push' && !startsWith(github.ref_name, 'v0.7.2') && !startsWith(github.ref_name, 'v0.7.3')
     name: Publish crates to crates.io
     needs: [release-validation, meshing-release-evidence]
     environment: Production
