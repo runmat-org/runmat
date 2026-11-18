@@ -6,7 +6,7 @@
   "encoding": "git-mode-type-blob-path-tuples-v1"
  },
  "accepted_inputs": {
-  "sha256": "40fb35d2c5b167d974385a292a180c793376aba7148d12b7b783e2e013aa4cdc",
+  "sha256": "b3dd3d7d352519dbd0c24a164f6867ffffd65ac6b89418695a3a490a29b5fdc1",
   "files": 26439,
   "encoding": "git-mode-type-blob-path-tuples-v1"
  },
@@ -16,7 +16,7 @@
  "qualification_evidence": [
   {
    "path": "qualification/scientific/evidence/cargo-fmt-072-20261118.json",
-   "sha256": "9637171e5c36d97ef502452e4f2c8ee06a1556aef1a00a1bd7fd0a165de5bd34"
+   "sha256": "e34ebf3756dd6e8be66867f25763cceebcfd6982c6e9009a9848e5874a1a1044"
   }
  ],
  "changed_inputs": [
@@ -2427,6 +2427,20 @@
     "84877308e0d3e43124e25ae834e98296b4ec18b9"
    ],
    "reason": "Formatting only: cargo fmt --all with the pinned rustfmt (rustc 1.90.0) and the repository rustfmt.toml. Tokens, expressions, arguments and control flow are unchanged."
+  },
+  {
+   "path": "crates/runmat-geometry/wasm-host/tests/cad_step_import.rs",
+   "before": [
+    "100644",
+    "blob",
+    "3d13022736b483979d53b42340bde6d40d2fe0bb"
+   ],
+   "after": [
+    "100644",
+    "blob",
+    "ac13a718f51936fd9467698261f22f0b202146ad"
+   ],
+   "reason": "Test only: adds a STEP export round-trip of a part with a drill point (a cone with a negative semi-angle) and a countersink, asserting every face is written, the re-imported solid is closed, and face names and colours survive. It covers d36e979417 (STEP export only). No production code changes. No cohort runs it: typed_fea_geometry_cli, remote::driver_replacement_tests, runtime_scale and cad_airliner_drawing are other test targets."
   },
   {
    "path": "crates/runmat-geometry/wasm-host/tests/cad_surface_commands.rs",

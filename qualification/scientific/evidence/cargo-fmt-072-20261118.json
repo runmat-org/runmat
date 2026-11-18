@@ -1,6 +1,6 @@
 {
  "schema_version": 1,
- "source_revision": "d12aa51b491a1e1203cd4610ba99fe735c0783dd",
+ "source_revision": "8e1f378f3a73d0339accc016674273b9108d6960",
  "previous_revision": "3583e216622e45db0732caaa314ce109ed5565c1",
  "measured_revision": "912f34e3cd484efcb72e2bbda9d018fded199b56",
  "changed_scientific_inputs": [
@@ -176,6 +176,7 @@
   "crates/runmat-geometry/wasm-host/tests/cad_sheet_metal_commands.rs",
   "crates/runmat-geometry/wasm-host/tests/cad_sheet_metal_convert.rs",
   "crates/runmat-geometry/wasm-host/tests/cad_sketch_geometry.rs",
+  "crates/runmat-geometry/wasm-host/tests/cad_step_import.rs",
   "crates/runmat-geometry/wasm-host/tests/cad_surface_commands.rs",
   "crates/runmat-geometry/wasm-host/tests/cad_surfaces.rs",
   "crates/runmat-geometry/wasm-host/tests/meshing_progress.rs",
