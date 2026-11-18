@@ -6,7 +6,7 @@
   "encoding": "git-mode-type-blob-path-tuples-v1"
  },
  "accepted_inputs": {
-  "sha256": "def858b43baece4010cef616b5ac3c1f3eb6bc54719a79e4fbdbcfe0b95f4d30",
+  "sha256": "54af7b43a9ae54e781fd6c6e007bfc3cfc52912028c7aebeaa5ec693c5b60edf",
   "files": 26439,
   "encoding": "git-mode-type-blob-path-tuples-v1"
  },
@@ -16,7 +16,7 @@
  "qualification_evidence": [
   {
    "path": "qualification/scientific/evidence/cargo-fmt-072-20261118.json",
-   "sha256": "bf069a8788378240848e2e3a7f9cd8b6371796eb8363b11639f4f6c1aa29ba36"
+   "sha256": "b950db081308e9ddfb1d22560eeaf571c08c7bccce990c63a91601a1294a12b6"
   }
  ],
  "changed_inputs": [
@@ -2527,6 +2527,20 @@
    "reason": "Formatting only: cargo fmt --all with the pinned rustfmt (rustc 1.90.0) and the repository rustfmt.toml. Tokens, expressions, arguments and control flow are unchanged."
   },
   {
+   "path": "crates/runmat-runtime/src/builtins/plotting/core/state/property_mutation/layout.rs",
+   "before": [
+    "100644",
+    "blob",
+    "983ba29dee8ee6452eb594bc7512ce9cc4825c2a"
+   ],
+   "after": [
+    "100644",
+    "blob",
+    "b9ca350ed14e15cda6f423caa05a4f92077605c0"
+   ],
+   "reason": "Formatted by the cargo fmt pass, then 8b33ada885 adds pin_legacy_axes_to_subplot_grid: on the first subplot of a uniform-grid figure, axes i takes slot i of the requested grid instead of being retired. This is the plotting state for subplot only. None of the four cohorts calls subplot: typed_fea_geometry_cli, remote::driver_replacement_tests, runtime_scale and cad_airliner_drawing contain no subplot call."
+  },
+  {
    "path": "crates/runmat-runtime/src/geometry/design_source.rs",
    "before": [
     "100644",
@@ -2709,5 +2723,5 @@
    "reason": "Formatting only: cargo fmt --all with the pinned rustfmt (rustc 1.90.0) and the repository rustfmt.toml. Tokens, expressions, arguments and control flow are unchanged."
   }
  ],
- "reason": "Conserves the fresh 0.7.2 scientific measurements across the CI formatting repair. cargo fmt --all on the measured source (3583e21662, whose scientific inputs equal the measured 912f34e3cd inventory) reproduces the 191 changed Rust files of bd7dd3a4d1 blob for blob. The only other scientific input change is the regenerated FEA highlighting grammar, which adds one field-quantity word and no execution path reads it. Solver arithmetic, model inputs, dependencies, features and thresholds are unchanged. This review is not a rerun of the scientific or performance measurements."
+ "reason": "Conserves the fresh 0.7.2 scientific measurements across the CI repairs. cargo fmt --all on the measured source (3583e21662, whose scientific inputs equal the measured 912f34e3cd inventory) reproduces the 191 formatted Rust files of bd7dd3a4d1 blob for blob. Two more inputs change: the regenerated FEA highlighting grammar, which adds one field-quantity word and no execution path reads it, and the subplot axes-slot repair in runtime plotting state (8b33ada885), which no cohort exercises. Solver arithmetic, model inputs, dependencies, features and thresholds are unchanged. This review is not a rerun of the scientific or performance measurements."
 }

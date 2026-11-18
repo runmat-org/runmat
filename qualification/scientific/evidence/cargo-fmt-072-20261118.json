@@ -1,6 +1,6 @@
 {
  "schema_version": 1,
- "source_revision": "b0c67d594e179e51d4f15b75db1495803b04ec8b",
+ "source_revision": "8b33ada88547516ec40c25ca08f215a2b314019f",
  "previous_revision": "3583e216622e45db0732caaa314ce109ed5565c1",
  "measured_revision": "912f34e3cd484efcb72e2bbda9d018fded199b56",
  "changed_scientific_inputs": [
@@ -183,6 +183,7 @@
   "crates/runmat-runtime/src/analysis/mod.rs",
   "crates/runmat-runtime/src/analysis/prepared_study_publication/tests/preparation.rs",
   "crates/runmat-runtime/src/analysis/tests.rs",
+  "crates/runmat-runtime/src/builtins/plotting/core/state/property_mutation/layout.rs",
   "crates/runmat-runtime/src/geometry/design_source.rs",
   "crates/runmat-runtime/tests/operation_contracts.rs",
   "crates/runmat-sparse-solvers/src/trace.rs",
@@ -239,7 +240,17 @@
    "revision": "b0c67d594e179e51d4f15b75db1495803b04ec8b",
    "passed": 24,
    "failed": 0
+  },
+  {
+   "name": "runtime-subplot-repair",
+   "revision": "8b33ada88547516ec40c25ca08f215a2b314019f",
+   "host": "runmat-build-mac",
+   "commands": [
+    "cargo test -p runmat-runtime --lib --all-features -- builtins::plotting:: compatibility::",
+    "cargo test -p runmat-vm --all-features --test plotting"
+   ],
+   "results": "runtime plotting+compatibility 1370 passed 1 failed before the meta.json regeneration (the catalog test, fixed by the same commit); runmat-vm plotting 68 passed 0 failed"
   }
  ],
- "review": "Conserves the fresh 0.7.2 scientific measurements across the CI formatting repair. cargo fmt --all on the measured source (3583e21662, whose scientific inputs equal the measured 912f34e3cd inventory) reproduces the 191 changed Rust files of bd7dd3a4d1 blob for blob. The only other scientific input change is the regenerated FEA highlighting grammar, which adds one field-quantity word and no execution path reads it. Solver arithmetic, model inputs, dependencies, features and thresholds are unchanged. This review is not a rerun of the scientific or performance measurements."
+ "review": "Conserves the fresh 0.7.2 scientific measurements across the CI repairs. cargo fmt --all on the measured source (3583e21662, whose scientific inputs equal the measured 912f34e3cd inventory) reproduces the 191 formatted Rust files of bd7dd3a4d1 blob for blob. Two more inputs change: the regenerated FEA highlighting grammar, which adds one field-quantity word and no execution path reads it, and the subplot axes-slot repair in runtime plotting state (8b33ada885), which no cohort exercises. Solver arithmetic, model inputs, dependencies, features and thresholds are unchanged. This review is not a rerun of the scientific or performance measurements."
 }
