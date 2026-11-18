@@ -94,6 +94,15 @@ fn error(message: &str) -> String {
 /// Runs one request on OCCT and returns the runtime's JSON answer.
 pub fn call(request: &str) -> String {
     install_occt();
+    // The request's STEP files live only for this call: a thread that serves a later request
+    // never sees them, even when this one panics.
+    struct ClearImports;
+    impl Drop for ClearImports {
+        fn drop(&mut self) {
+            IMPORTS.with(|imports| imports.borrow_mut().clear());
+        }
+    }
+    let _clear = ClearImports;
     let request: Request = match serde_json::from_str(request) {
         Ok(r) => r,
         Err(e) => return error(&format!("malformed CAD request: {e}")),
