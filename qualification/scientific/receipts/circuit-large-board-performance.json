@@ -3,9 +3,9 @@
   "cohort": "circuit-large-board-performance",
   "policy_sha256": "eeab2d440d501db5062b1302e786dd0680fa4bf1065d061bfe57f6691b7a233b",
   "measured": {
-    "source_revision": "35f5a6c647203246c4caec0fbbcfe18d4f899a6e",
+    "source_revision": "912f34e3cd484efcb72e2bbda9d018fded199b56",
     "target": "macos-aarch64",
-    "hardware": "Apple M4, 24 GiB RAM",
+    "hardware": "Apple M4 Max, 14 cores, 36 GiB RAM (runmat-build-mac)",
     "toolchain": "rustc 1.90.0 (1159e78c4 2025-09-14)",
     "command": [
       "cargo",
@@ -24,12 +24,11 @@
     "profile": {
       "release": true,
       "debug": 0,
-      "cargo_build_jobs": 1,
       "incremental": false,
       "rust_test_nocapture": true
     },
-    "log_sha256": "b1c9548012705f306db2894f20d91bcc06590dd2a87cb8c83b975f71303e10c5",
-    "log_location": "runmat-air:/Users/runmat-air/logs/intake-35f5a6c647-circuit-receipt.tests.log",
+    "log_sha256": "caefd034b525285028c313ca94d82e90376830cf30b5f00aaf6a60beb0a7d87d",
+    "log_location": "runmat-build-mac:/Users/runmat/runs/rel072-mac-receipts-quiet/circuit-large-board-performance.tests.log (copy: runmat-acc-2 design-coord/release/evidence/receipts-912f34e3cd)",
     "passed": 1,
     "failed": 0,
     "ignored": 0,
@@ -40,24 +39,44 @@
     ],
     "selected_filter": null,
     "inputs": {
-      "sha256": "bbb2feddfdd106f27287465c068b8ce426afb6cd6175e26733b229405d7feeb3",
-      "files": 26112,
+      "sha256": "bbf50649dc5805138f95ccfbd66d20c23944b229b17da7803bedda1f3dd051af",
+      "files": 26439,
       "encoding": "git-mode-type-blob-path-tuples-v1"
     },
     "artifacts": [
       {
-        "sha256": "ff391d179082800bbfd6026f9dbb9cb35c4589c9fa2dd7600a093a7e0b22f535",
-        "location": "runmat-air:/Users/runmat-air/logs/runtime-scale-35f5a6c647-qualified"
+        "sha256": "0b07be2c07ed92313041193383f0361d86e96d197ae7ae9265752db1abb09c38",
+        "location": "runmat-build-mac:/Users/runmat/targets/rel072-receipts/release/deps/runtime_scale-1321b0e34b0a1594"
       }
     ],
+    "test_seconds": 69.9,
     "source_verification": {
+      "status": "verified",
+      "revision": "912f34e3cd484efcb72e2bbda9d018fded199b56",
+      "files": 27644,
       "before_and_after": true,
-      "files": 27265,
-      "sha256": "f8e417808b079f3176a25bccc002eaec1b66abdcbf63e2e73152534efa551590"
-    },
-    "test_seconds": 72.55
+      "checks": [
+        {
+          "revision": "912f34e3cd484efcb72e2bbda9d018fded199b56",
+          "host": "runmat-build-mac",
+          "tracked_files": 27644,
+          "differing": 0,
+          "checked_at": "2026-11-18T07:12Z",
+          "method": "mac-sync.sh: fresh git archive of the revision rsynced with checksums and --delete into ~/rel072/runmat-source before the Mac chain (CLI build, circuit receipt, bindings) started"
+        },
+        {
+          "revision": "912f34e3cd484efcb72e2bbda9d018fded199b56",
+          "host": "runmat-build-mac",
+          "tracked_files": 27644,
+          "differing": 0,
+          "diff_lines": [],
+          "checked_at": "2026-11-18T10:20:32Z",
+          "method": "git archive of the revision vs the receipt source tree, rsync -rlpcni (checksums, tracked files only)"
+        }
+      ]
+    }
   },
-  "scope": "The unchanged 500 ms edit budget passed on the recorded native Apple M4. This receipt does not establish that budget on other processors. Earlier failed Linux measurements remain explicit comparisons.",
+  "scope": "Fresh 0.7.2 combined-qualification run on the frozen candidate 912f34e3cd (Apple M4 Max, 14 cores, 36 GiB RAM (runmat-build-mac)). The unchanged 500 ms edit budget passed on the recorded native Apple M4 Max (runmat-build-mac). This receipt does not establish that budget on other processors. The earlier receipt was measured on an Apple M4, so the 2-4% faster timings here are not a like-for-like comparison. Earlier failed Linux measurements remain explicit comparisons.",
   "comparison_runs": [
     {
       "source_revision": "a5ba07c1321391449e961bc3401300067672692b",
@@ -81,22 +100,5 @@
       "log_location": "gh-linux-20260327-125436:/home/nallana/rm1293/logs/integration-071-777b5146bf-scientific.circuit-large-board-performance.log",
       "disposition": "Renewed failed N1 comparison; the reference-Mac receipt retains the unchanged 500 ms budget."
     }
-  ],
-  "conservation": {
-    "measured_inputs": {
-      "sha256": "bbb2feddfdd106f27287465c068b8ce426afb6cd6175e26733b229405d7feeb3",
-      "files": 26112,
-      "encoding": "git-mode-type-blob-path-tuples-v1"
-    },
-    "accepted_inputs": {
-      "sha256": "55f884d6cb44d49c880e97e043a427c54be4a91e9d00a6ab8874ac7cf6f03a06",
-      "files": 26117,
-      "encoding": "git-mode-type-blob-path-tuples-v1"
-    },
-    "reason": "Conserves the existing scientific measurements across release-publication metadata changes. The only scientific input changes remove publish=false from two required Rust libraries. Package versions, dependencies, features, targets, implementation source, numerical inputs and thresholds are unchanged. Rate-limit retry handling and release scheduling are publication tooling, not simulation execution. This review is not a rerun of scientific or performance measurements.",
-    "review": {
-      "path": "qualification/scientific/reviews/publication-metadata-20261113-circuit-large-board-performance.json",
-      "sha256": "c0ba6cf6b318a525f8b0bd855d5d11263a913217c064b4ba1e72f02d939b1849"
-    }
-  }
+  ]
 }
