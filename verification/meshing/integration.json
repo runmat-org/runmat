@@ -556,6 +556,18 @@
       "source_units": "millimeter",
       "admission_scenarios": [{ "id": "default", "expected": { "outcome": "success", "solid_regions": 3 } }],
       "mesh_scenarios": []
+    },
+    {
+      "fixture_id": "configured-degree-name",
+      "source_units": "millimeter",
+      "admission_scenarios": [{ "id": "default", "expected": { "outcome": "success", "solid_regions": 1 } }],
+      "mesh_scenarios": []
+    },
+    {
+      "fixture_id": "configured-degree-name-escaped",
+      "source_units": "millimeter",
+      "admission_scenarios": [{ "id": "default", "expected": { "outcome": "success", "solid_regions": 1 } }],
+      "mesh_scenarios": []
     }
   ],
   "metamorphic_relations": [
