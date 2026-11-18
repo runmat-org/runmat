@@ -149,6 +149,33 @@ impl super::SceneStats {
     }
 }
 
+/// The unit a mode shape's legend reads in.
+pub const RELATIVE_AMPLITUDE_UNIT: &str = "relative";
+
+/// The legend title of mode `mode_number` (one-based) of a run's mode shapes.
+pub fn mode_amplitude_label(mode_number: usize) -> String {
+    format!("Mode {mode_number} relative amplitude")
+}
+
+/// Write a mode shape's `legend` as its relative amplitude, titled `label`. An eigenvector's
+/// amplitude is a normalization, not a physical value, so the legend reads 0 to 1 against the
+/// shape's peak, with no unit, study range or limit. Returns the factor that took the drawn
+/// values to the legend's scale. The snapshot posters and the live result view both call this.
+pub fn present_relative_amplitude(
+    legend: &mut GeometrySceneScalarLegend,
+    label: String,
+) -> Result<f64, String> {
+    if !(legend.maximum.is_finite() && legend.maximum > 0.0) {
+        return Err("mode shape has no nonzero amplitude".into());
+    }
+    let scale = 1.0 / legend.maximum;
+    legend.label = label;
+    legend.unit = RELATIVE_AMPLITUDE_UNIT.into();
+    legend.minimum *= scale;
+    legend.maximum = 1.0;
+    Ok(scale)
+}
+
 /// [`present`] the scalar legend of a scene's `overlay`, drawn in `field_unit`, when it has one.
 pub fn present_overlay(
     overlay: &mut runmat_plot::geometry_scene::GeometrySceneOverlay,
