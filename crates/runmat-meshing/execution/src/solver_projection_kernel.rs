@@ -67,6 +67,7 @@ impl<P: ExactMeshingEvaluatorProvider> MeshingStageKernel for ExactSolverProject
         log_phase(&control, "exact surface decoded");
         phase_checkpoint(
             invocation.control,
+            &control,
             "exact surface artifact decoding and validation",
         )?;
 
@@ -156,6 +157,7 @@ impl<P: ExactMeshingEvaluatorProvider> MeshingStageKernel for ExactSolverProject
         log_phase(&control, "solver topology constructed");
         phase_checkpoint(
             invocation.control,
+            &control,
             "solver topology construction and validation",
         )?;
         let elevation = topology.elevation_report();
@@ -216,7 +218,11 @@ impl<P: ExactMeshingEvaluatorProvider> MeshingStageKernel for ExactSolverProject
                 )
             }
         })?;
-        phase_checkpoint(invocation.control, "solver projection canonical encoding")?;
+        phase_checkpoint(
+            invocation.control,
+            &control,
+            "solver projection canonical encoding",
+        )?;
         let node_count = projection.topology.nodes.len() as u64;
         let element_count = (match projection.resolved_request.dimension {
             runmat_meshing_core::MeshDimension::Solid => projection.topology.volume_elements.len(),
@@ -234,10 +240,10 @@ impl<P: ExactMeshingEvaluatorProvider> MeshingStageKernel for ExactSolverProject
             estimated_work: completed_work,
             node_count,
             element_count,
-            // Requested workspace and wire bytes are not measured whole-process residency.
-            peak_memory_bytes: 0,
+            // The high-water mark of every charge this stage held: its inputs, the decoded
+            // volume and its validation, the solver topology and the encoding workspace.
+            peak_memory_bytes: control.usage().allocation_bytes,
             entity_counts: BTreeMap::from([
-                ("construction_memory_measurement_unavailable".into(), 1),
                 ("projection_retained_requested_bytes".into(), retained_bytes),
                 ("encoded_projection_bytes".into(), encoded.len() as u64),
                 (
@@ -302,12 +308,17 @@ fn log_phase(control: &crate::MeshingGeometryEvaluationControl<'_>, phase: &'sta
     );
 }
 
+/// Reports the stage's charge high-water mark so far at a phase boundary.
 fn phase_checkpoint(
     control: &mut MeshingStageControl<'_>,
+    allocations: &crate::MeshingGeometryEvaluationControl<'_>,
     phase: &'static str,
 ) -> Result<(), Box<MeshingFailure>> {
     control
-        .checkpoint(MeshingStageCheckpoint::default())
+        .checkpoint(MeshingStageCheckpoint {
+            peak_memory_bytes: allocations.usage().allocation_bytes,
+            ..MeshingStageCheckpoint::default()
+        })
         .map_err(|mut failure| {
             failure.remediation = format!("{}; phase: {phase}", failure.remediation);
             failure

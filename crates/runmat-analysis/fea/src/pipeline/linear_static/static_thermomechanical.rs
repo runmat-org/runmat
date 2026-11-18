@@ -1,4 +1,4 @@
-//! Physical solid and reduced static thermomechanical result dispatch.
+//! Static thermomechanical result dispatch: solved thermal state or prescribed temperature.
 
 use runmat_analysis_core::AnalysisField;
 
@@ -6,8 +6,7 @@ use crate::{
     assembly::AssemblySummary,
     contracts::{FeaRunError, FEA_FIELD_STRUCTURAL_DISPLACEMENT, FEA_FIELD_STRUCTURAL_VON_MISES},
     pipeline::thermo_mechanical::{
-        recover_physical_static_thermo_mechanical_fields, recover_thermo_mechanical_snapshots,
-        ThermoMechanicalSnapshotFields,
+        recover_physical_static_thermo_mechanical_fields, ThermoMechanicalSnapshotFields,
     },
 };
 
@@ -44,13 +43,6 @@ pub(super) fn recover(
         )
         .map_err(FeaRunError::Assembly)
     } else {
-        Ok(recover_thermo_mechanical_snapshots(
-            summary.thermo_mechanical.as_ref(),
-            &[1.0],
-            &displacement,
-            &von_mises,
-            &[residual_norm],
-            super::element_count_for_dofs(summary.dof_count),
-        ))
+        Ok(ThermoMechanicalSnapshotFields::default())
     }
 }

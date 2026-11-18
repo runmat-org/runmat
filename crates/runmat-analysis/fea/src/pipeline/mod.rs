@@ -1,4 +1,3 @@
-pub mod electro_thermal;
 pub mod linear_static;
 pub mod modal;
 pub mod modal_basis;

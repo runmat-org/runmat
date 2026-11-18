@@ -316,7 +316,11 @@ impl MeshingStageKernel for ExactSurfaceJoinKernel {
             estimated_work: face_count,
             node_count,
             element_count,
-            peak_memory_bytes: encoded_input_bytes.saturating_add(encoded_output_bytes),
+            // The high-water mark of the stage's charges, which hold its encoded input and output.
+            peak_memory_bytes: reconstruction_control
+                .usage()
+                .allocation_bytes
+                .max(encoded_input_bytes.saturating_add(encoded_output_bytes)),
             entity_counts,
             ..MeshingStageCheckpoint::default()
         };

@@ -530,6 +530,18 @@
       "features": ["assembly", "product-names", "non-ascii-names"],
       "expected": { "outcome": "success", "topology": "one 80 x 50 x 12 mm extruded body whose product name carries the degree sign as a Part 21 \\X2\\ escape and imports as 'tilted (depth 12 mm, tilt -20\u00b0)'", "mass_properties": "product-name witness; independent mass properties are unmeasured", "regions": 1, "mesh_error_bounds": "import name witness; volume-meshing error bounds are unmeasured" },
       "test": { "source": "crates/runmat-geometry/io/tests/step_non_ascii_names.rs", "name": "a_product_name_with_a_degree_sign_imports_as_utf8" }
+    },
+    {
+      "id": "camera-bracket",
+      "path": "camera_bracket.step",
+      "sha256": "81d5f16412a584592310423efe3627049091ea34b96df5a3f7bc0b1e9f85ee99",
+      "tier": "small",
+      "format": "step",
+      "supported_input": true,
+      "provenance": { "origin": "repository-authored thin-plate fixture (G62 check-time mesh estimate calibration)", "exporter": "Open CASCADE STEP processor", "exporter_version": "7.8", "license": "RunMat repository license" },
+      "features": ["thin-walls", "bores", "solid"],
+      "expected": { "outcome": "success", "topology": "one solid of three 3 mm plates: a 15 x 8 mm mount with two 2.2 mm bores, a 20 x 17.9 mm web and a 26 x 26 mm camera plate with four 2.2 mm bores", "mass_properties": "preview volume, area and wall and bore spectrum asserted by imported_previews_measure_volume_walls_and_bores", "regions": 1, "mesh_error_bounds": "preview-measure witness; volume-meshing error bounds are unmeasured" },
+      "test": { "source": "crates/runmat-geometry/io/tests/preview_measure.rs", "name": "imported_previews_measure_volume_walls_and_bores" }
     }
   ]
 }

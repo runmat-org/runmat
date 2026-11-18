@@ -58,6 +58,8 @@ impl RuntimeCollectiveService for PendingCollective {
 
 #[tokio::test]
 async fn compiled_region_worker_drop_retires_source_and_pending_effect_without_replay() {
+    // Program execution roots values in the process-wide GC heap.
+    let _gc = runmat_gc::gc_test_guard();
     let program = compile_spmd_region_bundle("spmd\n  spmdBarrier();\nend\n", 0).await;
     let scope_id = ExecutionScopeId::derive(&[b"source-lifetime-scope"]);
     let pool = PoolHandle {

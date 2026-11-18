@@ -2305,8 +2305,6 @@ fn persist_synthetic_indexed_results() -> String {
                         equilibrium_residual: vec![0.0],
                     })
                     .collect(),
-                electro_thermal_temperature_snapshots: Vec::new(),
-                electro_thermal_thermal_residual_snapshots: Vec::new(),
                 residual_norms: vec![0.5, 0.25],
                 integration_method:
                     crate::analysis::TransientIntegrationMethod::NewmarkAverageAcceleration,

@@ -43,7 +43,7 @@ use runmat_analysis_fea::{
     SolverMethod, SolverPreconditioner, FEA_FIELD_ACOUSTIC_PARTICLE_VELOCITY,
     FEA_FIELD_ACOUSTIC_PRESSURE_IMAG, FEA_FIELD_ACOUSTIC_PRESSURE_MAGNITUDE,
     FEA_FIELD_ACOUSTIC_PRESSURE_REAL, FEA_FIELD_CFD_WALL_SHEAR_STRESS,
-    FEA_FIELD_ELECTRO_THERMAL_JOULE_HEAT, FEA_FIELD_MODAL_EIGENVALUE, FEA_FIELD_MODAL_FREQUENCY_HZ,
+    FEA_FIELD_MODAL_EIGENVALUE, FEA_FIELD_MODAL_FREQUENCY_HZ,
     FEA_FIELD_MODAL_MODAL_MASS, FEA_FIELD_MODAL_MODAL_STIFFNESS, FEA_FIELD_MODAL_M_ORTHOGONALITY,
     FEA_FIELD_MODAL_PARTICIPATION_FACTOR, FEA_FIELD_MODAL_RELATIVE_FREQUENCY_SEPARATION,
     FEA_FIELD_MODAL_RESIDUAL_NORM, FEA_FIELD_STRUCTURAL_BEAM_AXIAL_FORCE,
@@ -3195,13 +3195,6 @@ fn analysis_field_descriptors_include_physics_units_and_locations() {
             AnalysisFieldLocation::Element,
         ),
         (
-            FEA_FIELD_ELECTRO_THERMAL_JOULE_HEAT.to_string(),
-            "electro_thermal",
-            "joule_heat",
-            Some("W/m^3"),
-            AnalysisFieldLocation::Element,
-        ),
-        (
             fea_nonlinear_contact_pressure_field_id(0),
             "nonlinear",
             "contact_pressure",
@@ -4158,7 +4151,7 @@ fn analysis_run_transient_rejects_electro_thermal_context_on_structural_step() {
 }
 
 #[test]
-fn analysis_results_summary_surfaces_thermo_nonlinear_metrics_rejects_unsupported_envelope() {
+fn analysis_run_nonlinear_rejects_an_unsupported_thermomechanical_envelope() {
     let _guard = analysis_test_guard();
     let mut model = sample_solid_model();
     model.sequence.steps = vec![ProcedureStep::coupled(

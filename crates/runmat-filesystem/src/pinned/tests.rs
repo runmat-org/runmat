@@ -436,3 +436,17 @@ async fn dependency_mounts_are_readonly_and_cannot_shadow_workspace_authority() 
     #[cfg(windows)]
     native_mounts::assert_native_cache_access(&pinned).await;
 }
+
+#[test]
+fn pinned_paths_keep_the_namespace_of_the_provider_they_pin() {
+    // A cloud project's provider is virtual-rooted on every host OS, so its `/x` paths stay
+    // absolute through the pinned scope even where the host's native paths are Windows ones.
+    let virtual_base: Arc<dyn FsProvider> = Arc::new(MemoryFsProvider::new());
+    let pinned = PinnedFsProvider::new(virtual_base.clone(), manifest("v1")).unwrap();
+    assert_eq!(pinned.path_namespace(), virtual_base.path_namespace());
+    assert_eq!(pinned.path_namespace(), crate::FsPathNamespace::VirtualRooted);
+
+    let native_base: Arc<dyn FsProvider> = Arc::new(crate::NativeFsProvider);
+    let pinned = PinnedFsProvider::new(native_base, manifest("v1")).unwrap();
+    assert_eq!(pinned.path_namespace(), crate::FsPathNamespace::NativeOs);
+}

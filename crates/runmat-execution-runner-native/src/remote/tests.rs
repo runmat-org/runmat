@@ -186,6 +186,8 @@ impl DriverControlPlane for FakeControl {
 
 #[tokio::test]
 async fn remote_driver_executes_exact_encrypted_program_and_commits_once() {
+    // Program execution roots values in the process-wide GC heap.
+    let _gc = runmat_gc::gc_test_guard();
     let run_id = "run-remote-conformance";
     let (program, _, bytes) = super::pool_tests::executable_bundle().await;
     let bundle =
@@ -206,6 +208,8 @@ async fn remote_driver_executes_exact_encrypted_program_and_commits_once() {
 
 #[tokio::test]
 async fn replacement_driver_consumes_an_exact_resume_safe_checkpoint() {
+    // Program execution roots values in the process-wide GC heap.
+    let _gc = runmat_gc::gc_test_guard();
     let run_id = "run-remote-replacement";
     let (program, _, bytes) = super::pool_tests::executable_bundle().await;
     let bundle =
@@ -629,6 +633,8 @@ async fn recovery_publication_commits_objects_then_catalog_then_checkpoint() {
 
 #[tokio::test]
 async fn remote_driver_preserves_exact_test_result_events_and_coverage() {
+    // Program execution roots values in the process-wide GC heap.
+    let _gc = runmat_gc::gc_test_guard();
     let test_source = "function tests = remoteTest()\n tests = functiontests(localfunctions);\nend\nfunction testRemote(testCase)\n testCase.verifyEqual(6 * 7, 42);\nend\n";
     let (_project_root, project, revision) = project_fixture(test_source);
     let snapshot = FrozenTestRunSnapshot::freeze(
@@ -686,6 +692,8 @@ async fn remote_driver_preserves_exact_test_result_events_and_coverage() {
 
 #[tokio::test]
 async fn encrypted_registry_dependency_executes_without_worker_registry_credentials() {
+    // Program execution roots values in the process-wide GC heap.
+    let _gc = runmat_gc::gc_test_guard();
     let temp = tempfile::tempdir().unwrap();
     let root = temp.path().join("root");
     let registry_root = temp.path().join("decrypted-registry-release");

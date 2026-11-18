@@ -699,7 +699,7 @@ fn remote_completion_uses_a_new_artifact_key_for_the_numbered_schema() {
             .unwrap();
     assert_eq!(
         persisted["schema_version"],
-        "analysis_run_artifact/2026-11-001"
+        "analysis_run_artifact/2026-11-002"
     );
     let _ = fs::remove_dir_all(&root);
 }

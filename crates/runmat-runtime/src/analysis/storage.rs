@@ -53,7 +53,7 @@ use frequency_sample::PersistedAcousticFrequencyArtifact;
 
 /// Format of a stored run record. `record_format` says when it must change; its test pins the
 /// persisted shape this version names.
-pub(super) const ARTIFACT_SCHEMA_VERSION: &str = "analysis_run_artifact/2026-11-001";
+pub(super) const ARTIFACT_SCHEMA_VERSION: &str = "analysis_run_artifact/2026-11-002";
 const FIELD_IDENTITY_PREFIX: &[u8] = b"runmat-analysis-field/v1\0";
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

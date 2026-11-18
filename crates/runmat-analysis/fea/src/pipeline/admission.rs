@@ -98,11 +98,7 @@ pub(super) fn admit_structural(
         .structural_solid_recovery
         .iter()
         .any(|element| element.solved_thermal_quadrature.is_some());
-    let thermomechanical = solved_thermal
-        || summary
-            .thermo_mechanical
-            .as_ref()
-            .is_some_and(|value| value.enabled);
+    let thermomechanical = solved_thermal || summary.thermo_mechanical.is_some();
     let realized_family = if thermomechanical {
         PhysicsFamily::Coupled(CoupledPhysicsFamily::Thermomechanical)
     } else {

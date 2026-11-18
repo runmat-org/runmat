@@ -19,22 +19,6 @@ pub(super) fn data(
             contact_gap_snapshots: nonlinear_run.contact_gap_snapshots,
             load_factor_snapshots: nonlinear_run.load_factor_snapshots,
             residual_norm_snapshots: nonlinear_run.residual_norm_snapshots,
-            thermo_mechanical_temperature_snapshots: nonlinear_run
-                .thermo_mechanical_temperature_snapshots,
-            thermo_mechanical_thermal_strain_snapshots: nonlinear_run
-                .thermo_mechanical_thermal_strain_snapshots,
-            thermo_mechanical_thermal_stress_snapshots: nonlinear_run
-                .thermo_mechanical_thermal_stress_snapshots,
-            thermo_mechanical_displacement_snapshots: nonlinear_run
-                .thermo_mechanical_displacement_snapshots,
-            thermo_mechanical_von_mises_snapshots: nonlinear_run
-                .thermo_mechanical_von_mises_snapshots,
-            thermo_mechanical_coupling_residual_snapshots: nonlinear_run
-                .thermo_mechanical_coupling_residual_snapshots,
-            electro_thermal_temperature_snapshots: nonlinear_run
-                .electro_thermal_temperature_snapshots,
-            electro_thermal_thermal_residual_snapshots: nonlinear_run
-                .electro_thermal_thermal_residual_snapshots,
             residual_norms: nonlinear_run.residual_norms,
             increment_norms: nonlinear_run.increment_norms,
             iteration_counts: nonlinear_run.iteration_counts,
@@ -96,22 +80,6 @@ pub(super) fn append(
         .extend(next.load_factor_snapshots);
     into.residual_norm_snapshots
         .extend(next.residual_norm_snapshots);
-    into.thermo_mechanical_temperature_snapshots
-        .extend(next.thermo_mechanical_temperature_snapshots);
-    into.thermo_mechanical_thermal_strain_snapshots
-        .extend(next.thermo_mechanical_thermal_strain_snapshots);
-    into.thermo_mechanical_thermal_stress_snapshots
-        .extend(next.thermo_mechanical_thermal_stress_snapshots);
-    into.thermo_mechanical_displacement_snapshots
-        .extend(next.thermo_mechanical_displacement_snapshots);
-    into.thermo_mechanical_von_mises_snapshots
-        .extend(next.thermo_mechanical_von_mises_snapshots);
-    into.thermo_mechanical_coupling_residual_snapshots
-        .extend(next.thermo_mechanical_coupling_residual_snapshots);
-    into.electro_thermal_temperature_snapshots
-        .extend(next.electro_thermal_temperature_snapshots);
-    into.electro_thermal_thermal_residual_snapshots
-        .extend(next.electro_thermal_thermal_residual_snapshots);
     into.residual_norms.extend(next.residual_norms);
     into.increment_norms.extend(next.increment_norms);
     into.iteration_counts.extend(next.iteration_counts);

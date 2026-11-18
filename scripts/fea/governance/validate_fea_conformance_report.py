@@ -209,7 +209,6 @@ REQUIRED_FIXTURES = {
         "nonlinear_path_mix_effective_modulus_scale",
         "nonlinear_path_mix_material_spread_ratio",
         "nonlinear_path_mix_spike_count",
-        "thermo_nonlinear_severity",
     },
     "nonlinear_plasticity_benchmark_gpu_provider": {
         "plasticity_nonlinear_severity_peak",
@@ -278,60 +277,6 @@ REQUIRED_FIXTURES = {
         "plasticity_hardening_reference_complex_state_max_equivalent_plastic_strain",
     }
     | PLASTIC_HARDENING_COMPLEX_KNOWN_ANSWER_REQUIRED_FIELDS,
-    "thermo_mech_kickoff_gpu_provider": {
-        "thermo_mech_thermal_strain_scale",
-        "thermo_mech_thermal_load_scale",
-        "thermo_mech_effective_modulus_scale",
-        "thermo_mech_material_spread_ratio",
-        "thermo_mech_assignment_heterogeneity_index",
-        "thermo_mech_transient_severity",
-        "thermo_mech_constitutive_residual_ratio",
-        "thermo_mech_thermal_strain_energy_density_mean",
-        "thermo_mech_consistency_coverage_ratio",
-        "thermo_mech_temperature_field_node_count",
-        "thermo_mech_strain_temperature_residual_ratio",
-        "thermo_mech_strain_temperature_coverage_ratio",
-        "transient_max_residual_norm",
-        "transient_max_energy_growth_ratio",
-        "transient_prepared_cache_hit_ratio",
-        "transient_prepared_cache_misses",
-    },
-    "thermo_gradient_benign_gpu_provider": {
-        "thermo_gradient_benign_spread_ratio",
-        "thermo_gradient_benign_heterogeneity",
-        "transient_max_residual_norm",
-        "transient_max_energy_growth_ratio",
-        "transient_prepared_cache_hit_ratio",
-        "transient_prepared_cache_misses",
-    },
-    "thermo_gradient_pathological_gpu_provider": {
-        "thermo_gradient_pathological_spread_ratio",
-        "thermo_gradient_pathological_heterogeneity",
-        "transient_max_residual_norm",
-        "transient_max_energy_growth_ratio",
-        "transient_prepared_cache_hit_ratio",
-        "transient_prepared_cache_misses",
-    },
-    "thermo_ramp_smooth_gpu_provider": {
-        "thermo_ramp_smooth_spatial_gradient_index",
-        "thermo_ramp_smooth_spatial_coverage_ratio",
-        "thermo_ramp_smooth_constitutive_temperature_factor",
-        "thermo_ramp_smooth_effective_modulus_scale",
-        "transient_max_residual_norm",
-        "transient_max_energy_growth_ratio",
-        "transient_prepared_cache_hit_ratio",
-        "transient_prepared_cache_misses",
-    },
-    "thermo_shock_oscillatory_gpu_provider": {
-        "thermo_shock_oscillatory_spatial_gradient_index",
-        "thermo_shock_oscillatory_spatial_coverage_ratio",
-        "thermo_shock_constitutive_temperature_factor",
-        "thermo_shock_effective_modulus_scale",
-        "transient_max_residual_norm",
-        "transient_max_energy_growth_ratio",
-        "transient_prepared_cache_hit_ratio",
-        "transient_prepared_cache_misses",
-    },
     "thermal_standalone_ramp_cpu": {
         "thermal_standalone_max_relative_residual_norm",
         "thermal_standalone_min_temperature_k",
@@ -1299,19 +1244,6 @@ REQUIRED_ERROR_FIXTURES = {
     },
 }
 
-THERMO_REQUIRED_FIELDS = {
-    "thermo_coupling_enabled",
-    "thermo_coupling_fingerprint",
-    "thermo_constitutive_temperature_factor",
-    "thermo_effective_modulus_scale",
-    "thermo_constitutive_material_spread_ratio",
-    "thermo_assignment_heterogeneity_index",
-    "thermo_region_delta_count",
-    "thermo_spatial_coverage_ratio",
-    "thermo_transient_severity",
-    "thermo_nonlinear_severity",
-}
-
 PLASTIC_REQUIRED_FIELDS = {
     "plastic_nonlinear_severity",
 }
@@ -1467,26 +1399,6 @@ PERFORMANCE_REQUIRED_FIELDS = {
         "gpu_solver_solve_ms",
     },
     "nonlinear_plastic_hardening_reference_complex_gpu_provider": {
-        "gpu_speedup_ratio",
-        "gpu_solver_solve_ms",
-    },
-    "thermo_mech_kickoff_gpu_provider": {
-        "gpu_speedup_ratio",
-        "gpu_solver_solve_ms",
-    },
-    "thermo_gradient_benign_gpu_provider": {
-        "gpu_speedup_ratio",
-        "gpu_solver_solve_ms",
-    },
-    "thermo_gradient_pathological_gpu_provider": {
-        "gpu_speedup_ratio",
-        "gpu_solver_solve_ms",
-    },
-    "thermo_ramp_smooth_gpu_provider": {
-        "gpu_speedup_ratio",
-        "gpu_solver_solve_ms",
-    },
-    "thermo_shock_oscillatory_gpu_provider": {
         "gpu_speedup_ratio",
         "gpu_solver_solve_ms",
     },
@@ -1654,12 +1566,6 @@ def main() -> int:
         return 1
 
     report = json.loads(path.read_text())
-    require_thermo_summary = is_true(
-        os.getenv("RUNMAT_VALIDATE_REQUIRE_THERMO_SUMMARY", "false")
-    )
-    require_thermo_field_summary = is_true(
-        os.getenv("RUNMAT_VALIDATE_REQUIRE_THERMO_FIELD_SUMMARY", "false")
-    )
     require_plastic_summary = is_true(
         os.getenv("RUNMAT_VALIDATE_REQUIRE_PLASTIC_SUMMARY", "false")
     )
@@ -1706,21 +1612,6 @@ def main() -> int:
         if record is None:
             continue
 
-        if fixture_id in {
-            "thermo_mech_kickoff_gpu_provider",
-            "thermo_gradient_benign_gpu_provider",
-            "thermo_gradient_pathological_gpu_provider",
-            "thermo_ramp_smooth_gpu_provider",
-            "thermo_shock_oscillatory_gpu_provider",
-            "nonlinear_load_path_mix_gpu_provider",
-        }:
-            missing_fields = sorted(
-                field for field in THERMO_REQUIRED_FIELDS if field not in record
-            )
-            if missing_fields:
-                errors.append(
-                    f"fixture {fixture_id} missing thermo summary fields: {', '.join(missing_fields)}"
-                )
         if fixture_id in {
             "nonlinear_plasticity_benchmark_gpu_provider",
         }:
@@ -1960,38 +1851,6 @@ def main() -> int:
                     f"fixture {fixture_id} missing non-empty performance field: gpu_solver_backend"
                 )
 
-    if require_thermo_summary:
-        thermo_records = [
-            record
-            for record in records.values()
-            if isinstance(record.get("thermo_coupling_enabled"), bool)
-            or isinstance(record.get("thermo_transient_severity"), (int, float))
-            or isinstance(record.get("thermo_nonlinear_severity"), (int, float))
-        ]
-        if not thermo_records:
-            errors.append(
-                "thermo summary fields missing across all records while RUNMAT_VALIDATE_REQUIRE_THERMO_SUMMARY=true"
-            )
-
-    if require_thermo_field_summary:
-        thermo_field_records = [
-            record
-            for record in records.values()
-            if isinstance(record.get("thermo_region_delta_count"), (int, float))
-            and float(record.get("thermo_region_delta_count", 0.0)) > 0.0
-        ]
-        if not thermo_field_records:
-            errors.append(
-                "thermo field summary records missing while RUNMAT_VALIDATE_REQUIRE_THERMO_FIELD_SUMMARY=true"
-            )
-        else:
-            if not any(
-                isinstance(record.get("thermo_spatial_coverage_ratio"), (int, float))
-                for record in thermo_field_records
-            ):
-                errors.append(
-                    "thermo_spatial_coverage_ratio missing across thermo field records while RUNMAT_VALIDATE_REQUIRE_THERMO_FIELD_SUMMARY=true"
-                )
     if require_plastic_summary:
         plastic_records = [
             record

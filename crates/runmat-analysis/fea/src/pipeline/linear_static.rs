@@ -37,7 +37,6 @@ use crate::{
         realize_step_excitations, ExcitationSamplePoint, RealizedExcitationKind,
         RealizedExcitations,
     },
-    pipeline::electro_thermal::recover_electro_thermal_fields,
     post::fields::{
         recover_result_fields_with_capacity, structural_field_recovery_metrics_from_fields,
     },
@@ -640,17 +639,6 @@ where
     fields.extend(thermo_mechanical_fields.von_mises_snapshots);
     fields.extend(thermo_mechanical_fields.coupling_residual_snapshots);
     let thermo_mechanical_diagnostics = thermo_mechanical_fields.diagnostics;
-    let electro_thermal_fields = recover_electro_thermal_fields(
-        summary.electro_thermal.as_ref(),
-        &[1.0],
-        &[solve_result.residual_norm],
-        summary.dof_count,
-        options.solver_mesh.as_ref(),
-    );
-    let electro_thermal_diagnostics = electro_thermal_fields.diagnostics;
-    fields.extend(electro_thermal_fields.static_fields);
-    fields.extend(electro_thermal_fields.temperature_snapshots);
-    fields.extend(electro_thermal_fields.thermal_residual_snapshots);
     drop(phase_clock);
     let phase_clock = crate::progress::phase_timer("structural_static.observations");
     let observations = observations::evaluate(
@@ -810,7 +798,6 @@ where
         },
     );
     diagnostics.extend(thermo_mechanical_diagnostics);
-    diagnostics.extend(electro_thermal_diagnostics);
     let structural_static_convergence =
         crate::contracts::StructuralStaticConvergence::from_solve(&solve_result, operator_proof);
     diagnostics.extend(solve_result.diagnostics);
@@ -865,8 +852,4 @@ fn field_snapshot(fields: &[AnalysisField], field_id: &str) -> Vec<AnalysisField
         .cloned()
         .into_iter()
         .collect()
-}
-
-fn element_count_for_dofs(dof_count: usize) -> usize {
-    dof_count.div_ceil(VECTOR_COMPONENT_COUNT).max(1)
 }

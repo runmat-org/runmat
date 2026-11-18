@@ -99,8 +99,6 @@ jobs:
       - name: Enforce thermo summary presence on thermo-gated branches
         if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master' || github.ref == 'refs/heads/release' || startsWith(github.ref, 'refs/heads/release/')
         env:
-          RUNMAT_VALIDATE_REQUIRE_THERMO_SUMMARY: "true"
-          RUNMAT_VALIDATE_REQUIRE_THERMO_FIELD_SUMMARY: "true"
           RUNMAT_VALIDATE_REQUIRE_ELECTRO_SUMMARY: "true"
           RUNMAT_VALIDATE_REQUIRE_PLASTIC_SUMMARY: "true"
           RUNMAT_VALIDATE_REQUIRE_CONTACT_SUMMARY: "true"

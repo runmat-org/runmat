@@ -33,16 +33,23 @@ export const REGISTRIES = [
     {
         id: "field locations",
         source: "crates/runmat-analysis/language/src/semantic/procedure/output/fields.rs",
-        from: /fn field_location\(/, to: /fn field_reference_type\(/,
-        pattern: ARM,
+        from: /const FIELD_LOCATIONS:/, to: /^\];/m,
+        pattern: /^\s*\("([a-z_]+)",\s*FieldLocation::/gm,
         docs: ["language/outputs-fields-and-observations.md"],
     },
     {
         id: "field quantities",
-        source: "crates/runmat-analysis/core/src/study/output/quantity.rs",
-        from: /fn from_source_name\(/, to: /^\s*_ => return None|^\s*_ => None/m,
-        pattern: ARM,
+        source: "crates/runmat-analysis/core/src/study/output/quantity/source_names.rs",
+        from: /pub const SOURCE_QUANTITIES:/, to: /^\];/m,
+        pattern: /^\s*row\("([a-z_0-9]+)"/gm,
         docs: ["language/outputs-fields-and-observations.md"],
+    },
+    {
+        id: "line parameters",
+        source: "crates/runmat-analysis/core/src/study/output/quantity.rs",
+        from: /fn from_line_parameter_name\(/, to: /^\s*_ => return None/m,
+        pattern: ARM,
+        docs: ["physics/trace-impedance.md"],
     },
     {
         id: "output operations",

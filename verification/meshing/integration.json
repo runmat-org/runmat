@@ -568,6 +568,12 @@
       "source_units": "millimeter",
       "admission_scenarios": [{ "id": "default", "expected": { "outcome": "success", "solid_regions": 1 } }],
       "mesh_scenarios": []
+    },
+    {
+      "fixture_id": "camera-bracket",
+      "source_units": "millimeter",
+      "admission_scenarios": [{ "id": "default", "expected": { "outcome": "success", "solid_regions": 1 } }],
+      "mesh_scenarios": []
     }
   ],
   "metamorphic_relations": [

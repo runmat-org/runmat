@@ -63,7 +63,6 @@ fn check_public_manufactured_cube(quadratic: bool, increments: usize) {
         assert_eq!(result.load_factors.last(), Some(&1.0));
         assert!(result.contact_pressure_snapshots.is_empty());
         assert!(result.contact_gap_snapshots.is_empty());
-        assert!(result.thermo_mechanical_temperature_snapshots.is_empty());
         assert!(result.load_factors.windows(2).all(|p| p[1] > p[0]));
         for length in [
             result.displacement_snapshots.len(),

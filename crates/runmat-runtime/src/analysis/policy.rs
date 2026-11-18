@@ -1,7 +1,3 @@
-use super::QualityPolicy;
-
-pub(crate) const THERMO_SPREAD_THRESHOLD_BALANCED: f64 = 1.25;
-pub(crate) const THERMO_HETEROGENEITY_THRESHOLD_BALANCED: f64 = 0.2;
 pub(crate) const EM_CONDUCTIVITY_SPREAD_THRESHOLD_BALANCED: f64 = 2.0;
 pub(crate) const EM_HETEROGENEITY_THRESHOLD_BALANCED: f64 = 0.2;
 pub(crate) const EM_ASSIGNMENT_COVERAGE_MIN_BALANCED: f64 = 0.85;
@@ -25,33 +21,6 @@ pub(crate) const EM_REAL_RESIDUAL_MAX_BALANCED: f64 = 0.30;
 pub(crate) const EM_IMAG_RESIDUAL_MAX_BALANCED: f64 = 0.65;
 pub(crate) const EM_SWEEP_COUNT_MIN_BALANCED: f64 = 5.0;
 pub(crate) const EM_RESONANCE_Q_MIN_BALANCED: f64 = 1.25;
-
-pub(crate) fn thermo_thresholds_for_policy(policy: QualityPolicy) -> (f64, f64) {
-    match policy {
-        QualityPolicy::Strict => (1.15, 0.12),
-        QualityPolicy::Balanced => (
-            THERMO_SPREAD_THRESHOLD_BALANCED,
-            THERMO_HETEROGENEITY_THRESHOLD_BALANCED,
-        ),
-        QualityPolicy::Exploratory => (1.4, 0.35),
-    }
-}
-
-pub(crate) fn thermo_spatial_gradient_threshold_for_policy(policy: QualityPolicy) -> f64 {
-    match policy {
-        QualityPolicy::Strict => 0.22,
-        QualityPolicy::Balanced => 0.30,
-        QualityPolicy::Exploratory => 0.45,
-    }
-}
-
-pub(crate) fn thermo_field_coverage_min_for_policy(policy: QualityPolicy) -> f64 {
-    match policy {
-        QualityPolicy::Strict => 0.55,
-        QualityPolicy::Balanced => 0.45,
-        QualityPolicy::Exploratory => 0.30,
-    }
-}
 
 pub(crate) fn breach_rate_greater_than(values: &[f64], threshold: f64) -> Option<f64> {
     if values.is_empty() {

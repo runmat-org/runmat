@@ -447,14 +447,13 @@ async fn execute_admitted_root(
                                 value: binding.value,
                             })
                             .collect();
-                        let outcome = in_case(&case.case_id, execute_case(source, study, inputs, options))
-                            .await
-                            .map(
-                            |mut completed| {
-                                completed.case_id = case.case_id.clone();
-                                completed
-                            },
-                        );
+                        let outcome =
+                            in_case(&case.case_id, execute_case(source, study, inputs, options))
+                                .await
+                                .map(|mut completed| {
+                                    completed.case_id = case.case_id.clone();
+                                    completed
+                                });
                         (
                             index,
                             LocalSweepCase {

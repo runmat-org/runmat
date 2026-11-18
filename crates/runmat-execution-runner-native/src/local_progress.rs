@@ -74,7 +74,10 @@ pub(crate) fn relay_observer(
 
 /// Forwards the live counts among an analysis worker's progress frames. The parent owns the
 /// run's phase boundaries, so a worker's own `Started` and `Completed` events stay in its log.
-pub(crate) fn forward_analysis_progress(slot: &ProgressObserverSlot, records: Vec<ProgramProgress>) {
+pub(crate) fn forward_analysis_progress(
+    slot: &ProgressObserverSlot,
+    records: Vec<ProgramProgress>,
+) {
     if slot.get().is_none() {
         return;
     }
@@ -104,7 +107,11 @@ impl MeshingProgressTracker {
     }
 
     /// Registers a stage before it runs and reports what it does.
-    pub(crate) fn stage_started(&mut self, stage: MeshingStageKind, partition: MeshingPartitionFaces) {
+    pub(crate) fn stage_started(
+        &mut self,
+        stage: MeshingStageKind,
+        partition: MeshingPartitionFaces,
+    ) {
         if self.slot.get().is_none() {
             return;
         }
@@ -131,8 +138,14 @@ impl MeshingProgressTracker {
         if self.slot.get().is_none() {
             return;
         }
-        for count in records.iter().filter_map(crate::meshing_host::decode_work_count) {
-            if let Some(event) = self.map.work_count(Some(stage), Some(partition.index), &count) {
+        for count in records
+            .iter()
+            .filter_map(crate::meshing_host::decode_work_count)
+        {
+            if let Some(event) = self
+                .map
+                .work_count(Some(stage), Some(partition.index), &count)
+            {
                 self.slot.emit(event);
             }
         }

@@ -19,6 +19,14 @@ use crate::cdt::{
 use runmat_geometry_core::{GeometryAllocationReservation, GeometryEvaluationControl};
 use runmat_meshing_core::resident_bytes::vec_bytes;
 
+mod construction;
+mod validation;
+pub(in crate::cdt) use construction::{
+    assembly_forecast, carving_bytes, facet_recovery_bytes, point_set_forecast, rebuild_forecast,
+    segment_recovery_bytes,
+};
+pub(in crate::cdt) use validation::{constraints_bytes, validation_scratch_bytes};
+
 /// Growth window: the charge covers the working mesh until its tetrahedron slots or nodes grow by
 /// this fraction of their count at the last inventory.
 const WINDOW_DIVISOR: u64 = 8;

@@ -96,11 +96,19 @@ impl MeshingProgressSink for ChannelProgress {
     fn record(&mut self, progress: &MeshingProgress) {
         match super::encode_meshing_progress(progress) {
             Ok(progress) => {
-                let mut state = self.0.state.lock().expect("meshing progress frames poisoned");
+                let mut state = self
+                    .0
+                    .state
+                    .lock()
+                    .expect("meshing progress frames poisoned");
                 self.0.send(&mut state, progress);
             }
             Err(error) => {
-                *self.0.error.lock().expect("meshing progress error poisoned") = Some(error);
+                *self
+                    .0
+                    .error
+                    .lock()
+                    .expect("meshing progress error poisoned") = Some(error);
             }
         }
     }

@@ -17,6 +17,8 @@ use super::execute_host_graph_request;
 
 #[tokio::test]
 async fn selected_graph_worker_preserves_callable_argument_layouts() {
+    // Program execution roots values in the process-wide GC heap.
+    let _gc = runmat_gc::gc_test_guard();
     let ambient_path_name = std::env::vars_os()
         .find_map(|(name, value)| {
             let name = name.to_str()?;

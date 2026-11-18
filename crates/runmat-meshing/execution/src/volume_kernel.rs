@@ -185,11 +185,9 @@ impl ExactVolumeKernel {
                 .take()
             {
                 Some(failure) => error::map_diagnostic_error(failure),
-                None => error::map_construction_error(
-                    error,
-                    held_before_construction,
-                    cancellation.maximum_allocation_bytes(),
-                ),
+                None => {
+                    error::map_construction_error(error, held_before_construction, &cancellation)
+                }
             }
         })?;
         // The finished mesh stays charged until its inventories are released below.

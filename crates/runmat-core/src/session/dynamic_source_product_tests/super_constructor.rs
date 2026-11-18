@@ -2,8 +2,9 @@ use super::super::*;
 
 #[test]
 fn separately_admitted_superclass_product_is_joined_by_exact_origin() {
+    // Lock order: the provider override first, then the GC test context (as every core test).
+    let _serial = runmat_filesystem::provider_override_lock();
     runmat_gc::gc_test_context(|| {
-        let _serial = runmat_filesystem::provider_override_lock();
         let temporary = tempfile::TempDir::new().expect("separate class source root");
         let base_dir = temporary.path().join("base");
         let derived_dir = temporary.path().join("derived");
@@ -152,8 +153,9 @@ fn separately_admitted_superclass_product_is_joined_by_exact_origin() {
 
 #[test]
 fn cold_superclass_source_is_admitted_without_running_its_constructor() {
+    // Lock order: the provider override first, then the GC test context (as every core test).
+    let _serial = runmat_filesystem::provider_override_lock();
     runmat_gc::gc_test_context(|| {
-        let _serial = runmat_filesystem::provider_override_lock();
         let temporary = tempfile::TempDir::new().expect("separate class source root");
         let base_dir = temporary.path().join("cold_base");
         let derived_dir = temporary.path().join("cold_derived");
@@ -214,8 +216,9 @@ fn cold_superclass_source_is_admitted_without_running_its_constructor() {
 
 #[test]
 fn cold_implicit_superclass_declaration_supplies_inherited_default() {
+    // Lock order: the provider override first, then the GC test context (as every core test).
+    let _serial = runmat_filesystem::provider_override_lock();
     runmat_gc::gc_test_context(|| {
-        let _serial = runmat_filesystem::provider_override_lock();
         let temporary = tempfile::TempDir::new().expect("separate class source root");
         let base_dir = temporary.path().join("implicit_base");
         let derived_dir = temporary.path().join("implicit_derived");
@@ -269,8 +272,9 @@ fn cold_implicit_superclass_declaration_supplies_inherited_default() {
 
 #[test]
 fn retained_derived_constructor_keeps_old_constructorless_base_defaults() {
+    // Lock order: the provider override first, then the GC test context (as every core test).
+    let _serial = runmat_filesystem::provider_override_lock();
     runmat_gc::gc_test_context(|| {
-        let _serial = runmat_filesystem::provider_override_lock();
         let temporary = tempfile::TempDir::new().expect("separate class source root");
         let base_dir = temporary.path().join("base_revision");
         let derived_dir = temporary.path().join("derived_revision");
@@ -362,8 +366,9 @@ fn retained_derived_constructor_keeps_old_constructorless_base_defaults() {
 
 #[test]
 fn cold_constructorless_superclass_with_other_methods_has_exact_no_body_target() {
+    // Lock order: the provider override first, then the GC test context (as every core test).
+    let _serial = runmat_filesystem::provider_override_lock();
     runmat_gc::gc_test_context(|| {
-        let _serial = runmat_filesystem::provider_override_lock();
         let temporary = tempfile::TempDir::new().expect("separate class source root");
         let base_dir = temporary.path().join("explicit_base");
         let derived_dir = temporary.path().join("explicit_derived");

@@ -17,9 +17,6 @@ NONLINEAR_FIXTURES = (
     "nonlinear_plastic_hardening_reference_complex_gpu_provider",
 )
 
-THERMO_FIXTURE = "thermo_mech_kickoff_gpu_provider"
-
-
 def threshold_map(record):
     return {
         item.get("name"): item
@@ -52,10 +49,10 @@ def build_summary(report):
     )
     lines.append("")
     lines.append(
-        "| Fixture | Publishable | GPU ms | Speedup | Failed increments | Backtracks | Tangent rebuilds | Thermo enabled | Thermo modulus scale | Thermo spread ratio | Thermo heterogeneity | Thermo transient sev | Thermo nonlinear sev | Plastic nonlinear sev | Contact nonlinear sev |"
+        "| Fixture | Publishable | GPU ms | Speedup | Failed increments | Backtracks | Tangent rebuilds | Plastic nonlinear sev | Contact nonlinear sev |"
     )
     lines.append(
-        "| --- | --- | ---: | ---: | ---: | ---: | ---: | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |"
+        "| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |"
     )
 
     for fixture_id in NONLINEAR_FIXTURES:
@@ -80,7 +77,7 @@ def build_summary(report):
             tangent = tmap.get("nonlinear_tangent_rebuild_count", {}).get("observed")
 
         lines.append(
-            "| {} | {} | {} | {} | {} | {} | {} | {} | {} | {} | {} | {} | {} | {} | {} |".format(
+            "| {} | {} | {} | {} | {} | {} | {} | {} | {} |".format(
                 fixture_id,
                 record.get("publishable", "-"),
                 format_num(record.get("gpu_run_ms")),
@@ -88,31 +85,8 @@ def build_summary(report):
                 format_num(failed),
                 format_num(backtracks),
                 format_num(tangent),
-                record.get("thermo_coupling_enabled", "-"),
-                format_num(record.get("thermo_effective_modulus_scale")),
-                format_num(record.get("thermo_constitutive_material_spread_ratio")),
-                format_num(record.get("thermo_assignment_heterogeneity_index")),
-                format_num(record.get("thermo_transient_severity")),
-                format_num(record.get("thermo_nonlinear_severity")),
                 format_num(record.get("plastic_nonlinear_severity")),
                 format_num(record.get("contact_nonlinear_severity")),
-            )
-        )
-
-    lines.append("")
-    lines.append("### Thermo Kickoff")
-    thermo_record = records_by_id.get(THERMO_FIXTURE)
-    if thermo_record is None:
-        lines.append(f"- `{THERMO_FIXTURE}`: missing")
-    else:
-        lines.append(
-            "- enabled={} modulus_scale={} spread_ratio={} heterogeneity_index={} transient_severity={} nonlinear_severity={}".format(
-                thermo_record.get("thermo_coupling_enabled", "-"),
-                format_num(thermo_record.get("thermo_effective_modulus_scale")),
-                format_num(thermo_record.get("thermo_constitutive_material_spread_ratio")),
-                format_num(thermo_record.get("thermo_assignment_heterogeneity_index")),
-                format_num(thermo_record.get("thermo_transient_severity")),
-                format_num(thermo_record.get("thermo_nonlinear_severity")),
             )
         )
 

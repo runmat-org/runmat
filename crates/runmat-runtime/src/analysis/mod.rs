@@ -28,8 +28,7 @@ use crate::operations::{
     OperationErrorSeverity, OperationErrorSpec, OperationErrorType,
 };
 use policy::{
-    breach_rate_greater_than, breach_rate_less_than, thermo_field_coverage_min_for_policy,
-    thermo_spatial_gradient_threshold_for_policy, thermo_thresholds_for_policy,
+    breach_rate_greater_than, breach_rate_less_than,
     EM_ASSIGNMENT_COVERAGE_MIN_BALANCED, EM_BOUNDARY_ANCHOR_MIN_BALANCED,
     EM_BOUNDARY_ENERGY_MIN_BALANCED, EM_BOUNDARY_LOCALIZATION_MIN_BALANCED,
     EM_BOUNDARY_PENALTY_CONTRIBUTION_MAX_BALANCED, EM_CONDITIONING_MAX_BALANCED,
@@ -41,8 +40,7 @@ use policy::{
     EM_SOURCE_INTERFERENCE_MAX_BALANCED, EM_SOURCE_MATERIAL_ALIGNMENT_MIN_BALANCED,
     EM_SOURCE_OVERLAP_MAX_BALANCED, EM_SOURCE_REALIZATION_MIN_BALANCED,
     EM_SOURCE_REGION_COVERAGE_MIN_BALANCED, EM_SOURCE_REGION_ENERGY_CONSISTENCY_MIN_BALANCED,
-    EM_SWEEP_COUNT_MIN_BALANCED, THERMO_HETEROGENEITY_THRESHOLD_BALANCED,
-    THERMO_SPREAD_THRESHOLD_BALANCED,
+    EM_SWEEP_COUNT_MIN_BALANCED,
 };
 
 mod artifact_root;
@@ -2690,48 +2688,6 @@ fn analysis_admit_transient_run_with_id(
         item.code == "FEA_TRANSIENT_STEP_FAILURE"
             && item.severity == runmat_analysis_fea::diagnostics::FeaDiagnosticSeverity::Warning
     });
-    let electro_transient_warn = run.diagnostics.iter().any(|item| {
-        item.code == "FEA_ET_TRANSIENT"
-            && item.severity == runmat_analysis_fea::diagnostics::FeaDiagnosticSeverity::Warning
-    });
-    let thermo_spatial_gradient_index = diagnostic_metric(
-        &run.diagnostics,
-        "FEA_TM_COUPLING",
-        "spatial_gradient_index",
-    );
-    let thermo_spatial_coverage_ratio = diagnostic_metric(
-        &run.diagnostics,
-        "FEA_TM_COUPLING",
-        "spatial_coverage_ratio",
-    );
-    let thermo_gradient_spatial_threshold =
-        thermo_spatial_gradient_threshold_for_policy(options.quality_policy);
-    let thermo_gradient_instability = thermo_spatial_gradient_index
-        .map(|value| value > thermo_gradient_spatial_threshold)
-        .unwrap_or(false);
-    let thermo_spread_ratio = diagnostic_metric(
-        &run.diagnostics,
-        "FEA_TM_COUPLING",
-        "constitutive_material_spread_ratio",
-    );
-    let thermo_heterogeneity_index = diagnostic_metric(
-        &run.diagnostics,
-        "FEA_TM_COUPLING",
-        "assignment_heterogeneity_index",
-    );
-    let (thermo_spread_threshold, thermo_heterogeneity_threshold) =
-        thermo_thresholds_for_policy(options.quality_policy);
-    let thermo_field_coverage_min = thermo_field_coverage_min_for_policy(options.quality_policy);
-    let thermo_spread_breach = thermo_spread_ratio
-        .map(|value| value > thermo_spread_threshold)
-        .unwrap_or(false);
-    let thermo_heterogeneity_breach = thermo_heterogeneity_index
-        .map(|value| value > thermo_heterogeneity_threshold)
-        .unwrap_or(false);
-    let thermo_field_coverage_breach = thermo_spatial_coverage_ratio
-        .map(|value| value < thermo_field_coverage_min)
-        .unwrap_or(false);
-
     let mut quality_reasons = Vec::new();
     if solver_convergence == QualityGate::Warn {
         quality_reasons.push(QualityReason {
@@ -2760,53 +2716,6 @@ fn analysis_admit_transient_run_with_id(
             detail: "transient step retry budget was exhausted".to_string(),
         });
     }
-    if electro_transient_warn {
-        quality_reasons.push(QualityReason {
-            code: QualityReasonCode::ElectroThermalTransientStress,
-            detail: "electro-thermal transient coupling severity exceeded balanced threshold"
-                .to_string(),
-        });
-    }
-    if thermo_spread_breach {
-        quality_reasons.push(QualityReason {
-            code: QualityReasonCode::ThermoMechanicalConstitutiveSpreadHigh,
-            detail: format!(
-                "thermo constitutive material spread ratio {} exceeds threshold {}",
-                thermo_spread_ratio.unwrap_or(0.0),
-                thermo_spread_threshold
-            ),
-        });
-    }
-    if thermo_heterogeneity_breach {
-        quality_reasons.push(QualityReason {
-            code: QualityReasonCode::ThermoMechanicalAssignmentHeterogeneityHigh,
-            detail: format!(
-                "thermo assignment heterogeneity index {} exceeds threshold {}",
-                thermo_heterogeneity_index.unwrap_or(0.0),
-                thermo_heterogeneity_threshold
-            ),
-        });
-    }
-    if thermo_gradient_instability {
-        quality_reasons.push(QualityReason {
-            code: QualityReasonCode::ThermoMechanicalGradientInstability,
-            detail: format!(
-                "thermo spatial gradient index {} exceeds threshold {}",
-                thermo_spatial_gradient_index.unwrap_or(0.0),
-                thermo_gradient_spatial_threshold,
-            ),
-        });
-    }
-    if thermo_field_coverage_breach {
-        quality_reasons.push(QualityReason {
-            code: QualityReasonCode::ThermoMechanicalFieldCoverageLow,
-            detail: format!(
-                "thermo field spatial coverage ratio {} is below minimum {}",
-                thermo_spatial_coverage_ratio.unwrap_or(0.0),
-                thermo_field_coverage_min
-            ),
-        });
-    }
     if fallback_events
         .iter()
         .any(FallbackEvent::is_solver_backend_fallback)
@@ -2830,9 +2739,6 @@ fn analysis_admit_transient_run_with_id(
                         r.code,
                         QualityReasonCode::TransientStabilityExceeded
                             | QualityReasonCode::TransientStepFailure
-                            | QualityReasonCode::ThermoMechanicalConstitutiveSpreadHigh
-                            | QualityReasonCode::ThermoMechanicalAssignmentHeterogeneityHigh
-                            | QualityReasonCode::ThermoMechanicalGradientInstability
                     )
                 })
         }
@@ -2885,10 +2791,6 @@ fn analysis_admit_transient_run_with_id(
             relative_energy_balance_error_snapshots: transient_run
                 .relative_energy_balance_error_snapshots,
             dynamic_balance_snapshots: transient_run.dynamic_balance_snapshots,
-            electro_thermal_temperature_snapshots: transient_run
-                .electro_thermal_temperature_snapshots,
-            electro_thermal_thermal_residual_snapshots: transient_run
-                .electro_thermal_thermal_residual_snapshots,
             residual_norms: transient_run.residual_norms,
             integration_method: TransientIntegrationMethod::NewmarkAverageAcceleration,
         }),
@@ -3213,14 +3115,6 @@ fn execute_nonlinear_with_options(
         .count();
     let strict_increment_failure = nonlinear_run.failed_increments > 0;
     let strict_iteration_cap_exhausted = iteration_cap_hits > 0;
-    let thermo_nonlinear_warn = run.diagnostics.iter().any(|item| {
-        item.code == "FEA_TM_NONLINEAR"
-            && item.severity == runmat_analysis_fea::diagnostics::FeaDiagnosticSeverity::Warning
-    });
-    let electro_nonlinear_warn = run.diagnostics.iter().any(|item| {
-        item.code == "FEA_ET_NONLINEAR"
-            && item.severity == runmat_analysis_fea::diagnostics::FeaDiagnosticSeverity::Warning
-    });
     let plastic_nonlinear_warn = run.diagnostics.iter().any(|item| {
         item.code == "FEA_PLASTIC_NONLINEAR"
             && item.severity == runmat_analysis_fea::diagnostics::FeaDiagnosticSeverity::Warning
@@ -3229,43 +3123,6 @@ fn execute_nonlinear_with_options(
         item.code == "FEA_CONTACT_NONLINEAR"
             && item.severity == runmat_analysis_fea::diagnostics::FeaDiagnosticSeverity::Warning
     });
-    let thermo_spatial_gradient_index = diagnostic_metric(
-        &run.diagnostics,
-        "FEA_TM_COUPLING",
-        "spatial_gradient_index",
-    );
-    let thermo_spatial_coverage_ratio = diagnostic_metric(
-        &run.diagnostics,
-        "FEA_TM_COUPLING",
-        "spatial_coverage_ratio",
-    );
-    let thermo_gradient_spatial_threshold =
-        thermo_spatial_gradient_threshold_for_policy(options.quality_policy);
-    let thermo_gradient_instability = thermo_spatial_gradient_index
-        .map(|value| value > thermo_gradient_spatial_threshold)
-        .unwrap_or(false);
-    let thermo_spread_ratio = diagnostic_metric(
-        &run.diagnostics,
-        "FEA_TM_COUPLING",
-        "constitutive_material_spread_ratio",
-    );
-    let thermo_heterogeneity_index = diagnostic_metric(
-        &run.diagnostics,
-        "FEA_TM_COUPLING",
-        "assignment_heterogeneity_index",
-    );
-    let (thermo_spread_threshold, thermo_heterogeneity_threshold) =
-        thermo_thresholds_for_policy(options.quality_policy);
-    let thermo_field_coverage_min = thermo_field_coverage_min_for_policy(options.quality_policy);
-    let thermo_spread_breach = thermo_spread_ratio
-        .map(|value| value > thermo_spread_threshold)
-        .unwrap_or(false);
-    let thermo_heterogeneity_breach = thermo_heterogeneity_index
-        .map(|value| value > thermo_heterogeneity_threshold)
-        .unwrap_or(false);
-    let thermo_field_coverage_breach = thermo_spatial_coverage_ratio
-        .map(|value| value < thermo_field_coverage_min)
-        .unwrap_or(false);
 
     let mut quality_reasons = Vec::new();
     if solver_convergence == QualityGate::Warn {
@@ -3294,20 +3151,6 @@ fn execute_nonlinear_with_options(
             ),
         });
     }
-    if thermo_nonlinear_warn {
-        quality_reasons.push(QualityReason {
-            code: QualityReasonCode::ThermoMechanicalNonlinearStress,
-            detail: "thermo-mechanical nonlinear coupling severity exceeded balanced threshold"
-                .to_string(),
-        });
-    }
-    if electro_nonlinear_warn {
-        quality_reasons.push(QualityReason {
-            code: QualityReasonCode::ElectroThermalNonlinearStress,
-            detail: "electro-thermal nonlinear coupling severity exceeded balanced threshold"
-                .to_string(),
-        });
-    }
     if plastic_nonlinear_warn {
         quality_reasons.push(QualityReason {
             code: QualityReasonCode::PlasticityNonlinearStress,
@@ -3318,46 +3161,6 @@ fn execute_nonlinear_with_options(
         quality_reasons.push(QualityReason {
             code: QualityReasonCode::ContactNonlinearStress,
             detail: "contact nonlinear severity exceeded balanced threshold".to_string(),
-        });
-    }
-    if thermo_spread_breach {
-        quality_reasons.push(QualityReason {
-            code: QualityReasonCode::ThermoMechanicalConstitutiveSpreadHigh,
-            detail: format!(
-                "thermo constitutive material spread ratio {} exceeds threshold {}",
-                thermo_spread_ratio.unwrap_or(0.0),
-                thermo_spread_threshold
-            ),
-        });
-    }
-    if thermo_heterogeneity_breach {
-        quality_reasons.push(QualityReason {
-            code: QualityReasonCode::ThermoMechanicalAssignmentHeterogeneityHigh,
-            detail: format!(
-                "thermo assignment heterogeneity index {} exceeds threshold {}",
-                thermo_heterogeneity_index.unwrap_or(0.0),
-                thermo_heterogeneity_threshold
-            ),
-        });
-    }
-    if thermo_gradient_instability {
-        quality_reasons.push(QualityReason {
-            code: QualityReasonCode::ThermoMechanicalGradientInstability,
-            detail: format!(
-                "thermo spatial gradient index {} exceeds threshold {}",
-                thermo_spatial_gradient_index.unwrap_or(0.0),
-                thermo_gradient_spatial_threshold,
-            ),
-        });
-    }
-    if thermo_field_coverage_breach {
-        quality_reasons.push(QualityReason {
-            code: QualityReasonCode::ThermoMechanicalFieldCoverageLow,
-            detail: format!(
-                "thermo field spatial coverage ratio {} is below minimum {}",
-                thermo_spatial_coverage_ratio.unwrap_or(0.0),
-                thermo_field_coverage_min
-            ),
         });
     }
     if fallback_events
@@ -3386,12 +3189,8 @@ fn execute_nonlinear_with_options(
                         r.code,
                         QualityReasonCode::NonlinearResidualExceeded
                             | QualityReasonCode::NonlinearIncrementFailure
-                            | QualityReasonCode::ThermoMechanicalNonlinearStress
                             | QualityReasonCode::PlasticityNonlinearStress
                             | QualityReasonCode::ContactNonlinearStress
-                            | QualityReasonCode::ThermoMechanicalConstitutiveSpreadHigh
-                            | QualityReasonCode::ThermoMechanicalAssignmentHeterogeneityHigh
-                            | QualityReasonCode::ThermoMechanicalGradientInstability
                     )
                 })
         }
@@ -3747,22 +3546,6 @@ fn diagnostic_metric(
                 .find_map(|token| token.strip_prefix(&format!("{key}=")))
         })
         .and_then(|value| value.parse::<f64>().ok())
-}
-
-fn diagnostic_metric_u64(
-    diagnostics: &[runmat_analysis_fea::diagnostics::FeaDiagnostic],
-    code: &str,
-    key: &str,
-) -> Option<u64> {
-    diagnostics
-        .iter()
-        .find(|diag| diag.code == code)
-        .and_then(|diag| {
-            diag.message
-                .split_whitespace()
-                .find_map(|token| token.strip_prefix(&format!("{key}=")))
-        })
-        .and_then(|value| value.parse::<u64>().ok())
 }
 
 fn diagnostic_metric_bool(
