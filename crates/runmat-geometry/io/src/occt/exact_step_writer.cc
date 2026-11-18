@@ -18,6 +18,7 @@
 #include "exact_kernel.hxx"
 
 #include <BRepBuilderAPI_Copy.hxx>
+#include <BRepTools_Modifier.hxx>
 #include <IGESCAFControl_Writer.hxx>
 #include <IGESControl_Controller.hxx>
 #include <BRep_Builder.hxx>
@@ -26,6 +27,7 @@
 #include <STEPCAFControl_Controller.hxx>
 #include <STEPCAFControl_Writer.hxx>
 #include <STEPControl_Writer.hxx>
+#include <ShapeCustom_DirectModification.hxx>
 #include <Standard_Failure.hxx>
 #include <TCollection_AsciiString.hxx>
 #include <TCollection_ExtendedString.hxx>
@@ -89,6 +91,15 @@ rust::Vec<std::uint8_t> kernel_export_step(rust::Slice<const KInstr> document,
       // kept from its cut) share their common faces; written as they are, XCAF would store one
       // face for both parts, so it would carry one part's name and drop the other's solid.
       std::shared_ptr<BRepBuilderAPI_Copy> copy;
+      // The copy with every surface direct: a cone with a negative semi-angle (a revolved drill
+      // point or countersink) becomes the same cone with a positive one. OCCT 8.0's STEP writer
+      // drops a face on a cone with a negative semi-angle and writes the rest of the solid, so
+      // the file read back has an open shell. Other surfaces are unchanged.
+      std::shared_ptr<BRepTools_Modifier> direct;
+      // The written face of a face of one of the part's bodies.
+      TopoDS_Shape written(const TopoDS_Shape& face) const {
+        return direct->ModifiedShape(copy->ModifiedShape(face));
+      }
     };
     std::vector<Part> parts;
     std::vector<TDF_Label> occurrences;
@@ -122,7 +133,10 @@ rust::Vec<std::uint8_t> kernel_export_step(rust::Slice<const KInstr> document,
             shape = c;
           }
           p.copy = std::make_shared<BRepBuilderAPI_Copy>(shape, Standard_True, Standard_False);
-          p.label = st->AddShape(p.copy->Shape(), Standard_False);
+          p.direct = std::make_shared<BRepTools_Modifier>(p.copy->Shape(),
+                                                          new ShapeCustom_DirectModification);
+          if (!p.direct->IsDone()) fail("a part's surfaces could not be made direct for export");
+          p.label = st->AddShape(p.direct->ModifiedShape(p.copy->Shape()), Standard_False);
           set_name(p.label, in.strs.empty() ? "part" : std::string(in.strs[0]));
           if (in.reals.size() >= 4 && in.reals[0] != 0.0)
             ct->SetColor(p.label, Quantity_Color(in.reals[1], in.reals[2], in.reals[3], Quantity_TOC_RGB), XCAFDoc_ColorSurf);
@@ -139,7 +153,7 @@ rust::Vec<std::uint8_t> kernel_export_step(rust::Slice<const KInstr> document,
         case 4: {
           const Part& p = parts.at(static_cast<std::size_t>(in.ints[0]));
           const Body& b = *p.bodies.at(static_cast<std::size_t>(in.ints[1]));
-          const TopoDS_Shape f = p.copy->ModifiedShape(b.faces.at(static_cast<std::size_t>(in.ints[2])));
+          const TopoDS_Shape f = p.written(b.faces.at(static_cast<std::size_t>(in.ints[2])));
           TDF_Label sub = st->AddSubShape(p.label, f);
           if (sub.IsNull()) fail("a named face is not part of its body");
           if (in.op == 3) set_name(sub, std::string(in.strs.at(0)));
