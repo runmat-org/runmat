@@ -554,6 +554,24 @@ jobs:
           python scripts/development/run-workspace-test-group.py "${{ matrix.test_group }}" --shard-index "${{ matrix.shard_index || 0 }}" --shard-count "${{ matrix.shard_count || 1 }}" --reclaim-completed-test-binaries 2>&1 | Tee-Object -FilePath test.log
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
+      # rust-cache saves this target after the job. A restored target that grows
+      # past the build volume fails the next restore ("No space left on device").
+      # Record its size and its most-duplicated crates so a save cap can be set from data.
+      - name: Report Rust target size before cache save (Windows)
+        if: success() && runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $deps = Join-Path $env:CARGO_TARGET_DIR 'debug/deps'
+          $files = @(Get-ChildItem -LiteralPath $env:CARGO_TARGET_DIR -Recurse -File -Force -ErrorAction SilentlyContinue)
+          $bytes = ($files | Measure-Object -Property Length -Sum).Sum
+          $free = (Get-PSDrive -Name (Get-Item -LiteralPath $env:CARGO_TARGET_DIR).PSDrive.Name).Free
+          Write-Host ("Rust target: {0:N1} GiB logical in {1} files; build volume {2:N1} GiB free" -f ($bytes / 1GB), $files.Count, ($free / 1GB))
+          if (Test-Path -LiteralPath $deps) {
+            Get-ChildItem -LiteralPath $deps -File -Filter '*.rlib' |
+              Group-Object { $_.BaseName -replace '-[0-9a-f]{16}$', '' } |
+              Sort-Object Count -Descending | Select-Object -First 10 |
+              ForEach-Object { Write-Host ("{0,4} variants  {1}" -f $_.Count, $_.Name) }
+          }
 
       - name: Upload analysis benchmark artifacts
         if: always() && ((github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master' || github.ref == 'refs/heads/release' || startsWith(github.ref, 'refs/heads/release/'))) || (github.event_name == 'pull_request' && failure()))
