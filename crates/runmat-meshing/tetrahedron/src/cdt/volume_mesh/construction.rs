@@ -69,13 +69,14 @@ fn construct_charged(
     // The finished mesh stays charged while validation rebuilds its constraints beside it.
     let mut charge = super::residency::ResidentCharge::new(memory);
     charge.hold(result.resident_bytes())?;
-    validate_delaunay_volume_mesh(
+    super::validation::validate_charged(
         topology,
         surface,
         metric_request,
         &result,
         options,
         cancellation,
+        memory,
     )?;
     Ok(ValidatedDelaunayVolumeMesh::new(result))
 }
@@ -102,12 +103,27 @@ fn construct_with_observer(
                 "solid boundary cannot define a nondegenerate canonical volume frame",
             )
         })?;
+    // The ledger charges what construction holds beside the component it is meshing: the
+    // partitioned constraints still to mesh and the components already meshed.
+    let mut ledger = super::residency::ResidentCharge::new(memory);
+    let physical_bytes = super::residency::constraints_bytes(&physical_constraints);
+    // Partitioning copies each region's constraints out of the aggregate source.
+    ledger.hold(physical_bytes.saturating_mul(2))?;
     let components = components::partition_constraints(&physical_constraints)?;
     // Each partition owns its constraints; the aggregate source is no longer used.
     drop(physical_constraints);
+    let mut pending = components
+        .iter()
+        .map(|component| super::residency::constraints_bytes(&component.constraints))
+        .fold(0, u64::saturating_add);
+    let mut completed = 0_u64;
     let mut meshes = Vec::with_capacity(components.len());
     let mut remaining_insertions = options.refinement.maximum_insertions;
     for component in components {
+        // The component's own constraints are charged by its construction.
+        pending =
+            pending.saturating_sub(super::residency::constraints_bytes(&component.constraints));
+        ledger.hold(pending.saturating_add(completed))?;
         let mut component_options = options;
         component_options.refinement.maximum_insertions = remaining_insertions;
         let mut mesh = construct_component_mesh(
@@ -128,7 +144,12 @@ fn construct_with_observer(
             &mut mesh.facet_recovery_insertions,
             &component.global_facet_indices,
         )?;
+        completed = completed.saturating_add(mesh.resident_bytes());
+        ledger.hold(pending.saturating_add(completed))?;
         meshes.push(mesh);
+    }
+    if meshes.len() > 1 {
+        ledger.hold(completed.saturating_add(super::residency::assembly_forecast(&meshes)))?;
     }
     components::assemble(meshes, metric_request, options, cancellation)
 }

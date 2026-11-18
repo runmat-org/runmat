@@ -23,10 +23,44 @@ pub fn validate_delaunay_volume_mesh(
     options: DelaunayVolumeMeshOptions,
     cancellation: &dyn MeshingCancellationSignal,
 ) -> Result<(), DelaunayVolumeMeshError> {
+    validate_charged(
+        topology,
+        surface,
+        metric_request,
+        result,
+        options,
+        cancellation,
+        None,
+    )
+}
+
+/// Validates `result` as [`validate_delaunay_volume_mesh`] does, charging the rebuilt
+/// constraints and the bound on every check's scratch to `memory` (the run's memory authority)
+/// before the checks allocate it.
+pub(in crate::cdt) fn validate_charged(
+    topology: &ExactBRepTopology,
+    surface: &ExactSurfaceMesh,
+    metric_request: &MetricFieldRequest,
+    result: &DelaunayVolumeMesh,
+    options: DelaunayVolumeMeshOptions,
+    cancellation: &dyn MeshingCancellationSignal,
+    memory: Option<&dyn runmat_geometry_core::GeometryEvaluationControl>,
+) -> Result<(), DelaunayVolumeMeshError> {
     validate_option_consistency(options)?;
     let constraints =
         build_delaunay_constraints(topology, surface, options.constraints, cancellation)
             .map_err(super::constraint_error)?;
+    let mut charge = super::residency::ResidentCharge::new(memory);
+    charge.hold(
+        super::residency::constraints_bytes(&constraints).saturating_add(
+            super::residency::validation_scratch_bytes(
+                result,
+                &constraints,
+                topology.edges.len(),
+                !metric_request.contributions.is_empty(),
+            ),
+        ),
+    )?;
     let protected_faces = result
         .provenance
         .facets

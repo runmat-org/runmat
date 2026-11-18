@@ -82,8 +82,8 @@ pub fn materialized_fea_geometry(
     })
 }
 
-/// Tessellates a materialized study geometry under its own identities and adds the study's
-/// resolved regions as face overlays. `options.source_units` is taken from the materialized
+/// Tessellates a materialized study geometry under its own identities, names each face and body
+/// as the CAD author did, and adds the study's resolved regions as face overlays. `options.source_units` is taken from the materialized
 /// document.
 pub fn materialized_geometry_preview(
     materialized: &MaterializedFeaGeometry,
@@ -106,6 +106,7 @@ pub fn materialized_geometry_preview(
         context,
         &materialized.topology,
         &materialized.output.source_face_ids,
+        &materialized.output.display_names,
     )
     .map_err(|error| error.to_string())?;
     let mut asset = imported.asset;

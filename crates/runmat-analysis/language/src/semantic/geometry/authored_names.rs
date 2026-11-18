@@ -6,9 +6,34 @@ use crate::{
     FeaDiagnostic, FeaDiagnosticLocation, FeaDiagnosticPhase, FeaDiagnosticSeverity,
     GeometryInspectionCapability,
 };
+use crate::semantic::CheckedFeaStatementKind;
 use runmat_geometry_core::{
     GeometryRegionCardinality, GeometryRegionDefinition, GeometryRegionRole, GeometryRegionSelector,
 };
+
+/// The span of `region <id> : …` inside the geometry declaration, so a refusal points at the
+/// selector the author wrote; the declaration's span when the block can't be found.
+fn region_span(declaration: &CheckedFeaDeclaration, region_id: &str) -> runmat_types::Span {
+    declaration
+        .statements
+        .iter()
+        .find(|statement| match &statement.kind {
+            CheckedFeaStatementKind::Block { header, .. } => header
+                .trim()
+                .strip_prefix("region ")
+                .and_then(|rest| rest.split_once(':'))
+                .is_some_and(|(name, _)| name.trim() == region_id),
+            _ => false,
+        })
+        .map_or(declaration.span, |statement| statement.span)
+}
+
+/// Names a refusal lists: the names the author wrote in the design or CAD file. Generated
+/// topology references (`feature.<name>.<kind>.<role>…`) still match a `select name` that spells
+/// them, but they are not offered as suggestions.
+fn listed(name: &str) -> bool {
+    !name.starts_with("feature.")
+}
 
 /// Refuses a `select name` that matches no entity of its role, or several for an exactly_one
 /// region. Without readable names each such region gets a located warning that the name cannot
@@ -39,7 +64,7 @@ pub(super) fn check(
                     FeaDiagnosticPhase::Lowering,
                     Some(FeaDiagnosticLocation {
                         path: declaration.module.clone(),
-                        span: declaration.span,
+                        span: region_span(declaration, &region.region_id),
                     }),
                 )
             });
@@ -69,7 +94,7 @@ pub(super) fn check(
         if matches > 1 && region.cardinality == GeometryRegionCardinality::ExactlyOne {
             error(
                 declaration,
-                declaration.span,
+                region_span(declaration, &region.region_id),
                 format!(
                     "region `{}` selects {role} name \"{name}\", which {matches} {roles} in `{}` carry; it expects exactly_one (name each entity uniquely in the CAD file, or use expect one_or_more)",
                     region.region_id, inspection.source_path
@@ -81,7 +106,11 @@ pub(super) fn check(
         if matches > 0 {
             continue;
         }
-        let mut available = available.to_vec();
+        let mut available = available
+            .iter()
+            .filter(|candidate| listed(candidate))
+            .cloned()
+            .collect::<Vec<_>>();
         available.dedup();
         let message = if available.is_empty() {
             format!(
@@ -100,6 +129,11 @@ pub(super) fn check(
                     .join(", ")
             )
         };
-        error(declaration, declaration.span, message, diagnostics);
+        error(
+            declaration,
+            region_span(declaration, &region.region_id),
+            message,
+            diagnostics,
+        );
     }
 }

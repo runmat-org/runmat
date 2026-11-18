@@ -37,7 +37,7 @@
     },
     {
       "name": "storage.type.assembly",
-      "match": "(?<![\\w])(?:configuration|occurrence|connector|fasteners|envelope|exploded|property|pattern|publish|mirror|sketch|mate|view|use)(?![\\w])"
+      "match": "(?<![\\w])(?:configuration|display_state|occurrence|connector|fasteners|operation|envelope|exploded|position|property|contact|feature|pattern|publish|mirror|motion|sketch|mate|view|use)(?![\\w])"
     },
     {
       "name": "keyword.other.assembly",
@@ -86,13 +86,19 @@
         "words": [
           "configuration",
           "connector",
+          "contact",
+          "display_state",
           "envelope",
           "exploded",
           "fasteners",
+          "feature",
           "mate",
           "mirror",
+          "motion",
           "occurrence",
+          "operation",
           "pattern",
+          "position",
           "property",
           "publish",
           "sketch",

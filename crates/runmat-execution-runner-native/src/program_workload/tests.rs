@@ -67,6 +67,8 @@ async fn request_for_source(source_text: &str) -> ProgramExecutionRequest {
 
 #[tokio::test]
 async fn owned_transcript_preserves_success_and_original_failure_prefix() {
+    // Program execution roots values in the process-wide GC heap.
+    let _gc = runmat_gc::gc_test_guard();
     use runmat_execution::console::{ConsoleCompletion, ConsoleLimits};
     for (source, succeeds) in [
         ("function y = environment(); disp('owned sentinel'); y = 7; end", true),
@@ -89,6 +91,8 @@ async fn owned_transcript_preserves_success_and_original_failure_prefix() {
 
 #[tokio::test]
 async fn original_unit_consumes_exact_frozen_environment_and_live_cancellation() {
+    // Program execution roots values in the process-wide GC heap.
+    let _gc = runmat_gc::gc_test_guard();
     let request = original_request().await;
     for value in ["first", "second"] {
         let environment = [("RUNMAT_NATIVE_CONTEXT".into(), value.into())];

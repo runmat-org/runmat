@@ -1,4 +1,5 @@
 use runmat_geometry_core::ExactBRepTopology;
+use runmat_meshing_core::resident_bytes::vec_bytes;
 use runmat_meshing_core::MeshingCancellationSignal;
 use runmat_meshing_size::metric::MetricFieldRequest;
 use runmat_meshing_surface::ExactSurfaceMesh;
@@ -173,6 +174,13 @@ fn construct_component_mesh(
     let cancellation = execution.cancellation;
     let observer = execution.observer;
     let constraints = &owned_constraints;
+    // Each phase before convergence is charged its live inputs and a forecast of the working
+    // topology it builds before it runs, then re-measured once it has finished.
+    let mut phase = residency::ResidentCharge::new(execution.memory);
+    let constraint_bytes = residency::constraints_bytes(constraints);
+    phase.hold(
+        constraint_bytes.saturating_add(residency::point_set_forecast(constraints.nodes.len())),
+    )?;
     let component_span = tracing::info_span!(
         "meshing.tetrahedron.component",
         constraint_nodes = constraints.nodes.len(),
@@ -214,6 +222,14 @@ fn construct_component_mesh(
         .map_err(point_set_error)
         .map(|topology| (topology, Vec::new()))
     })?;
+    phase.hold(
+        constraint_bytes
+            .saturating_add(residency::topology_bytes(&initial))
+            .saturating_add(vec_bytes::<[runmat_meshing_core::StableDigest; 3]>(
+                point_set_barriers.capacity(),
+            ))
+            .saturating_add(residency::rebuild_forecast(&initial)),
+    )?;
     let initial = traced_substage("point_set_coordinate_normalization", || {
         normalize_point_set_coordinates(
             initial,
@@ -223,6 +239,11 @@ fn construct_component_mesh(
         )
     })?;
     drop(point_set_barriers);
+    phase.hold(
+        constraint_bytes
+            .saturating_add(residency::topology_bytes(&initial))
+            .saturating_add(residency::rebuild_forecast(&initial)),
+    )?;
     let segments = traced_substage("segment_recovery", || {
         recover_delaunay_segments_from_point_set(
             initial,
@@ -232,6 +253,11 @@ fn construct_component_mesh(
         )
         .map_err(segment_error)
     })?;
+    phase.hold(
+        constraint_bytes
+            .saturating_add(residency::segment_recovery_bytes(&segments))
+            .saturating_add(residency::rebuild_forecast(&segments.topology)),
+    )?;
     let mut facets = traced_substage("facet_recovery", || {
         recover_delaunay_facets(
             segments,
@@ -241,10 +267,25 @@ fn construct_component_mesh(
         )
         .map_err(facet_error)
     })?;
+    let facet_bytes = residency::facet_recovery_bytes(&facets);
+    phase.hold(
+        constraint_bytes
+            .saturating_add(facet_bytes)
+            .saturating_add(residency::rebuild_forecast(&facets.topology)),
+    )?;
     let carving = traced_substage("carving", || {
         carve_delaunay_volume(&facets, constraints, options.carving, cancellation)
             .map_err(carving_error)
     })?;
+    let carving_bytes = residency::carving_bytes(&carving);
+    // The carved topology moves into region seeding; its removed cells and facet sides stay.
+    let carving_remainder =
+        carving_bytes.saturating_sub(residency::topology_bytes(&carving.topology));
+    phase.hold(
+        constraint_bytes
+            .saturating_add(facet_bytes)
+            .saturating_add(carving_bytes),
+    )?;
     let provenance = traced_substage("provenance", || {
         build_delaunay_volume_provenance(
             &facets,
@@ -265,6 +306,21 @@ fn construct_component_mesh(
         .iter()
         .map(|facet| facet.node_identities)
         .collect::<Vec<_>>();
+    let provenance_bytes = residency::provenance_bytes(&provenance);
+    let retained_bytes = constraint_bytes
+        .saturating_add(carving_remainder)
+        .saturating_add(provenance_bytes)
+        .saturating_add(vec_bytes::<super::DelaunayFacetSteinerInsertion>(
+            facet_recovery_insertions.capacity(),
+        ))
+        .saturating_add(vec_bytes::<[runmat_meshing_core::StableDigest; 3]>(
+            protected_faces.capacity(),
+        ));
+    phase.hold(
+        retained_bytes
+            .saturating_add(residency::topology_bytes(&carving.topology))
+            .saturating_add(residency::rebuild_forecast(&carving.topology)),
+    )?;
     let seeded = traced_substage("region_seed", || {
         region_seed::seed_carved_regions(
             carving.topology,
@@ -273,6 +329,14 @@ fn construct_component_mesh(
             cancellation,
         )
     })?;
+    let seed_bytes =
+        vec_bytes::<runmat_meshing_core::StableDigest>(seeded.node_identities.capacity());
+    phase.hold(
+        retained_bytes
+            .saturating_add(seed_bytes)
+            .saturating_add(residency::topology_bytes(&seeded.topology))
+            .saturating_add(residency::rebuild_forecast(&seeded.topology)),
+    )?;
     let materialized = traced_substage("coordinate_materialization", || {
         materialize_recovered_coordinates(
             seeded.topology,
@@ -282,6 +346,12 @@ fn construct_component_mesh(
         )
     })?;
     drop(protected_faces);
+    phase.hold(
+        retained_bytes
+            .saturating_add(seed_bytes)
+            .saturating_add(residency::topology_bytes(&materialized))
+            .saturating_add(residency::rebuild_forecast(&materialized)),
+    )?;
     let quality = traced_substage("quality", || {
         evaluate_delaunay_volume_quality(
             &materialized,
@@ -292,6 +362,12 @@ fn construct_component_mesh(
         )
         .map_err(quality_error)
     })?;
+    phase.hold(
+        retained_bytes
+            .saturating_add(seed_bytes)
+            .saturating_add(residency::topology_bytes(&materialized))
+            .saturating_add(residency::quality_bytes(&quality)),
+    )?;
     if let Some(source) = quality.worst_optimization_tetrahedron.and_then(|identity| {
         quality
             .tetrahedra
@@ -329,6 +405,14 @@ fn construct_component_mesh(
     }
     // Durable provenance and seeded identities now carry every remaining consumer.
     drop(owned_constraints);
+    // Convergence charges the topology, quality and provenance it takes over; this phase keeps
+    // the seeded identities, facet insertions and carving remainder that stay live beside it.
+    phase.hold(
+        retained_bytes
+            .saturating_sub(constraint_bytes)
+            .saturating_sub(provenance_bytes)
+            .saturating_add(seed_bytes),
+    )?;
     observer.observe(quality_replay::VolumeQualitySnapshot {
         topology: &materialized,
         provenance: &provenance,

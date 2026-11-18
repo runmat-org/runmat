@@ -61,3 +61,17 @@ pub fn btree_bytes<K, V>(length: usize) -> u64 {
         .saturating_mul(size_of::<LeafMirror<K, V>>() as u64)
         .saturating_add(internals.saturating_mul(size_of::<InternalMirror<K, V>>() as u64))
 }
+
+/// Upper bound on the heap bytes of `maps` separate `BTreeMap<K, V>`s (or `BTreeSet<K>`s with
+/// `V = ()`) that hold `entries` entries between them, however the entries are distributed.
+///
+/// Each map is bounded as in [`btree_bytes`]; summing those per-map node counts gives at most
+/// `entries / 5 + maps` leaves and at most `leaves / 5 + maps` internal nodes in all.
+pub fn btree_family_bytes<K, V>(maps: usize, entries: usize) -> u64 {
+    let maps = maps as u64;
+    let leaves = (entries as u64 / BTREE_MINIMUM_ENTRIES).saturating_add(maps);
+    let internals = (leaves / BTREE_MINIMUM_ENTRIES).saturating_add(maps);
+    leaves
+        .saturating_mul(size_of::<LeafMirror<K, V>>() as u64)
+        .saturating_add(internals.saturating_mul(size_of::<InternalMirror<K, V>>() as u64))
+}

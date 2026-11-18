@@ -1,9 +1,9 @@
 //! Local composition of the same portable whole-study root used by remote execution.
 
+use runmat_analysis_fea::progress::trace::{self, StudyStep};
 use runmat_analysis_fea::study::{
     compile_analysis_study, plan_structural_study_with_fields, AnalysisStudyCompilationInput,
 };
-use runmat_analysis_fea::progress::trace::{self, StudyStep};
 use runmat_analysis_fea::{FeaProgressEvent, FeaProgressPhase, FeaProgressStatus};
 use tracing::Instrument;
 
@@ -198,8 +198,9 @@ pub async fn execute_prepared_study_locally_with_observers(
         )
         .await?;
         crate::input_materialization::apply_to_model(&mut compiled.model, completed_inputs)?;
-        let workloads = plan_structural_study_with_fields(&compiled, planning, &decoded.initial_fields)
-            .map_err(protocol)?;
+        let workloads =
+            plan_structural_study_with_fields(&compiled, planning, &decoded.initial_fields)
+                .map_err(protocol)?;
         Ok::<_, NativeExecutionError>((compiled, workloads))
     }
     .instrument(assemble_step.clone())

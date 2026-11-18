@@ -87,6 +87,8 @@ study heating {
 //   source/boundary energy; explicit and field-artifact variants are not compared here.
 #[tokio::test]
 async fn checked_named_thermal_inputs_match_tables_and_independent_source_boundary_energy() {
+    // Program execution roots values in the process-wide GC heap.
+    let _gc = runmat_gc::gc_test_guard();
     let directory = tempfile::tempdir().unwrap();
     std::fs::create_dir_all(directory.path().join("src")).unwrap();
     std::fs::write(

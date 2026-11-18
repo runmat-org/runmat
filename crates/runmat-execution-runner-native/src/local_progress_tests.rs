@@ -9,7 +9,9 @@ fn recording() -> (ProgressObserverSlot, Arc<Mutex<Vec<FeaProgressEvent>>>) {
     let events = Arc::new(Mutex::new(Vec::new()));
     let sink = Arc::clone(&events);
     (
-        ProgressObserverSlot::new(Some(Arc::new(move |event| sink.lock().unwrap().push(event)))),
+        ProgressObserverSlot::new(Some(Arc::new(move |event| {
+            sink.lock().unwrap().push(event)
+        }))),
         events,
     )
 }
@@ -59,15 +61,22 @@ fn surface_partitions_sum_to_a_model_wide_face_count_that_ends_at_its_total() {
     let events = events.lock().unwrap();
     let counts = events
         .iter()
-        .filter(|event| event.metadata.get(UNIT_METADATA).map(String::as_str) == Some("surface_faces"))
+        .filter(|event| {
+            event.metadata.get(UNIT_METADATA).map(String::as_str) == Some("surface_faces")
+        })
         .map(|event| (event.current.unwrap(), event.total.unwrap()))
         .collect::<Vec<_>>();
     assert_eq!(counts.first(), Some(&(1, 10)));
     assert_eq!(counts.last(), Some(&(10, 10)));
-    assert!(counts.windows(2).all(|pair| pair[0].0 <= pair[1].0), "{counts:?}");
-    assert!(events.iter().all(|event| event.phase == FeaProgressPhase::MeshPrep
-        && event.status == FeaProgressStatus::Advanced
-        && event.metadata.contains_key("stage")));
+    assert!(
+        counts.windows(2).all(|pair| pair[0].0 <= pair[1].0),
+        "{counts:?}"
+    );
+    assert!(events
+        .iter()
+        .all(|event| event.phase == FeaProgressPhase::MeshPrep
+            && event.status == FeaProgressStatus::Advanced
+            && event.metadata.contains_key("stage")));
 }
 
 #[test]
@@ -139,10 +148,20 @@ fn analysis_frames_decode_back_to_fea_events() {
         payload: serde_json::to_vec(&boundary).unwrap(),
         ..frame.clone()
     };
-    forward_analysis_progress(&slot, vec![frame, boundary, work_frame(2, MeshingWorkCount {
-        unit: MeshingWorkUnit::VolumePoints,
-        current: 1,
-        total: None,
-    })]);
+    forward_analysis_progress(
+        &slot,
+        vec![
+            frame,
+            boundary,
+            work_frame(
+                2,
+                MeshingWorkCount {
+                    unit: MeshingWorkUnit::VolumePoints,
+                    current: 1,
+                    total: None,
+                },
+            ),
+        ],
+    );
     assert_eq!(*events.lock().unwrap(), vec![event]);
 }

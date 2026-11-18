@@ -59,6 +59,11 @@ impl PinnedFsProvider {
 }
 #[async_trait(?Send)]
 impl FsProvider for PinnedFsProvider {
+    /// Pinned inputs live in the namespace of the provider they were pinned from: a cloud
+    /// project's rooted `/x` paths stay absolute on every host OS, including Windows.
+    fn path_namespace(&self) -> crate::FsPathNamespace {
+        self.base.path_namespace()
+    }
     async fn data_manifest_descriptor(
         &self,
         request: &DataManifestRequest,

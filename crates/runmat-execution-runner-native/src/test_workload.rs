@@ -967,6 +967,8 @@ mod tests {
 
     #[tokio::test]
     async fn host_executes_an_exact_test_workload_and_returns_canonical_result() {
+        // Program execution roots values in the process-wide GC heap.
+        let _gc = runmat_gc::gc_test_guard();
         let request = original_request("function tests = arithmeticTest()\n tests = functiontests(localfunctions);\nend\nfunction testAddition(testCase)\n testCase.verifyEqual(1 + 1, 2);\nend\n");
         let response = execute_host_program_request(request).await;
         let ProgramExecutionResponse::Success { outputs } = response else {
@@ -987,6 +989,8 @@ mod tests {
 
     #[tokio::test]
     async fn original_test_attempt_uses_request_context_and_rejects_bundle_substitution() {
+        // Program execution roots values in the process-wide GC heap.
+        let _gc = runmat_gc::gc_test_guard();
         let source = "function tests = arithmeticTest()\n tests = functiontests(localfunctions);\nend\nfunction testEnvironment(testCase)\n testCase.verifyEqual(getenv('RUNMAT_TEST_ORIGINAL'), 'captured');\n testCase.verifyEmpty(getenv('HOME'));\n setenv('RUNMAT_TEST_ORIGINAL','child');\nend\n";
         let host = std::env::var_os("RUNMAT_TEST_ORIGINAL");
         let mut request = original_request(source);
@@ -1128,6 +1132,8 @@ mod tests {
 
     #[tokio::test]
     async fn host_executes_a_packaged_mex_module_from_the_exact_bundle() {
+        // Program execution roots values in the process-wide GC heap.
+        let _gc = runmat_gc::gc_test_guard();
         if Command::new(if cfg!(windows) { "gcc" } else { "clang" })
             .arg("--version")
             .output()
