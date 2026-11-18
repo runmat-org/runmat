@@ -231,6 +231,15 @@ pub struct GeometryMaterializationOutput {
     /// ordinal while analysis selection uses the persistent identity; this is their authoritative
     /// join and must never be inferred from canonical topology ordering.
     pub source_face_ids: BTreeMap<u64, PersistentEntityId>,
+    /// The name a display shows for each face and solid the CAD author named (a STEP face name,
+    /// a solid's or its part's name): `ImportedExactCad::display_names`, the first name in the
+    /// exact import's `entity_names` (the table `select name` and the check read), keyed by the
+    /// entity's analysis selection ID. The kernel representation carries no names, so a display
+    /// of it names each face and its owning body from here. Selector metadata outside geometry
+    /// identity. The encoding omits an empty table, and an omitted field decodes as an empty
+    /// table: the geometry names no face or solid.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub display_names: BTreeMap<String, String>,
     pub regions: ResolvedGeometryRegions,
     pub feature_history: BTreeMap<String, GeometryTopologyHistory>,
     pub feature_resources: Option<GeometryFeatureResourceBounds>,

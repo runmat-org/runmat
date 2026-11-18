@@ -11,12 +11,6 @@ use runmat_meshing_core::{MeshingRequestSettings, PlatformBuildIdentity, StableD
 use serde::Deserialize;
 
 const MAX_REQUEST_BYTES: usize = 64 << 20;
-const MAX_GEOMETRY_MEMORY_BYTES: u64 = 512 << 20;
-const INVENTORY: ObjectInventoryLimits = ObjectInventoryLimits {
-    max_objects: 100_000,
-    max_object_bytes: 64 << 20,
-    max_total_bytes: 128 << 20,
-};
 #[derive(Deserialize)]
 #[serde(tag = "operation", rename_all = "snake_case", deny_unknown_fields)]
 enum Request {
@@ -53,8 +47,11 @@ impl runmat_meshing_core::MeshingCancellationSignal for Cancellation {
         false
     }
 }
-pub(super) fn execute(
+/// Runs one exact execution request. While a request meshes, its live work counts go to
+/// `progress` (see [`crate::progress`]).
+pub fn execute(
     json: &str,
+    progress: Option<runmat_analysis_fea::progress::FeaProgressHandler>,
 ) -> Result<String, runmat_analysis_execution::SerialGeometryMeshingError> {
     if json.len() > MAX_REQUEST_BYTES {
         return Err("Geometry preparation exceeds this host's input allowance.".into());
@@ -62,17 +59,21 @@ pub(super) fn execute(
     let request: Request = serde_json::from_str(json).map_err(|e| e.to_string())?;
     let profile = occt_geometry_provider_profile()
         .ok_or_else(|| "Exact CAD execution is unavailable.".to_owned())?;
+    // One measurement per request bounds both the meshing ceilings and the run-data inventory.
+    let memory_bytes = request_memory_bytes();
+    let inventory = ObjectInventoryLimits::admitted(memory_bytes);
     match request {
         Request::Profile => serde_json::to_string(&profile).map_err(|e| e.to_string().into()),
         Request::MeshImportedSource { request } => {
+            let _progress = progress.map(crate::progress::MeshingProgressBridge::install);
             // The surrounding owned-worker JS host validates the original
             // parent delegation before this call and before returning bytes.
             let ceilings = runmat_meshing_core::MeshingExecutionCeilings::for_host(
-                MAX_GEOMETRY_MEMORY_BYTES,
+                memory_bytes,
                 &request.settings.limits,
             );
             let platform = browser_platform(profile.kernel_abi);
-            let mut store = MemoryObjectStore::new(INVENTORY).map_err(|error| error.to_string())?;
+            let mut store = MemoryObjectStore::new(inventory).map_err(|error| error.to_string())?;
             let context =
                 runmat_geometry_io::GeometryImportContext::with_cancellation_probe(|| {
                     runmat_meshing_core::MeshingCancellationSignal::is_cancelled(&Cancellation)
@@ -83,7 +84,7 @@ pub(super) fn execute(
                 &context,
                 ceilings,
                 platform,
-                INVENTORY,
+                inventory,
                 &Cancellation,
                 &mut runmat_meshing_execution::NoopMeshingProgress,
             )?;
@@ -95,9 +96,9 @@ pub(super) fn execute(
             display_name,
             options,
         } => {
-            runmat_execution_artifact::object::validate_inventory(&objects, INVENTORY)
+            runmat_execution_artifact::object::validate_inventory(&objects, inventory)
                 .map_err(|e| e.to_string())?;
-            let mut store = MemoryObjectStore::new(INVENTORY).map_err(|e| e.to_string())?;
+            let mut store = MemoryObjectStore::new(inventory).map_err(|e| e.to_string())?;
             for object in objects {
                 store.write_verified(&object).map_err(|e| e.to_string())?;
             }
@@ -109,7 +110,7 @@ pub(super) fn execute(
                 &program,
                 &mut store,
                 browser_platform(profile.kernel_abi),
-                INVENTORY,
+                inventory,
                 &display_name,
                 options,
                 &context,
@@ -122,16 +123,15 @@ pub(super) fn execute(
             settings,
         } => {
             settings.validate().map_err(|e| e.to_string())?;
-            // The browser host admits at most MAX_GEOMETRY_MEMORY_BYTES; a mesh that needs more
-            // stops at this ceiling with a typed meshing resource failure.
+            let _progress = progress.map(crate::progress::MeshingProgressBridge::install);
             let ceilings = runmat_meshing_core::MeshingExecutionCeilings::for_host(
-                MAX_GEOMETRY_MEMORY_BYTES,
+                memory_bytes,
                 &settings.limits,
             );
             // Validate the complete transferred inventory before retaining copies.
-            runmat_execution_artifact::object::validate_inventory(&objects, INVENTORY)
+            runmat_execution_artifact::object::validate_inventory(&objects, inventory)
                 .map_err(|e| e.to_string())?;
-            let mut store = MemoryObjectStore::new(INVENTORY).map_err(|e| e.to_string())?;
+            let mut store = MemoryObjectStore::new(inventory).map_err(|e| e.to_string())?;
             for object in objects {
                 store.write_verified(&object).map_err(|e| e.to_string())?;
             }
@@ -142,7 +142,7 @@ pub(super) fn execute(
                 settings,
                 ceilings,
                 platform,
-                INVENTORY,
+                inventory,
                 &Cancellation,
                 &mut runmat_meshing_execution::NoopMeshingProgress,
             )?;
@@ -154,6 +154,14 @@ pub(super) fn execute(
             .map_err(|e| e.to_string().into())
         }
     }
+}
+
+/// The memory one request may use: what this module can still grow into, measured when the
+/// request starts ([`crate::memory`]). A mesh that needs more stops at this ceiling with a
+/// typed meshing resource failure, and run data past it with an inventory capacity error.
+/// Browser requests carry no admitted memory budget, so the measured headroom is the ceiling.
+fn request_memory_bytes() -> u64 {
+    crate::memory::meshing_memory_bytes(crate::memory::HostMemory::measure(), None)
 }
 
 fn browser_platform(kernel_abi: String) -> PlatformBuildIdentity {

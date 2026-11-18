@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "corpus_revision": 8,
+  "corpus_revision": 9,
   "fixture_root": "crates/runmat-geometry/io/tests/fixtures",
   "entries": [
     {
@@ -506,6 +506,30 @@
       "features": ["assembly", "persistent-labels", "product-names"],
       "expected": { "outcome": "success", "topology": "three bodies named esc_board_thermal, esc_heatsink and thermal_pad; authored fins face name survives import", "mass_properties": "product-name and face-name witness; independent mass properties are unmeasured", "regions": 3, "mesh_error_bounds": "import/preview identity witness; volume-meshing error bounds are unmeasured" },
       "test": { "source": "crates/runmat-geometry/io/tests/step_face_names.rs", "name": "assembly_step_preview_names_bodies_by_product" }
+    },
+    {
+      "id": "configured-degree-name",
+      "path": "configured-degree-name.step",
+      "sha256": "7facb033948f029189401902d5c7e82cb065016f2f6d38819742d2f522b51181",
+      "tier": "extended",
+      "format": "step",
+      "supported_input": true,
+      "provenance": { "origin": "repository assembly STEP export from runmat-geometry-wasm-host cad_step_import a_configured_part_with_an_angle_input_exports_and_imports_back, 2026-11-13; product name written as raw UTF-8", "exporter": "Open CASCADE STEP processor", "exporter_version": "7.9", "license": "RunMat repository license" },
+      "features": ["assembly", "product-names", "non-ascii-names"],
+      "expected": { "outcome": "success", "topology": "one 80 x 50 x 12 mm extruded body whose product name 'tilted (depth 12 mm, tilt -20\u00b0)' carries a raw UTF-8 degree sign and imports as UTF-8", "mass_properties": "product-name witness; independent mass properties are unmeasured", "regions": 1, "mesh_error_bounds": "import name witness; volume-meshing error bounds are unmeasured" },
+      "test": { "source": "crates/runmat-geometry/io/tests/step_non_ascii_names.rs", "name": "a_product_name_with_a_degree_sign_imports_as_utf8" }
+    },
+    {
+      "id": "configured-degree-name-escaped",
+      "path": "configured-degree-name-escaped.step",
+      "sha256": "ee77d7c8a6c83d7957fc4ac1d504a744c69871c6cdc49c21412064e611af6118",
+      "tier": "extended",
+      "format": "step",
+      "supported_input": true,
+      "provenance": { "origin": "configured-degree-name.step with the product name's degree sign rewritten by hand as the Part 21 escape \\X2\\00B0\\X0\\ (lines 45-46 only), 2026-11-13", "exporter": "Open CASCADE STEP processor", "exporter_version": "7.9", "license": "RunMat repository license" },
+      "features": ["assembly", "product-names", "non-ascii-names"],
+      "expected": { "outcome": "success", "topology": "one 80 x 50 x 12 mm extruded body whose product name carries the degree sign as a Part 21 \\X2\\ escape and imports as 'tilted (depth 12 mm, tilt -20\u00b0)'", "mass_properties": "product-name witness; independent mass properties are unmeasured", "regions": 1, "mesh_error_bounds": "import name witness; volume-meshing error bounds are unmeasured" },
+      "test": { "source": "crates/runmat-geometry/io/tests/step_non_ascii_names.rs", "name": "a_product_name_with_a_degree_sign_imports_as_utf8" }
     },
     {
       "id": "camera-bracket",
