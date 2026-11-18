@@ -94,7 +94,8 @@ rust::Vec<std::uint8_t> kernel_export_step(rust::Slice<const KInstr> document,
       // The copy with every surface direct: a cone with a negative semi-angle (a revolved drill
       // point or countersink) becomes the same cone with a positive one. OCCT 8.0's STEP writer
       // drops a face on a cone with a negative semi-angle and writes the rest of the solid, so
-      // the file read back has an open shell. Other surfaces are unchanged.
+      // the file read back has an open shell. Every indirect elementary surface is written direct;
+      // other surfaces keep their geometry.
       std::shared_ptr<BRepTools_Modifier> direct;
       // The written face of a face of one of the part's bodies.
       TopoDS_Shape written(const TopoDS_Shape& face) const {
