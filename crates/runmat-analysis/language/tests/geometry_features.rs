@@ -371,6 +371,36 @@ fn authored_names_are_checked_without_persistent_ids() {
         .all(|diagnostic| diagnostic.location.is_some()));
 }
 
+// The refusal points at the region's own selector, not the geometry block, and suggests only
+// names the author wrote: generated topology references stay matchable but aren't listed.
+#[test]
+fn an_unknown_name_is_refused_at_its_region_and_lists_only_authored_names() {
+    let mut inspection = named_face_inspection(vec![GeometryInspectionCapability::AuthoredNames]);
+    inspection
+        .authored_names
+        .get_mut("face")
+        .unwrap()
+        .push("feature.puck.face.side(s.c)".to_string());
+    let checked = check_puck_regions(inspection);
+    let refusal = checked
+        .diagnostics
+        .iter()
+        .find(|diagnostic| diagnostic.severity == FeaDiagnosticSeverity::Error)
+        .expect("the unknown name is refused");
+    assert_eq!(
+        refusal.message,
+        "region `pressed` selects face name \"mounting\", which `project/puck.step` does not carry; named faces: \"mount\", \"top\""
+    );
+    let source = r#"geometry puck { file = "./puck.step"; units = m
+        region pressed : face { select name "mounting"; expect exactly_one }"#;
+    let region_start = source.find("region pressed").unwrap();
+    let span = refusal.location.as_ref().unwrap().span;
+    assert!(
+        span.start >= region_start && span.start < source.len(),
+        "refusal at {span:?}, region starts at {region_start}"
+    );
+}
+
 // A host that cannot read a file's names says so at the geometry, for each `select name`
 // region; the check does not pass the name silently.
 #[test]

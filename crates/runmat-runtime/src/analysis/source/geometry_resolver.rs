@@ -138,24 +138,9 @@ fn inspect_uncached(
     let mut shared_faces = Vec::new();
     let (topology_digest, exact_topology) = match exact {
         Ok(Some(exact)) => {
-            for (id, names) in &exact.entity_names {
-                let role = match id.kind {
-                    runmat_geometry_core::PersistentEntityKind::Vertex => "vertex",
-                    runmat_geometry_core::PersistentEntityKind::Edge => "edge",
-                    runmat_geometry_core::PersistentEntityKind::Face => "face",
-                    runmat_geometry_core::PersistentEntityKind::Solid => "solid",
-                    _ => continue,
-                };
-                authored_names
-                    .entry(role.to_string())
-                    .or_default()
-                    .extend(names.iter().cloned());
-            }
-            // One entry per named entity: a name carried by two entities appears twice, so a
-            // check can count what `select name` resolves to.
-            for names in authored_names.values_mut() {
-                names.sort();
-            }
+            // The same table `select name` resolves against and the study preview names
+            // faces and bodies from.
+            authored_names = exact.authored_names_by_role();
             shared_faces = shared_face_inspections(&exact);
             let closure = exact.build_closure().map_err(|error| {
                 diagnostic(

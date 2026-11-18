@@ -443,6 +443,12 @@ fn fill_tile(
     let zkey = BItem::Zone(z.id);
     let zclr = z.clearance.unwrap_or(0);
     let near = window.inflate(rules.max_clearance().max(zclr) + FILL_MARGIN + spoke);
+    // Everything below is cut from or clipped to `area_w`, so a cutter whose grown box misses
+    // the area's box changes nothing: it is left out before its outline is built. A small pour's
+    // tile window holds many times the copper its area touches (the ESC's phase pours read
+    // 4 to 20 times more cutter vertices than reach their areas).
+    let reach = area_w.bbox();
+    let touches = |b: Rect, grow: Coord| b.inflate(grow + 2 * FILL_TOL).intersects(&reach);
     let mut cutters: Vec<Ring> = Vec::new();
     let mut hard: Vec<Ring> = Vec::new();
     let mut thermal: Vec<(&PlacedPad, Coord, Coord)> = Vec::new();
@@ -450,15 +456,21 @@ fn fill_tile(
         let same = z.net.is_some() && it.net == z.net;
         let clr = rules.pair_len(zkey, it.key, props::CLEARANCE).max(zclr) + FILL_MARGIN;
         if !same {
-            let rings = it.prim.outline(clr, FILL_TOL);
-            hard.extend(rings.iter().cloned());
-            cutters.extend(rings);
+            if touches(it.prim.bbox(), clr) {
+                let rings = it.prim.outline(clr, FILL_TOL);
+                hard.extend(rings.iter().cloned());
+                cutters.extend(rings);
+            }
             continue;
         }
         if let Some(p) = &it.pad {
             match relief(rules, g, z, it, p) {
                 None => {}
-                Some(PadConnect::None) => cutters.extend(it.prim.outline(clr, FILL_TOL)),
+                Some(PadConnect::None) => {
+                    if touches(it.prim.bbox(), clr) {
+                        cutters.extend(it.prim.outline(clr, FILL_TOL));
+                    }
+                }
                 Some(_) => {
                     let gap = rules
                         .len(g, it.key, props::THERMAL_GAP)
@@ -466,7 +478,10 @@ fn fill_tile(
                     let sw = rules
                         .len(g, it.key, props::SPOKE_WIDTH)
                         .unwrap_or(z.spoke_width);
-                    cutters.extend(it.prim.outline(gap + FILL_MARGIN, FILL_TOL));
+                    if touches(it.prim.bbox(), gap + FILL_MARGIN) {
+                        cutters.extend(it.prim.outline(gap + FILL_MARGIN, FILL_TOL));
+                    }
+                    // Spokes reach past the pad's box: kept for every pad near the window.
                     thermal.push((p, gap, sw));
                 }
             }
@@ -475,13 +490,13 @@ fn fill_tile(
     for k in board.keepouts.values() {
         if k.rules.pours
             && (k.layers.is_empty() || k.layers.contains(&layer))
-            && k.outline.bbox().intersects(&window)
+            && touches(k.outline.bbox(), 0)
         {
             cutters.push(k.outline.outer.clone());
         }
     }
     for (rect, piece, clr) in &higher.pieces {
-        if !rect.inflate(*clr).intersects(&window) {
+        if !touches(*rect, *clr) || !touches(piece.bbox(), *clr) {
             continue;
         }
         cutters.extend(
