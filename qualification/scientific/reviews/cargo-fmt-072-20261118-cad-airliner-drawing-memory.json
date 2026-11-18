@@ -6,7 +6,7 @@
   "encoding": "git-mode-type-blob-path-tuples-v1"
  },
  "accepted_inputs": {
-  "sha256": "b3dd3d7d352519dbd0c24a164f6867ffffd65ac6b89418695a3a490a29b5fdc1",
+  "sha256": "ed52650cf224860be7dcccc5cfac83effdf3eba28b70de60196a7d90a6b0b0c1",
   "files": 26439,
   "encoding": "git-mode-type-blob-path-tuples-v1"
  },
@@ -16,7 +16,7 @@
  "qualification_evidence": [
   {
    "path": "qualification/scientific/evidence/cargo-fmt-072-20261118.json",
-   "sha256": "e34ebf3756dd6e8be66867f25763cceebcfd6982c6e9009a9848e5874a1a1044"
+   "sha256": "b733fda96373ac7e6774c085142d4eb6e969d4fb7021465fbec709ed6c646b1c"
   }
  ],
  "changed_inputs": [
@@ -2214,9 +2214,9 @@
    "after": [
     "100644",
     "blob",
-    "8e104abbd2f26441b201c9c5bf7b8396fa97ee05"
+    "e9911de05b538dfcab5d631b0b67ac31d4bf9f38"
    ],
-   "reason": "STEP export only; no cohort exports STEP. d36e979417 makes each exported part's surfaces direct (ShapeCustom_DirectModification) before the OCCT writer, so OCCT 8.0 no longer drops a cone face with a negative semi-angle. Import, healing and meshing are unchanged."
+   "reason": "STEP export only; no cohort exports STEP. d36e979417 makes each exported part's surfaces direct (ShapeCustom_DirectModification) before the OCCT writer, so OCCT 8.0 no longer drops a cone face with a negative semi-angle; every indirect elementary surface is written direct and other surfaces keep their geometry. A later commit corrects the code comment to say so (comment only). Import, healing and meshing are unchanged."
   },
   {
    "path": "crates/runmat-geometry/kernel/src/stroke.rs",
