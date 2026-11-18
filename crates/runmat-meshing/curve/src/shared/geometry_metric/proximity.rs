@@ -416,9 +416,23 @@ fn sides_oppose(
     shared.peek().is_none() || shared.any(|sides| sides * normals < 0.0)
 }
 
+/// The size that resolves a gap `g` with `layers` layers of cells: `sqrt(2) * g / layers`.
+///
+/// The volume refines every cell with an edge longer than its size. A cell of a layer
+/// `t = g / layers` thick spans the layer from a corner on one side to corners on the other,
+/// and those corners lie up to one cell width apart along the faces. For cells about as wide as
+/// the layer is thick, the longest such edge is `sqrt(2) * t`, so that is the size. Sized `t`,
+/// every edge across the layer with any offset along the faces is too long, and the volume
+/// splits the layer again: a 2 mm plate at one layer was meshed with 1.25 mm cells in about
+/// two layers.
+fn layer_edge_length(gap: f64, layers: u32) -> f64 {
+    std::f64::consts::SQRT_2 * gap / f64::from(layers)
+}
+
 /// Gaps between facing surfaces: each pair of faces that share no vertex, whose sides oppose
 /// (see `sides_oppose`), and whose boundaries face each other across a separation `g` below the
-/// search radius is resolved with `cells_across_gap` cells across `g`. The separation runs from
+/// search radius is resolved with `cells_across_gap` layers of cells across `g`, at the size
+/// `layer_edge_length(g, cells_across_gap)`. The separation runs from
 /// each boundary sample of one face to the closest point of the other face's boundary
 /// polylines, so the two faces' edges need not be sampled at matching points: the top and
 /// bottom faces of a thin layer meet its side faces along the same outline, and each sample on
@@ -427,7 +441,7 @@ fn sides_oppose(
 /// Where the gap is measured decides where it is sized. When every bounding edge of a face
 /// faces another face across a gap (the two sides of a thin wall or layer, the inner and outer
 /// surfaces of a tube, the walls of a slot), the face lies across the gap everywhere, and it
-/// receives the isotropic size `g / cells_across_gap` over its whole area; the volume grades
+/// receives that isotropic size over its whole area; the volume grades
 /// from there. When only some of its edges do (a beam whose underside passes 0.3 mm above a
 /// hinge lug along one trim edge), the gap exists only along those edges, and each of them
 /// receives the size of its own gap as an edge-local source: consumers grade it by distance from
@@ -593,9 +607,11 @@ pub(super) fn derive_face_proximity_contributions(
     let mut contributions = Vec::new();
     let mut located = Vec::new();
     let size = |gap: f64| {
-        MetricTensor3::isotropic_length_m(gap / f64::from(cells_across_gap)).map_err(|error| {
-            SharedCurveError::invalid_request("surface proximity metric", error.to_string())
-        })
+        MetricTensor3::isotropic_length_m(layer_edge_length(gap, cells_across_gap)).map_err(
+            |error| {
+                SharedCurveError::invalid_request("surface proximity metric", error.to_string())
+            },
+        )
     };
     for (witness, gaps) in witnesses.into_iter().zip(gaps) {
         let boundary_gaps = gaps
@@ -972,7 +988,7 @@ mod tests {
                 other => panic!("unexpected scope {other:?}"),
             })
             .collect::<std::collections::BTreeMap<_, _>>();
-        let expected = MetricTensor3::isotropic_length_m(0.02 / 4.0).unwrap();
+        let expected = MetricTensor3::isotropic_length_m(layer_edge_length(0.02, 4)).unwrap();
         assert_eq!(
             sized.get(&id(PersistentEntityKind::Face, 1)),
             Some(&expected)
@@ -982,7 +998,8 @@ mod tests {
             Some(&expected)
         );
         // The adjacent face faces the top across 0.03 (no shared vertex), so it is a gap.
-        let adjacent_size = MetricTensor3::isotropic_length_m(0.03 / 4.0).unwrap();
+        let adjacent_size =
+            MetricTensor3::isotropic_length_m(layer_edge_length(0.03, 4)).unwrap();
         assert_eq!(
             sized.get(&id(PersistentEntityKind::Face, 4)),
             Some(&adjacent_size)
@@ -1024,7 +1041,7 @@ mod tests {
         )
         .unwrap()
         .0;
-        let expected = MetricTensor3::isotropic_length_m(0.003).unwrap();
+        let expected = MetricTensor3::isotropic_length_m(layer_edge_length(0.003, 1)).unwrap();
         let sized = contributions
             .iter()
             .map(|contribution| match &contribution.scope {
@@ -1099,7 +1116,7 @@ mod tests {
         assert!(sized_with(interface, [0.0, 0.0, 1.0], 1.0).is_empty());
         assert!(sized([0.0, 0.0, -1.0], -1.0).is_empty());
         // Layer: the lower face's side points down, whichever way its parameterization runs.
-        let layer = MetricTensor3::isotropic_length_m(73.0e-6).unwrap();
+        let layer = MetricTensor3::isotropic_length_m(layer_edge_length(73.0e-6, 1)).unwrap();
         for (normal, side) in [([0.0, 0.0, -1.0], 1.0), ([0.0, 0.0, 1.0], -1.0)] {
             let contributions = sized(normal, side);
             assert_eq!(contributions.len(), 2);
@@ -1140,7 +1157,7 @@ mod tests {
             &Control,
         )
         .unwrap();
-        let size = MetricTensor3::isotropic_length_m(0.0003).unwrap();
+        let size = MetricTensor3::isotropic_length_m(layer_edge_length(0.0003, 1)).unwrap();
         assert_eq!(whole.len(), 1);
         assert_eq!(whole[0].metric, size);
         assert_eq!(
@@ -1177,6 +1194,18 @@ mod tests {
             ..request
         };
         assert_eq!(requested.resolved_cells_across_face_gap(), 3);
+    }
+
+    /// One layer across a 2 mm plate: the plate's faces take 2.83 mm, the diagonal of a cell
+    /// 2 mm thick and 2 mm wide, so a single layer of cells about as wide as the plate is thick
+    /// meets the size. Sized 2 mm, the volume split the plate into about two layers of 1.25 mm
+    /// cells.
+    #[test]
+    fn one_layer_across_a_face_gap_admits_cells_as_wide_as_the_gap() {
+        let size = layer_edge_length(0.002, 1);
+        assert!((size - (0.002_f64.powi(2) * 2.0).sqrt()).abs() < 1e-15);
+        // n layers: the same cell on a layer of gap / n.
+        assert!((layer_edge_length(0.003, 3) - 0.001 * std::f64::consts::SQRT_2).abs() < 1e-15);
     }
 
     #[test]
@@ -1526,7 +1555,9 @@ mod tests {
     fn one_thin_walled_body_still_refines_across_its_wall() {
         let contributions = proximity_sizing(facing_pair(0.002, &[21], &[21]));
         assert_eq!(contributions.len(), 4);
-        let face_size = MetricTensor3::isotropic_length_m(0.001).unwrap();
+        // The faces take the size of a cell in each of two layers across the wall; the edges
+        // take the wall over two cells across it.
+        let face_size = MetricTensor3::isotropic_length_m(layer_edge_length(0.002, 2)).unwrap();
         assert_eq!(
             contributions
                 .iter()
@@ -1535,8 +1566,7 @@ mod tests {
             2
         );
         let across: [f64; 3] = [0.0, 0.0, 1.0];
-        for metric in &contributions {
-            let metric = *metric;
+        for metric in contributions.iter().filter(|metric| **metric != face_size) {
             let density = metric.xx * across[0].powi(2)
                 + metric.yy * across[1].powi(2)
                 + metric.zz * across[2].powi(2);

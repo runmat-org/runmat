@@ -27,9 +27,9 @@ const DISCONNECTED_SOLIDS: &[u8] =
 // Snapshot of the integrated sizing field. The differential test independently
 // checks geometry, volume and linear-field energy. The 1 x 2 x 3 m box is thinner than
 // the 10 m target in every direction, so each face pair is the two sides of a wall with
-// one layer across it (1, 2 and 3 m face sizing).
+// one layer across it (1.41, 2.83 and 4.24 m face sizing: sqrt(2) times each thickness).
 const EXPECTED_BOX_ARTIFACT_DIGEST: &str =
-    "4373fb972fbb6917749b5b3cc96d1a98b0c4649f5d2c79968c8ebbba03e2f281";
+    "9e6304e2823a31580cf0a09bd4a6b8a9d4c6bfd0dcd27b75936c4280d48ac35a";
 
 #[path = "occt_exact_meshing/differential.rs"]
 mod differential;
