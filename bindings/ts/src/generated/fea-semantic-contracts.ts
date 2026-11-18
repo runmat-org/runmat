@@ -1528,6 +1528,16 @@ export type ErrorContributionKind = "geometry_admission"
   | "precision"
   | "execution_equivalence";
 
+export interface EvaluatedParameterizedSignal {
+  signal_id: SignalId;
+  quantity: PhysicalQuantityKind;
+  unit: string;
+  value_si: EvaluatedSignalValue | null;
+}
+
+export type EvaluatedSignalValue = number
+  | [number, number, number];
+
 export interface ExcitationCase {
   case_id: ExcitationCaseId;
   action_ids: ExcitationId[];
@@ -1742,6 +1752,7 @@ export interface FeaSemanticProgram {
   geometries: GeometryDefinition[];
   meshes: MeshDefinition[];
   models: AuthoredModel[];
+  evaluatedSignals?: FeaStudyEvaluatedSignals[];
 }
 
 export type FeaSourceCheckContract = "assessments_v1";
@@ -1785,6 +1796,12 @@ export interface FeaSourceIndex {
 export interface FeaSourceIndexEntry {
   identity: FeaSourceIdentity;
   location: FeaDiagnosticLocation;
+}
+
+export interface FeaStudyEvaluatedSignals {
+  modulePath: string;
+  studyId: string;
+  signals: EvaluatedParameterizedSignal[];
 }
 
 export type FeaStudyMemberKind = "output"

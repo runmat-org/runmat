@@ -39,4 +39,6 @@ pub use source_index::{
 };
 
 #[cfg(test)]
+mod evaluated_signal_tests;
+#[cfg(test)]
 mod tests;

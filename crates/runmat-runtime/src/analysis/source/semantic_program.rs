@@ -2,6 +2,7 @@ use super::CheckedFeaSource;
 use runmat_analysis_language::FeaSymbolKind;
 pub use runmat_fea_source::{
     FeaDeclaredMaterial, FeaExecutionBinding, FeaExecutionTarget, FeaSemanticProgram,
+    FeaStudyEvaluatedSignals,
 };
 
 impl CheckedFeaSource {
@@ -44,6 +45,32 @@ impl CheckedFeaSource {
             geometries: self.program.geometries.values().cloned().collect(),
             meshes: self.program.meshes.values().cloned().collect(),
             models: self.program.models.values().cloned().collect(),
+            evaluated_signals: self.evaluated_signals(),
         }
+    }
+
+    /// Each study's parameterized signals evaluated at the study's own input values, with the
+    /// same evaluation realization uses. Studies whose model has none are left out.
+    fn evaluated_signals(&self) -> Vec<FeaStudyEvaluatedSignals> {
+        self.program
+            .studies
+            .iter()
+            .filter_map(|((module_path, _), study)| {
+                let instance = study.model.as_ref()?;
+                let model = self
+                    .program
+                    .models
+                    .values()
+                    .find(|model| model.reference() == instance.model)?;
+                if model.parameterized_signals.is_empty() {
+                    return None;
+                }
+                Some(FeaStudyEvaluatedSignals {
+                    module_path: module_path.clone(),
+                    study_id: study.study_id.clone(),
+                    signals: study.evaluate_parameterized_signals(model),
+                })
+            })
+            .collect()
     }
 }

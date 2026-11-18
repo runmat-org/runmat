@@ -83,6 +83,7 @@ pub const UNIT_KINDS: &[UnitKind] = &[
     row([2, 1, -2, -2, 0, 0, 0, 0], 0, "inductance", "H", &["nH", "uH", "mH"]),
     row([0; 8], 1, "angle", "rad", &["deg", "rad"]),
     row([0, 0, -1, 0, 0, 0, 0, 0], 1, "angle per time", "rad/s", &["rad/s", "deg/s", "rpm"]),
+    row([0, 0, -2, 0, 0, 0, 0, 0], 1, "angle per time squared", "rad/s^2", &["rad/s^2", "deg/s^2"]),
     row([2, 1, -2, 0, 0, 0, 0, 0], -1, "moment per angle", "N*m/rad", &["N*m/rad", "N*m/deg"]),
     row(
         [2, 1, -1, 0, 0, 0, 0, 0],

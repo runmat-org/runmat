@@ -119,6 +119,24 @@ impl AuthoredStudy {
             sequence: self.sequence.clone(),
         })
     }
+
+    /// The value of each parameterized signal of `model` (this study's root model) at the study's
+    /// own input values: study-input defaults and the study's model arguments, falling back to
+    /// model-input defaults, bound exactly as a run without provided inputs binds them. Sweep
+    /// cases never change these values. When the inputs do not bind, every value is `None`.
+    pub fn evaluate_parameterized_signals(
+        &self,
+        model: &AuthoredModel,
+    ) -> Vec<crate::EvaluatedParameterizedSignal> {
+        let inputs = bind_study_inputs(self, &[])
+            .and_then(|study_inputs| bind_model_inputs(self, model, &study_inputs))
+            .ok();
+        model
+            .parameterized_signals
+            .iter()
+            .map(|signal| signal.evaluated(inputs.as_ref()))
+            .collect()
+    }
 }
 
 fn realize_geometry(

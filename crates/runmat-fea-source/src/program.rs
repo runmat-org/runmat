@@ -1,6 +1,6 @@
 use runmat_analysis_core::{
     AuthoredExecutionPolicy, AuthoredExecutionPolicyRef, AuthoredModel, AuthoredStudy,
-    AuthoredSweep, MaterialModel,
+    AuthoredSweep, EvaluatedParameterizedSignal, MaterialModel,
 };
 use runmat_analysis_language::LogicalSourcePath;
 use runmat_geometry_core::GeometryDefinition;
@@ -23,6 +23,21 @@ pub struct FeaSemanticProgram {
     pub geometries: Vec<GeometryDefinition>,
     pub meshes: Vec<MeshDefinition>,
     pub models: Vec<AuthoredModel>,
+    /// Derived from `studies` and `models`: each study's parameterized-signal values at the
+    /// study's own inputs. It never enters the checked revision or any study, model or run
+    /// identity.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub evaluated_signals: Vec<FeaStudyEvaluatedSignals>,
+}
+
+/// One study's parameterized signals evaluated at the study's own input values. Sweep cases
+/// never change these values.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct FeaStudyEvaluatedSignals {
+    pub module_path: LogicalSourcePath,
+    pub study_id: String,
+    pub signals: Vec<EvaluatedParameterizedSignal>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

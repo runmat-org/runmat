@@ -119,6 +119,7 @@ pub use problem::authored_model_physics::{
 };
 pub use problem::authored_parameterized_signals::{
     AuthoredParameterizedSignal, AuthoredParameterizedSignalError, AuthoredSignalExpression,
+    EvaluatedParameterizedSignal, EvaluatedSignalValue,
 };
 pub use problem::authored_properties::{
     AuthoredLayupDefinition, AuthoredLayupSource, AuthoredOrientationDefinition,
