@@ -41,10 +41,6 @@ The design docs describe the design language as it is meant to work. Where the d
 
 **Polarity marks on assembly drawings.** The assembly drawing of each side marks pin 1 and the polarity of polarized parts (diodes, LEDs, polarized capacitors, ICs) beside their outlines and designators, in the Gerber and PDF.
 
-### design.ecad.import.other-tools
-
-**Imports from other electronics tools.** Clean-room readers for the other common tools' binary, text and JSON schematic and board formats write circuits and boards with part declarations and a report of what did not carry over, tested on an openly licensed corpus.
-
 ### design.ecad.import.kicad-roundtrip
 
 **KiCad round-trip gate.** A corpus of KiCad projects reads in and writes back with hierarchy, symbols, footprints, net classes and rules intact, and the not-carried report is empty or explained.
