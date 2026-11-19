@@ -6,7 +6,7 @@
   "encoding": "git-mode-type-blob-path-tuples-v1"
  },
  "accepted_inputs": {
-  "sha256": "e61a531b92c6977e768a9672cf42ab90a34c9e0ac12e2901fd8d32147b4934de",
+  "sha256": "b1fca93db8610091320f76831afc7932ae963b7a723db8beac01e4663ec2af2c",
   "files": 26439,
   "encoding": "git-mode-type-blob-path-tuples-v1"
  },
@@ -16,7 +16,7 @@
  "qualification_evidence": [
   {
    "path": "qualification/scientific/evidence/cargo-fmt-072-20261118.json",
-   "sha256": "f91a431bd9d2a76c8345524d154b00661099464e51628990b6c112e682bb6356"
+   "sha256": "aa38735291bde1b3f1a35cdcdc1c3ed7b51b4d6a52ec040e139e3f93d01210b5"
   }
  ],
  "changed_inputs": [
@@ -2718,9 +2718,9 @@
    "after": [
     "100644",
     "blob",
-    "2dbaf9d1ee5cbe642c93c9b7158171bdbc9998dd"
+    "abb6f83bbf74e496b3bd61af61423b29a308bff4"
    ],
-   "reason": "Display only: 1e945c104a (disp072) labels a mode-ordinal field in the live field-scene legend as 'Mode N relative amplitude', 0 to 1, as the snapshot posters already do, and carries the mode index on FieldData for that label. It changes legend text and range only; solver arithmetic, published field values, units in the store and receipt measurements are unchanged."
+   "reason": "Display only: 1e945c104a (disp072) labels a mode-ordinal field in the live field-scene legend as 'Mode N relative amplitude', 0 to 1, as the snapshot posters already do, and carries the mode index on FieldData for that label. It changes legend text and range only; solver arithmetic, published field values, units in the store and receipt measurements are unchanged. Then 18dc173c6f (field_scene cleanup): FieldData's normalized flag is replaced by mode.is_some(), the one source it was always derived from; field_scene.rs returns to 600 lines. Display only; no behaviour change."
   },
   {
    "path": "crates/runmat-runtime/src/analysis/field_scene/deformation.rs",
@@ -2735,6 +2735,20 @@
     "0a9f01ec5a6300f18e370bd2695e3bdcfe3b0ede"
    ],
    "reason": "Display only: 1e945c104a (disp072) labels a mode-ordinal field in the live field-scene legend as 'Mode N relative amplitude', 0 to 1, as the snapshot posters already do, and carries the mode index on FieldData for that label. It changes legend text and range only; solver arithmetic, published field values, units in the store and receipt measurements are unchanged."
+  },
+  {
+   "path": "crates/runmat-runtime/src/analysis/field_scene/geometry.rs",
+   "before": [
+    "100644",
+    "blob",
+    "281d3ed1c2ffe7639f9633cc2a6489a08dc05d0e"
+   ],
+   "after": [
+    "100644",
+    "blob",
+    "6e16237a9ca4b8d53859502ef4941c7a50fee390"
+   ],
+   "reason": "Display only: the field-scene cleanup reads a mode shape as mode.is_some() instead of the removed normalized flag it was derived from. No behaviour change; solver arithmetic and published values are unchanged. No cohort renders a live field scene."
   },
   {
    "path": "crates/runmat-runtime/src/analysis/field_scene/legend.rs",
@@ -2765,6 +2779,20 @@
    "reason": "Formatting only: cargo fmt --all with the pinned rustfmt (rustc 1.90.0) and the repository rustfmt.toml. Tokens, expressions, arguments and control flow are unchanged."
   },
   {
+   "path": "crates/runmat-runtime/src/analysis/field_scene/stats.rs",
+   "before": [
+    "100644",
+    "blob",
+    "d1794d80d8ed359056a385f196b9d5e6126843de"
+   ],
+   "after": [
+    "100644",
+    "blob",
+    "b11ae94d59dd2f2685be3a44bee61883a273f858"
+   ],
+   "reason": "Display only: the field-scene cleanup reads a mode shape as mode.is_some() instead of the removed normalized flag it was derived from. No behaviour change; solver arithmetic and published values are unchanged. No cohort renders a live field scene."
+  },
+  {
    "path": "crates/runmat-runtime/src/analysis/field_scene/view.rs",
    "before": [
     "100644",
@@ -2774,9 +2802,9 @@
    "after": [
     "100644",
     "blob",
-    "41167297631f8e763aa6dbf510cd2637ab77fad4"
+    "83161fee82712b93d8d85b396772aca729a7c6cb"
    ],
-   "reason": "Display only: 1e945c104a (disp072) labels a mode-ordinal field in the live field-scene legend as 'Mode N relative amplitude', 0 to 1, as the snapshot posters already do, and carries the mode index on FieldData for that label. It changes legend text and range only; solver arithmetic, published field values, units in the store and receipt measurements are unchanged."
+   "reason": "Display only: 1e945c104a (disp072) labels a mode-ordinal field in the live field-scene legend as 'Mode N relative amplitude', 0 to 1, as the snapshot posters already do, and carries the mode index on FieldData for that label. It changes legend text and range only; solver arithmetic, published field values, units in the store and receipt measurements are unchanged. Then 18dc173c6f (field_scene cleanup): FieldData's normalized flag is replaced by mode.is_some(), the one source it was always derived from; field_scene.rs returns to 600 lines. Display only; no behaviour change."
   },
   {
    "path": "crates/runmat-runtime/src/analysis/mod.rs",

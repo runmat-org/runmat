@@ -1,6 +1,6 @@
 {
  "schema_version": 1,
- "source_revision": "e5c12dca8ad79c0cdf0c3b8a60603f6ee8bd713e",
+ "source_revision": "18dc173c6f810eb1c048cb2e0fc6dfe2fa990250",
  "previous_revision": "3583e216622e45db0732caaa314ce109ed5565c1",
  "measured_revision": "912f34e3cd484efcb72e2bbda9d018fded199b56",
  "changed_scientific_inputs": [
@@ -198,8 +198,10 @@
   "crates/runmat-meshing/tetrahedron/src/cdt/volume_refinement/iteration.rs",
   "crates/runmat-runtime/src/analysis/field_scene.rs",
   "crates/runmat-runtime/src/analysis/field_scene/deformation.rs",
+  "crates/runmat-runtime/src/analysis/field_scene/geometry.rs",
   "crates/runmat-runtime/src/analysis/field_scene/legend.rs",
   "crates/runmat-runtime/src/analysis/field_scene/legend/tests.rs",
+  "crates/runmat-runtime/src/analysis/field_scene/stats.rs",
   "crates/runmat-runtime/src/analysis/field_scene/view.rs",
   "crates/runmat-runtime/src/analysis/mod.rs",
   "crates/runmat-runtime/src/analysis/prepared_study_publication/tests/preparation.rs",
