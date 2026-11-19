@@ -73,7 +73,7 @@ pub struct Picks<'a> {
     pub document: &'a PartDocument,
     path: &'a str,
     text: &'a str,
-    bodies: OnceCell<Vec<Value>>,
+    display: OnceCell<Value>,
 }
 
 impl<'a> Picks<'a> {
@@ -82,19 +82,52 @@ impl<'a> Picks<'a> {
             document,
             path,
             text,
-            bodies: OnceCell::new(),
+            display: OnceCell::new(),
         }
+    }
+
+    /// The regenerated part's display (`Null` when it doesn't regenerate).
+    fn display(&self) -> &Value {
+        self.display.get_or_init(|| {
+            compile_part(self.path, self.text)
+                .ok()
+                .and_then(|c| serde_json::to_value(&c.display).ok())
+                .unwrap_or_default()
+        })
     }
 
     /// The regenerated part's display bodies (faces with their reference texts).
     pub fn bodies(&self) -> &[Value] {
-        self.bodies.get_or_init(|| {
-            compile_part(self.path, self.text)
-                .ok()
-                .and_then(|c| serde_json::to_value(&c.display).ok())
-                .and_then(|d| d["bodies"].as_array().cloned())
-                .unwrap_or_default()
-        })
+        self.display()["bodies"]
+            .as_array()
+            .map(Vec::as_slice)
+            .unwrap_or_default()
+    }
+
+    /// Sketch `id`'s plane as the regenerated part draws it.
+    pub(crate) fn sketch_frame(
+        &self,
+        id: &str,
+    ) -> Option<crate::edit::sketch::placed::SketchFrame> {
+        crate::edit::sketch::placed::SketchFrame::of_display(self.display(), id)
+    }
+
+    /// The model point (metres) of a vertex pick: its reference text (`vertex_of(…)`), as the
+    /// regenerated part's display bodies carry it.
+    pub(crate) fn vertex_point(&self, pick: &str) -> Option<[f64; 3]> {
+        self.bodies()
+            .iter()
+            .filter_map(|b| b["vertices"].as_array())
+            .flatten()
+            .find(|v| v["reference"].as_str() == Some(pick))
+            .and_then(|v| {
+                let p = v["point"].as_array()?;
+                Some([
+                    p.first()?.as_f64()?,
+                    p.get(1)?.as_f64()?,
+                    p.get(2)?.as_f64()?,
+                ])
+            })
     }
 
     fn kind_of(&self, feature: &str) -> Option<&'static str> {

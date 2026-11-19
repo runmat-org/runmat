@@ -757,6 +757,17 @@ pub fn sketch_edit(
     else {
         return Some(Err(model("open a sketch first")));
     };
+    // A point field given as a point of the model (a click on the plane, the origin, a vertex)
+    // lands on the sketch plane; the regenerated part is read only when one does.
+    let values = &match placed::placed_points(
+        values,
+        &id,
+        |pick| picks_of.vertex_point(pick),
+        || picks_of.sketch_frame(&id),
+    ) {
+        Ok(values) => values,
+        Err(e) => return Some(Err(e)),
+    };
     let mut summary = String::new();
     let result = edit_part(text, path, |document| {
         let sketch = sketch_mut(document, &id)?;
@@ -885,13 +896,15 @@ pub(crate) fn with_selection(
     out
 }
 
-/// The point fields a tool takes (`center`, `at`, `base`, `start`, `end`, `first`, `second`)
-/// given as a pick of a sketch point (`sketch.<sketch>.l1.end`, from the Outline or the view)
-/// rewritten as the point value the canvas sends, `{ x, y, of }`: the tool then sits on that
-/// point, where it is now.
+/// The point fields a sketch tool takes.
+const POINT_FIELDS: [&str; 7] = ["center", "at", "base", "start", "end", "first", "second"];
+
+/// The point fields a tool takes ([`POINT_FIELDS`]) given as a pick of a sketch point
+/// (`sketch.<sketch>.l1.end`, from the Outline or the view) rewritten as the point value the
+/// canvas sends, `{ x, y, of }`: the tool then sits on that point, where it is now.
 fn picked_points(values: &Map<String, Value>, sketch: &Sketch, id: &str) -> Map<String, Value> {
     let mut out = values.clone();
-    for key in ["center", "at", "base", "start", "end", "first", "second"] {
+    for key in POINT_FIELDS {
         let pick = match values.get(key) {
             Some(Value::String(s)) => s.clone(),
             Some(Value::Array(a)) if a.len() == 1 => match a[0].as_str() {
@@ -1025,6 +1038,7 @@ mod corners;
 mod ellipse;
 mod infer;
 mod modify;
+pub(crate) mod placed;
 mod repeat;
 mod text;
 mod use_edges;

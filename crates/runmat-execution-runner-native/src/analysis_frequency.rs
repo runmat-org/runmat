@@ -1,5 +1,4 @@
 use std::sync::Arc;
-use std::time::Instant;
 
 use runmat_analysis_execution::{
     import_structural_frequency_entry, import_structural_frequency_recovered_fields,
@@ -32,8 +31,8 @@ use crate::analysis_frequency_observations::{
 use crate::analysis_sequence::StructuralSequenceExecutionPolicy;
 use crate::analysis_task_pool::{
     configure_local_analysis, execute_analysis_task_batch, protocol, AnalysisTaskBatchPolicy,
-    AnalysisTaskDependency, AnalysisTaskPool, ExecutedAnalysisTask, LocalAnalysisTaskPool,
-    PreparedAnalysisTask, RemoteAnalysisTaskPool,
+    AnalysisTaskDependency, AnalysisTaskPool, AnalysisWorkflowClock, ExecutedAnalysisTask,
+    LocalAnalysisTaskPool, PreparedAnalysisTask, RemoteAnalysisTaskPool,
 };
 use crate::{
     NativeExecutionConfig, NativeExecutionError, NativeExecutionResult, NativeProgramSession,
@@ -143,7 +142,7 @@ pub(crate) async fn execute_with_pool(
             ))
         }
     }
-    let started = Instant::now();
+    let workflow_clock = AnalysisWorkflowClock::start(pool);
     let workload_objects = prepare_structural_frequency_workload_objects(
         &preparation.workload,
         preparation.chunk_bytes,
@@ -392,7 +391,7 @@ pub(crate) async fn execute_with_pool(
         preparation.inventory_limits,
     )
     .map_err(protocol)?;
-    let wall_millis = u64::try_from(started.elapsed().as_millis()).unwrap_or(u64::MAX);
+    let wall_millis = workflow_clock.wall_millis(pool)?;
     let resource_graph =
         PlannedResourceUsageGraph::new(resource_attempts, wall_millis).map_err(protocol)?;
     let resource_usage = prepare_planned_resource_graph_usage(

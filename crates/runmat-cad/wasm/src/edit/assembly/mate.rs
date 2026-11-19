@@ -115,6 +115,13 @@ pub(super) struct Resolved {
     pub(super) anchor: Anchor,
 }
 
+impl Resolved {
+    /// Where the pick sits in assembly coordinates (metres), for the component as placed now.
+    pub(super) fn world_origin(&self) -> Option<V3> {
+        self.world.as_ref().map(|w| w.origin)
+    }
+}
+
 /// The entity `list` (`faces`, `edges`, `vertices`) of a body, by index.
 fn entity<'a>(body: Option<&'a Value>, list: &str, index: usize) -> Option<&'a Value> {
     body?[list]

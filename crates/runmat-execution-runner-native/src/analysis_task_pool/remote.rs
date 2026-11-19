@@ -5,7 +5,9 @@ use std::time::{Duration, Instant};
 
 pub(crate) struct RemoteAnalysisTaskPool {
     pool: Arc<RemotePoolDriver>,
-    pending_clock: Option<crate::remote::RemoteObservedWave>,
+    /// The wave's durable clock and the instant this process began observing it.
+    pending_clock: Option<(crate::remote::RemoteObservedWave, Instant)>,
+    carried_wave_millis: u64,
 }
 
 impl RemoteAnalysisTaskPool {
@@ -13,6 +15,7 @@ impl RemoteAnalysisTaskPool {
         Self {
             pool,
             pending_clock: None,
+            carried_wave_millis: 0,
         }
     }
 }
@@ -39,10 +42,16 @@ impl AnalysisTaskPool for RemoteAnalysisTaskPool {
         if self.pending_clock.is_some() {
             return Err(protocol("remote wave observer is already pending"));
         }
-        self.pending_clock = Some(
+        let observed_from = Instant::now();
+        self.pending_clock = Some((
             crate::remote::RemoteObservedWave::begin(Arc::clone(&self.pool), planned_tasks).await?,
-        );
+            observed_from,
+        ));
         Ok(())
+    }
+
+    fn carried_wave_millis(&self) -> u64 {
+        self.carried_wave_millis
     }
     fn permitted_trust_tiers(
         &self,
@@ -108,7 +117,7 @@ impl AnalysisTaskPool for RemoteAnalysisTaskPool {
             .iter()
             .map(|(_, submission)| submission.request.id)
             .collect::<Vec<_>>();
-        let mut clock = self
+        let (mut clock, observed_from) = self
             .pending_clock
             .take()
             .ok_or_else(|| protocol("remote analysis wave has no original begin"))?;
@@ -195,6 +204,18 @@ impl AnalysisTaskPool for RemoteAnalysisTaskPool {
                     }
                 }
             }
+            // A restored or resumed wave's durable wall includes time under a replaced driver.
+            let carried = carried_wave_millis(
+                responses
+                    .iter()
+                    .flatten()
+                    .map(|response| response.original_graph_wall_millis),
+                observed_from.elapsed(),
+            );
+            self.carried_wave_millis = self
+                .carried_wave_millis
+                .checked_add(carried)
+                .ok_or_else(|| protocol("remote carried wave time overflowed"))?;
         }
         responses
             .into_iter()

@@ -836,6 +836,7 @@ pub(super) fn edit(
         }
         command if command.starts_with("sketch.") => sketch::tool(
             &mut document,
+            &compiled,
             command,
             &crate::edit::sketch::with_selection(&request.values, &request.selection),
         )?,
