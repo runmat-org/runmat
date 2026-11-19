@@ -414,7 +414,8 @@ fn a_part_with_a_drill_point_and_a_countersink_exports_a_closed_named_coloured_s
     std::fs::write(&file, &text).unwrap();
     let housing = format!(
         "runmat 0.7\nstd 1\n\npart housing {{\n    feature step = import(source = \"{}\", digest = \"unrecorded\")\n}}\n",
-        file.display()
+        // A Windows temp path has backslashes, which a source string must escape.
+        file.display().to_string().replace('\\', "\\\\")
     );
     let back = regenerate_part("/p/housing.part", &housing).expect("compiles");
     let read = &back.result.state.bodies;
