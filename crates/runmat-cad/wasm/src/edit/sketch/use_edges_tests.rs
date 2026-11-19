@@ -215,3 +215,49 @@ fn edit_plane_moves_a_sketch_and_refuses_a_face_made_after_it() {
         "{none}"
     );
 }
+
+#[test]
+fn offset_of_a_model_edge_projects_it_and_the_copy_follows_the_model() {
+    // D9: the edge pick was read as a sketch curve ("the sketch has no curve `end)`").
+    let edge = "edges_between(feature.body.face.side(s1.l1), feature.body.face.end)";
+    let text = applied(
+        PLATE,
+        "sketch.offset",
+        json!({ "sketch": "top", "entities": [edge], "distance": 3 }),
+    );
+    assert_eq!(text.matches("from = project(").count(), 1, "{text}");
+    let ys = |text: &str| -> Vec<(f64, f64)> {
+        solved(text, "top")
+            .iter()
+            .filter(|l| l.0 == "line")
+            .map(|(_, a, b)| ((a[1] + b[1]) / 2.0, (a[0] - b[0]).hypot(a[1] - b[1])))
+            .collect()
+    };
+    let lines = ys(&text);
+    assert_eq!(lines.len(), 2, "{lines:?}\n{text}");
+    let mut offsets: Vec<f64> = lines.iter().map(|l| (l.0 + 10.0).abs()).collect();
+    offsets.sort_by(f64::total_cmp);
+    assert!(offsets[0] < 1e-3 && (offsets[1] - 3.0).abs() < 1e-3, "{lines:?}\n{text}");
+    // The plate's front edge moves 5 mm out: the projected edge and its copy both follow.
+    let moved = text.replace("-10 mm", "-15 mm");
+    let after = ys(&moved);
+    let mut offsets: Vec<f64> = after.iter().map(|l| (l.0 + 15.0).abs()).collect();
+    offsets.sort_by(f64::total_cmp);
+    assert!(offsets[0] < 1e-3 && (offsets[1] - 3.0).abs() < 1e-3, "{after:?}\n{moved}");
+}
+
+#[test]
+fn offset_of_a_model_edge_with_a_sketch_curve_offsets_both() {
+    let base = PLATE.replace(
+        "    sketch top on feature.body.face.end {\n    }",
+        "    sketch top on feature.body.face.end {\n        c1 = circle(center = [0 mm, 0 mm], radius = 4 mm)\n    }",
+    );
+    let edge = "edges_between(feature.body.face.side(s1.l1), feature.body.face.end)";
+    let text = applied(
+        &base,
+        "sketch.offset",
+        json!({ "sketch": "top", "entities": ["sketch.top.c1", edge], "distance": 1 }),
+    );
+    assert_eq!(text.matches("from = project(").count(), 1, "{text}");
+    assert!(text.contains("radius = 5 mm"), "{text}");
+}
