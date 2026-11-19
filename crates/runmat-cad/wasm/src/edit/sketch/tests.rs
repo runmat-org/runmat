@@ -705,3 +705,85 @@ fn construction_toggles_the_selected_curve() {
         "{out}"
     );
 }
+
+/// A point field takes a point of the model as well as a sketch point: the origin from the
+/// Outline, a click on the sketch plane (`point(x mm, y mm, z mm)`) or a vertex. Each lands
+/// where it sits seen straight onto the sketch plane.
+#[test]
+fn a_point_field_takes_the_origin_a_clicked_point_or_a_vertex() {
+    let text = applied(
+        PLATE,
+        "sketch.polygon",
+        json!({ "sketch": "s1", "sides": 4, "radius": 5, "center": ["origin:point"] }),
+    );
+    assert!(
+        text.contains("[5 mm, 0 mm]") && text.contains("[0 mm, 5 mm]"),
+        "{text}"
+    );
+    let text = applied(
+        PLATE,
+        "sketch.circle",
+        json!({ "sketch": "s1", "type": "center", "center": ["point(10 mm, 5 mm, 0 mm)"], "radius": 3 }),
+    );
+    assert!(
+        added(PLATE, &text)
+            .iter()
+            .any(|l| l.contains("circle(center = [10 mm, 5 mm], radius = 3 mm)")),
+        "{text}"
+    );
+    let text = applied(
+        PLATE,
+        "sketch.text",
+        json!({ "sketch": "s1", "text": "AB", "height": 5, "at": ["origin:point"] }),
+    );
+    assert!(
+        text.contains("text(text = \"AB\", at = [0 mm, 0 mm]"),
+        "{text}"
+    );
+    // On Front (x along the model's z, y along its x), a clicked point reads in the sketch's axes.
+    let front = applied(PLATE, "part.sketch", json!({ "plane": "origin:front" }));
+    let text = applied(
+        &front,
+        "sketch.point",
+        json!({ "sketch": "sketch1", "at": ["point(3 mm, 0 mm, 7 mm)"] }),
+    );
+    assert!(
+        added(&front, &text)
+            .iter()
+            .any(|l| l.contains("point(at = [7 mm, 3 mm])")),
+        "{text}"
+    );
+    // A vertex of the plate's body, on a sketch on the top plane.
+    let compiled = compile_part("/p/plate.part", PLATE).unwrap();
+    let display = serde_json::to_value(&compiled.display).unwrap();
+    let vertex = display["bodies"][0]["vertices"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|v| v["reference"].is_string() && v["point"][2].as_f64().unwrap() > 0.004)
+        .unwrap_or_else(|| panic!("no top vertex: {display}"))
+        .clone();
+    let [x, y] = [0, 1].map(|i| (vertex["point"][i].as_f64().unwrap() * 1000.0).round());
+    let text = applied(
+        PLATE,
+        "sketch.point",
+        json!({ "sketch": "s1", "at": [vertex["reference"].as_str().unwrap()] }),
+    );
+    assert!(
+        added(PLATE, &text)
+            .iter()
+            .any(|l| l.contains(&format!("point(at = [{x} mm, {y} mm])"))),
+        "{text}"
+    );
+}
+
+/// A pick that names no point is refused as before, with the field's prompt.
+#[test]
+fn a_point_field_refuses_a_pick_that_names_no_point() {
+    let out = run(
+        PLATE,
+        "sketch.polygon",
+        json!({ "sketch": "s1", "sides": 4, "radius": 5, "center": ["origin:top"] }),
+    );
+    assert_eq!(out["ok"], false, "{out}");
+}
