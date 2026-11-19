@@ -768,6 +768,11 @@ pub fn sketch_edit(
         Ok(values) => values,
         Err(e) => return Some(Err(e)),
     };
+    if command == "sketch.offset" {
+        if let Some(result) = offset_edges::in_part(path, text, &id, values) {
+            return Some(result);
+        }
+    }
     let mut summary = String::new();
     let result = edit_part(text, path, |document| {
         let sketch = sketch_mut(document, &id)?;
@@ -1038,6 +1043,7 @@ mod corners;
 mod ellipse;
 mod infer;
 mod modify;
+pub(crate) mod offset_edges;
 pub(crate) mod placed;
 mod repeat;
 mod text;

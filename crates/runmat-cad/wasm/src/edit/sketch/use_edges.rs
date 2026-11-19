@@ -16,11 +16,11 @@
 //!   that lies square to the sketch normal.
 
 use super::super::{model, EditFailure, SourceChange};
+use super::offset_edges::{fresh, stem, Converted};
 use crate::features::value;
 use runmat_cad::display::{BodyDisplay, FaceDisplay, PartDisplay};
-use runmat_cad::ids::SketchEntityId;
 use runmat_cad::model::datum::Frame;
-use runmat_cad::model::sketch::{Sketch, SketchEntity, SketchGeometry, SketchProjection};
+use runmat_cad::model::sketch::{SketchEntity, SketchProjection};
 use runmat_cad::model::FeatureKind;
 use runmat_cad::refs::history::{EdgeCurve, SurfaceKind};
 use runmat_cad::refs::reference::Reference;
@@ -251,6 +251,64 @@ fn offset_face<'d>(
         .ok_or_else(|| model("pick the planar face to offset the edge across along with it"))
 }
 
+/// The regenerated part, for reading the edges a sketch brings in.
+fn compile(path: &str, text: &str) -> Result<crate::runtime::CompiledPart, EditFailure> {
+    crate::runtime::compile_part(path, text).map_err(|d| {
+        model(format!(
+            "the part doesn't compile, so nothing can be brought into the sketch: {}",
+            d.first().map(|d| d.message.as_str()).unwrap_or("")
+        ))
+    })
+}
+
+/// The drawn frame of sketch `sketch_id` (part coordinates, metres).
+fn sketch_frame(display: &PartDisplay, sketch_id: &str) -> Result<Frame, EditFailure> {
+    let drawn = display
+        .sketches
+        .iter()
+        .find(|s| s.id == sketch_id)
+        .ok_or_else(|| {
+            model(format!(
+                "`{sketch_id}` isn't drawn, so nothing can be projected onto it"
+            ))
+        })?;
+    let v = |a: [f32; 3]| [a[0] as f64, a[1] as f64, a[2] as f64];
+    Ok(Frame {
+        origin: v(drawn.frame.origin),
+        x: v(drawn.frame.x),
+        y: v(drawn.frame.y),
+        z: v(drawn.frame.z),
+    })
+}
+
+/// Whether `pick` names an edge of the part's model (rather than a sketch curve or point).
+pub(super) fn is_model_edge(pick: &str) -> bool {
+    !pick.starts_with("sketch.")
+        && crate::picks::lower_text(pick).is_ok_and(|r| crate::picks::topo(&r) == "edge")
+}
+
+/// Each picked model edge projected onto sketch `sketch_id`, as Project would bring it in.
+pub(super) fn project_edges(
+    path: &str,
+    text: &str,
+    sketch_id: &str,
+    picks: &[String],
+) -> Result<Vec<Converted>, EditFailure> {
+    let compiled = compile(path, text)?;
+    let display = &compiled.display;
+    let frame = sketch_frame(display, sketch_id)?;
+    picks
+        .iter()
+        .map(|p| match find(display, p) {
+            Some(Picked::Edge(body, e)) => {
+                let n = project(&frame, body, e)?;
+                Ok((n.from, n.curve.geometry()))
+            }
+            _ => Err(model(format!("`{p}` isn't an edge of the part"))),
+        })
+        .collect()
+}
+
 /// Brings the picked edges and faces into the open sketch.
 pub(super) fn use_edges(
     path: &str,
@@ -277,29 +335,9 @@ pub(super) fn use_edges(
             _ => "pick the edges, faces or bodies to project into the sketch",
         }));
     }
-    let compiled = crate::runtime::compile_part(path, text).map_err(|d| {
-        model(format!(
-            "the part doesn't compile, so nothing can be brought into the sketch: {}",
-            d.first().map(|d| d.message.as_str()).unwrap_or("")
-        ))
-    })?;
+    let compiled = compile(path, text)?;
     let display = &compiled.display;
-    let drawn = display
-        .sketches
-        .iter()
-        .find(|s| s.id == sketch_id)
-        .ok_or_else(|| {
-            model(format!(
-                "`{sketch_id}` isn't drawn, so nothing can be projected onto it"
-            ))
-        })?;
-    let v = |a: [f32; 3]| [a[0] as f64, a[1] as f64, a[2] as f64];
-    let frame = Frame {
-        origin: v(drawn.frame.origin),
-        x: v(drawn.frame.x),
-        y: v(drawn.frame.y),
-        z: v(drawn.frame.z),
-    };
+    let frame = sketch_frame(display, &sketch_id)?;
     if kind == "intersection" || kind == "silhouette" {
         for p in &items {
             if crate::picks::lower_text(p).is_ok_and(|r| crate::picks::topo(&r) == "edge") {
@@ -469,22 +507,4 @@ pub(super) fn use_edges(
         change,
         format!("Brought {} into {sketch_id}", added.join(", ")),
     ))
-}
-
-fn stem(geometry: &SketchGeometry) -> &'static str {
-    match geometry {
-        SketchGeometry::Line { .. } => "l",
-        SketchGeometry::Circle { .. } => "c",
-        SketchGeometry::Arc { .. } => "a",
-        SketchGeometry::Spline { .. } => "sp",
-        _ => "e",
-    }
-}
-
-fn fresh(sketch: &Sketch, stem: &str) -> SketchEntityId {
-    let id = (1..)
-        .map(|n| format!("{stem}{n}"))
-        .find(|id| !sketch.entities.iter().any(|e| e.id.0 == *id))
-        .expect("an unused name");
-    SketchEntityId::new(id)
 }

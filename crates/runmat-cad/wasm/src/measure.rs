@@ -24,6 +24,8 @@ mod items;
 mod span;
 #[cfg(test)]
 mod tests;
+#[cfg(test)]
+mod label_tests;
 
 use crate::analyze::{Analysis, ModelDimension, Row};
 use crate::edit::assembly::frames::{add, dot, norm, perpendicular, scale, sub, V3};
