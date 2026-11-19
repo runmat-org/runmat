@@ -62,7 +62,6 @@ fn counted_static_estimate_matches_the_mesh_based_multigrid_plan() {
 }
 
 #[test]
-#[ignore = "G128: multigrid plan under-reports ~9 MB; FEA fixing"]
 fn multigrid_static_plan_covers_the_measured_solve() {
     elastic_static_path::multigrid_plan_covers_the_measured_solve();
 }

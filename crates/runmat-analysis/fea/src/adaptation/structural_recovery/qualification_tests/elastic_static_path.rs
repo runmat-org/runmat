@@ -478,9 +478,11 @@ pub(super) fn multigrid_plan_covers_the_measured_solve() {
             peak as u64 <= planned,
             "{order:?}: peak {peak} above {planned}"
         );
-        // Measured 2026-11-15: 1.41x (Tet4) and 1.13x (Tet10). Every charged store (stiffness,
+        // Measured 2026-11-19: 1.45x (Tet4) and 1.29x (Tet10). Every charged store (stiffness,
         // consistent mass and damping patterns, contribution stream, hierarchy, proof
-        // inventory, recovery) is held; the plan has no slack to remove at this size.
+        // inventory, recovery) is held; the plan has no slack to remove at this size. The
+        // coarse grid's dense factor allocates only its own n² values: a BLAS packing buffer
+        // sized from the host cache (132 MiB on a 33 MiB-L3 host) once tripled the peak.
         assert!(
             planned <= 2 * peak as u64,
             "{order:?}: plan {planned} exceeds twice the measured peak {peak}"
