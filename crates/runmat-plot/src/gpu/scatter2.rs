@@ -255,29 +255,25 @@ pub fn pack_vertices_from_xy(
         });
 
     let output_size = max_points as u64 * 6 * std::mem::size_of::<Vertex>() as u64;
-    let output_buffer = runmat_accelerate_api::WgpuBufferOwner::new(device.create_buffer(
-        &wgpu::BufferDescriptor {
-            label: Some("scatter2-gpu-vertices"),
-            size: output_size,
-            usage: wgpu::BufferUsages::STORAGE
-                | wgpu::BufferUsages::VERTEX
-                | wgpu::BufferUsages::COPY_DST
-                | wgpu::BufferUsages::COPY_SRC,
-            mapped_at_creation: false,
-        },
-    ));
+    let output_buffer = emission.own_buffer(device.create_buffer(&wgpu::BufferDescriptor {
+        label: Some("scatter2-gpu-vertices"),
+        size: output_size,
+        usage: wgpu::BufferUsages::STORAGE
+            | wgpu::BufferUsages::VERTEX
+            | wgpu::BufferUsages::COPY_DST
+            | wgpu::BufferUsages::COPY_SRC,
+        mapped_at_creation: false,
+    }));
 
-    let indirect_args = runmat_accelerate_api::WgpuBufferOwner::new(device.create_buffer(
-        &wgpu::BufferDescriptor {
-            label: Some("scatter2-gpu-indirect-args"),
-            size: std::mem::size_of::<DrawIndirectArgsRaw>() as u64,
-            usage: wgpu::BufferUsages::STORAGE
-                | wgpu::BufferUsages::INDIRECT
-                | wgpu::BufferUsages::COPY_DST
-                | wgpu::BufferUsages::COPY_SRC,
-            mapped_at_creation: false,
-        },
-    ));
+    let indirect_args = emission.own_buffer(device.create_buffer(&wgpu::BufferDescriptor {
+        label: Some("scatter2-gpu-indirect-args"),
+        size: std::mem::size_of::<DrawIndirectArgsRaw>() as u64,
+        usage: wgpu::BufferUsages::STORAGE
+            | wgpu::BufferUsages::INDIRECT
+            | wgpu::BufferUsages::COPY_DST
+            | wgpu::BufferUsages::COPY_SRC,
+        mapped_at_creation: false,
+    }));
     let init = DrawIndirectArgsRaw {
         vertex_count: 0,
         instance_count: 1,

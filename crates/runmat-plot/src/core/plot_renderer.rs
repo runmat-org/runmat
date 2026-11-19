@@ -61,6 +61,8 @@ type PerAxesViewBounds = Vec<Option<ViewBounds2D>>;
 mod figure_camera_fit;
 #[path = "plot_renderer/world_helpers.rs"]
 mod world_helpers;
+#[path = "plot_renderer/foreign_buffers.rs"]
+mod foreign_buffers;
 #[path = "plot_renderer/grid_2d.rs"]
 mod grid_2d;
 #[path = "plot_renderer/y_direction.rs"]
@@ -233,6 +235,7 @@ pub struct PlotRenderer {
     axes_applied_view_revisions: Vec<Option<u64>>,
     /// Per-node GPU buffer cache for stable interactive redraws.
     scene_buffer_cache: RefCell<HashMap<u64, CachedSceneBuffers>>,
+    foreign_buffers: foreign_buffers::ForeignBufferCopies,
 }
 
 /// Configuration for plot rendering
@@ -345,10 +348,7 @@ impl PlotRenderer {
         Option<runmat_accelerate_api::WgpuBufferOwner>,
     )> {
         let mut cache = self.scene_buffer_cache.borrow_mut();
-        let vertex_signature = (
-            render_data.vertices.as_ptr() as usize,
-            render_data.vertices.len(),
-        );
+        let vertex_signature = foreign_buffers::vertex_signature(render_data);
         let index_signature = render_data
             .indices
             .as_ref()
@@ -362,11 +362,8 @@ impl PlotRenderer {
             }
         }
 
-        let vertex_buffer = self.wgpu_renderer.vertex_buffer_from_sources(
-            emission,
-            render_data.gpu_vertices.as_ref(),
-            &render_data.vertices,
-        )?;
+        let vertex_buffer = self.vertex_buffer_for(emission, render_data)?;
+        let _ = self.gpu_indirect_args(emission, render_data); // copied here, not in a pass
         let index_buffer = render_data.indices.as_ref().map(|indices| {
             runmat_accelerate_api::WgpuBufferOwner::new(
                 self.wgpu_renderer.create_index_buffer(emission, indices),
@@ -384,14 +381,6 @@ impl PlotRenderer {
         );
 
         Some((vertex_buffer, index_buffer))
-    }
-
-    fn gpu_indirect_args(render_data: &crate::core::RenderData) -> Option<(&wgpu::Buffer, u64)> {
-        render_data
-            .gpu_vertices
-            .as_ref()
-            .and_then(|buf| buf.indirect.as_ref())
-            .map(|indirect| (indirect.args.as_ref(), indirect.offset))
     }
 
     /// Create a new plot renderer
@@ -449,6 +438,7 @@ impl PlotRenderer {
             axes_2d_camera_user_controlled: vec![false],
             axes_applied_view_revisions: vec![None],
             scene_buffer_cache: RefCell::new(HashMap::new()),
+            foreign_buffers: Default::default(),
         })
     }
 

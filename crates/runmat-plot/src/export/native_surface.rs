@@ -1035,6 +1035,9 @@ mod preparation_tests;
 #[cfg(all(test, not(target_arch = "wasm32")))]
 #[path = "native_surface/frame_reuse_tests.rs"]
 mod frame_reuse_tests;
+#[cfg(all(test, not(target_arch = "wasm32")))]
+#[path = "native_surface/foreign_device_tests.rs"]
+mod foreign_device_tests;
 
 pub async fn create_headless_context(
     width: u32,

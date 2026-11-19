@@ -9,13 +9,30 @@ use std::sync::{Arc as Shared, Weak};
 pub struct WgpuBufferOwner {
     inner: Shared<wgpu::Buffer>,
     scope: Option<crate::DeviceAllocationScope>,
+    device: Option<crate::WgpuDeviceAccess>,
 }
 impl WgpuBufferOwner {
+    /// Own a buffer without recording its device. A consumer then assumes the buffer belongs
+    /// to the device it draws or computes on.
     pub fn new(buffer: wgpu::Buffer) -> Self {
         Self {
             inner: Shared::new(buffer),
             scope: crate::current_device_allocation_scope(),
+            device: None,
         }
+    }
+    /// Own a buffer created on `device`. A consumer on another device (a render surface with
+    /// its own device, for example) checks it with [`crate::WgpuDeviceAccess::same_device`]
+    /// and copies the contents instead of binding a buffer its device cannot use.
+    pub fn on_device(buffer: wgpu::Buffer, device: &crate::WgpuDeviceAccess) -> Self {
+        Self {
+            device: Some(device.clone()),
+            ..Self::new(buffer)
+        }
+    }
+    /// The device that created the buffer, when it was recorded.
+    pub fn device(&self) -> Option<&crate::WgpuDeviceAccess> {
+        self.device.as_ref()
     }
     pub fn creation_scope(&self) -> Option<crate::DeviceAllocationScope> {
         self.scope
