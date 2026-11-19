@@ -162,7 +162,9 @@ study bracket_modes {
 
 The eigensolve operates on the constrained $\mathsf K$ and $\mathsf M$. Each mode records angular
 frequency $\omega_i$, frequency $f_i=\omega_i/(2\pi)$, the mode shape, modal mass/stiffness,
-residual, and normalization identity. Check that:
+residual, and normalization identity. Each shape is scaled to a one-kilogram reference generalized
+mass, and the generalized coordinate carries the length, so each published `modal.mode_shape.<n>`
+field has unit `1`. Check that:
 
 - the first modes are physically plausible and not unconstrained rigid modes;
 - cumulative participating mass is sufficient in every excited direction;

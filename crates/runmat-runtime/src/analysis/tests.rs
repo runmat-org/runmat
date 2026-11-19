@@ -3166,13 +3166,6 @@ fn analysis_field_descriptors_include_physics_units_and_locations() {
             AnalysisFieldLocation::Mode,
         ),
         (
-            fea_modal_mode_shape_field_id(1),
-            "modal",
-            "mode_shape",
-            Some("m"),
-            AnalysisFieldLocation::Node,
-        ),
-        (
             FEA_FIELD_ACOUSTIC_PRESSURE_REAL.to_string(),
             "acoustic",
             "pressure_real",
@@ -3266,6 +3259,61 @@ fn analysis_field_descriptors_include_physics_units_and_locations() {
         assert_eq!(descriptor.family, family, "{field_id} family");
         assert_eq!(descriptor.unit.as_deref(), unit, "{field_id} unit");
     }
+
+    // A mode shape is a normalized eigenvector: its `Mode` ordinal fixes the unit at "1"
+    // whatever quantity it shapes, and its id implies no length.
+    let mode_shape = |field_id: String, quantity, value_shape| {
+        AnalysisFieldDescriptor::from_field(&AnalysisField::host_f64(
+            &field_id,
+            runmat_analysis_core::AnalysisFieldLayout::new(
+                quantity,
+                runmat_analysis_core::FieldLocation::Node,
+                value_shape,
+            )
+            .mode(0),
+            vec![1, 3],
+            vec![0.0; 3],
+        ))
+    };
+    for descriptor in [
+        mode_shape(
+            fea_modal_mode_shape_field_id(1),
+            runmat_analysis_core::ObservationQuantity::Displacement,
+            runmat_analysis_core::ObservationValueShape::Vector3,
+        ),
+        mode_shape(
+            "buckling.rotation_shape.1".into(),
+            runmat_analysis_core::ObservationQuantity::Rotation,
+            runmat_analysis_core::ObservationValueShape::Vector3,
+        ),
+    ] {
+        assert_eq!(descriptor.unit.as_deref(), Some("1"), "{}", descriptor.field_id);
+    }
+    let acoustic_mode = AnalysisFieldDescriptor::from_field(&AnalysisField::host_f64(
+        "acoustic.mode_shape.1",
+        runmat_analysis_core::AnalysisFieldLayout::scalar(
+            runmat_analysis_core::ObservationQuantity::AcousticPressure,
+            runmat_analysis_core::FieldLocation::Node,
+        )
+        .mode(0),
+        vec![1],
+        vec![0.0],
+    ));
+    assert_eq!(acoustic_mode.unit.as_deref(), Some("1"));
+    assert_eq!(
+        AnalysisFieldDescriptor::from_field(&AnalysisField::host_f64(
+            "modal.mode_shape.1",
+            runmat_analysis_core::AnalysisFieldLayout::scalar(
+                runmat_analysis_core::ObservationQuantity::Residual,
+                runmat_analysis_core::FieldLocation::Global,
+            ),
+            vec![1],
+            vec![0.0],
+        ))
+        .unit,
+        None,
+        "the id alone no longer claims a length"
+    );
 
     let membrane = AnalysisFieldDescriptor::from_field(&AnalysisField::host_f64(
         FEA_FIELD_STRUCTURAL_SHELL_MEMBRANE_FORCE,

@@ -81,7 +81,7 @@ mod scene_tests {
                 3,
                 vec![0.0, 0.0, 0.0, 0.0, 0.0, 0.0, amplitude, 0.0, 0.0],
                 "modal.mode_shape.1",
-                "m",
+                "1",
             )
             .mode_shape();
             let (scene, scale) = scene_from_topology(

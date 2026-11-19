@@ -196,8 +196,9 @@ mod tests {
         }
     }
 
-    // A mass-normalized eigenvector published in "m" peaks at 7.0; the live view's legend reads
-    // its relative amplitude, 0 to 1, as the snapshot poster does, never "0 m – 7.0 m".
+    // A mass-normalized eigenvector (published with unit "1") peaks at 7.0; the live view's
+    // legend reads its relative amplitude, 0 to 1, as the snapshot poster does, never
+    // "0 – 7.0" or a length.
     #[test]
     fn a_mode_shape_legend_reads_relative_amplitude_not_metres() {
         let field = FieldData::inline(
@@ -205,7 +206,7 @@ mod tests {
             3,
             vec![0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 7.0, 0.0, 0.0],
             "structural.displacement",
-            "m",
+            "1",
         )
         .mode_shape();
         let (mut scene, _) = scene_from_topology(

@@ -1183,7 +1183,10 @@ impl AnalysisFieldDescriptor {
             class_name,
             kind,
             dtype: "double".to_string(),
-            unit: infer_field_unit(&field.field_id).map(str::to_string),
+            unit: layout
+                .normalized_unit()
+                .or_else(|| infer_field_unit(&field.field_id))
+                .map(str::to_string),
             location,
             shape: field.shape.clone(),
             element_count: value_count,
@@ -1246,6 +1249,7 @@ impl AnalysisFieldDescriptor {
             }
             _ => runmat_analysis_core::FieldOrdinal::Single,
         };
+        let layout = layout.with_ordinal(ordinal);
         let size_bytes = value_count
             .checked_mul(storage_width)
             .and_then(|count| count.checked_mul(std::mem::size_of::<f64>()))
@@ -1256,7 +1260,7 @@ impl AnalysisFieldDescriptor {
             numeric_representation: Some(entry.definition.numeric_representation()),
             family: infer_field_family(entry.definition.field_id()).to_string(),
             statistic: layout.statistic,
-            layout: layout.with_ordinal(ordinal),
+            layout: layout.clone(),
             topology_id: None,
             element_kind: None,
             class_name: "fea.Field".to_string(),
@@ -1267,7 +1271,10 @@ impl AnalysisFieldDescriptor {
                 "double"
             }
             .to_string(),
-            unit: infer_field_unit(entry.definition.field_id()).map(str::to_string),
+            unit: layout
+                .normalized_unit()
+                .or_else(|| infer_field_unit(entry.definition.field_id()))
+                .map(str::to_string),
             location,
             shape,
             element_count: value_count,
