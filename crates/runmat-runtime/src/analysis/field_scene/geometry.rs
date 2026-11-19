@@ -333,7 +333,7 @@ pub(super) fn automatic_deformation_scale(
     Ok(super::deformation::automatic_scale(
         diagonal,
         max_displacement,
-        field.normalized,
+        field.mode.is_some(),
     ))
 }
 
