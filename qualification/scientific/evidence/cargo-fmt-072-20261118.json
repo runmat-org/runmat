@@ -1,6 +1,6 @@
 {
  "schema_version": 1,
- "source_revision": "e9e8d158a3adbe40e35bb9c94a796a05b202e68e",
+ "source_revision": "3af73068badce53f70e6b81dfe227674e574636c",
  "previous_revision": "3583e216622e45db0732caaa314ce109ed5565c1",
  "measured_revision": "912f34e3cd484efcb72e2bbda9d018fded199b56",
  "changed_scientific_inputs": [
@@ -161,6 +161,8 @@
   "crates/runmat-design-tools/tests/dwg.rs",
   "crates/runmat-design-tools/tests/tools.rs",
   "crates/runmat-filesystem/src/pinned/tests.rs",
+  "crates/runmat-filesystem/src/remote/native.rs",
+  "crates/runmat-filesystem/src/remote/wasm.rs",
   "crates/runmat-geometry/io/src/exact.rs",
   "crates/runmat-geometry/io/src/occt/exact_step_writer.cc",
   "crates/runmat-geometry/kernel/src/stroke.rs",
@@ -271,5 +273,5 @@
    "results": "runtime plotting+compatibility 1370 passed 1 failed before the meta.json regeneration (the catalog test, fixed by the same commit); runmat-vm plotting 68 passed 0 failed"
   }
  ],
- "review": "Conserves the fresh 0.7.2 scientific measurements across the CI repairs. cargo fmt --all on the measured source (3583e21662, whose scientific inputs equal the measured 912f34e3cd inventory) reproduces the 191 formatted Rust files of bd7dd3a4d1 blob for blob. Other changed inputs: the regenerated FEA highlighting grammar and the regenerated wasm builtin registry (fingerprint line only), which adds one field-quantity word and no execution path reads it; the mode-shape legend wording in the live field scene and CLI snapshot (1e945c104a; legend text and range only); the subplot axes-slot repair in runtime plotting state (8b33ada885), which no cohort exercises; the OCCT host's per-thread STEP import table (a6fb58c3ad; the airliner cohort imports no STEP file, so its table is empty either way); the STEP exporter's direct-surface pass (d36e979417; no cohort exports STEP); and test-only edits that no cohort runs (eight OCCT CAD tests read the always-known mass-properties volume; the G128 multigrid memory test is ignored). Solver arithmetic, model inputs, dependencies, features and thresholds are unchanged. This review is not a rerun of the scientific or performance measurements."
+ "review": "Conserves the fresh 0.7.2 scientific measurements across the CI repairs. cargo fmt --all on the measured source (3583e21662, whose scientific inputs equal the measured 912f34e3cd inventory) reproduces the 191 formatted Rust files of bd7dd3a4d1 blob for blob. Other changed inputs: the regenerated FEA highlighting grammar and the regenerated wasm builtin registry (fingerprint line only), which adds one field-quantity word and no execution path reads it; the empty pinned-file read in the remote filesystem providers (3af73068ba); the mode-shape legend wording in the live field scene and CLI snapshot (1e945c104a; legend text and range only); the subplot axes-slot repair in runtime plotting state (8b33ada885), which no cohort exercises; the OCCT host's per-thread STEP import table (a6fb58c3ad; the airliner cohort imports no STEP file, so its table is empty either way); the STEP exporter's direct-surface pass (d36e979417; no cohort exports STEP); and test-only edits that no cohort runs (eight OCCT CAD tests read the always-known mass-properties volume; the G128 multigrid memory test is ignored). Solver arithmetic, model inputs, dependencies, features and thresholds are unchanged. This review is not a rerun of the scientific or performance measurements."
 }

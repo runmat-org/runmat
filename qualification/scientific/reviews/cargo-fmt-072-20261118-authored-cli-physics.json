@@ -6,7 +6,7 @@
   "encoding": "git-mode-type-blob-path-tuples-v1"
  },
  "accepted_inputs": {
-  "sha256": "8e1b8894a45d76409ba8338c4f60f4fb1271f0e2569227639d2b25ac39132e3a",
+  "sha256": "fa034256092a3e42dc5609dfa7f1497c9e06e77ff9271f1937f1b0283acd5f67",
   "files": 26439,
   "encoding": "git-mode-type-blob-path-tuples-v1"
  },
@@ -16,7 +16,7 @@
  "qualification_evidence": [
   {
    "path": "qualification/scientific/evidence/cargo-fmt-072-20261118.json",
-   "sha256": "5ecb54a5134299b369637da6fa3fd7dff9c7df8c9a81210731ad6979120da429"
+   "sha256": "b4f7cb44d8d427cf1a650f4aa24bb0714f5fe916c3dc788795d5111c14fe4488"
   }
  ],
  "changed_inputs": [
@@ -2219,6 +2219,34 @@
    "reason": "Formatting only: cargo fmt --all with the pinned rustfmt (rustc 1.90.0) and the repository rustfmt.toml. Tokens, expressions, arguments and control flow are unchanged."
   },
   {
+   "path": "crates/runmat-filesystem/src/remote/native.rs",
+   "before": [
+    "100644",
+    "blob",
+    "40b215bdf012fdd5aa8425ae09e56a941f077c1d"
+   ],
+   "after": [
+    "100644",
+    "blob",
+    "3797c0885fd98c6e28a8c273a2c4f4ad1d5a95ab"
+   ],
+   "reason": "Remote file read only: 3af73068ba returns an empty buffer for a 0-byte pinned version without a server range request (the server refuses a 1-byte range on an empty file). Nonempty reads are unchanged; the test server now refuses out-of-range reads as the server does. No cohort reads a remote filesystem."
+  },
+  {
+   "path": "crates/runmat-filesystem/src/remote/wasm.rs",
+   "before": [
+    "100644",
+    "blob",
+    "fbd84460415c1ee43c7d06e17ef4fb933e93b64c"
+   ],
+   "after": [
+    "100644",
+    "blob",
+    "95210834cbab0a1436ed7672e825c3a8bebe5e40"
+   ],
+   "reason": "Remote file read only: 3af73068ba returns an empty buffer for a 0-byte pinned version without a server range request (the server refuses a 1-byte range on an empty file). Nonempty reads are unchanged; the test server now refuses out-of-range reads as the server does. No cohort reads a remote filesystem."
+  },
+  {
    "path": "crates/runmat-geometry/io/src/exact.rs",
    "before": [
     "100644",
@@ -2989,5 +3017,5 @@
    "reason": "Formatting only: cargo fmt --all with the pinned rustfmt (rustc 1.90.0) and the repository rustfmt.toml. Tokens, expressions, arguments and control flow are unchanged."
   }
  ],
- "reason": "Conserves the fresh 0.7.2 scientific measurements across the CI repairs. cargo fmt --all on the measured source (3583e21662, whose scientific inputs equal the measured 912f34e3cd inventory) reproduces the 191 formatted Rust files of bd7dd3a4d1 blob for blob. Other changed inputs: the regenerated FEA highlighting grammar and the regenerated wasm builtin registry (fingerprint line only), which adds one field-quantity word and no execution path reads it; the mode-shape legend wording in the live field scene and CLI snapshot (1e945c104a; legend text and range only); the subplot axes-slot repair in runtime plotting state (8b33ada885), which no cohort exercises; the OCCT host's per-thread STEP import table (a6fb58c3ad; the airliner cohort imports no STEP file, so its table is empty either way); the STEP exporter's direct-surface pass (d36e979417; no cohort exports STEP); and test-only edits that no cohort runs (eight OCCT CAD tests read the always-known mass-properties volume; the G128 multigrid memory test is ignored). Solver arithmetic, model inputs, dependencies, features and thresholds are unchanged. This review is not a rerun of the scientific or performance measurements."
+ "reason": "Conserves the fresh 0.7.2 scientific measurements across the CI repairs. cargo fmt --all on the measured source (3583e21662, whose scientific inputs equal the measured 912f34e3cd inventory) reproduces the 191 formatted Rust files of bd7dd3a4d1 blob for blob. Other changed inputs: the regenerated FEA highlighting grammar and the regenerated wasm builtin registry (fingerprint line only), which adds one field-quantity word and no execution path reads it; the empty pinned-file read in the remote filesystem providers (3af73068ba); the mode-shape legend wording in the live field scene and CLI snapshot (1e945c104a; legend text and range only); the subplot axes-slot repair in runtime plotting state (8b33ada885), which no cohort exercises; the OCCT host's per-thread STEP import table (a6fb58c3ad; the airliner cohort imports no STEP file, so its table is empty either way); the STEP exporter's direct-surface pass (d36e979417; no cohort exports STEP); and test-only edits that no cohort runs (eight OCCT CAD tests read the always-known mass-properties volume; the G128 multigrid memory test is ignored). Solver arithmetic, model inputs, dependencies, features and thresholds are unchanged. This review is not a rerun of the scientific or performance measurements."
 }
