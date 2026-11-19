@@ -517,7 +517,11 @@ pub fn resolve_pmi_with(
                 DiagCode::PmiInvalid,
                 Severity::Error,
                 s("size"),
-                format!("`{}` is a {}, not a size", z.name, crate::value::kind_name(q.dimension)),
+                format!(
+                    "`{}` is a {}, not a size",
+                    z.name,
+                    crate::value::kind_name(q.dimension)
+                ),
                 Cause::Root,
                 Vec::new(),
             ),
@@ -607,7 +611,12 @@ fn check_annotations(
     };
     for a in &pmi.annotations {
         if !ids.insert(a.id.as_str()) {
-            invalid(out, &a.id, "id", format!("annotation `{}` is declared twice", a.id));
+            invalid(
+                out,
+                &a.id,
+                "id",
+                format!("annotation `{}` is declared twice", a.id),
+            );
         }
         if let Some(view) = &a.view {
             if !pmi.views.iter().any(|v| &v.name == view) {
@@ -615,27 +624,30 @@ fn check_annotations(
                     out,
                     &a.id,
                     "view",
-                    format!("annotation `{}` names view `{view}`, which the part does not declare", a.id),
+                    format!(
+                        "annotation `{}` names view `{view}`, which the part does not declare",
+                        a.id
+                    ),
                 );
             }
         }
         let missing = match &a.kind {
-            AnnotationKind::Gdt { tolerance } => (!pmi.tolerances.iter().any(|t| &t.name == tolerance))
-                .then(|| format!("tolerance `{tolerance}`")),
+            AnnotationKind::Gdt { tolerance } => {
+                (!pmi.tolerances.iter().any(|t| &t.name == tolerance))
+                    .then(|| format!("tolerance `{tolerance}`"))
+            }
             AnnotationKind::DatumSymbol { label } => {
                 (!labels.contains(label)).then(|| format!("datum `{label}`"))
             }
-            AnnotationKind::Dimension { pmi: Some(name), .. } => (!pmi
-                .sizes
-                .iter()
-                .any(|z| &z.name == name)
+            AnnotationKind::Dimension {
+                pmi: Some(name), ..
+            } => (!pmi.sizes.iter().any(|z| &z.name == name)
                 && !pmi.locations.iter().any(|l| &l.name == name))
             .then(|| format!("size or location `{name}`")),
-            AnnotationKind::Coating { treatment } => (!pmi
-                .treatments
-                .iter()
-                .any(|t| &t.name == treatment))
-            .then(|| format!("treatment `{treatment}`")),
+            AnnotationKind::Coating { treatment } => {
+                (!pmi.treatments.iter().any(|t| &t.name == treatment))
+                    .then(|| format!("treatment `{treatment}`"))
+            }
             _ => None,
         };
         if let Some(what) = missing {
@@ -643,12 +655,19 @@ fn check_annotations(
                 out,
                 &a.id,
                 "kind",
-                format!("annotation `{}` shows {what}, which the part's PMI does not declare", a.id),
+                format!(
+                    "annotation `{}` shows {what}, which the part's PMI does not declare",
+                    a.id
+                ),
             );
         }
         let mut all = Vec::new();
         for (k, r) in a.references().into_iter().enumerate() {
-            all.extend(resolve(out, site(&format!("annotation.{}", a.id), &format!("on[{k}]")), r));
+            all.extend(resolve(
+                out,
+                site(&format!("annotation.{}", a.id), &format!("on[{k}]")),
+                r,
+            ));
         }
         out.annotations.insert(a.id.clone(), all);
     }

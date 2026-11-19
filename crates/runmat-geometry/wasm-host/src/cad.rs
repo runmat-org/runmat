@@ -23,6 +23,7 @@ use runmat_design_tools::commands;
 use runmat_geometry_io::ImportSource;
 use runmat_geometry_io::OcctKernel;
 use serde::Deserialize;
+use std::cell::RefCell;
 use std::collections::BTreeMap;
 use std::ffi::{c_char, CStr, CString};
 use std::sync::{Arc, Mutex};
@@ -35,10 +36,15 @@ struct Request {
     args: Vec<String>,
 }
 
-/// The STEP files of the request being served, by the names an `import(source = …)` may give
-/// them (the workspace path and the bare file name). The browser host has no project folder, so
-/// the files travel in the request and the kernel reads their text from here.
-static IMPORTS: Mutex<BTreeMap<String, ImportSource>> = Mutex::new(BTreeMap::new());
+thread_local! {
+    /// The STEP files of the request being served on this thread, by the names an
+    /// `import(source = …)` may give them (the workspace path and the bare file name). The
+    /// browser host has no project folder, so the files travel in the request and the kernel
+    /// reads their text from here. The table is per thread because a native process can serve
+    /// requests on several threads at once (the test harness does), and the runtime makes each
+    /// request's kernel on the request's own thread.
+    static IMPORTS: RefCell<BTreeMap<String, ImportSource>> = const { RefCell::new(BTreeMap::new()) };
+}
 
 /// What the last `probe` found.
 static LAST_PROBE: Mutex<Option<runtime::part_cache::ProbeReport>> = Mutex::new(None);
@@ -58,7 +64,7 @@ fn set_imports(files: &runtime::Files) {
                 .or_insert_with(|| source.clone());
         }
     }
-    *IMPORTS.lock().unwrap_or_else(|e| e.into_inner()) = map;
+    IMPORTS.with(|imports| *imports.borrow_mut() = map);
 }
 
 /// Installs OCCT as the runtime's kernel (once per process; later calls do nothing). Each
@@ -72,7 +78,7 @@ pub fn install_occt() {
     }
     kernel::install("occt", || {
         let mut k = OcctKernel::new();
-        k.imports = IMPORTS.lock().unwrap_or_else(|e| e.into_inner()).clone();
+        k.imports = IMPORTS.with(|imports| imports.borrow().clone());
         Box::new(k)
     });
 }
@@ -88,6 +94,15 @@ fn error(message: &str) -> String {
 /// Runs one request on OCCT and returns the runtime's JSON answer.
 pub fn call(request: &str) -> String {
     install_occt();
+    // The request's STEP files live only for this call: a thread that serves a later request
+    // never sees them, even when this one panics.
+    struct ClearImports;
+    impl Drop for ClearImports {
+        fn drop(&mut self) {
+            IMPORTS.with(|imports| imports.borrow_mut().clear());
+        }
+    }
+    let _clear = ClearImports;
     let request: Request = match serde_json::from_str(request) {
         Ok(r) => r,
         Err(e) => return error(&format!("malformed CAD request: {e}")),

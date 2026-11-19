@@ -389,7 +389,11 @@ pub fn exported(tree: &ResolvedAssembly, id: NodeId) -> bool {
 
 /// The envelope box of node `id` in its own frame: a part's or board's configured box, or for a
 /// sub-assembly the box around every part and board under it. `None` when nothing has a box.
-pub fn envelope_box(tree: &ResolvedAssembly, source: &dyn DesignSource, id: NodeId) -> Option<Aabb> {
+pub fn envelope_box(
+    tree: &ResolvedAssembly,
+    source: &dyn DesignSource,
+    id: NodeId,
+) -> Option<Aabb> {
     let node = tree.node(id);
     let own = |n: &crate::assembly::resolve::OccNode| {
         source

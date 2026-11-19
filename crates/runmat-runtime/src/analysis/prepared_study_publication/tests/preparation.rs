@@ -169,7 +169,12 @@ fn assessment_is_the_assess_trace_step_with_its_verdict_count() {
             values: &tracing::span::Record<'_>,
             context: Context<'_, S>,
         ) {
-            let index = *context.span(id).unwrap().extensions().get::<usize>().unwrap();
+            let index = *context
+                .span(id)
+                .unwrap()
+                .extensions()
+                .get::<usize>()
+                .unwrap();
             let mut spans = self.0.lock().unwrap();
             let (_, step, result) = &mut spans[index];
             values.record(&mut Strings(step, result));

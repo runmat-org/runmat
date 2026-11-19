@@ -155,6 +155,11 @@ class ScientificRoutingTests(unittest.TestCase):
         # A package without a selected target must keep contributing features.
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
+            # Build the fixture with the repository's pinned Cargo. The runner relies on
+            # that Cargo's target layout (target/debug/deps); an image's newer default
+            # Cargo places artifacts under target/debug/build/<package>/<hash>/out.
+            repository = Path(__file__).resolve().parents[2]
+            (root / "rust-toolchain.toml").write_bytes((repository / "rust-toolchain.toml").read_bytes())
             (root / "Cargo.toml").write_text('[workspace]\nmembers=["a", "b", "shared"]\nresolver="2"\n')
             (root / "shared/src").mkdir(parents=True)
             (root / "shared/Cargo.toml").write_text('[package]\nname="shared"\nversion="0.1.0"\nedition="2021"\n[features]\nfrom_b=[]\n')

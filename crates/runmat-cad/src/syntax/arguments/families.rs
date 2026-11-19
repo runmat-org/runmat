@@ -7,7 +7,11 @@
 use super::Quantity::*;
 use super::{opt, req, Argument, Group, Operation};
 
-const fn op(word: &'static str, summary: &'static str, arguments: &'static [Argument]) -> Operation {
+const fn op(
+    word: &'static str,
+    summary: &'static str,
+    arguments: &'static [Argument],
+) -> Operation {
     Operation {
         word,
         group: Group::Feature,

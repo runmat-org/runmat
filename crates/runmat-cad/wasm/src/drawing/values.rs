@@ -326,7 +326,8 @@ impl AnnotationValues for Values<'_> {
         let display = if occurrence.is_empty() {
             self.displays.get(file)?
         } else {
-            self.scoped.get(&scoped_key(file, &occurrence.to_string()))?
+            self.scoped
+                .get(&scoped_key(file, &occurrence.to_string()))?
         };
         let p = super::point_of(display, on)?;
         Some(format!("EL. {}", self.units.elevation(p[2])))

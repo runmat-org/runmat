@@ -38,8 +38,16 @@ impl DrawingUnits {
             DrawingUnits::FtIn => {
                 let inches = mm / 25.4;
                 let sixteenths = (inches.abs() * 16.0).round() as u64;
-                let sign = if inches < 0.0 && sixteenths > 0 { "-" } else { "" };
-                format!("{sign}{}'-{}\"", sixteenths / 192, fraction(sixteenths % 192))
+                let sign = if inches < 0.0 && sixteenths > 0 {
+                    "-"
+                } else {
+                    ""
+                };
+                format!(
+                    "{sign}{}'-{}\"",
+                    sixteenths / 192,
+                    fraction(sixteenths % 192)
+                )
             }
             other => other.length(mm),
         }

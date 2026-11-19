@@ -359,7 +359,9 @@ where
     )
     .map_err(|error| error.to_string())?;
     let source_face_ids = geometry.source_face_ids.clone();
-    let display_names = geometry.display_names().map_err(|error| error.to_string())?;
+    let display_names = geometry
+        .display_names()
+        .map_err(|error| error.to_string())?;
     let exact_objects = prepare_exact_geometry_objects(
         document,
         geometry.topology,

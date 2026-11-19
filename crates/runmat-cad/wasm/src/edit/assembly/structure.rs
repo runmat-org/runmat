@@ -704,7 +704,11 @@ pub(super) fn skeleton(
     values: &Values,
 ) -> Result<(String, Vec<FileEdit>), EditFailure> {
     let name = text(values, "name").trim();
-    let name = if name.is_empty() { "skeleton.part" } else { name };
+    let name = if name.is_empty() {
+        "skeleton.part"
+    } else {
+        name
+    };
     let file = if name.ends_with(".part") {
         name.to_owned()
     } else {

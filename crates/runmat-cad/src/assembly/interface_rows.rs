@@ -62,7 +62,10 @@ pub fn connector_form_values(c: &MateConnector) -> Map<String, Value> {
     out
 }
 
-pub fn connector_rows(tree: &ResolvedAssembly, doc: Option<&AssemblyDocument>) -> Vec<ConnectorRow> {
+pub fn connector_rows(
+    tree: &ResolvedAssembly,
+    doc: Option<&AssemblyDocument>,
+) -> Vec<ConnectorRow> {
     let Some(doc) = doc else { return Vec::new() };
     doc.connectors
         .iter()

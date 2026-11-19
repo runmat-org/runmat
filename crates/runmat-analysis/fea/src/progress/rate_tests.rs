@@ -1,6 +1,11 @@
 use super::*;
 
-fn advanced(phase: FeaProgressPhase, unit: &str, current: u64, total: Option<u64>) -> FeaProgressEvent {
+fn advanced(
+    phase: FeaProgressPhase,
+    unit: &str,
+    current: u64,
+    total: Option<u64>,
+) -> FeaProgressEvent {
     FeaProgressEvent {
         operation: "test".into(),
         phase,
@@ -24,15 +29,27 @@ fn counts_pass_at_most_ten_per_second_and_only_when_they_move() {
     let phase = FeaProgressPhase::ModelAssembly;
     assert!(limiter.admit(&advanced(phase, "elements", 0, Some(1000)), at(origin, 0)));
     // Too soon, although the count moved 10%.
-    assert!(!limiter.admit(&advanced(phase, "elements", 100, Some(1000)), at(origin, 50)));
+    assert!(!limiter.admit(
+        &advanced(phase, "elements", 100, Some(1000)),
+        at(origin, 50)
+    ));
     // Interval passed but the fraction moved only 0.4%.
     assert!(!limiter.admit(&advanced(phase, "elements", 4, Some(1000)), at(origin, 150)));
     assert!(limiter.admit(&advanced(phase, "elements", 5, Some(1000)), at(origin, 160)));
     // Two seconds without an event admits even an unchanged count.
-    assert!(limiter.admit(&advanced(phase, "elements", 5, Some(1000)), at(origin, 2200)));
+    assert!(limiter.admit(
+        &advanced(phase, "elements", 5, Some(1000)),
+        at(origin, 2200)
+    ));
     // The final count always passes.
-    assert!(limiter.admit(&advanced(phase, "elements", 1000, Some(1000)), at(origin, 2201)));
-    assert!(!limiter.admit(&advanced(phase, "elements", 1000, Some(1000)), at(origin, 2202)));
+    assert!(limiter.admit(
+        &advanced(phase, "elements", 1000, Some(1000)),
+        at(origin, 2201)
+    ));
+    assert!(!limiter.admit(
+        &advanced(phase, "elements", 1000, Some(1000)),
+        at(origin, 2202)
+    ));
 }
 
 #[test]

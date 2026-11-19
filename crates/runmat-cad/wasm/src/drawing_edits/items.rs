@@ -65,8 +65,16 @@ fn set_at(d: &mut Drawing<'_>, item: Item<'_>, p: [f64; 2]) -> Result<(), EditFa
     let doc = &mut d.document;
     match item {
         Item::View(n) => doc.views.iter_mut().find(|v| v.name == n).map(|v| v.at = p),
-        Item::Annotation(n) => doc.annotations.iter_mut().find(|a| a.id == n).map(|a| a.at = p),
-        Item::Table(n) => doc.tables.iter_mut().find(|t| t.name == n).map(|t| t.at = Some(p)),
+        Item::Annotation(n) => doc
+            .annotations
+            .iter_mut()
+            .find(|a| a.id == n)
+            .map(|a| a.at = p),
+        Item::Table(n) => doc
+            .tables
+            .iter_mut()
+            .find(|t| t.name == n)
+            .map(|t| t.at = Some(p)),
     }
     .ok_or_else(|| model(format!("the drawing has no `{}`", name(item))))
 }

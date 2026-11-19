@@ -581,7 +581,12 @@ pub(super) fn add(catalog: &mut Catalog) {
         context_menu(
             K::Annotation,
             P,
-            &["view.zoom-selection", "design.show-source", "design.copy-reference", "part.delete"],
+            &[
+                "view.zoom-selection",
+                "design.show-source",
+                "design.copy-reference",
+                "part.delete",
+            ],
             vec![
                 vec![c("view.zoom-selection")],
                 vec![c("design.show-source"), c("design.copy-reference")],
@@ -591,7 +596,12 @@ pub(super) fn add(catalog: &mut Catalog) {
         context_menu(
             K::View,
             P,
-            &["view.zoom-selection", "design.show-source", "design.copy-reference", "part.delete"],
+            &[
+                "view.zoom-selection",
+                "design.show-source",
+                "design.copy-reference",
+                "part.delete",
+            ],
             vec![
                 vec![c("view.zoom-selection")],
                 vec![c("design.show-source"), c("design.copy-reference")],

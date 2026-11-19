@@ -1,6 +1,6 @@
 [package]
 name = "runmat-config"
-version = "0.7.1"
+version = "0.7.2"
 edition = "2021"
 description = "Shared configuration schema and loaders for RunMat"
 license-file = "../../LICENSE.md"

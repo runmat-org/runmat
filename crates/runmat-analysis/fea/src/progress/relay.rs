@@ -15,9 +15,7 @@ use std::sync::{Arc, Mutex};
 
 use runmat_time::Instant;
 
-use super::rate::{
-    ProgressRateLimiter, ELAPSED_METADATA, HEARTBEAT_INTERVAL, HEARTBEAT_METADATA,
-};
+use super::rate::{ProgressRateLimiter, ELAPSED_METADATA, HEARTBEAT_INTERVAL, HEARTBEAT_METADATA};
 use super::{FeaProgressEvent, FeaProgressHandler, FeaProgressStatus};
 
 struct OpenPhase {

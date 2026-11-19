@@ -1898,7 +1898,10 @@ fn analysis_run_nonlinear_strict_iteration_cap_refuses_unconverged_publication()
             .difference(&unconverged_before)
             .cloned()
             .collect();
-        assert!(published.is_empty(), "unconverged runs published: {published:?}");
+        assert!(
+            published.is_empty(),
+            "unconverged runs published: {published:?}"
+        );
     }
 }
 
@@ -1942,7 +1945,10 @@ fn analysis_run_nonlinear_quality_policy_cannot_publish_unconverged_physical_sol
             .difference(&unconverged_before)
             .cloned()
             .collect();
-        assert!(published.is_empty(), "unconverged runs published: {published:?}");
+        assert!(
+            published.is_empty(),
+            "unconverged runs published: {published:?}"
+        );
     }
 }
 

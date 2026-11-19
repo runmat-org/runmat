@@ -7,11 +7,15 @@ Every other first-party crate retains strict all-target Clippy.
 
 ## Architecture inventory
 
-`fea-architecture-debt-0.7.json` records 111 findings covering module
+`fea-architecture-debt-0.7.json` records 103 findings covering module
 concentration, module size and existing suppression sites in the listed FEA
 domains. The checker requires the exact diagnostic multiset, an ancestor review
 commit, its Git input identity and the pinned compiler. The language-surface
 ledger runs independently and covers 136 current members.
+
+The 0.7.2 candidate update removed eight findings that the 0.7.2 FEA work
+resolved and lowered the recorded line counts of others. No finding was added
+and no recorded line count rose.
 
 ## Clippy inventory
 
@@ -27,6 +31,13 @@ partial-order findings in `algebra/elastic_rigidity.rs`. Every retained identity
 and emission count matches the prior inventory. No new exception was added.
 The retained JSONL SHA-256 is
 `152dc4f633b477b298d30de7361b9961fd68fd1dc1bf3b00ff682f97019c82d3`.
+
+On the 0.7.2 candidate, `solve_policy` in
+`planning/resource/preflight/solve_workspace.rs` gained a ninth parameter
+(`preparation_bytes`, 69f99121ff). Its existing `too_many_arguments` finding
+now reads 9/7 in place of 8/7. The ledger records that one identity with its
+unchanged count of two emissions. Sites, identities and emissions stay at 179,
+166 and 265.
 
 CI retains the separate FEA lint log and checks it against the ledger. The
 expected Clippy failure under `-D warnings` is accepted only when that exact

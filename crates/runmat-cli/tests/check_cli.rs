@@ -1554,11 +1554,15 @@ study bar_resistance {{
     assert_eq!(declared["status"], "valid", "{declared}");
     let undeclared = check_variant(&temp, "conduction-node-density.fea", &study("node"));
     assert_eq!(undeclared["status"], "invalid", "{undeclared}");
+    // Lowering refuses the node location before admission runs, and names where the step
+    // does publish the quantity (00e06f0d82: one admission rule with published locations).
     let diagnostics = undeclared["diagnostics"].to_string();
     assert!(
-        diagnostics.contains("fea.admission.observation")
-            && diagnostics.contains("end_current_density")
-            && diagnostics.contains("no declaration matches quantity, location, and value shape"),
+        diagnostics.contains("fea.semantic.output.field_location")
+            && diagnostics.contains(
+                "step `conduction` doesn't publish `electric_current_density` at this location"
+            )
+            && diagnostics.contains("`element`"),
         "{diagnostics}"
     );
 }

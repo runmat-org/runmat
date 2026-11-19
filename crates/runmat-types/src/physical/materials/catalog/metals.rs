@@ -8,7 +8,8 @@ use super::super::{Cited, Material, MaterialCategory};
 
 const GPA: f64 = 1.0e9;
 const MPA: f64 = 1.0e6;
-const ROOM: Cited<crate::physical::kind::Temperature> = Cited::new(293.15, &c::ROOM_TEMPERATURE_20_C);
+const ROOM: Cited<crate::physical::kind::Temperature> =
+    Cited::new(293.15, &c::ROOM_TEMPERATURE_20_C);
 
 const fn structural_steel(id: &'static str, label: &'static str, yield_mpa: f64) -> Material {
     Material {

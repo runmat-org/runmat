@@ -72,11 +72,14 @@ impl<'a, 'b> Run<'a, 'b> {
                 // nothing to extend to, so the edit says which way to pick instead of failing in
                 // the kernel.
                 if let FaceMotion::Translate { vector } = motion {
-                    let length = (vector[0] * vector[0] + vector[1] * vector[1] + vector[2] * vector[2]).sqrt();
+                    let length =
+                        (vector[0] * vector[0] + vector[1] * vector[1] + vector[2] * vector[2])
+                            .sqrt();
                     let in_plane = length > 0.0
                         && set.iter().all(|h| {
                             self.face_normal(h).is_some_and(|n| {
-                                (n[0] * vector[0] + n[1] * vector[1] + n[2] * vector[2]).abs() < 1e-9 * length.max(1.0)
+                                (n[0] * vector[0] + n[1] * vector[1] + n[2] * vector[2]).abs()
+                                    < 1e-9 * length.max(1.0)
                             })
                         });
                     if in_plane {

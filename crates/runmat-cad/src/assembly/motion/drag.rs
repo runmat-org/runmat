@@ -13,8 +13,8 @@
 
 use super::kinematics::{frame_failure, warm_placement, MotionContext};
 use crate::assembly::model::{AssemblyDocument, Placement};
-use crate::regen::kernel::Transform;
 use crate::assembly::resolve::{resolve, DragTarget, NodeId, ResolveRequest, ResolvedAssembly};
+use crate::regen::kernel::Transform;
 
 /// A drag's outcome.
 pub struct Dragged {
@@ -68,7 +68,11 @@ pub fn drag(
     };
     let tree = resolve(&base.top, &request, ctx.resolve);
     let same = tree.nodes.len() == base.nodes.len()
-        && tree.nodes.iter().zip(&base.nodes).all(|(a, b)| a.uuid == b.uuid);
+        && tree
+            .nodes
+            .iter()
+            .zip(&base.nodes)
+            .all(|(a, b)| a.uuid == b.uuid);
     if !same {
         return Err("the assembly's structure changed during the drag".into());
     }

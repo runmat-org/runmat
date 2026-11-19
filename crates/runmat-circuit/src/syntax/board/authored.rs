@@ -36,10 +36,14 @@ fn statement_value(text: &str) -> Option<(Val, usize)> {
     if !syntax.diagnostics.is_empty() {
         return None;
     }
-    let statement: Statement = syntax.file().items().into_iter().find_map(|item| match item {
-        Item::Declaration(d) => d.block().and_then(|b| b.statements().into_iter().next()),
-        _ => None,
-    })?;
+    let statement: Statement = syntax
+        .file()
+        .items()
+        .into_iter()
+        .find_map(|item| match item {
+            Item::Declaration(d) => d.block().and_then(|b| b.statements().into_iter().next()),
+            _ => None,
+        })?;
     let value = head(&statement).ok()??.value?;
     Some((value, OPEN.len()))
 }
@@ -209,8 +213,10 @@ mod tests {
 
     #[test]
     fn a_rewritten_statement_keeps_the_values_that_did_not_change() {
-        let written = "track GND = { layer = F.Cu, width = 12 mil, from = [0.1 in, 20], to = [30, 20] }";
-        let printed = "track GND = { layer = B.Cu, width = 0.3048, from = [2.54, 20], to = [31, 20] }";
+        let written =
+            "track GND = { layer = F.Cu, width = 12 mil, from = [0.1 in, 20], to = [30, 20] }";
+        let printed =
+            "track GND = { layer = B.Cu, width = 0.3048, from = [2.54, 20], to = [31, 20] }";
         assert_eq!(
             keep_written(written, printed),
             "track GND = { layer = B.Cu, width = 12 mil, from = [0.1 in, 20], to = [31, 20] }"

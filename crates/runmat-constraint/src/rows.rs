@@ -99,7 +99,11 @@ mod tests {
             let (ru, rd) = (constraint_rows(&s, &up), constraint_rows(&s, &down));
             for row in 0..r.rows() {
                 let fd = (ru.residual[row] - rd.residual[row]) / (2.0 * h);
-                assert!((fd - r.at(row, v)).abs() < 1e-6, "row {row} var {v}: {fd} vs {}", r.at(row, v));
+                assert!(
+                    (fd - r.at(row, v)).abs() < 1e-6,
+                    "row {row} var {v}: {fd} vs {}",
+                    r.at(row, v)
+                );
             }
         }
     }

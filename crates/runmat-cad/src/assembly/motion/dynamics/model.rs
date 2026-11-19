@@ -202,7 +202,12 @@ impl<'a> Model<'a> {
                 mass,
                 inv_inertia,
                 position: [vars[0].index(), vars[1].index(), vars[2].index()],
-                orientation: [vars[3].index(), vars[4].index(), vars[5].index(), vars[6].index()],
+                orientation: [
+                    vars[3].index(),
+                    vars[4].index(),
+                    vars[5].index(),
+                    vars[6].index(),
+                ],
             });
         }
         if let Some(i) = sys
@@ -291,7 +296,10 @@ impl<'a> Model<'a> {
             let a = rotation(p);
             let w = [u[6 * i + 3], u[6 * i + 4], u[6 * i + 5]];
             // ṙ = v + A (c' × ω') ... = v − A (ω' × c').
-            let rdot = sub([u[6 * i], u[6 * i + 1], u[6 * i + 2]], mat3_vec(&a, cross(w, b.mass.center)));
+            let rdot = sub(
+                [u[6 * i], u[6 * i + 1], u[6 * i + 2]],
+                mat3_vec(&a, cross(w, b.mass.center)),
+            );
             for k in 0..3 {
                 out[b.position[k]] = rdot[k];
             }
@@ -327,7 +335,8 @@ impl<'a> Model<'a> {
                     e[k] = 1.0;
                     let dr = scale(mat3_vec(&a, cross(e, body.mass.center)), -1.0);
                     let dp = p_dot(p, e);
-                    row[6 * i + 3 + k] = dot(jr, dr) + jp.iter().zip(dp).map(|(x, y)| x * y).sum::<f64>();
+                    row[6 * i + 3 + k] =
+                        dot(jr, dr) + jp.iter().zip(dp).map(|(x, y)| x * y).sum::<f64>();
                 }
             }
             phi.push(rows.residual[r]);
@@ -351,7 +360,10 @@ impl<'a> Model<'a> {
             mul(&b, u, m, self.dofs())
         };
         let (up, down) = (at(1.0), at(-1.0));
-        up.iter().zip(&down).map(|(a, b)| -(a - b) / (2.0 * h)).collect()
+        up.iter()
+            .zip(&down)
+            .map(|(a, b)| -(a - b) / (2.0 * h))
+            .collect()
     }
 
     fn inv_mass(&self, f: &[f64]) -> Vec<f64> {
@@ -443,14 +455,17 @@ impl<'a> Model<'a> {
             })
             .collect();
         // B M⁻¹ Bᵀ.
-        let minv_bt: Vec<Vec<f64>> = (0..m).map(|r| self.inv_mass(&b[r * n..(r + 1) * n])).collect();
+        let minv_bt: Vec<Vec<f64>> = (0..m)
+            .map(|r| self.inv_mass(&b[r * n..(r + 1) * n]))
+            .collect();
         let mut s = vec![0.0; m * m];
         for r in 0..m {
             for c in 0..m {
                 s[r * m + c] = (0..n).map(|k| b[r * n + k] * minv_bt[c][k]).sum();
             }
         }
-        let lambda = solve_spd(&s, &rhs, m).ok_or("the mechanism's equations of motion are singular")?;
+        let lambda =
+            solve_spd(&s, &rhs, m).ok_or("the mechanism's equations of motion are singular")?;
         let reaction = mul_t(&b, &lambda, m, n);
         let total: Vec<f64> = f.iter().zip(&reaction).map(|(a, r)| a + r).collect();
         Ok((self.inv_mass(&total), lambda, owners))
@@ -482,14 +497,18 @@ impl<'a> Model<'a> {
                 return Ok(());
             }
             let n = cols.len();
-            let j: Vec<f64> = (0..m).flat_map(|r| cols.iter().map(move |&c| (r, c))).map(|(r, c)| rows.at(r, c)).collect();
+            let j: Vec<f64> = (0..m)
+                .flat_map(|r| cols.iter().map(move |&c| (r, c)))
+                .map(|(r, c)| rows.at(r, c))
+                .collect();
             let mut s = vec![0.0; m * m];
             for r in 0..m {
                 for c in 0..m {
                     s[r * m + c] = (0..n).map(|k| j[r * n + k] * j[c * n + k]).sum();
                 }
             }
-            let y = solve_spd(&s, &rows.residual, m).ok_or("the position projection is singular")?;
+            let y =
+                solve_spd(&s, &rows.residual, m).ok_or("the position projection is singular")?;
             let dx = mul_t(&j, &y, m, n);
             for (k, &c) in cols.iter().enumerate() {
                 q[c] -= dx[k];
@@ -511,7 +530,9 @@ impl<'a> Model<'a> {
         let (_, b, _) = self.velocity_rows(q);
         let m = b.len() / n.max(1);
         let bu = mul(&b, u, m, n);
-        let minv_bt: Vec<Vec<f64>> = (0..m).map(|r| self.inv_mass(&b[r * n..(r + 1) * n])).collect();
+        let minv_bt: Vec<Vec<f64>> = (0..m)
+            .map(|r| self.inv_mass(&b[r * n..(r + 1) * n]))
+            .collect();
         let mut s = vec![0.0; m * m];
         for r in 0..m {
             for c in 0..m {
@@ -551,7 +572,9 @@ impl<'a> Model<'a> {
 
     /// One classical Runge–Kutta step of `h`, then the projections.
     fn step(&self, q: &mut [f64], u: &mut [f64], h: f64) -> Result<(), String> {
-        let shift = |x: &[f64], d: &[f64], s: f64| -> Vec<f64> { x.iter().zip(d).map(|(a, b)| a + s * b).collect() };
+        let shift = |x: &[f64], d: &[f64], s: f64| -> Vec<f64> {
+            x.iter().zip(d).map(|(a, b)| a + s * b).collect()
+        };
         let (k1q, k1u) = self.derivative(q, u)?;
         let (k2q, k2u) = self.derivative(&shift(q, &k1q, h / 2.0), &shift(u, &k1u, h / 2.0))?;
         let (k3q, k3u) = self.derivative(&shift(q, &k2q, h / 2.0), &shift(u, &k2u, h / 2.0))?;
@@ -586,20 +609,37 @@ impl<'a> Model<'a> {
     /// Integrates from `(q, u)` at rest or moving over `steps` equal steps of `h`, and returns
     /// the state `(t, q, u)` after every step (the first at time 0). On a failure the states so
     /// far stand and the error says when and why.
-    pub fn integrate(&self, q0: &[f64], u0: &[f64], steps: usize, h: f64) -> (Vec<State>, Option<(f64, String)>) {
+    pub fn integrate(
+        &self,
+        q0: &[f64],
+        u0: &[f64],
+        steps: usize,
+        h: f64,
+    ) -> (Vec<State>, Option<(f64, String)>) {
         let mut q = q0.to_vec();
         let mut u = u0.to_vec();
         self.normalize(&mut q);
-        if let Err(e) = self.project_positions(&mut q).and_then(|_| self.project_velocities(&q, &mut u)) {
+        if let Err(e) = self
+            .project_positions(&mut q)
+            .and_then(|_| self.project_velocities(&q, &mut u))
+        {
             return (Vec::new(), Some((0.0, e)));
         }
         let mut out = Vec::with_capacity(steps + 1);
-        out.push(State { time: 0.0, q: q.clone(), u: u.clone() });
+        out.push(State {
+            time: 0.0,
+            q: q.clone(),
+            u: u.clone(),
+        });
         for s in 0..steps {
             if let Err(e) = self.step(&mut q, &mut u, h) {
                 return (out, Some((s as f64 * h, e)));
             }
-            out.push(State { time: (s + 1) as f64 * h, q: q.clone(), u: u.clone() });
+            out.push(State {
+                time: (s + 1) as f64 * h,
+                q: q.clone(),
+                u: u.clone(),
+            });
         }
         (out, None)
     }
@@ -617,7 +657,12 @@ impl<'a> Model<'a> {
         mut on_frame: impl FnMut(&Sample),
     ) -> Result<(), (f64, String)> {
         let per = (frame_dt / max_step).ceil().max(1.0) as usize;
-        let (states, failed) = self.integrate(q0, u0, per * frames.saturating_sub(1), frame_dt / per as f64);
+        let (states, failed) = self.integrate(
+            q0,
+            u0,
+            per * frames.saturating_sub(1),
+            frame_dt / per as f64,
+        );
         for (k, s) in states.iter().step_by(per).enumerate() {
             let t = k as f64 * frame_dt;
             on_frame(&self.sample(t, &s.q, &s.u).map_err(|e| (t, e))?);
@@ -638,7 +683,13 @@ impl<'a> Model<'a> {
     /// The load `load` puts on body `i` at `(q, u)` (none when neither of its connectors is on
     /// that body): a world force acting at a world point and a world torque, the terms
     /// [`Model::forces`] applies.
-    pub fn mate_load_on(&self, q: &[f64], u: &[f64], load: &MateLoad, i: usize) -> Option<([f64; 3], [f64; 3], [f64; 3])> {
+    pub fn mate_load_on(
+        &self,
+        q: &[f64],
+        u: &[f64],
+        load: &MateLoad,
+        i: usize,
+    ) -> Option<([f64; 3], [f64; 3], [f64; 3])> {
         let (x, xd) = self.measure(q, u, load);
         let value = -load.stiffness * (x - load.free) - load.damping * xd + load.constant;
         let (fa, fb) = (self.connector(q, load.a), self.connector(q, load.b));
@@ -649,10 +700,16 @@ impl<'a> Model<'a> {
         };
         let mut out: Option<([f64; 3], [f64; 3], [f64; 3])> = None;
         for (c, sign) in [(load.b, 1.0), (load.a, -1.0)] {
-            let rc::EntityKind::Connector { body, .. } = &self.sys.entity(c).kind else { continue };
+            let rc::EntityKind::Connector { body, .. } = &self.sys.entity(c).kind else {
+                continue;
+            };
             if self.body_of_entity(*body) == Some(i) {
                 let (pf, pt) = out.map_or(([0.0; 3], [0.0; 3]), |o| (o.1, o.2));
-                out = Some((fb.translation, add(pf, scale(f, sign)), add(pt, scale(t, sign))));
+                out = Some((
+                    fb.translation,
+                    add(pf, scale(f, sign)),
+                    add(pt, scale(t, sign)),
+                ));
             }
         }
         out
@@ -671,7 +728,10 @@ impl<'a> Model<'a> {
             }
         }
         let a = rotation(quat(q, &self.bodies[i].orientation));
-        ([gen[0], gen[1], gen[2]], mat3_vec(&a, [gen[3], gen[4], gen[5]]))
+        (
+            [gen[0], gen[1], gen[2]],
+            mat3_vec(&a, [gen[3], gen[4], gen[5]]),
+        )
     }
 
     /// The model of a kinematic study's pose: every free body of `sys` weighs alike, with its

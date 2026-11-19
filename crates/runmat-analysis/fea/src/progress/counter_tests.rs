@@ -44,9 +44,17 @@ fn a_short_count_stays_silent_and_a_long_one_ends_at_its_total() {
         .iter()
         .map(|event| event.current.unwrap())
         .collect::<Vec<_>>();
-    assert!(counts.windows(2).all(|pair| pair[0] <= pair[1]), "{counts:?}");
+    assert!(
+        counts.windows(2).all(|pair| pair[0] <= pair[1]),
+        "{counts:?}"
+    );
     let last = events.last().unwrap();
-    assert_eq!((last.current, last.total, last.fraction), (Some(1_000), Some(1_000), Some(1.0)));
+    assert_eq!(
+        (last.current, last.total, last.fraction),
+        (Some(1_000), Some(1_000), Some(1.0))
+    );
     assert_eq!(last.metadata[UNIT_METADATA], "elements");
-    assert!(events.iter().all(|event| event.status == FeaProgressStatus::Advanced));
+    assert!(events
+        .iter()
+        .all(|event| event.status == FeaProgressStatus::Advanced));
 }

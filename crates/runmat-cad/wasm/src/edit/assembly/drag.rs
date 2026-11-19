@@ -72,14 +72,15 @@ pub(super) fn drag(
     let name = component(compiled, request)?;
     let delta = ["dx", "dy", "dz"].map(|id| number(request, id) / 1000.0);
     if delta == [0.0; 3] {
-        return Err(model("drag the handle, or type how far to pull the component"));
+        return Err(model(
+            "drag the handle, or type how far to pull the component",
+        ));
     }
     let resolution = resolve_assembly_in(path, text, files, None)
         .map_err(|_| model("the assembly doesn't compile"))?;
     let base = &resolution.resolved;
     let solve = |f: f64| {
-        crate::motion::drag(base, &resolution.source, &name, delta.map(|d| d * f))
-            .map_err(model)
+        crate::motion::drag(base, &resolution.source, &name, delta.map(|d| d * f)).map_err(model)
     };
     let mut dragged = solve(1.0)?;
     if dragged.placements.is_empty() {

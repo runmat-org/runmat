@@ -296,7 +296,10 @@ impl ImportedExactCad {
         use runmat_geometry_core::PersistentEntityKind;
         let mut display = BTreeMap::new();
         for (id, names) in &self.entity_names {
-            if !matches!(id.kind, PersistentEntityKind::Face | PersistentEntityKind::Solid) {
+            if !matches!(
+                id.kind,
+                PersistentEntityKind::Face | PersistentEntityKind::Solid
+            ) {
                 continue;
             }
             let Some(name) = names.iter().find(|name| !name.trim().is_empty()) else {

@@ -14,13 +14,19 @@ fn state_of(path: &str, text: &str) -> FileState {
 }
 
 fn fixture(name: &str) -> FileState {
-    let path = format!("{}/tests/fixtures/part_kinds/{name}", env!("CARGO_MANIFEST_DIR"));
+    let path = format!(
+        "{}/tests/fixtures/part_kinds/{name}",
+        env!("CARGO_MANIFEST_DIR")
+    );
     state_of(name, &std::fs::read_to_string(&path).expect(&path))
 }
 
 /// A corpus document, read as `as_path` (the file a part lives in is named after the part).
 fn corpus(name: &str, as_path: &str) -> FileState {
-    let path = format!("{}/tests/corpus/documents/{name}", env!("CARGO_MANIFEST_DIR"));
+    let path = format!(
+        "{}/tests/corpus/documents/{name}",
+        env!("CARGO_MANIFEST_DIR")
+    );
     state_of(as_path, &std::fs::read_to_string(&path).expect(&path))
 }
 
@@ -67,8 +73,14 @@ fn a_machined_bracket_is_a_written_part() {
 
 #[test]
 fn a_part_with_sheet_metal_features_is_sheet_metal() {
-    assert_eq!(corpus("part01.part", "bracket_sm.part"), FileState::SheetMetal);
-    assert_eq!(corpus("part08.part", "bracket_sm.part"), FileState::SheetMetal);
+    assert_eq!(
+        corpus("part01.part", "bracket_sm.part"),
+        FileState::SheetMetal
+    );
+    assert_eq!(
+        corpus("part08.part", "bracket_sm.part"),
+        FileState::SheetMetal
+    );
 }
 
 #[test]

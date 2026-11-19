@@ -144,7 +144,10 @@ fn a_filleted_plates_hole_rims_draw_as_closed_ellipses_in_an_isometric_view() {
     assert_eq!(closed_rims(iso, &tangent), sharp_rims(), "{iso:#}");
     // The L reads whole: the thin lines span the view as its outline does.
     let span = |ls: &[Vec<f64>]| {
-        let v: Vec<f64> = ls.iter().flat_map(|l| l.iter().skip(1).step_by(2).copied()).collect();
+        let v: Vec<f64> = ls
+            .iter()
+            .flat_map(|l| l.iter().skip(1).step_by(2).copied())
+            .collect();
         v.iter().cloned().fold(f64::MIN, f64::max) - v.iter().cloned().fold(f64::MAX, f64::min)
     };
     let outline = span(&lines(iso, "visible"));

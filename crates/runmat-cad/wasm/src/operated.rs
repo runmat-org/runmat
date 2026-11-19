@@ -16,8 +16,8 @@ use runmat_cad::ids::FeatureId;
 use runmat_cad::model::PartDocument;
 use runmat_cad::refs::naming::{name_outputs, NamingContext, OperandView};
 use runmat_cad::regen::engine::LiveBody;
-use runmat_cad::regen::RegenResult;
 use runmat_cad::regen::kernel::{Combine, KernelOp, ToolOp, ToolShape};
+use runmat_cad::regen::RegenResult;
 use std::collections::BTreeMap;
 
 /// What the assembly's features made: per affected node, its display and its digest; and per
@@ -50,7 +50,8 @@ fn affected(resolved: &ResolvedAssembly, op: &AssemblyOperation) -> Vec<u32> {
         .filter(|(_, n)| n.definition.kind == DefinitionKind::Part && !n.represented_by_ancestor)
         .filter(|(i, _)| {
             op.components.is_empty()
-                || top_name(resolved, *i as u32).is_some_and(|t| op.components.iter().any(|c| c == t))
+                || top_name(resolved, *i as u32)
+                    .is_some_and(|t| op.components.iter().any(|c| c == t))
         })
         .map(|(i, _)| i as u32)
         .collect()
@@ -83,7 +84,10 @@ pub fn node_tools(
         };
         for c in &op.components {
             if !document.occurrences.iter().any(|o| &o.name == c) {
-                problems.push((op.name.clone(), format!("the assembly has no component `{c}`")));
+                problems.push((
+                    op.name.clone(),
+                    format!("the assembly has no component `{c}`"),
+                ));
             }
         }
         let nodes = affected(resolved, op);

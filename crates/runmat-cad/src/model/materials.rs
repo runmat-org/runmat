@@ -220,18 +220,48 @@ const SECTION_SYMBOLS: &[(&[&str], SectionSymbol)] = &[
     ),
     (&["concrete", "grout", "mortar"], SectionSymbol::Concrete),
     (
-        &["earth", "soil", "gravel", "crushed_stone", "aggregate", "backfill"],
+        &[
+            "earth",
+            "soil",
+            "gravel",
+            "crushed_stone",
+            "aggregate",
+            "backfill",
+        ],
         SectionSymbol::Earth,
     ),
     (
         &[
-            "lumber", "wood", "douglas_fir", "hem_fir", "spf", "pine", "oak", "birch", "plywood",
-            "osb", "oriented_strand", "lvl", "lsl", "glulam", "i_joist", "timber",
+            "lumber",
+            "wood",
+            "douglas_fir",
+            "hem_fir",
+            "spf",
+            "pine",
+            "oak",
+            "birch",
+            "plywood",
+            "osb",
+            "oriented_strand",
+            "lvl",
+            "lsl",
+            "glulam",
+            "i_joist",
+            "timber",
         ],
         SectionSymbol::Wood,
     ),
     (
-        &["steel", "stainless", "iron", "rebar", "s235", "s275", "s355", "a36"],
+        &[
+            "steel",
+            "stainless",
+            "iron",
+            "rebar",
+            "s235",
+            "s275",
+            "s355",
+            "a36",
+        ],
         SectionSymbol::Steel,
     ),
 ];
@@ -356,8 +386,13 @@ mod tests {
         // A density in a unit mass properties don't read is unknown, not skipped for the
         // material's.
         let odd = part_density(&output(", material = \"material.steel\", properties = [{ name = density, value = { type = quantity, value = 0.28 lb/in^3 } }]"));
-        assert!(odd.as_ref().is_err_and(|e| e.contains("lb/in^3")), "{odd:?}");
-        let zero = part_density(&output(", properties = [{ name = density, value = { type = quantity, value = 0 kg/m^3 } }]"));
+        assert!(
+            odd.as_ref().is_err_and(|e| e.contains("lb/in^3")),
+            "{odd:?}"
+        );
+        let zero = part_density(&output(
+            ", properties = [{ name = density, value = { type = quantity, value = 0 kg/m^3 } }]",
+        ));
         assert!(zero.is_err(), "{zero:?}");
     }
 

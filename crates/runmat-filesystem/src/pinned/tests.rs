@@ -444,7 +444,10 @@ fn pinned_paths_keep_the_namespace_of_the_provider_they_pin() {
     let virtual_base: Arc<dyn FsProvider> = Arc::new(MemoryFsProvider::new());
     let pinned = PinnedFsProvider::new(virtual_base.clone(), manifest("v1")).unwrap();
     assert_eq!(pinned.path_namespace(), virtual_base.path_namespace());
-    assert_eq!(pinned.path_namespace(), crate::FsPathNamespace::VirtualRooted);
+    assert_eq!(
+        pinned.path_namespace(),
+        crate::FsPathNamespace::VirtualRooted
+    );
 
     let native_base: Arc<dyn FsProvider> = Arc::new(crate::NativeFsProvider);
     let pinned = PinnedFsProvider::new(native_base, manifest("v1")).unwrap();

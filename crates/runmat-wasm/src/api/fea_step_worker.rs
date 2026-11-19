@@ -130,10 +130,7 @@ pub async fn execute_owned_fea_study_step(
     let settled = context.settle(outcome).await;
     if let Ok((json, false)) = &result {
         // The step's own error travels in the response; show it here as well.
-        super::fea_lease::log_worker_failure(
-            "executeOwnedFeaStudyStep",
-            &JsValue::from_str(json),
-        );
+        super::fea_lease::log_worker_failure("executeOwnedFeaStudyStep", &JsValue::from_str(json));
     }
     let result =
         super::fea_lease::merge_js_lease_error(result.map(|(json, _)| json), settled.err());

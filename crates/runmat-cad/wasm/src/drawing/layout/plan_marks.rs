@@ -47,7 +47,10 @@ pub fn draw(ctx: &mut Ctx<'_>, views: &[ViewPlan]) {
     let data = ctx.data;
     let mut prims: Vec<(String, Vec<Prim>, Option<BoxR>)> = Vec::new();
     for a in annotations(ctx, "level") {
-        let Some(v) = views.iter().find(|v| a["view"].as_str() == Some(v.name.as_str())) else {
+        let Some(v) = views
+            .iter()
+            .find(|v| a["view"].as_str() == Some(v.name.as_str()))
+        else {
             continue;
         };
         let aid = a["id"].as_str().unwrap_or("");
@@ -68,7 +71,14 @@ pub fn draw(ctx: &mut Ctx<'_>, views: &[ViewPlan]) {
             None => {
                 let left = v.v_side == Side::Left;
                 let room = v.room[if left { 2 } else { 3 }];
-                (left, if left { g.x0 - room - 12.0 } else { g.x1 + room + 12.0 })
+                (
+                    left,
+                    if left {
+                        g.x0 - room - 12.0
+                    } else {
+                        g.x1 + room + 12.0
+                    },
+                )
             }
         };
         let start = if left { g.x0 - 1.5 } else { g.x1 + 1.5 };
@@ -80,22 +90,39 @@ pub fn draw(ctx: &mut Ctx<'_>, views: &[ViewPlan]) {
         } else {
             (end + 3.0, "start")
         };
-        out.push(mark(&id, "dimtext", text(x, p[1] + 1.0, label, st.text, anchor)));
+        out.push(mark(
+            &id,
+            "dimtext",
+            text(x, p[1] + 1.0, label, st.text, anchor),
+        ));
         out.push(mark(
             &id,
             "dimtext",
             text(x, p[1] - 1.0 - st.text, &elevation, st.text, anchor),
         ));
         let b = if left {
-            BoxR::new(x - width, p[1] - 1.0 - st.text, end + 2.0, p[1] + 1.0 + st.text)
+            BoxR::new(
+                x - width,
+                p[1] - 1.0 - st.text,
+                end + 2.0,
+                p[1] + 1.0 + st.text,
+            )
         } else {
-            BoxR::new(end - 2.0, p[1] - 1.0 - st.text, x + width, p[1] + 1.0 + st.text)
+            BoxR::new(
+                end - 2.0,
+                p[1] - 1.0 - st.text,
+                x + width,
+                p[1] + 1.0 + st.text,
+            )
         };
         ctx.out.placed.insert(id.clone(), [end, p[1]]);
         prims.push((id, out, Some(b)));
     }
     for a in annotations(ctx, "door_swing") {
-        let Some(v) = views.iter().find(|v| a["view"].as_str() == Some(v.name.as_str())) else {
+        let Some(v) = views
+            .iter()
+            .find(|v| a["view"].as_str() == Some(v.name.as_str()))
+        else {
             continue;
         };
         let aid = a["id"].as_str().unwrap_or("");
@@ -144,7 +171,10 @@ pub fn draw_grids(ctx: &mut Ctx<'_>, views: &[ViewPlan]) {
         .collect();
     let mut prims: Vec<(String, Vec<Prim>, Option<BoxR>)> = Vec::new();
     for a in annotations(ctx, "grids") {
-        let Some(v) = views.iter().find(|v| a["view"].as_str() == Some(v.name.as_str())) else {
+        let Some(v) = views
+            .iter()
+            .find(|v| a["view"].as_str() == Some(v.name.as_str()))
+        else {
             continue;
         };
         let aid = a["id"].as_str().unwrap_or("");
@@ -216,7 +246,13 @@ pub fn draw_grids(ctx: &mut Ctx<'_>, views: &[ViewPlan]) {
             out.push(mark(
                 &id,
                 "dimtext",
-                text(centre[0], centre[1] - st.text / 2.0, label, st.text, "middle"),
+                text(
+                    centre[0],
+                    centre[1] - st.text / 2.0,
+                    label,
+                    st.text,
+                    "middle",
+                ),
             ));
             ctx.out.placed.entry(id.clone()).or_insert(centre);
         }
@@ -243,7 +279,15 @@ fn level_symbol(id: &str, c: Xy, r: f64) -> Vec<Prim> {
         mark(id, "arrow", Shape::Polygon { rings: vec![ring] })
     };
     vec![
-        mark(id, "dimink", Shape::Circle { x: c[0], y: c[1], r }),
+        mark(
+            id,
+            "dimink",
+            Shape::Circle {
+                x: c[0],
+                y: c[1],
+                r,
+            },
+        ),
         quarter(0.0),
         quarter(std::f64::consts::PI),
     ]
@@ -289,9 +333,15 @@ mod tests {
 
     #[test]
     fn a_grid_line_leaves_a_gap_where_it_crosses_text() {
-        let boxes = [BoxR::new(-2.0, 10.0, 2.0, 14.0), BoxR::new(5.0, 0.0, 9.0, 100.0)];
+        let boxes = [
+            BoxR::new(-2.0, 10.0, 2.0, 14.0),
+            BoxR::new(5.0, 0.0, 9.0, 100.0),
+        ];
         let pieces = around_text([0.0, 0.0], [0.0, 30.0], &boxes);
-        assert_eq!(pieces, vec![([0.0, 0.0], [0.0, 10.0]), ([0.0, 14.0], [0.0, 30.0])]);
+        assert_eq!(
+            pieces,
+            vec![([0.0, 0.0], [0.0, 10.0]), ([0.0, 14.0], [0.0, 30.0])]
+        );
         // A line that crosses nothing stays whole.
         assert_eq!(around_text([20.0, 0.0], [20.0, 5.0], &boxes).len(), 1);
     }

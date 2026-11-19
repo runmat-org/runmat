@@ -101,7 +101,11 @@ pub fn has_face(scoped: &Value, text: &str) -> bool {
 /// The datum planes `features` of the occurrence `path`'s part, in order: each plane's centre
 /// and its box `[min, max]` in the assembly (mm), from the outline the part's display draws it
 /// with. `None` for a feature the part doesn't draw as a plane.
-pub fn datum_planes(display: &Value, path: &str, features: &[String]) -> Vec<Option<(P3, [P3; 2])>> {
+pub fn datum_planes(
+    display: &Value,
+    path: &str,
+    features: &[String],
+) -> Vec<Option<(P3, [P3; 2])>> {
     let Some((proto, t)) = placed(display, path) else {
         return features.iter().map(|_| None).collect();
     };
@@ -158,7 +162,10 @@ pub fn door_swing(display: &Value, path: &str, hinge: Hinge, swing: Swing) -> Op
                 })
             })
             .collect(),
-        _ => vec![(vec3(&proto["bounds"]["min"])?, vec3(&proto["bounds"]["max"])?)],
+        _ => vec![(
+            vec3(&proto["bounds"]["min"])?,
+            vec3(&proto["bounds"]["max"])?,
+        )],
     };
     let (lo, hi) = boxes
         .into_iter()
@@ -224,7 +231,9 @@ mod tests {
         let s = scoped(&assembly(), "set/door").expect("scoped");
         let (points, surface) = super::super::values::face(&s, "feature.f.face.end").unwrap();
         // Part (0.8, 0, 0) m turned a quarter about z is (0, 0.8, 0), then moved 1 m along x.
-        assert!(points.iter().any(|p| (p[0] - 1000.0).abs() < 1e-6 && (p[1] - 800.0).abs() < 1e-6));
+        assert!(points
+            .iter()
+            .any(|p| (p[0] - 1000.0).abs() < 1e-6 && (p[1] - 800.0).abs() < 1e-6));
         let n = vec3(&surface["normal"]).unwrap();
         assert!((n[0] + 1.0).abs() < 1e-9 && n[1].abs() < 1e-9);
         assert!(scoped(&assembly(), "set/missing").is_none());
@@ -252,6 +261,8 @@ mod tests {
         assert!((open[0] - (h[0] - 800.0)).abs() < 1e-6);
         let arc = swing["arc"].as_array().unwrap();
         assert_eq!(arc.len(), 17);
-        assert!(arc.iter().all(|q| (len(vec3(q).unwrap(), h) - 800.0).abs() < 1e-6));
+        assert!(arc
+            .iter()
+            .all(|q| (len(vec3(q).unwrap(), h) - 800.0).abs() < 1e-6));
     }
 }

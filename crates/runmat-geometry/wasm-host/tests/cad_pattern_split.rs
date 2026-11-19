@@ -44,11 +44,7 @@ fn after(command: &str, values: Value) -> (String, usize, f64) {
         ],
     );
     assert_eq!(mass["ok"], true, "{mass}");
-    (
-        text,
-        bodies,
-        mass["data"]["total"]["volume"].as_f64().unwrap() * 1e9,
-    )
+    (text, bodies, mass["data"]["volume"].as_f64().unwrap() * 1e9)
 }
 
 fn close(got: f64, want: f64) {
@@ -142,7 +138,7 @@ fn a_fillet_patterns_with_its_boss() {
                 "{}",
                 &json!({ "command": "evaluate.mass-properties" }).to_string(),
             ],
-        )["data"]["total"]["volume"]
+        )["data"]["volume"]
             .as_f64()
             .unwrap()
             * 1e9

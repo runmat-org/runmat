@@ -43,7 +43,9 @@ fn rename_target(id: &str) -> Result<(RenameKind, &str), EditFailure> {
         ));
     }
     if id.starts_with("origin:") {
-        return Err(model("the origin's planes, axes and point keep their names"));
+        return Err(model(
+            "the origin's planes, axes and point keep their names",
+        ));
     }
     Err(model(format!("`{id}` can't be renamed")))
 }

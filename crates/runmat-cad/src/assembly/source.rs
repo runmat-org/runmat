@@ -736,15 +736,30 @@ mod label_tests {
             let shown = display_quantity(Some(&QuantityKindId::new(kind)), si);
             let source = format!("part p {{\n    input x : {kind} = {shown}\n}}\n");
             let parsed = crate::syntax::parse_part("/p.part", &source);
-            assert!(parsed.diagnostics.is_empty(), "{shown}: {:?}", parsed.diagnostics);
-            let document = parsed.document.unwrap_or_else(|| panic!("{shown} doesn't parse"));
-            let evaluator = Evaluator { units: &Units, dynamic: &NoDynamicValues };
+            assert!(
+                parsed.diagnostics.is_empty(),
+                "{shown}: {:?}",
+                parsed.diagnostics
+            );
+            let document = parsed
+                .document
+                .unwrap_or_else(|| panic!("{shown} doesn't parse"));
+            let evaluator = Evaluator {
+                units: &Units,
+                dynamic: &NoDynamicValues,
+            };
             // An input's default reads against its kind, so a mass's `g` is the gram.
-            let expected = crate::units::Units.kind(&QuantityKindId::new(kind)).unwrap();
+            let expected = crate::units::Units
+                .kind(&QuantityKindId::new(kind))
+                .unwrap();
             let value = evaluator
                 .eval_expecting(&document.inputs[0].default, &ValueEnv::default(), expected)
                 .unwrap_or_else(|e| panic!("{shown}: {e}"));
-            assert!((value.si - si).abs() <= si.abs() * 1e-6, "{shown} read as {}", value.si);
+            assert!(
+                (value.si - si).abs() <= si.abs() * 1e-6,
+                "{shown} read as {}",
+                value.si
+            );
         }
     }
 }

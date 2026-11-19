@@ -177,7 +177,9 @@ pub fn connector_displays(
 
 /// The top assembly's envelopes, each as the twelve edges of its box (id `envelope:<name>`, kind
 /// `curve`), in world coordinates.
-pub fn envelope_displays(resolved: &crate::assembly::resolve::ResolvedAssembly) -> Vec<ReferenceDisplay> {
+pub fn envelope_displays(
+    resolved: &crate::assembly::resolve::ResolvedAssembly,
+) -> Vec<ReferenceDisplay> {
     resolved
         .envelopes
         .iter()

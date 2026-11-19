@@ -12,7 +12,11 @@ use runmat_design_syntax::edit::TextEdit;
 use runmat_types::Span;
 
 /// Releases `file` (a workspace path) at `text`: the store's change and the new revision.
-pub fn release(file: &str, text: &str, files: &Files) -> Result<(FileEdit, RevisionId), EditFailure> {
+pub fn release(
+    file: &str,
+    text: &str,
+    files: &Files,
+) -> Result<(FileEdit, RevisionId), EditFailure> {
     let at = store_path(file);
     let old = files.get(&at).cloned().unwrap_or_default();
     let mut store = if old.is_empty() {

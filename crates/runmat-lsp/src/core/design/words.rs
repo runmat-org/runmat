@@ -36,7 +36,10 @@ pub(super) fn hover(
             return Some(text);
         }
     }
-    let cad = matches!(dialect, Dialect::Part | Dialect::Assembly | Dialect::Drawing);
+    let cad = matches!(
+        dialect,
+        Dialect::Part | Dialect::Assembly | Dialect::Drawing
+    );
     if cad {
         if let Some(text) = cad_hover(dialect, source, start, end, word, before, after) {
             return Some(text);
@@ -84,7 +87,11 @@ fn cad_hover(
         }
         // An allowed value: `mode = cut`, `form = counterbore`.
         if call.in_value && before.ends_with('=') {
-            if let Some(argument) = call.argument.as_deref().and_then(|a| call.callee.argument(a)) {
+            if let Some(argument) = call
+                .argument
+                .as_deref()
+                .and_then(|a| call.callee.argument(a))
+            {
                 if let Some(choice) = argument.choice(word) {
                     let mut text = format!(
                         "**`{}`** · value of `{}` in `{}`\n\n{}",
@@ -113,7 +120,10 @@ fn callee_hover(callee: &Callee, fence: &str) -> String {
     let (signature, arguments) = callee.signature();
     let mut text = format!("```{fence}\n{signature}\n```\n\n{}", callee.summary());
     if let Callee::Choice(op, argument, _) = callee {
-        text.push_str(&format!("\n\nA value of `{}` in `{}`.", argument.name, op.word));
+        text.push_str(&format!(
+            "\n\nA value of `{}` in `{}`.",
+            argument.name, op.word
+        ));
     }
     if !arguments.is_empty() {
         text.push_str("\n\n");
@@ -211,7 +221,10 @@ fn string_hover(
     let open = line_start + source[line_start..start].rfind('"')?;
     let close = start + source[start..].find('"')?;
     let text = &source[open + 1..close];
-    let head = source[line_start..open].trim_end().strip_suffix('=')?.trim_end();
+    let head = source[line_start..open]
+        .trim_end()
+        .strip_suffix('=')?
+        .trim_end();
     let field = head
         .rsplit(|c: char| !(c.is_ascii_alphanumeric() || c == '_'))
         .next()
@@ -235,14 +248,23 @@ fn string_hover(
 pub(super) fn material_hover(m: &runmat_types::physical::materials::Material) -> String {
     let mut rows = vec![
         format!("- Density: {} kg/m³", format_number(m.mass_density.si())),
-        format!("- Young's modulus: {} GPa", format_number(m.youngs_modulus.si() / 1e9)),
+        format!(
+            "- Young's modulus: {} GPa",
+            format_number(m.youngs_modulus.si() / 1e9)
+        ),
     ];
     let mut cited = vec![m.mass_density.citation, m.youngs_modulus.citation];
     if let Some(y) = m.yield_strength {
-        rows.push(format!("- Yield strength: {} MPa", format_number(y.si() / 1e6)));
+        rows.push(format!(
+            "- Yield strength: {} MPa",
+            format_number(y.si() / 1e6)
+        ));
         cited.push(y.citation);
     }
-    rows.push(format!("- Poisson's ratio: {}", format_number(m.poisson_ratio.si())));
+    rows.push(format!(
+        "- Poisson's ratio: {}",
+        format_number(m.poisson_ratio.si())
+    ));
     rows.push(format!(
         "- Thermal conductivity: {} W/(m·K)",
         format_number(m.conductivity.si())
@@ -265,13 +287,19 @@ pub(super) fn material_hover(m: &runmat_types::physical::materials::Material) ->
 
 fn part_hover(pool: &runmat_circuit::library::Pool, mpn: &str) -> Option<String> {
     let part = pool.parts.values().find(|p| p.mpn == mpn)?;
-    let mut text = format!("**{}** · {}\n\n{}", part.mpn, part.manufacturer, part.description);
+    let mut text = format!(
+        "**{}** · {}\n\n{}",
+        part.mpn, part.manufacturer, part.description
+    );
     if let Some(package) = pool.packages.get(&part.package) {
         text.push_str(&format!("\n\n- Package: `{}`", package.name));
     }
     text.push_str(&format!("\n- Lifecycle: {:?}", part.lifecycle).to_lowercase());
     for (name, param) in part.params.iter().take(6) {
-        let value = param.written.clone().unwrap_or_else(|| format!("{:?}", param.value));
+        let value = param
+            .written
+            .clone()
+            .unwrap_or_else(|| format!("{:?}", param.value));
         text.push_str(&format!("\n- {name}: {value}"));
     }
     if let Some(datasheet) = &part.datasheet {
@@ -287,7 +315,11 @@ fn package_hover(pool: &runmat_circuit::library::Pool, name: &str) -> Option<Str
         package.name,
         package.description,
         package.pads.len(),
-        if package.smd { "surface mount" } else { "through hole" }
+        if package.smd {
+            "surface mount"
+        } else {
+            "through hole"
+        }
     ))
 }
 
@@ -356,7 +388,11 @@ pub(super) fn entity_lines(count: u64, facts: &[serde_json::Value]) -> String {
                 if let Some(r) = f["radius"].as_f64() {
                     l.push_str(&format!(", radius {} mm", format_number(r * 1e3)));
                 }
-                l.push_str(&format!(", from {} to {} mm", mm(&f["start"]), mm(&f["end"])));
+                l.push_str(&format!(
+                    ", from {} to {} mm",
+                    mm(&f["start"]),
+                    mm(&f["end"])
+                ));
                 l
             }
             Some("vertex") => format!("- vertex at {} mm", mm(&f["point"])),

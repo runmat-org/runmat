@@ -60,6 +60,8 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 24
+      # The routing tests build a Cargo fixture; use the repository's pinned toolchain.
+      - uses: dtolnay/rust-toolchain@1.90.0
       - name: Verify distribution staging and notice archives
         run: >-
           node --test
@@ -81,6 +83,7 @@ jobs:
         run: |
           python3 -m unittest discover -s scripts/development -p 'test_run_workspace_test_group.py'
           python3 -m unittest discover -s scripts/development -p 'test_ci_changes.py'
+          python3 -m unittest discover -s scripts/development -p 'test_rust_cache_target.py'
 
   docs-lint:
     # FEA docs: capability ledger (ledger↔code↔docs), pending flags, fea highlighting, front matter, links, and generated pages.
@@ -269,7 +272,11 @@ jobs:
         with:
           # Completed root test binaries are reclaimed after each batch.
           # Keep the remaining libraries at a stable, lane-specific path.
-          shared-key: ordinary-0.7-v1-${{ matrix.cache_name || matrix.name }}
+          # Windows v2 caches are pruned and sealed by rust-cache-target.py;
+          # v1 Windows caches grew past what the build volume can restore.
+          shared-key: ordinary-0.7-${{ runner.os == 'Windows' && 'v2' || 'v1' }}-${{ matrix.cache_name || matrix.name }}
+          # The seal manifest lists every cached compiler output and its size.
+          cache-directories: ${{ runner.os == 'Windows' && format('{0}/.runmat-rust-cache', github.workspace) || '' }}
           cache-workspace-crates: true
           # A disk-exhausted Windows job can leave incomplete Cargo metadata.
           # Retain the last successful cache rather than publish that state.
@@ -324,6 +331,22 @@ jobs:
         run: |
           python -m pip install 'numpy>=2,<3' 'lxml>=6,<7'
           python -c "import sys, numpy, lxml.etree; print(sys.executable); print(numpy.__version__); print(lxml.etree.LIBXML_VERSION)"
+
+      # rust-cache only warns when tar fails partway (for example, when the
+      # volume fills), and Cargo then trusts fingerprints whose outputs are
+      # missing or truncated (E0463). Check the restored target against the
+      # manifest sealed at save time; clear it and build cold when incomplete.
+      - name: Discard an incomplete Windows Rust cache restore
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          python scripts/development/rust-cache-target.py verify `
+            --target $env:CARGO_TARGET_DIR `
+            --manifest-dir "$env:GITHUB_WORKSPACE/.runmat-rust-cache" `
+            --cargo-home $env:CARGO_HOME
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          "RUNMAT_CARGO_ARTIFACT_LEDGER=$env:RUNNER_TEMP/runmat-cargo-artifacts.txt" >> $env:GITHUB_ENV
 
       - name: Restore Windows native dependency cache
         if: runner.os == 'Windows' && matrix.needs_occt
@@ -552,6 +575,24 @@ jobs:
           python scripts/development/run-workspace-test-group.py "${{ matrix.test_group }}" --shard-index "${{ matrix.shard_index || 0 }}" --shard-count "${{ matrix.shard_count || 1 }}" --reclaim-completed-test-binaries 2>&1 | Tee-Object -FilePath test.log
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
+      # rust-cache saves this target after the job. A restored target that grows
+      # past the build volume fails the next restore ("No space left on device").
+      # Record its size and its most-duplicated crates so a save cap can be set from data.
+      - name: Report Rust target size before cache save (Windows)
+        if: success() && runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $deps = Join-Path $env:CARGO_TARGET_DIR 'debug/deps'
+          $files = @(Get-ChildItem -LiteralPath $env:CARGO_TARGET_DIR -Recurse -File -Force -ErrorAction SilentlyContinue)
+          $bytes = ($files | Measure-Object -Property Length -Sum).Sum
+          $free = (Get-PSDrive -Name (Get-Item -LiteralPath $env:CARGO_TARGET_DIR).PSDrive.Name).Free
+          Write-Host ("Rust target: {0:N1} GiB logical in {1} files; build volume {2:N1} GiB free" -f ($bytes / 1GB), $files.Count, ($free / 1GB))
+          if (Test-Path -LiteralPath $deps) {
+            Get-ChildItem -LiteralPath $deps -File -Filter '*.rlib' |
+              Group-Object { $_.BaseName -replace '-[0-9a-f]{16}$', '' } |
+              Sort-Object Count -Descending | Select-Object -First 10 |
+              ForEach-Object { Write-Host ("{0,4} variants  {1}" -f $_.Count, $_.Name) }
+          }
 
       - name: Upload analysis benchmark artifacts
         if: always() && ((github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master' || github.ref == 'refs/heads/release' || startsWith(github.ref, 'refs/heads/release/'))) || (github.event_name == 'pull_request' && failure()))
@@ -600,6 +641,24 @@ jobs:
             } else {
               console.log(body);
             }
+
+      # Runs last, just before rust-cache's post step saves the target. Drops
+      # deps outputs no Cargo command in this job used (stale variants that
+      # accumulated across restore-key generations), caches no target at all
+      # above the 48-GiB restore budget, and writes the completion manifest
+      # that the restore check above verifies. The budget keeps the restored
+      # target plus its archive well inside the ~102 GiB free before restore.
+      - name: Seal Windows Rust target for cache save
+        if: success() && runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          python scripts/development/rust-cache-target.py seal `
+            --target $env:CARGO_TARGET_DIR `
+            --manifest-dir "$env:GITHUB_WORKSPACE/.runmat-rust-cache" `
+            --ledger "$env:RUNNER_TEMP/runmat-cargo-artifacts.txt" `
+            --cap-gib 48
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
 
   cross-build:

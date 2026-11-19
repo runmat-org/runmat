@@ -240,7 +240,10 @@ pub fn operation_in(group: Group, word: &str) -> Option<&'static Operation> {
 }
 
 /// A choice written as a call (`counterbore`, `linear`) under one of `operation`'s arguments.
-pub fn choice_call(operation: &Operation, word: &str) -> Option<(&'static Argument, &'static Allowed)> {
+pub fn choice_call(
+    operation: &Operation,
+    word: &str,
+) -> Option<(&'static Argument, &'static Allowed)> {
     operation.arguments.iter().find_map(|a| {
         a.choice(word)
             .filter(|c| !c.fields.is_empty())
@@ -266,7 +269,12 @@ pub fn parameter(kind: &str, path: &str) -> Option<&'static Argument> {
     }
     if let Some((head, field)) = path.split_once('.') {
         if let Some(a) = op.argument(head) {
-            if let Some(f) = a.choices.iter().flat_map(|c| c.fields).find(|f| f.name == field) {
+            if let Some(f) = a
+                .choices
+                .iter()
+                .flat_map(|c| c.fields)
+                .find(|f| f.name == field)
+            {
                 return Some(f);
             }
         }
@@ -315,7 +323,10 @@ pub fn markdown_table(op: &Operation) -> String {
             (None, true) => "required".into(),
             (None, false) => "".into(),
         };
-        out.push_str(&format!("| `{}` | {kind} | {default} | {} |\n", a.name, a.summary));
+        out.push_str(&format!(
+            "| `{}` | {kind} | {default} | {} |\n",
+            a.name, a.summary
+        ));
     }
     out
 }
@@ -333,10 +344,17 @@ pub fn docs_block(spec: &str) -> Option<String> {
         "operations" => {
             let mut out = String::from("| Operation | Does | Arguments |\n|---|---|---|\n");
             for word in words {
-                let op = operation_in(Group::Feature, word)
-                    .or_else(|| operation(word))?;
-                let args: Vec<String> = op.call_arguments().map(|a| format!("`{}`", a.name)).collect();
-                out.push_str(&format!("| `{}` | {} | {} |\n", op.word, op.summary, args.join(", ")));
+                let op = operation_in(Group::Feature, word).or_else(|| operation(word))?;
+                let args: Vec<String> = op
+                    .call_arguments()
+                    .map(|a| format!("`{}`", a.name))
+                    .collect();
+                out.push_str(&format!(
+                    "| `{}` | {} | {} |\n",
+                    op.word,
+                    op.summary,
+                    args.join(", ")
+                ));
             }
             Some(out)
         }
@@ -344,10 +362,19 @@ pub fn docs_block(spec: &str) -> Option<String> {
         "choices" => {
             let op = operation(words.next()?)?;
             let argument = op.argument(words.next()?)?;
-            let mut out = format!("| `{}` | Arguments | Gives |\n|---|---|---|\n", argument.name);
+            let mut out = format!(
+                "| `{}` | Arguments | Gives |\n|---|---|---|\n",
+                argument.name
+            );
             for c in argument.choices {
-                let fields: Vec<String> = c.fields.iter().map(|f| format!("`{}`", f.name)).collect();
-                out.push_str(&format!("| `{}` | {} | {} |\n", c.word, fields.join(", "), c.summary));
+                let fields: Vec<String> =
+                    c.fields.iter().map(|f| format!("`{}`", f.name)).collect();
+                out.push_str(&format!(
+                    "| `{}` | {} | {} |\n",
+                    c.word,
+                    fields.join(", "),
+                    c.summary
+                ));
             }
             Some(out)
         }
@@ -364,7 +391,10 @@ pub fn rewrite_docs(page: &str) -> String {
         let Some(head_end) = rest[start..].find("-->").map(|i| start + i + 3) else {
             break;
         };
-        let Some(close) = rest[head_end..].find("<!-- /arguments -->").map(|i| head_end + i) else {
+        let Some(close) = rest[head_end..]
+            .find("<!-- /arguments -->")
+            .map(|i| head_end + i)
+        else {
             break;
         };
         let spec = rest[start + "<!-- arguments:".len()..head_end - 3].trim();

@@ -120,10 +120,12 @@ impl ModuleScope {
     fn nearest(&self, target: &str) -> Option<String> {
         let name = target.rsplit('/').next().unwrap_or(target);
         let limit = (name.chars().count() / 3).max(2);
-        let files = self
-            .declared
-            .keys()
-            .map(|f| (f, edit_distance(target, f).min(edit_distance(target, without_extension(f)))));
+        let files = self.declared.keys().map(|f| {
+            (
+                f,
+                edit_distance(target, f).min(edit_distance(target, without_extension(f))),
+            )
+        });
         let folders = self
             .scope
             .folders

@@ -7,9 +7,9 @@
 //! with no components picked it keeps its box. Interference and clearance checks list components
 //! inside a keep-out envelope, except its owner.
 
+use super::mate::field;
 use super::publishes::valid_name;
 use super::{model, parse_pick, Compiled};
-use super::mate::field;
 use crate::features::picks_of;
 use runmat_cad::assembly::model::{AssemblyDocument, EnvelopeDecl};
 use runmat_cad::syntax::edit::EditFailure;
@@ -32,7 +32,11 @@ fn component_box(compiled: &Compiled, uuid: &str) -> Option<([f64; 3], [f64; 3])
     };
     let corner = |k: &str| -> Option<[f64; 3]> {
         let a = bounds[k].as_array()?;
-        Some([a.first()?.as_f64()?, a.get(1)?.as_f64()?, a.get(2)?.as_f64()?])
+        Some([
+            a.first()?.as_f64()?,
+            a.get(1)?.as_f64()?,
+            a.get(2)?.as_f64()?,
+        ])
     };
     let (lo, hi) = (corner("min")?, corner("max")?);
     if t.len() < 12 {
@@ -73,8 +77,7 @@ pub(super) fn apply(
         Some(Value::String(s)) if s.trim().is_empty() => 0.0,
         _ => {
             let v = field(values, "margin", "mm")?;
-            runmat_cad::units::length_mm(&v)
-                .ok_or_else(|| model("the margin must be a length"))?
+            runmat_cad::units::length_mm(&v).ok_or_else(|| model("the margin must be a length"))?
                 / 1e3
         }
     };
@@ -115,10 +118,7 @@ pub(super) fn apply(
         .unwrap_or(true);
     let at = document.envelopes.iter().position(|e| e.name == name);
     let (min, max) = match (fitted, at) {
-        (Some((lo, hi)), _) => (
-            lo.map(|v| mm(v - margin)),
-            hi.map(|v| mm(v + margin)),
-        ),
+        (Some((lo, hi)), _) => (lo.map(|v| mm(v - margin)), hi.map(|v| mm(v + margin))),
         (None, Some(i)) => (
             document.envelopes[i].min.clone(),
             document.envelopes[i].max.clone(),

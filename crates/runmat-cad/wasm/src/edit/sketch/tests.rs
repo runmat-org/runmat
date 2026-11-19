@@ -660,7 +660,11 @@ fn delete_on_a_picked_line_keeps_the_points_other_lines_took_from_it() {
     let after = out["files"][0]["text"].as_str().unwrap();
     assert!(!after.contains("l2 = line("), "{after}");
     assert!(!after.contains("l2.end"), "{after}");
-    assert!(after.contains("l5 = line(start = [40 mm, 20 mm]") || after.contains("= line(start = [40 mm, 20 mm], end = [60 mm"), "{after}");
+    assert!(
+        after.contains("l5 = line(start = [40 mm, 20 mm]")
+            || after.contains("= line(start = [40 mm, 20 mm], end = [60 mm"),
+        "{after}"
+    );
 }
 
 /// The polygon and text forms take their centre or anchor as a picked sketch point (the Outline
@@ -693,5 +697,11 @@ fn construction_toggles_the_selected_curve() {
     ))
     .unwrap();
     assert_eq!(out["ok"], true, "{out}");
-    assert!(out["files"][0]["text"].as_str().unwrap().contains("end = [40 mm, 0 mm], construction)"), "{out}");
+    assert!(
+        out["files"][0]["text"]
+            .as_str()
+            .unwrap()
+            .contains("end = [40 mm, 0 mm], construction)"),
+        "{out}"
+    );
 }

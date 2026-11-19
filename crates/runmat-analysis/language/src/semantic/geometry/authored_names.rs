@@ -1,12 +1,12 @@
 //! `select name` regions on imported geometry, checked against the names the CAD file carries.
 
 use super::error;
+use crate::semantic::CheckedFeaStatementKind;
 use crate::semantic::{CheckedFeaDeclaration, CheckedGeometryInspection};
 use crate::{
     FeaDiagnostic, FeaDiagnosticLocation, FeaDiagnosticPhase, FeaDiagnosticSeverity,
     GeometryInspectionCapability,
 };
-use crate::semantic::CheckedFeaStatementKind;
 use runmat_geometry_core::{
     GeometryRegionCardinality, GeometryRegionDefinition, GeometryRegionRole, GeometryRegionSelector,
 };

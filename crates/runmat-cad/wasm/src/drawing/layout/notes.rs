@@ -325,7 +325,9 @@ pub fn fit(
     let st = ctx.std.clone();
     if let Some(at) = at {
         let here = match width {
-            Some(w) => Some(TextBlock::new(&st, t, Some(w))).filter(|b| free(ctx, &b.box_at(at), owner)),
+            Some(w) => {
+                Some(TextBlock::new(&st, t, Some(w))).filter(|b| free(ctx, &b.box_at(at), owner))
+            }
             None => wrap_in_room(ctx, owner, at, t),
         };
         if let Some(block) = here {
@@ -348,7 +350,11 @@ pub fn fit(
         if let Some(b) = nearest_free(&ctx.occ, owner, [bw, bh], c, 2.0, CLEAR, &ok) {
             let spot = [b.x0, b.y1];
             if let Some(at) = at {
-                let under = what_is_under(ctx, &TextBlock::new(&st, t, width.or(Some(ctx.occ.frame.x1 - at[0]))).box_at(at), owner);
+                let under = what_is_under(
+                    ctx,
+                    &TextBlock::new(&st, t, width.or(Some(ctx.occ.frame.x1 - at[0]))).box_at(at),
+                    owner,
+                );
                 ctx.finding(
                     "note_moved",
                     aid,
@@ -391,11 +397,21 @@ mod tests {
     #[test]
     fn wrap_breaks_at_spaces_to_the_width_and_keeps_explicit_breaks() {
         // 3.5 mm text: 2.1 mm a character, so 42 mm holds 20 characters.
-        let lines = wrap("BREAK SHARP EDGES; DEBURR ALL HOLES BOTH SIDES.", 3.5, Some(42.0));
-        assert_eq!(lines, ["BREAK SHARP EDGES;", "DEBURR ALL HOLES", "BOTH SIDES."]);
+        let lines = wrap(
+            "BREAK SHARP EDGES; DEBURR ALL HOLES BOTH SIDES.",
+            3.5,
+            Some(42.0),
+        );
+        assert_eq!(
+            lines,
+            ["BREAK SHARP EDGES;", "DEBURR ALL HOLES", "BOTH SIDES."]
+        );
         assert!(lines.iter().all(|l| Std::text_width(l, 3.5) <= 42.0 + 1e-9));
         assert_eq!(wrap("A\nB C", 3.5, None), ["A", "B C"]);
-        assert_eq!(wrap("6X ⌀5.5 THRU\nM5 CLEARANCE", 3.5, Some(200.0)), ["6X ⌀5.5 THRU", "M5 CLEARANCE"]);
+        assert_eq!(
+            wrap("6X ⌀5.5 THRU\nM5 CLEARANCE", 3.5, Some(200.0)),
+            ["6X ⌀5.5 THRU", "M5 CLEARANCE"]
+        );
         // A word longer than the column breaks between characters.
         assert_eq!(wrap("ABCDEFGHIJ", 3.5, Some(10.5)), ["ABCDE", "FGHIJ"]);
     }

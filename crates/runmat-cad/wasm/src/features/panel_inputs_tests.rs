@@ -20,8 +20,13 @@ const SIDE3: &str = "feature.body.face.side(s1.l3)";
 
 fn edit_in(text: &str, command: &str, values: Value) -> Value {
     let request = json!({ "command": command, "values": values });
-    serde_json::from_str(&edit_json("/p/plate.part", text, &Files::new(), &request.to_string()))
-        .unwrap()
+    serde_json::from_str(&edit_json(
+        "/p/plate.part",
+        text,
+        &Files::new(),
+        &request.to_string(),
+    ))
+    .unwrap()
 }
 
 fn written_in(text: &str, command: &str, values: Value) -> String {
@@ -66,7 +71,10 @@ fn face_fillets_and_full_rounds_take_face_sets() {
         "part.fillet",
         json!({ "type": "face", "face_set1": [END], "face_set2": [SIDE2], "radius": 2 }),
     );
-    assert!(t.contains("face_fillet(") && t.contains(END) && t.contains(SIDE2), "{t}");
+    assert!(
+        t.contains("face_fillet(") && t.contains(END) && t.contains(SIDE2),
+        "{t}"
+    );
     let t = written_in(
         PLATE,
         "part.fillet",

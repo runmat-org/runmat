@@ -301,7 +301,10 @@ pub fn operation_form_values(
     let mut out = serde_json::Map::new();
     out.insert("name".into(), json!(op.name));
     out.insert("type".into(), json!(op.op.word()));
-    out.insert("profile".into(), json!(format!("feature:{}", op.op.sketch())));
+    out.insert(
+        "profile".into(),
+        json!(format!("feature:{}", op.op.sketch())),
+    );
     let extent = |out: &mut serde_json::Map<String, Value>, e: &Extent, both: bool| match e {
         Extent::Blind { distance } => {
             out.insert("end".into(), json!("blind"));
@@ -314,7 +317,11 @@ pub fn operation_form_values(
         _ => {
             out.insert(
                 "end".into(),
-                json!(if both { "through_all_both" } else { "through_all" }),
+                json!(if both {
+                    "through_all_both"
+                } else {
+                    "through_all"
+                }),
             );
         }
     };

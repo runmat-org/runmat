@@ -102,8 +102,13 @@ pub(super) fn lower(
         runmat_geometry_core::GeometryDefinitionSource::CrossSection(section) => Some(section),
         _ => None,
     };
-    let outputs =
-        super::output::lower_outputs(context.bound, &sequence.steps, declaration, cross_section, diagnostics);
+    let outputs = super::output::lower_outputs(
+        context.bound,
+        &sequence.steps,
+        declaration,
+        cross_section,
+        diagnostics,
+    );
     reject_formulation_setting(declaration, diagnostics);
     let assessments = super::assessment::lower_assessments(context.bound, declaration, diagnostics);
     let displays = super::display::lower_displays(

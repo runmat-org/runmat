@@ -5,7 +5,10 @@ use crate::edit::edit_json;
 use serde_json::{json, Value};
 
 fn envelope(text: &str, values: Value) -> String {
-    run(text, json!({ "command": "assembly.envelope", "values": values }))
+    run(
+        text,
+        json!({ "command": "assembly.envelope", "values": values }),
+    )
 }
 
 fn row(index: &Value, name: &str) -> Value {
@@ -38,7 +41,10 @@ fn an_envelope_fits_round_components_with_its_margin_and_is_drawn() {
         .lines()
         .find(|l| l.contains("envelope service = {"))
         .unwrap_or_else(|| panic!("{text}"));
-    assert!(line.contains("owner = block") && line.contains("keep_out = true"), "{line}");
+    assert!(
+        line.contains("owner = block") && line.contains("keep_out = true"),
+        "{line}"
+    );
     let c = compile(&text);
     let r = row(&c.index, "service");
     // The block (20 x 20 x 15 mm at 30, 10, 40 mm) grown by 5 mm on every side.

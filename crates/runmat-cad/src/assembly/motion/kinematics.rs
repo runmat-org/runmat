@@ -140,9 +140,13 @@ impl DesignSource for Overlay<'_> {
 fn drive_quantity(kind: &MateKind, quantity: DriveQuantity) -> bool {
     matches!(
         (kind, quantity),
-        (MateKind::Revolute { .. } | MateKind::Angle { .. }, DriveQuantity::Angle)
-            | (MateKind::Slider { .. } | MateKind::Distance { .. }, DriveQuantity::Length)
-            | (MateKind::Cylindrical { .. }, _)
+        (
+            MateKind::Revolute { .. } | MateKind::Angle { .. },
+            DriveQuantity::Angle
+        ) | (
+            MateKind::Slider { .. } | MateKind::Distance { .. },
+            DriveQuantity::Length
+        ) | (MateKind::Cylindrical { .. }, _)
     )
 }
 
@@ -162,9 +166,8 @@ fn set_target(kind: &mut MateKind, quantity: DriveQuantity, value: f64) {
     let deg = ValueExpr::deg(value.to_degrees());
     let mm = ValueExpr::mm(value * 1000.0);
     match (kind, quantity) {
-        (MateKind::Revolute { angle }, _) | (MateKind::Cylindrical { angle, .. }, DriveQuantity::Angle) => {
-            *angle = exact(deg)
-        }
+        (MateKind::Revolute { angle }, _)
+        | (MateKind::Cylindrical { angle, .. }, DriveQuantity::Angle) => *angle = exact(deg),
         (MateKind::Slider { distance }, _)
         | (MateKind::Cylindrical { distance, .. }, DriveQuantity::Length) => *distance = exact(mm),
         (MateKind::Distance { target, .. }, _) => *target = TargetExpr::Exact { value: mm },
@@ -406,7 +409,8 @@ pub fn run_study(
     let duration = match ev.eval_as(&study.duration, &env, Dimension::TIME) {
         Ok(d) if d > 0.0 && d.is_finite() => d,
         Ok(_) => {
-            run.problems.push("the duration must be more than zero".into());
+            run.problems
+                .push("the duration must be more than zero".into());
             return run;
         }
         Err(e) => {
@@ -433,7 +437,10 @@ pub fn run_study(
     if !run.problems.is_empty() {
         return run;
     }
-    let rate = study.rate.filter(|r| *r > 0.0 && r.is_finite()).unwrap_or(DEFAULT_RATE);
+    let rate = study
+        .rate
+        .filter(|r| *r > 0.0 && r.is_finite())
+        .unwrap_or(DEFAULT_RATE);
     let count = ((duration * rate).ceil() as usize + 1).clamp(2, MAX_FRAMES);
     let h = duration / (count - 1) as f64;
     run.drives = drives
@@ -484,7 +491,11 @@ pub fn run_study(
         };
         let tree = resolve(&base.top, &keep, &fctx);
         let same = tree.nodes.len() == base.nodes.len()
-            && tree.nodes.iter().zip(&base.nodes).all(|(a, b)| a.uuid == b.uuid);
+            && tree
+                .nodes
+                .iter()
+                .zip(&base.nodes)
+                .all(|(a, b)| a.uuid == b.uuid);
         let failure = if same {
             frame_failure(&tree, base)
         } else {
@@ -502,7 +513,8 @@ pub fn run_study(
             frame_doc.occurrences[i].placement = warm_placement(&tree.node(node).local);
         }
         run.times.push(t);
-        run.frames.push(tree.nodes.iter().map(|n| n.world).collect());
+        run.frames
+            .push(tree.nodes.iter().map(|n| n.world).collect());
         if let Some(all) = &mut rates {
             match frame_rates(doc, &tree, &drives, study.profile, t / duration, duration) {
                 Some(r) => all.push(r),
@@ -602,12 +614,7 @@ pub(super) fn set_moving(run: &mut MotionRun, base: &ResolvedAssembly) {
             })
             .collect();
         run.moving = (0..first.len())
-            .filter(|&i| {
-                moved[i]
-                    && base.nodes[i]
-                        .parent
-                        .is_none_or(|p| !moved[p as usize])
-            })
+            .filter(|&i| moved[i] && base.nodes[i].parent.is_none_or(|p| !moved[p as usize]))
             .map(|i| i as NodeId)
             .collect();
     }

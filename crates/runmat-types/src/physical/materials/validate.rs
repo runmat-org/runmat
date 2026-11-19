@@ -19,7 +19,10 @@ pub enum MaterialDefect {
 pub fn validate_material(material: &Material) -> Result<(), MaterialDefect> {
     if material.id.is_empty()
         || !material.id.starts_with(|c: char| c.is_ascii_lowercase())
-        || !material.id.chars().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_')
+        || !material
+            .id
+            .chars()
+            .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_')
     {
         return Err(MaterialDefect::Id);
     }

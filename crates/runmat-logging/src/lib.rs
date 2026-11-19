@@ -547,9 +547,7 @@ where
         let ts = now_timestamp_micros();
 
         let trace_id = current_trace_id();
-        let parent_span_id = ctx
-            .event_span(event)
-            .and_then(|span| feed_span_id(&span));
+        let parent_span_id = ctx.event_span(event).and_then(|span| feed_span_id(&span));
         let span_id = Some(next_event_span_id());
 
         let mut visitor = JsonVisitor::default();
@@ -678,7 +676,9 @@ fn feed_span_id<S>(span: &tracing_subscriber::registry::SpanRef<'_, S>) -> Optio
 where
     S: Subscriber + for<'a> tracing_subscriber::registry::LookupSpan<'a>,
 {
-    span.extensions().get::<FeedSpan>().map(|feed| feed.id.clone())
+    span.extensions()
+        .get::<FeedSpan>()
+        .map(|feed| feed.id.clone())
 }
 
 fn current_trace_id() -> Option<String> {

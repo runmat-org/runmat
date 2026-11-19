@@ -189,7 +189,10 @@ pub fn clearance_in(
             Source::Envelope(b) => match envelope_body(b) {
                 Ok(body) => Some(body),
                 Err(e) => {
-                    errors.push(format!("{}: its envelope doesn't make a solid: {e}", p.path));
+                    errors.push(format!(
+                        "{}: its envelope doesn't make a solid: {e}",
+                        p.path
+                    ));
                     None
                 }
             },
@@ -364,7 +367,10 @@ pub fn clearance_in(
         }
     }
     let mut out = Interference {
-        parts: placements.iter().filter(|p| matches!(p.at, At::Node(_))).count(),
+        parts: placements
+            .iter()
+            .filter(|p| matches!(p.at, At::Node(_)))
+            .count(),
         clearance,
         errors,
         changed: changed.map(<[String]>::to_vec).unwrap_or_default(),

@@ -16,7 +16,11 @@ fn part(body: &str) -> String {
 
 fn solved(text: &str) -> (Sketch, SolvedSketch) {
     let parsed = parse_part("p.part", text);
-    assert!(parsed.diagnostics.is_empty(), "{text}\n{:#?}", parsed.diagnostics);
+    assert!(
+        parsed.diagnostics.is_empty(),
+        "{text}\n{:#?}",
+        parsed.diagnostics
+    );
     let FeatureKind::Sketch(s) = &parsed.document.unwrap().features[0].kind else {
         panic!()
     };
@@ -67,9 +71,13 @@ fn text_prints_as_it_is_written_and_names_its_font() {
     let bare = part("        t1 = text(text = \"A\", at = [0 mm, 0 mm], height = 3 mm)\n");
     let parsed = parse_part("p.part", &bare);
     let printed = print_part(parsed.document.as_ref().unwrap(), &parsed.uses).unwrap();
-    assert!(printed.contains("height = 3 mm, font = single_line)"), "{printed}");
+    assert!(
+        printed.contains("height = 3 mm, font = single_line)"),
+        "{printed}"
+    );
     // Any other font says which one sketches use.
-    let other = part("        t1 = text(text = \"A\", at = [0 mm, 0 mm], height = 3 mm, font = sans)\n");
+    let other =
+        part("        t1 = text(text = \"A\", at = [0 mm, 0 mm], height = 3 mm, font = sans)\n");
     let message = format!("{:?}", parse_part("p.part", &other).diagnostics);
     assert!(message.contains("`single_line`"), "{message}");
 }
@@ -83,12 +91,21 @@ fn text_is_closed_outlines_at_its_anchor_height_and_angle() {
     assert_closed(&loops, "RUNMAT");
     // R, U, N, M, A, T are one outline each; R and A each have a counter (a hole).
     let holes = loops.iter().filter(|l| signed_area(l) < 0.0).count();
-    assert_eq!((loops.len() - holes, holes), (6, 2), "{} loops", loops.len());
+    assert_eq!(
+        (loops.len() - holes, holes),
+        (6, 2),
+        "{} loops",
+        loops.len()
+    );
     // Turned a quarter turn about the anchor: the lettering runs up from (10, 20) mm, its
     // capitals reaching 6 mm (plus half the pen) to the left.
     let pts: Vec<[f64; 2]> = loops.iter().flatten().flat_map(|s| s.polyline(8)).collect();
-    let (x0, x1) = pts.iter().fold((f64::MAX, f64::MIN), |(a, b), p| (a.min(p[0]), b.max(p[0])));
-    let (y0, _) = pts.iter().fold((f64::MAX, f64::MIN), |(a, b), p| (a.min(p[1]), b.max(p[1])));
+    let (x0, x1) = pts
+        .iter()
+        .fold((f64::MAX, f64::MIN), |(a, b), p| (a.min(p[0]), b.max(p[0])));
+    let (y0, _) = pts
+        .iter()
+        .fold((f64::MAX, f64::MIN), |(a, b), p| (a.min(p[1]), b.max(p[1])));
     assert!((x0 - (0.010 - 0.006 - 0.0005)).abs() < 1e-9, "{x0}");
     assert!((x1 - (0.010 + 0.0005)).abs() < 1e-9, "{x1}");
     assert!((y0 - (0.020 - 0.0005)).abs() < 1e-9, "{y0}");
@@ -136,6 +153,9 @@ fn every_glyph_outlines_to_its_stroke_area() {
             y += step;
         }
         let counted = count as f64 * step * step;
-        assert!(cells > 0 && (area - counted).abs() <= 0.01 * counted, "{c}: outline {area}, grid {counted}");
+        assert!(
+            cells > 0 && (area - counted).abs() <= 0.01 * counted,
+            "{c}: outline {area}, grid {counted}"
+        );
     }
 }

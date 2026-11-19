@@ -478,7 +478,7 @@
       2
     ],
     [
-      "[\"clippy::too_many_arguments\",\"this function has too many arguments (8/7)\",[[\"crates/runmat-analysis/fea/src/planning/resource/preflight/solve_workspace.rs\",\"pub(super) fn solve_policy(\\npreconditioner: SpdPreconditionerKind,\\npath: StaticSolvePath,\\ndofs: u64,\\nconstraint_rows: u64,\\nenforcement: ConstraintEnforcement,\\nstiffness_nonzeros: u64,\\nadmission: SolverAdmissionResourcePolicy,\\ntranspose_index_bytes: u64,\\n) -> Result<SolveResourcePolicy, ResourcePlanningError> {\"]]]",
+      "[\"clippy::too_many_arguments\",\"this function has too many arguments (9/7)\",[[\"crates/runmat-analysis/fea/src/planning/resource/preflight/solve_workspace.rs\",\"pub(super) fn solve_policy(\\npreconditioner: SpdPreconditionerKind,\\npath: StaticSolvePath,\\ndofs: u64,\\nconstraint_rows: u64,\\nenforcement: ConstraintEnforcement,\\nstiffness_nonzeros: u64,\\nadmission: SolverAdmissionResourcePolicy,\\ntranspose_index_bytes: u64,\\npreparation_bytes: u64,\\n) -> Result<SolveResourcePolicy, ResourcePlanningError> {\"]]]",
       2
     ],
     [

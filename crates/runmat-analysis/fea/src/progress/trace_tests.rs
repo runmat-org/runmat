@@ -49,12 +49,22 @@ impl<S: Subscriber + for<'a> LookupSpan<'a>> Layer<S> for SpanCapture {
     }
 
     fn on_record(&self, id: &Id, values: &Record<'_>, context: Context<'_, S>) {
-        let index = *context.span(id).unwrap().extensions().get::<usize>().unwrap();
+        let index = *context
+            .span(id)
+            .unwrap()
+            .extensions()
+            .get::<usize>()
+            .unwrap();
         values.record(&mut Fields(&mut self.0.lock().unwrap()[index].fields));
     }
 
     fn on_close(&self, id: Id, context: Context<'_, S>) {
-        let index = *context.span(&id).unwrap().extensions().get::<usize>().unwrap();
+        let index = *context
+            .span(&id)
+            .unwrap()
+            .extensions()
+            .get::<usize>()
+            .unwrap();
         self.0.lock().unwrap()[index].closed = true;
     }
 }
@@ -138,12 +148,19 @@ fn a_study_run_traces_its_steps_in_order_with_labels_and_results() {
     for step in &StudyStep::ALL[1..] {
         assert_eq!(parent(step.span_name()), [Some(CASE_SPAN); 2]);
     }
-    assert_eq!(parent("meshing.native_session"), [Some("fea.study.mesh"); 2]);
+    assert_eq!(
+        parent("meshing.native_session"),
+        [Some("fea.study.mesh"); 2]
+    );
     assert_eq!(parent("solver.factorize"), [Some("fea.study.solve"); 2]);
 
     let steps = spans
         .iter()
-        .filter_map(|span| span.fields.get(STEP_FIELD).map(|step| (step.as_str(), span)))
+        .filter_map(|span| {
+            span.fields
+                .get(STEP_FIELD)
+                .map(|step| (step.as_str(), span))
+        })
         .collect::<Vec<_>>();
     let labels = steps.iter().map(|(step, _)| *step).collect::<Vec<_>>();
     assert_eq!(
@@ -166,7 +183,10 @@ fn a_study_run_traces_its_steps_in_order_with_labels_and_results() {
     );
     for (step, span) in steps.iter().filter(|(step, _)| !step.starts_with("Case ")) {
         let result = span.fields.get(RESULT_FIELD).map(String::as_str);
-        assert!(result.is_some_and(|result| !result.is_empty()), "{step}: {result:?}");
+        assert!(
+            result.is_some_and(|result| !result.is_empty()),
+            "{step}: {result:?}"
+        );
     }
     let results = spans
         .iter()
@@ -175,7 +195,14 @@ fn a_study_run_traces_its_steps_in_order_with_labels_and_results() {
         .collect::<Vec<_>>();
     assert_eq!(
         results,
-        ["0 errors", "12,180 tet10", "117,000 dof", "1 step", "21 outputs", "1 of 1 passed"]
+        [
+            "0 errors",
+            "12,180 tet10",
+            "117,000 dof",
+            "1 step",
+            "21 outputs",
+            "1 of 1 passed"
+        ]
     );
 }
 
@@ -214,6 +241,9 @@ fn results_read_as_one_line() {
     );
     assert_eq!(
         mesh_result(&mesh),
-        format!("{} tet10", grouped(mesh.topology.volume_elements.len() as u64))
+        format!(
+            "{} tet10",
+            grouped(mesh.topology.volume_elements.len() as u64)
+        )
     );
 }

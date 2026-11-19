@@ -368,14 +368,22 @@ fn a_section_cuts_through_an_origin_plane() {
         "{cut}"
     );
     let messages = Value::Array(findings(&out)).to_string();
-    assert!(messages.contains("section a_a cuts no material"), "{messages}");
+    assert!(
+        messages.contains("section a_a cuts no material"),
+        "{messages}"
+    );
     // Moved 25 mm into the part, through the pocket: hatched, either side of it.
-    for plane in ["origin.zx, offset = 25 mm", "origin.zx, offset = 25 mm, keep_other_side = true"] {
+    for plane in [
+        "origin.zx, offset = 25 mm",
+        "origin.zx, offset = 25 mm, keep_other_side = true",
+    ] {
         let out = with(plane);
         assert_eq!(findings(&out), Vec::<Value>::new(), "{plane}");
         let section = &out["projection"]["data"]["hlr"]["a_a"];
         assert!(
-            section["cut"]["at"].as_f64().is_some_and(|at| (at - 25.0).abs() < 1e-6),
+            section["cut"]["at"]
+                .as_f64()
+                .is_some_and(|at| (at - 25.0).abs() < 1e-6),
             "{plane}: {}",
             section["cut"]
         );
@@ -522,7 +530,10 @@ fn a_view_can_leave_its_centerlines_out() {
             .filter(|p| p["id"] == "view:top" && p["style"] == "center")
             .count()
     };
-    assert!(centers(DRAWING) > 0, "the hole's center mark draws by default");
+    assert!(
+        centers(DRAWING) > 0,
+        "the hole's center mark draws by default"
+    );
     let off = DRAWING.replacen(
         "at = [100, 200],\n        display = hidden_lines\n",
         "at = [100, 200],\n        display = hidden_lines,\n        centerlines = false\n",
@@ -551,18 +562,20 @@ fn assembly_view_annotations_measure_their_occurrences_where_they_are_placed() {
     assert_eq!(data["text"]["top_b"], "EL. 35", "{}", data["diagnostics"]);
     assert_eq!(data["resolved"]["bad"], false);
     assert!(
-        data["diagnostics"]
-            .to_string()
-            .contains("doesn't have"),
+        data["diagnostics"].to_string().contains("doesn't have"),
         "{}",
         data["diagnostics"]
     );
     let swing = &data["swings"]["swing"];
-    assert!(swing["arc"].as_array().is_some_and(|a| a.len() == 17), "{swing}");
+    assert!(
+        swing["arc"].as_array().is_some_and(|a| a.len() == 17),
+        "{swing}"
+    );
     let layout = &data["layouts"]["1"];
     let dims = layout["dimensions"].as_array().unwrap();
     assert!(
-        dims.iter().any(|d| d["id"] == "overall" && d["text"] == "180"),
+        dims.iter()
+            .any(|d| d["id"] == "overall" && d["text"] == "180"),
         "{}",
         layout["dimensions"]
     );
@@ -601,7 +614,9 @@ fn grids_and_level_marks_read_a_skeleton_s_published_datums() {
     assert_eq!(data["text"]["grids"], "120 · 80", "{}", data["diagnostics"]);
     assert_eq!(data["text"]["floor"], "EL. 30", "{}", data["diagnostics"]);
     assert_eq!(data["resolved"]["nope"], false);
-    assert!(data["diagnostics"].to_string().contains("publishes no datum `grid_9`"));
+    assert!(data["diagnostics"]
+        .to_string()
+        .contains("publishes no datum `grid_9`"));
     let layout = &data["layouts"]["1"];
     let prims = layout["primitives"].as_array().unwrap();
     let bubbles = prims

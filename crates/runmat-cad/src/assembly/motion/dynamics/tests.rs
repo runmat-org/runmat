@@ -63,14 +63,19 @@ struct Pendulum {
 impl Pendulum {
     fn new() -> Self {
         let mass = 2.0;
-        Pendulum { mass, d: 0.3, inertia: box_inertia(mass, [0.05, 0.6, 0.02]) }
+        Pendulum {
+            mass,
+            d: 0.3,
+            inertia: box_inertia(mass, [0.05, 0.6, 0.02]),
+        }
     }
     /// `I` about the pivot axis.
     fn pivot_inertia(&self) -> f64 {
         self.inertia[2][2] + self.mass * self.d * self.d
     }
     fn exact_period(&self, theta0: f64) -> f64 {
-        4.0 * (self.pivot_inertia() / (self.mass * G * self.d)).sqrt() * elliptic_k((theta0 / 2.0).sin())
+        4.0 * (self.pivot_inertia() / (self.mass * G * self.d)).sqrt()
+            * elliptic_k((theta0 / 2.0).sin())
     }
 }
 
@@ -83,13 +88,19 @@ fn swing(p: &Pendulum, theta0: f64, seconds: f64) -> (Vec<f64>, Vec<f64>, Vec<f6
     let body = s.body(rc::Frame::axis_angle([0.0; 3], [0.0, 0.0, 1.0], theta0));
     let a = s.connector(ground, rc::Frame::IDENTITY).unwrap();
     let b = s.connector(body, rc::Frame::IDENTITY).unwrap();
-    s.constrain(rc::Constraint::Mate(rc::Mate::Revolute { a, b })).unwrap();
-    let mass = BodyMass { mass: p.mass, center: [0.0, -p.d, 0.0], inertia: p.inertia };
+    s.constrain(rc::Constraint::Mate(rc::Mate::Revolute { a, b }))
+        .unwrap();
+    let mass = BodyMass {
+        mass: p.mass,
+        center: [0.0, -p.d, 0.0],
+        inertia: p.inertia,
+    };
     let model = Model::new(&s, &[(body, mass)], [0.0, -G, 0.0], Vec::new()).unwrap();
     let q0: Vec<f64> = s.vars().iter().map(|v| v.value).collect();
     let dt = 1e-3;
     let frames = (seconds / dt) as usize + 1;
-    let (mut t, mut angle, mut energy, mut samples) = (Vec::new(), Vec::new(), Vec::new(), Vec::new());
+    let (mut t, mut angle, mut energy, mut samples) =
+        (Vec::new(), Vec::new(), Vec::new(), Vec::new());
     model
         .simulate(&q0, &[0.0; 6], frames, dt, dt, |sample| {
             let c = model.center(&sample.q, 0);
@@ -104,12 +115,19 @@ fn swing(p: &Pendulum, theta0: f64, seconds: f64) -> (Vec<f64>, Vec<f64>, Vec<f6
     // The release reaction, by Newton's second law at rest: F = m (α ẑ × r_c) − m g.
     let alpha = -p.mass * G * p.d * theta0.sin() / p.pivot_inertia();
     let rc_ = [p.d * theta0.sin(), -p.d * theta0.cos(), 0.0];
-    let expected = [p.mass * (-alpha * rc_[1]), p.mass * (alpha * rc_[0]) + p.mass * G, 0.0];
+    let expected = [
+        p.mass * (-alpha * rc_[1]),
+        p.mass * (alpha * rc_[0]) + p.mass * G,
+        0.0,
+    ];
     let rows: Vec<usize> = (0..samples[0].owners.len()).collect();
     let (force, _) = model.reaction_on(&samples[0], &rows, 0);
     let scale = p.mass * G;
     for k in 0..3 {
-        assert!((force[k] - expected[k]).abs() < 1e-6 * scale, "reaction {force:?} vs {expected:?}");
+        assert!(
+            (force[k] - expected[k]).abs() < 1e-6 * scale,
+            "reaction {force:?} vs {expected:?}"
+        );
     }
     (t, angle, energy, samples)
 }
@@ -122,10 +140,16 @@ fn small_swings_keep_the_linear_period() {
     let (t, angle, energy, _) = swing(&p, theta0, 10.5 * t0);
     let measured = period(&t, &angle);
     let error = (measured - t0).abs() / t0;
-    assert!(error < 1e-3, "period {measured} s vs 2π√(I/mgd) = {t0} s ({error:e})");
+    assert!(
+        error < 1e-3,
+        "period {measured} s vs 2π√(I/mgd) = {t0} s ({error:e})"
+    );
     // Closer still to the exact period (the amplitude correction is θ₀²/16 ≈ 6e-6).
     let exact = p.exact_period(theta0);
-    assert!((measured - exact).abs() / exact < 1e-5, "{measured} vs {exact}");
+    assert!(
+        (measured - exact).abs() / exact < 1e-5,
+        "{measured} vs {exact}"
+    );
     let e0 = energy[0];
     let drift = energy.iter().fold(0.0_f64, |m, e| m.max((e - e0).abs()));
     assert!(drift < 1e-6 * p.mass * G * p.d, "energy drift {drift:e} J");
@@ -139,8 +163,14 @@ fn large_swings_keep_the_elliptic_period() {
     let (t, angle, energy, _) = swing(&p, theta0, 10.5 * exact);
     let measured = period(&t, &angle);
     let error = (measured - exact).abs() / exact;
-    assert!(error < 1e-3, "period {measured} s vs 4√(I/mgd) K(sin θ₀/2) = {exact} s ({error:e})");
-    assert!(error < 1e-5, "the integration is far closer than the stated tolerance: {error:e}");
+    assert!(
+        error < 1e-3,
+        "period {measured} s vs 4√(I/mgd) K(sin θ₀/2) = {exact} s ({error:e})"
+    );
+    assert!(
+        error < 1e-5,
+        "the integration is far closer than the stated tolerance: {error:e}"
+    );
     // The linear formula is well off at this amplitude: the run is not a small-angle model.
     let linear = 2.0 * PI * (p.pivot_inertia() / (p.mass * G * p.d)).sqrt();
     assert!((measured - linear) / linear > 0.2);
@@ -157,7 +187,8 @@ fn a_torsion_spring_sets_the_period_without_gravity() {
     let body = s.body(rc::Frame::axis_angle([0.0; 3], [0.0, 0.0, 1.0], 0.5));
     let a = s.connector(ground, rc::Frame::IDENTITY).unwrap();
     let b = s.connector(body, rc::Frame::IDENTITY).unwrap();
-    s.constrain(rc::Constraint::Mate(rc::Mate::Revolute { a, b })).unwrap();
+    s.constrain(rc::Constraint::Mate(rc::Mate::Revolute { a, b }))
+        .unwrap();
     let inertia = box_inertia(1.5, [0.2, 0.1, 0.05]);
     let k = 3.0;
     let spring = super::model::MateLoad {
@@ -169,20 +200,43 @@ fn a_torsion_spring_sets_the_period_without_gravity() {
         free: 0.0,
         constant: 0.0,
     };
-    let model = Model::new(&s, &[(body, BodyMass { mass: 1.5, center: [0.0; 3], inertia })], [0.0; 3], vec![spring]).unwrap();
+    let model = Model::new(
+        &s,
+        &[(
+            body,
+            BodyMass {
+                mass: 1.5,
+                center: [0.0; 3],
+                inertia,
+            },
+        )],
+        [0.0; 3],
+        vec![spring],
+    )
+    .unwrap();
     let q0: Vec<f64> = s.vars().iter().map(|v| v.value).collect();
     let expected = 2.0 * PI * (inertia[2][2] / k).sqrt();
     let (mut t, mut angle) = (Vec::new(), Vec::new());
     let dt = 1e-3;
     model
-        .simulate(&q0, &[0.0; 6], (4.5 * expected / dt) as usize, dt, dt, |sample| {
-            t.push(sample.time);
-            let pose = model.pose(&sample.q, 0);
-            angle.push(pose.rotation[1][0].atan2(pose.rotation[0][0]));
-        })
+        .simulate(
+            &q0,
+            &[0.0; 6],
+            (4.5 * expected / dt) as usize,
+            dt,
+            dt,
+            |sample| {
+                t.push(sample.time);
+                let pose = model.pose(&sample.q, 0);
+                angle.push(pose.rotation[1][0].atan2(pose.rotation[0][0]));
+            },
+        )
         .unwrap();
     let measured = period(&t, &angle);
-    assert!((measured - expected).abs() / expected < 1e-4, "{measured} vs {expected}");
+    assert!(
+        (measured - expected).abs() / expected < 1e-4,
+        "{measured} vs {expected}"
+    );
 }
 
 /// The arm: 0.4 m long along X from its origin, its centre of mass 0.2 m out.
@@ -190,14 +244,26 @@ const ARM: (f64, f64) = (1.2, 0.2);
 
 /// Runs study `name` of the hinge assembly `text` (a base and an arm, both parts), with the
 /// arm's mass properties as [`ARM`] and a heavy base; the run and the resolved assembly.
-fn hinge_run(text: &str, name: &str) -> (crate::assembly::motion::kinematics::MotionRun, crate::assembly::resolve::ResolvedAssembly) {
+fn hinge_run(
+    text: &str,
+    name: &str,
+) -> (
+    crate::assembly::motion::kinematics::MotionRun,
+    crate::assembly::resolve::ResolvedAssembly,
+) {
     let scope = crate::modules::ModuleScope::from_files(
-        [("hinge.assembly", text), ("block.part", "part block {\n}\n"), ("arm.part", "part arm {\n}\n")]
-            .iter()
-            .copied(),
+        [
+            ("hinge.assembly", text),
+            ("block.part", "part block {\n}\n"),
+            ("arm.part", "part arm {\n}\n"),
+        ]
+        .iter()
+        .copied(),
     );
     let parsed = crate::syntax::parse_assembly_in("hinge.assembly", text, &scope);
-    let doc = parsed.document.unwrap_or_else(|| panic!("{:?}", parsed.diagnostics));
+    let doc = parsed
+        .document
+        .unwrap_or_else(|| panic!("{:?}", parsed.diagnostics));
     let (m, d) = ARM;
     let inertia = box_inertia(m, [0.4, 0.04, 0.02]);
     // The definitions the occurrences name, as resolution reads them (a first pass with no parts).
@@ -212,7 +278,11 @@ fn hinge_run(text: &str, name: &str) -> (crate::assembly::motion::kinematics::Mo
         tables: None,
         gauge: None,
     };
-    let named = resolve(&FilePath::new("hinge.assembly"), &ResolveRequest::default(), &probe_ctx);
+    let named = resolve(
+        &FilePath::new("hinge.assembly"),
+        &ResolveRequest::default(),
+        &probe_ctx,
+    );
     let mut src = MemorySource::default();
     for n in named.nodes.iter().filter(|n| n.parent.is_some()) {
         let arm = n.segment.name == "arm";
@@ -221,9 +291,16 @@ fn hinge_run(text: &str, name: &str) -> (crate::assembly::motion::kinematics::Mo
             ConfiguredSummary {
                 mass: Some(if arm { m } else { 10.0 }),
                 center_of_mass: Some(if arm { [d, 0.0, 0.0] } else { [0.0; 3] }),
-                inertia: Some(if arm { inertia } else { box_inertia(10.0, [0.1; 3]) }),
+                inertia: Some(if arm {
+                    inertia
+                } else {
+                    box_inertia(10.0, [0.1; 3])
+                }),
                 // The arm's box centre, the tracked point, 30 mm out from the hinge.
-                bbox: arm.then_some(Aabb { min: [0.0, -0.02, -0.01], max: [0.06, 0.02, 0.01] }),
+                bbox: arm.then_some(Aabb {
+                    min: [0.0, -0.02, -0.01],
+                    max: [0.06, 0.02, 0.01],
+                }),
                 ..Default::default()
             },
         );
@@ -240,8 +317,22 @@ fn hinge_run(text: &str, name: &str) -> (crate::assembly::motion::kinematics::Mo
     };
     let request = ResolveRequest::default();
     let base = resolve(&FilePath::new("hinge.assembly"), &request, &ctx);
-    let run = run_study(&doc, &base, name, &MotionContext { resolve: &ctx, request: &request, frame_bytes: 8 << 20 });
-    assert!(run.problems.is_empty() && run.stopped.is_none(), "{:?} {:?}", run.problems, run.stopped);
+    let run = run_study(
+        &doc,
+        &base,
+        name,
+        &MotionContext {
+            resolve: &ctx,
+            request: &request,
+            frame_bytes: 8 << 20,
+        },
+    );
+    assert!(
+        run.problems.is_empty() && run.stopped.is_none(),
+        "{:?} {:?}",
+        run.problems,
+        run.stopped
+    );
     (run, base)
 }
 
@@ -255,7 +346,9 @@ fn an_assembly_study_swings_the_arm_at_the_pendulum_period() {
     let (m, d) = ARM;
     let inertia = box_inertia(m, [0.4, 0.04, 0.02]);
     // Released along +X with gravity −Y: a quarter turn from hanging (θ₀ = 90°).
-    let arm = (0..base.nodes.len() as u32).find(|&n| base.path(n) == "arm").unwrap();
+    let arm = (0..base.nodes.len() as u32)
+        .find(|&n| base.path(n) == "arm")
+        .unwrap();
     let angle: Vec<f64> = run
         .frames
         .iter()
@@ -267,7 +360,10 @@ fn an_assembly_study_swings_the_arm_at_the_pendulum_period() {
     let i_pivot = inertia[2][2] + m * d * d;
     let exact = 4.0 * (i_pivot / (m * G * d)).sqrt() * elliptic_k((PI / 4.0).sin());
     let measured = period(&run.times, &angle);
-    assert!((measured - exact).abs() / exact < 1e-3, "{measured} vs {exact}");
+    assert!(
+        (measured - exact).abs() / exact < 1e-3,
+        "{measured} vs {exact}"
+    );
     // The hinge reaction is recorded on the arm at every frame.
     let hinge = run.reactions.iter().find(|r| r.mate == "hinge").unwrap();
     assert_eq!(hinge.frames.len(), run.times.len());
@@ -284,19 +380,30 @@ fn an_assembly_study_swings_the_arm_at_the_pendulum_period() {
 fn the_mate_loads_weight_and_inertia_of_the_arm_balance_at_every_frame() {
     let norm = |v: [f64; 3]| v.iter().map(|x| x * x).sum::<f64>().sqrt();
     let add = |a: [f64; 3], b: [f64; 3]| [a[0] + b[0], a[1] + b[1], a[2] + b[2]];
-    let cross = |a: [f64; 3], b: [f64; 3]| [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]];
+    let cross = |a: [f64; 3], b: [f64; 3]| {
+        [
+            a[1] * b[2] - a[2] * b[1],
+            a[2] * b[0] - a[0] * b[2],
+            a[0] * b[1] - a[1] * b[0],
+        ]
+    };
     for name in ["swing", "wound"] {
         let (run, base) = hinge_run(HINGE, name);
         let g = run.gravity.unwrap();
         let body = run.bodies.iter().find(|b| b.occurrence == "arm").unwrap();
         assert_eq!(body.frames.len(), run.times.len());
-        let arm = (0..base.nodes.len()).find(|&n| base.path(n as u32) == "arm").unwrap();
-        let frames: Vec<usize> = (0..run.times.len()).step_by((run.times.len() / 7).max(1)).collect();
+        let arm = (0..base.nodes.len())
+            .find(|&n| base.path(n as u32) == "arm")
+            .unwrap();
+        let frames: Vec<usize> = (0..run.times.len())
+            .step_by((run.times.len() / 7).max(1))
+            .collect();
         assert!(frames.len() >= 5, "{name}: {} frames", run.times.len());
         for k in frames {
             let state = &body.frames[k];
             let rotation = run.frames[k][arm].rotation;
-            let (inertia_force, inertia_moment) = state.inertia_load(body.mass, &body.inertia, &rotation);
+            let (inertia_force, inertia_moment) =
+                state.inertia_load(body.mass, &body.inertia, &rotation);
             let weight = g.map(|c| c * body.mass);
             let mut force = add(weight, inertia_force);
             let mut moment = inertia_moment;
@@ -304,17 +411,29 @@ fn the_mate_loads_weight_and_inertia_of_the_arm_balance_at_every_frame() {
             let mut scale_m = norm(inertia_moment);
             for mate in &run.reactions {
                 for l in mate.frames[k].iter().filter(|l| l.occurrence == "arm") {
-                    let about = add(l.moment, cross([0, 1, 2].map(|a| l.point[a] - state.center[a]), l.force));
+                    let about = add(
+                        l.moment,
+                        cross([0, 1, 2].map(|a| l.point[a] - state.center[a]), l.force),
+                    );
                     force = add(force, l.force);
                     moment = add(moment, about);
                     scale_f = scale_f.max(norm(l.force));
                     scale_m = scale_m.max(norm(about));
                 }
             }
-            assert!(norm(force) <= 1e-6 * scale_f, "{name} frame {k}: force residual {force:?} of {scale_f}");
-            assert!(norm(moment) <= 1e-6 * scale_m, "{name} frame {k}: moment residual {moment:?} of {scale_m}");
+            assert!(
+                norm(force) <= 1e-6 * scale_f,
+                "{name} frame {k}: force residual {force:?} of {scale_f}"
+            );
+            assert!(
+                norm(moment) <= 1e-6 * scale_m,
+                "{name} frame {k}: moment residual {moment:?} of {scale_m}"
+            );
             if k > 0 {
-                assert!(norm(state.angular_velocity) > 0.0, "{name} frame {k}: the arm turns");
+                assert!(
+                    norm(state.angular_velocity) > 0.0,
+                    "{name} frame {k}: the arm turns"
+                );
             }
         }
     }
@@ -326,15 +445,33 @@ fn the_mate_loads_weight_and_inertia_of_the_arm_balance_at_every_frame() {
 fn a_fast_swing_gets_frames_close_enough_for_a_smooth_trail() {
     let fast = HINGE.replace("duration = 3 s, rate = 200,", "duration = 1 s,");
     let (run, base) = hinge_run(&fast, "swing");
-    let arm = (0..base.nodes.len()).find(|&n| base.path(n as u32) == "arm").unwrap();
+    let arm = (0..base.nodes.len())
+        .find(|&n| base.path(n as u32) == "arm")
+        .unwrap();
     let n = run.times.len();
     assert!(n > 31, "faster than 30 frames a second: {n}");
-    assert!((run.times[n - 1] - 1.0).abs() < 1e-12, "ends at the study's end: {:?}", run.times.last());
+    assert!(
+        (run.times[n - 1] - 1.0).abs() < 1e-12,
+        "ends at the study's end: {:?}",
+        run.times.last()
+    );
     let dt = run.times[1] - run.times[0];
-    assert!(run.times.windows(2).all(|w| ((w[1] - w[0]) - dt).abs() < 1e-12), "evenly spaced");
+    assert!(
+        run.times
+            .windows(2)
+            .all(|w| ((w[1] - w[0]) - dt).abs() < 1e-12),
+        "evenly spaced"
+    );
     for k in 1..n {
-        let turn = super::super::kinematics::rotation_between(&run.frames[k - 1][arm], &run.frames[k][arm]);
-        assert!(turn <= super::FRAME_TURN * 1.05, "frame {k} turns {} deg", turn.to_degrees());
+        let turn = super::super::kinematics::rotation_between(
+            &run.frames[k - 1][arm],
+            &run.frames[k][arm],
+        );
+        assert!(
+            turn <= super::FRAME_TURN * 1.05,
+            "frame {k} turns {} deg",
+            turn.to_degrees()
+        );
     }
     // Slow: a stiff damper barely lets it move; 30 frames a second hold.
     let slow = HINGE.replace(

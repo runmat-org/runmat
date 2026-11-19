@@ -3,8 +3,8 @@ use runmat_analysis_core::{
     AssessmentEvidenceRequirement, AssessmentQuantity, AssessmentResult, AssessmentRule,
     AssessmentStatus, AuthoredAssessment, DisplayRange, DisplayUnitSource,
 };
-use runmat_types::PhysicalDimension;
 use runmat_plot::legend_text::LegendPrecision;
+use runmat_types::PhysicalDimension;
 
 fn kelvin(value: f64) -> AssessmentQuantity {
     AssessmentQuantity::try_from_descriptor(PhysicalDimension::TEMPERATURE.into(), value).unwrap()

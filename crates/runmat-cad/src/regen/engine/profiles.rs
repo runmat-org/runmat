@@ -113,8 +113,11 @@ pub(super) fn build_loops(
         for l in explicit {
             // A text listed alone is every loop of its outline.
             if let [id] = l.as_slice() {
-                if let Some(SketchGeometry::Text { text, .. }) =
-                    sketch.entities.iter().find(|e| &e.id == id).map(|e| &e.geometry)
+                if let Some(SketchGeometry::Text { text, .. }) = sketch
+                    .entities
+                    .iter()
+                    .find(|e| &e.id == id)
+                    .map(|e| &e.geometry)
                 {
                     loops.extend(solved.text_loops(id, text));
                     continue;
