@@ -57,6 +57,14 @@ pub fn build_scene_view(
     let field = field_id
         .map(|id| load_field(run_id, &AnalysisFieldSelection::new(id, None)))
         .transpose()?;
+    // A mode shape's relative amplitude has no unit, study range or limit, as in the snapshot
+    // posters: the study's display and assessments don't apply to it.
+    let no_terms = legend::FieldLegendTerms::default();
+    let terms = if field.as_ref().is_some_and(|field| field.normalized) {
+        &no_terms
+    } else {
+        terms
+    };
     let additional_deformation =
         if shape_mode == "undeformed" || field.as_ref().is_some_and(|field| field.deforms) {
             None
@@ -102,22 +110,11 @@ pub fn build_scene_view(
     model_bounds.expand_by_box(&scene.bounds);
     scene.bounds = model_bounds;
     if let Some(overlay) = scene.overlay.as_mut() {
-        let shown = field.as_ref().map(|field| legend::ShownField {
-            field_id: &field.label,
-            location: field.location,
-        });
-        let locate = |field_id: &str| {
-            super::load_field_page(run_id, &AnalysisFieldSelection::new(field_id, None), 0)
-                .ok()
-                .map(|page| page.descriptor.location)
-        };
-        legend::present_overlay(
-            overlay,
-            field.as_ref().map(|f| f.unit.as_str()),
-            terms,
-            shown,
-            &locate,
-        )?;
+        if let Some(field) = field.as_ref().filter(|field| field.normalized) {
+            present_mode_amplitude(overlay, field)?;
+        } else {
+            present_field_legend(overlay, field.as_ref(), terms, run_id)?;
+        }
         overlay.mesh_count = selection.mesh_count;
         overlay.status = if selection.exact {
             GeometrySceneCompleteness::Complete
@@ -127,4 +124,106 @@ pub fn build_scene_view(
         overlay.quality_label = (!selection.exact).then(|| "Adaptive mesh detail".into());
     }
     Ok((scene, scale, selection.exact))
+}
+
+/// The legend of a field in the study's terms: its display unit, range and assessment line.
+fn present_field_legend(
+    overlay: &mut runmat_plot::geometry_scene::GeometrySceneOverlay,
+    field: Option<&super::FieldData>,
+    terms: &legend::FieldLegendTerms,
+    run_id: &str,
+) -> Result<(), FieldSceneError> {
+    let shown = field.map(|field| legend::ShownField {
+        field_id: &field.label,
+        location: field.location,
+    });
+    let locate = |field_id: &str| {
+        super::load_field_page(run_id, &AnalysisFieldSelection::new(field_id, None), 0)
+            .ok()
+            .map(|page| page.descriptor.location)
+    };
+    legend::present_overlay(
+        overlay,
+        field.map(|f| f.unit.as_str()),
+        terms,
+        shown,
+        &locate,
+    )?;
+    Ok(())
+}
+
+/// The legend of a mode shape: its amplitude relative to the shape's peak, titled by its mode
+/// like the snapshot posters ("Mode 1 relative amplitude"). A field recovered from the mode
+/// (its stress, say) keeps its name in the title.
+fn present_mode_amplitude(
+    overlay: &mut runmat_plot::geometry_scene::GeometrySceneOverlay,
+    field: &super::FieldData,
+) -> Result<(), FieldSceneError> {
+    let Some(legend) = overlay.scalar_legend.as_mut() else {
+        return Ok(());
+    };
+    let number = field.mode.map_or(1, |index| index + 1);
+    let label = if field.deforms {
+        legend::mode_amplitude_label(number)
+    } else {
+        format!("Mode {number} {} relative amplitude", field.label)
+    };
+    legend::present_relative_amplitude(legend, label)?;
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::super::{scene_from_topology, AnalysisFieldLocation, FieldData};
+    use super::present_mode_amplitude;
+    use crate::analysis::{
+        AnalysisRenderMesh, AnalysisRenderTopology, AnalysisRenderTopologySource,
+    };
+
+    fn triangle() -> AnalysisRenderTopology {
+        AnalysisRenderTopology {
+            schema_version: "test".into(),
+            source: AnalysisRenderTopologySource::AnalysisMesh,
+            volume_element_count: 1,
+            meshes: vec![AnalysisRenderMesh {
+                mesh_id: "mesh".into(),
+                vertices: vec![[0.0, 0.0, 0.0], [0.01, 0.0, 0.0], [0.0, 0.0, 0.1]],
+                triangles: vec![[0, 1, 2]],
+                regions: vec![],
+                vertex_volume_node_indices: vec![Some(0), Some(1), Some(2)],
+                triangle_volume_element_indices: vec![Some(0)],
+            }],
+        }
+    }
+
+    // A mass-normalized eigenvector published in "m" peaks at 7.0; the live view's legend reads
+    // its relative amplitude, 0 to 1, as the snapshot poster does, never "0 m – 7.0 m".
+    #[test]
+    fn a_mode_shape_legend_reads_relative_amplitude_not_metres() {
+        let field = FieldData::inline(
+            AnalysisFieldLocation::Node,
+            3,
+            vec![0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 7.0, 0.0, 0.0],
+            "structural.displacement",
+            "m",
+        )
+        .mode_shape();
+        let (mut scene, _) = scene_from_topology(
+            "run",
+            &triangle(),
+            Some(&field),
+            Some(&field),
+            "exaggerated",
+            1.0,
+            false,
+        )
+        .unwrap();
+        let overlay = scene.overlay.as_mut().unwrap();
+        present_mode_amplitude(overlay, &field).unwrap();
+        let legend = overlay.scalar_legend.as_ref().unwrap();
+        assert_eq!(legend.label, "Mode 1 relative amplitude");
+        assert_eq!(legend.unit, "relative");
+        assert_eq!((legend.minimum, legend.maximum), (0.0, 1.0));
+        assert!(legend.limit.is_none() && legend.note.is_none());
+    }
 }

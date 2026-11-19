@@ -390,10 +390,12 @@ pub(super) async fn capture(
                 legend.label = spec.legend.clone();
                 legend.unit = spec.unit.clone();
                 if spec.relative {
-                    anyhow::ensure!(legend.maximum > 0.0, "mode shape has no nonzero amplitude");
-                    scalar_scale = 1.0 / legend.maximum;
-                    legend.minimum *= scalar_scale;
-                    legend.maximum = 1.0;
+                    scalar_scale =
+                        runmat_runtime::analysis::field_scene::legend::present_relative_amplitude(
+                            legend,
+                            spec.legend.clone(),
+                        )
+                        .map_err(anyhow::Error::msg)?;
                 }
                 range = Some((legend.minimum, legend.maximum));
                 range_source = legend.range_source;
