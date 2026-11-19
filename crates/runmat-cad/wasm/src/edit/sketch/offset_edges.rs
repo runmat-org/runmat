@@ -87,10 +87,7 @@ pub(crate) fn offset(
                 .collect::<Vec<_>>(),
         ),
     );
-    let distance = values
-        .get("distance")
-        .and_then(super::num)
-        .unwrap_or(0.0);
+    let distance = values.get("distance").and_then(super::num).unwrap_or(0.0);
     let before: Vec<SketchEntityId> = sketch.entities.iter().map(|e| e.id.clone()).collect();
     let summary = super::apply("sketch.offset", &values, sketch, sketch_id)?;
     let made: Vec<SketchEntityId> = sketch

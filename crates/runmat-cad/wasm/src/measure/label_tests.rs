@@ -61,7 +61,11 @@ fn occurrences_that_share_a_name_read_by_their_paths() {
     let a = measure("/p/drone.assembly", DRONE, &files(), &values).unwrap();
     assert_eq!(a.settings.len(), 2, "{:?}", a.settings);
     assert!(a.settings[0].starts_with("left/hub · "), "{:?}", a.settings);
-    assert!(a.settings[1].starts_with("right/hub · "), "{:?}", a.settings);
+    assert!(
+        a.settings[1].starts_with("right/hub · "),
+        "{:?}",
+        a.settings
+    );
     assert_ne!(a.settings[0], a.settings[1]);
     // A whole component reads by its path too.
     values.insert(
@@ -69,5 +73,8 @@ fn occurrences_that_share_a_name_read_by_their_paths() {
         json!([format!("occurrence:{left}"), format!("occurrence:{right}")]),
     );
     let b = measure("/p/drone.assembly", DRONE, &files(), &values).unwrap();
-    assert_eq!(b.settings, vec!["left/hub".to_owned(), "right/hub".to_owned()]);
+    assert_eq!(
+        b.settings,
+        vec!["left/hub".to_owned(), "right/hub".to_owned()]
+    );
 }

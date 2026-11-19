@@ -237,13 +237,19 @@ fn offset_of_a_model_edge_projects_it_and_the_copy_follows_the_model() {
     assert_eq!(lines.len(), 2, "{lines:?}\n{text}");
     let mut offsets: Vec<f64> = lines.iter().map(|l| (l.0 + 10.0).abs()).collect();
     offsets.sort_by(f64::total_cmp);
-    assert!(offsets[0] < 1e-3 && (offsets[1] - 3.0).abs() < 1e-3, "{lines:?}\n{text}");
+    assert!(
+        offsets[0] < 1e-3 && (offsets[1] - 3.0).abs() < 1e-3,
+        "{lines:?}\n{text}"
+    );
     // The plate's front edge moves 5 mm out: the projected edge and its copy both follow.
     let moved = text.replace("-10 mm", "-15 mm");
     let after = ys(&moved);
     let mut offsets: Vec<f64> = after.iter().map(|l| (l.0 + 15.0).abs()).collect();
     offsets.sort_by(f64::total_cmp);
-    assert!(offsets[0] < 1e-3 && (offsets[1] - 3.0).abs() < 1e-3, "{after:?}\n{moved}");
+    assert!(
+        offsets[0] < 1e-3 && (offsets[1] - 3.0).abs() < 1e-3,
+        "{after:?}\n{moved}"
+    );
 }
 
 #[test]

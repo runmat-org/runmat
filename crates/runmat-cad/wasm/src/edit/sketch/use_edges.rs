@@ -16,10 +16,10 @@
 //!   that lies square to the sketch normal.
 
 use super::super::{model, EditFailure, SourceChange};
+use super::offset_edges::{fresh, stem, Converted};
 use crate::features::value;
 use runmat_cad::display::{BodyDisplay, FaceDisplay, PartDisplay};
 use runmat_cad::model::datum::Frame;
-use super::offset_edges::{fresh, stem, Converted};
 use runmat_cad::model::sketch::{SketchEntity, SketchProjection};
 use runmat_cad::model::FeatureKind;
 use runmat_cad::refs::history::{EdgeCurve, SurfaceKind};
@@ -508,4 +508,3 @@ pub(super) fn use_edges(
         format!("Brought {} into {sketch_id}", added.join(", ")),
     ))
 }
-
