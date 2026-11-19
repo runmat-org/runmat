@@ -282,11 +282,7 @@ impl PlotRenderer {
 
         for node in self.scene.get_visible_nodes() {
             if let Some(render_data) = &node.render_data {
-                if let Some(vertex_buffer) = self.wgpu_renderer.vertex_buffer_from_sources(
-                    emission,
-                    render_data.gpu_vertices.as_ref(),
-                    &render_data.vertices,
-                ) {
+                if let Some(vertex_buffer) = self.vertex_buffer_for(emission, render_data) {
                     self.wgpu_renderer
                         .ensure_pipeline(emission, render_data.pipeline_type);
 

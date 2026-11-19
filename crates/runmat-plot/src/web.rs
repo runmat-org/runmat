@@ -671,14 +671,14 @@ impl WebRenderer {
     /// Render a chunked geometry scene directly into the canvas.
     pub fn render_geometry_scene(
         &mut self,
-        scene: crate::GeometryScene,
+        scene: impl Into<std::sync::Arc<crate::GeometryScene>>,
     ) -> Result<(), WebRendererError> {
         self.render_geometry_scene_with_presentation(scene, None)
     }
 
     pub fn render_geometry_scene_with_presentation(
         &mut self,
-        scene: crate::GeometryScene,
+        scene: impl Into<std::sync::Arc<crate::GeometryScene>>,
         presentation: Option<GeometryScenePresentation>,
     ) -> Result<(), WebRendererError> {
         self.background_policy = BackgroundPolicy::ThemeDriven;
