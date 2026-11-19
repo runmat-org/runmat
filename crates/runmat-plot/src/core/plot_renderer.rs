@@ -202,7 +202,7 @@ pub struct PlotRenderer {
     pub(crate) last_figure: Option<crate::plots::Figure>,
     /// Current chunked geometry scene key, when the renderer is driven by CAD/FEA scene data.
     last_geometry_scene_key: Option<GeometrySceneCacheKey>,
-    last_geometry_scene: Option<GeometryScene>,
+    last_geometry_scene: Option<Arc<GeometryScene>>,
     geometry_overlay: Option<GeometrySceneOverlay>,
     geometry_presentation: GeometryScenePresentation,
     presence: crate::collaboration::PresenceFrame,
