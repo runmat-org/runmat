@@ -61,6 +61,69 @@ impl PreparedThermalSolve<'_> {
         &self,
         chunk_bytes: usize,
     ) -> Result<AnalysisTransportProfile, FeaRunError> {
+        self.transport_profile_of_samples(chunk_bytes, self.schedule.sample_count())
+    }
+
+    /// The same bound for the header and `retained` samples of every recovered field, each
+    /// charged as the last (widest-named) sample. With one sample it bounds every product that
+    /// copies one sample's fields plus header inventories (node and element IDs, times).
+    pub fn transport_profile_of_samples(
+        &self,
+        chunk_bytes: usize,
+        retained: usize,
+    ) -> Result<AnalysisTransportProfile, FeaRunError> {
+        self.result_profile(chunk_bytes, retained)
+            .map(|(profile, _)| profile)
+    }
+
+    /// Typed storage of the complete decoded result: the header at the codec's per-byte decode
+    /// bound, each field partition priced from its shape.
+    pub fn result_typed_resident_bytes(&self, chunk_bytes: usize) -> Result<u64, FeaRunError> {
+        self.result_profile(chunk_bytes, self.schedule.sample_count())
+            .map(|(_, typed)| typed)
+    }
+
+    /// The workspace an original-object import charges for the complete result, as the shared
+    /// import profiler prices it: the transport held three times (original, assembled payload,
+    /// verification copy), the fixed per-reference codec allowance for every chunk and the
+    /// manifest, the manifest's typed decode, and every partition's typed decode (its typed
+    /// storage, `result_typed_resident_bytes`, with its encoded bytes alongside).
+    pub fn result_import_workspace_bytes(&self, chunk_bytes: usize) -> Result<u64, FeaRunError> {
+        let (profile, partitions) =
+            self.result_profile(chunk_bytes, self.schedule.sample_count())?;
+        let overflow = || FeaRunError::InvalidModel("thermal import workspace overflows".into());
+        let references = profile
+            .chunk_count_upper_bound
+            .checked_add(1)
+            .ok_or_else(overflow)?;
+        let fixed =
+            runmat_canonical_codec::projected_canonical_materialization_resident_bytes_estimate(
+                0, references,
+            )
+            .ok_or_else(overflow)?;
+        let manifest =
+            runmat_canonical_codec::projected_canonical_typed_decode_resident_bytes_estimate(
+                profile.root.encoded_bytes_upper_bound,
+                1,
+            )
+            .ok_or_else(overflow)?;
+        profile
+            .total_bytes_upper_bound
+            .checked_mul(3)
+            .and_then(|bytes| bytes.checked_add(fixed))
+            .and_then(|bytes| bytes.checked_add(manifest))
+            .and_then(|bytes| bytes.checked_add(partitions))
+            .and_then(|bytes| bytes.checked_add(profile.payload_bytes_upper_bound))
+            .ok_or_else(overflow)
+    }
+
+    /// The transport profile of the header and `retained` samples, with the summed typed storage
+    /// of their decoded partitions.
+    fn result_profile(
+        &self,
+        chunk_bytes: usize,
+        retained: usize,
+    ) -> Result<(AnalysisTransportProfile, u64), FeaRunError> {
         let invalid = |error: crate::execution::AnalysisExecutionError| {
             FeaRunError::InvalidModel(error.to_string())
         };
@@ -72,14 +135,21 @@ impl PreparedThermalSolve<'_> {
                 .encoded_bytes_upper_bound,
         )
         .map_err(invalid)?;
-        profile
-            .push(
-                self.facts
-                    .manifest_metadata
-                    .complete_header
-                    .encoded_bytes_upper_bound,
+        let header = self
+            .facts
+            .manifest_metadata
+            .complete_header
+            .encoded_bytes_upper_bound;
+        profile.push(header).map_err(invalid)?;
+        let overflow =
+            || FeaRunError::InvalidModel("thermal typed decode estimate overflows".into());
+        // The header's integer inventories may encode in one byte per value: charge it at the
+        // codec's per-byte typed decode bound, without the encoded bytes counted separately.
+        let mut typed =
+            runmat_canonical_codec::projected_canonical_typed_decode_resident_bytes_estimate(
+                header, 1,
             )
-            .map_err(invalid)?;
+            .ok_or_else(overflow)?;
         let samples = self.schedule.sample_count();
         let ordinal = samples
             .checked_sub(1)
@@ -107,9 +177,20 @@ impl PreparedThermalSolve<'_> {
                     count,
                 )
                 .map_err(|error| FeaRunError::InvalidModel(error.to_string()))?;
-                let repetitions = blocks.checked_mul(samples).ok_or_else(|| {
+                let decoded = RecoveredFieldPartition::profile_shape_typed_resident_bytes(
+                    &definition,
+                    RecoveredFieldSample::TimeSeconds(0.0),
+                    count,
+                )
+                .map_err(|error| FeaRunError::InvalidModel(error.to_string()))?;
+                let repetitions = blocks.checked_mul(retained.min(samples)).ok_or_else(|| {
                     FeaRunError::InvalidModel("thermal output block count overflows".into())
                 })?;
+                typed = u64::try_from(repetitions)
+                    .ok()
+                    .and_then(|n| decoded.checked_mul(n))
+                    .and_then(|bytes| typed.checked_add(bytes))
+                    .ok_or_else(overflow)?;
                 for _ in 0..repetitions {
                     profile
                         .push(shape.encoded_bytes_upper_bound)
@@ -117,9 +198,10 @@ impl PreparedThermalSolve<'_> {
                 }
             }
         }
-        profile
+        let profile = profile
             .finish(AnalysisNumericalObjectKind::SolverResult)
-            .map_err(invalid)
+            .map_err(invalid)?;
+        Ok((profile, typed))
     }
 
     pub fn execute(self) -> Result<FeaThermalRunResult, FeaRunError> {
@@ -189,6 +271,22 @@ impl<'a> PreparedThermalPrimarySolve<'a> {
         chunk_bytes: usize,
     ) -> Result<AnalysisTransportProfile, FeaRunError> {
         self.0.transport_profile(chunk_bytes)
+    }
+    /// Transport bound of the result header and one sample of every recovered field: the most
+    /// a single-sample product of this solve (a state, a field observation) copies from it.
+    pub fn sample_transport_profile(
+        &self,
+        chunk_bytes: usize,
+    ) -> Result<AnalysisTransportProfile, FeaRunError> {
+        self.0.transport_profile_of_samples(chunk_bytes, 1)
+    }
+    /// Typed storage of the complete decoded result.
+    pub fn result_typed_resident_bytes(&self, chunk_bytes: usize) -> Result<u64, FeaRunError> {
+        self.0.result_typed_resident_bytes(chunk_bytes)
+    }
+    /// The workspace an original-object import charges for the complete result.
+    pub fn result_import_workspace_bytes(&self, chunk_bytes: usize) -> Result<u64, FeaRunError> {
+        self.0.result_import_workspace_bytes(chunk_bytes)
     }
     pub fn execute_primary_fields(self) -> Result<FeaThermalRunResult, FeaRunError> {
         self.0.execute_primary_fields()

@@ -34,6 +34,16 @@ pub(super) fn standalone_preparation(
     transient: bool,
     identity: &str,
 ) -> ThermalStudyPreparation {
+    standalone_preparation_with(order, transient.then_some((2, true, true)), identity)
+}
+
+/// `transient` is the interval count, whether the whole-model histories are observed and
+/// whether the final temperature field is observed; the authored states are always kept.
+pub(super) fn standalone_preparation_with(
+    order: ElementOrder,
+    transient: Option<(usize, bool, bool)>,
+    identity: &str,
+) -> ThermalStudyPreparation {
     // Reuse the real canonical thermal fixture, removing its authored structural consumers
     // before planning. This produces a fresh standalone workload, not a relabeled prefix result.
     let mut prepared = crate::analysis_thermal::tests::prestress::setup(order, false);
@@ -46,16 +56,16 @@ pub(super) fn standalone_preparation(
         )
     });
     let mut step = model.sequence.steps[0].clone();
-    if transient {
+    if let Some((intervals, histories, field)) = transient {
         let mut transient = ProcedureStep::thermal_transient(step.step_id.0.clone());
         transient.state_outputs = step.state_outputs;
         transient.independent_domain = IndependentDomain::TimeSeconds {
             origin: 0.0,
             start: 0.0,
-            end: 2.0,
-            interval_count: 2,
+            end: intervals as f64,
+            interval_count: intervals,
         };
-        transient.accuracy.resources.maximum_samples = 3;
+        transient.accuracy.resources.maximum_samples = intervals + 1;
         transient.observations = crate::analysis_thermal::tests::history_finalization::histories(
             runmat_analysis_core::PartialAccessPolicy::ManifestAndChunks,
         );
@@ -68,11 +78,16 @@ pub(super) fn standalone_preparation(
             runmat_analysis_core::ObservationId("temperature-final".into());
         final_sample.sampling = runmat_analysis_core::SamplingPolicy::Final;
         final_sample.reduction = None;
-        transient
-            .observations
-            .push(runmat_analysis_core::ObservationRequest::Field(
-                final_sample,
-            ));
+        if !histories {
+            transient.observations.clear();
+        }
+        if field {
+            transient
+                .observations
+                .push(runmat_analysis_core::ObservationRequest::Field(
+                    final_sample,
+                ));
+        }
         step = transient;
     }
     model.sequence = AnalysisSequence::from_steps("standalone-thermal-publication", vec![step]);

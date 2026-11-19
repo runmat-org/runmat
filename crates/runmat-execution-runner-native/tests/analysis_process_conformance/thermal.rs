@@ -220,6 +220,9 @@ pub(super) async fn run_driver<D: PublicationChainDriver>(
             program: prepared.program.clone(),
             inputs: prepared.inputs.clone(),
             resource_plan: prepared.resource_plan.clone(),
+            sample_output_bytes: prepared.sample_output_bytes,
+            result_import_bytes: prepared.result_import_bytes,
+            result_typed_bytes: prepared.result_typed_bytes,
         };
         foreign.resource_plan.input.phase =
             runmat_analysis_fea::planning::resource::FeaResourcePhase::ThermalSolve(
