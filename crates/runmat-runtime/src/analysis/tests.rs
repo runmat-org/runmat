@@ -3287,7 +3287,12 @@ fn analysis_field_descriptors_include_physics_units_and_locations() {
             runmat_analysis_core::ObservationValueShape::Vector3,
         ),
     ] {
-        assert_eq!(descriptor.unit.as_deref(), Some("1"), "{}", descriptor.field_id);
+        assert_eq!(
+            descriptor.unit.as_deref(),
+            Some("1"),
+            "{}",
+            descriptor.field_id
+        );
     }
     let acoustic_mode = AnalysisFieldDescriptor::from_field(&AnalysisField::host_f64(
         "acoustic.mode_shape.1",
