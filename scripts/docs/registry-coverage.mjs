@@ -41,7 +41,8 @@ export const REGISTRIES = [
         id: "field quantities",
         source: "crates/runmat-analysis/core/src/study/output/quantity/source_names.rs",
         from: /pub const SOURCE_QUANTITIES:/, to: /^\];/m,
-        pattern: /^\s*row\("([a-z_0-9]+)"/gm,
+        // rustfmt breaks a long row(...) call after "row(", so the name may start on the next line.
+        pattern: /^\s*row\(\s*"([a-z_0-9]+)"/gm,
         docs: ["language/outputs-fields-and-observations.md"],
     },
     {

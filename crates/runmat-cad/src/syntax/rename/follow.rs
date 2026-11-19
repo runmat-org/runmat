@@ -121,10 +121,14 @@ fn reached<'a>(
                 continue;
             };
             let mirror = segment.instance.as_ref().and_then(|i| {
-                assembly.mirrors.iter().find(|m| m.name == i.by).and_then(|m| match &m.hand {
-                    MirrorHand::Opposite { source, .. } => Some(&source.definition),
-                    MirrorHand::Symmetric { .. } => None,
-                })
+                assembly
+                    .mirrors
+                    .iter()
+                    .find(|m| m.name == i.by)
+                    .and_then(|m| match &m.hand {
+                        MirrorHand::Opposite { source, .. } => Some(&source.definition),
+                        MirrorHand::Symmetric { .. } => None,
+                    })
             });
             if let Some(definition) = mirror {
                 next.push(definition);

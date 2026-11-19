@@ -268,20 +268,22 @@ impl<'a, 'b> Run<'a, 'b> {
             AxisRef::Face { face } => {
                 let r = self.single(i, f, param, face, Some(TopoKind::Face))?;
                 let h = *r.entities().iter().next().expect("exactly one");
-                self.face_axis(&h).or_else(|| self.planar_normal(&h)).ok_or_else(|| {
-                    self.error(
-                        f,
-                        Some(param),
-                        DiagCode::RefKindMismatch,
-                        format!(
+                self.face_axis(&h)
+                    .or_else(|| self.planar_normal(&h))
+                    .ok_or_else(|| {
+                        self.error(
+                            f,
+                            Some(param),
+                            DiagCode::RefKindMismatch,
+                            format!(
                             "`{}` is neither cylindrical, planar nor bounded by a circle, so it \
                              gives no axis; pick a cylindrical or conical face, a planar face, a \
                              circular edge or a datum axis",
                             face
                         ),
-                        Vec::new(),
-                    )
-                })
+                            Vec::new(),
+                        )
+                    })
             }
             AxisRef::SketchLine { sketch, entity } => {
                 self.gate_feature(i, f, sketch, param)?;

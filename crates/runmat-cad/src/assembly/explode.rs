@@ -490,7 +490,13 @@ impl Eval<'_, '_> {
                     }
                     err => (DiagCode::ValueFailed, format!("`{}`: {}", param, err)),
                 };
-                push(&mut self.rep, code, Severity::Error, site(&self.view, param), message);
+                push(
+                    &mut self.rep,
+                    code,
+                    Severity::Error,
+                    site(&self.view, param),
+                    message,
+                );
                 None
             }
         }

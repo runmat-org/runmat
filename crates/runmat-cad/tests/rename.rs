@@ -35,7 +35,12 @@ fn rename(kind: RenameKind, from: &str, to: &str) -> String {
     let change = rename_part_item(PLATE, "/p/plate.part", kind, from, to)
         .unwrap_or_else(|e| panic!("{from} → {to}: {e}"));
     let parsed = parse_part("/p/plate.part", &change.source);
-    assert!(parsed.is_valid(), "{:?}\n{}", parsed.diagnostics, change.source);
+    assert!(
+        parsed.is_valid(),
+        "{:?}\n{}",
+        parsed.diagnostics,
+        change.source
+    );
     assert!(!change.reprinted, "{}", change.source);
     change.source
 }
@@ -103,21 +108,39 @@ drawing plate {
     annotation t = dimension(style = linear, references = [feature.body.face.start, feature.body.face.end], view = front)
 }
 "#;
-    let scope = ModuleScope::from_files([
-        ("/p/plate.part", PLATE),
-        ("/p/plate.drawing", drawing),
-    ]);
-    let change = rename_in_drawing(drawing, "/p/plate.drawing", &scope, "/p/plate.part", "body", "slab")
-        .unwrap()
-        .expect("the drawing names the feature");
-    assert!(change.source.contains("plane = feature.slab.face.start"), "{}", change.source);
+    let scope = ModuleScope::from_files([("/p/plate.part", PLATE), ("/p/plate.drawing", drawing)]);
+    let change = rename_in_drawing(
+        drawing,
+        "/p/plate.drawing",
+        &scope,
+        "/p/plate.part",
+        "body",
+        "slab",
+    )
+    .unwrap()
+    .expect("the drawing names the feature");
     assert!(
-        change.source.contains("references = [feature.slab.face.start, feature.slab.face.end]"),
+        change.source.contains("plane = feature.slab.face.start"),
+        "{}",
+        change.source
+    );
+    assert!(
+        change
+            .source
+            .contains("references = [feature.slab.face.start, feature.slab.face.end]"),
         "{}",
         change.source
     );
     // Another part's drawing isn't touched.
-    let other = rename_in_drawing(drawing, "/p/plate.drawing", &scope, "/p/other.part", "body", "slab").unwrap();
+    let other = rename_in_drawing(
+        drawing,
+        "/p/plate.drawing",
+        &scope,
+        "/p/other.part",
+        "body",
+        "slab",
+    )
+    .unwrap();
     assert!(other.is_none());
 }
 
@@ -160,7 +183,10 @@ fn every_corpus_feature_renames_cleanly() {
             let after = parse_part(file, &change.source);
             let new = after.document.expect("reads back");
             assert!(new.features.iter().any(|f| f.id.0 == to), "{file}: {from}");
-            assert!(!new.features.iter().any(|f| f.id.0 == from), "{file}: {from}");
+            assert!(
+                !new.features.iter().any(|f| f.id.0 == from),
+                "{file}: {from}"
+            );
             for head in ["feature", "sketch", "plane", "axis", "point"] {
                 let old = format!("{head}.{from}");
                 let left = change.source.match_indices(&old).find(|(at, _)| {
@@ -252,21 +278,45 @@ fn an_input_rename_reaches_assemblies_that_set_it() {
     let assemblies = assemblies_in(files, &scope);
     assert_eq!(assemblies.len(), 2, "both assemblies read");
     let follow = |path: &str, text: &str| {
-        rename_input_in_assembly(text, path, &scope, &assemblies, "/p/bracket.part", "width", "span")
-            .unwrap()
+        rename_input_in_assembly(
+            text,
+            path,
+            &scope,
+            &assemblies,
+            "/p/bracket.part",
+            "width",
+            "span",
+        )
+        .unwrap()
     };
     // The occurrence's own values follow; the spacer's input of the same name stays.
     let sub = follow("/p/sub.assembly", SUB).expect("sub sets the bracket's width");
-    assert!(sub.source.contains("values = { span = 30 mm }"), "{}", sub.source);
-    assert!(sub.source.contains("values = { width = 6 mm }"), "{}", sub.source);
+    assert!(
+        sub.source.contains("values = { span = 30 mm }"),
+        "{}",
+        sub.source
+    );
+    assert!(
+        sub.source.contains("values = { width = 6 mm }"),
+        "{}",
+        sub.source
+    );
     // An override whose target resolves through the sub-assembly to the bracket follows.
     let top = follow("/p/top.assembly", TOP).expect("top overrides the bracket's width");
     assert!(top.source.contains("input.span = 25 mm"), "{}", top.source);
     assert!(top.source.contains("input.width = 7 mm"), "{}", top.source);
     assert!(!top.reprinted, "{}", top.source);
     // An assembly that sets no input of the part isn't touched.
-    let none = rename_input_in_assembly(SUB, "/p/sub.assembly", &scope, &assemblies, "/p/bracket.part", "depth", "d")
-        .unwrap();
+    let none = rename_input_in_assembly(
+        SUB,
+        "/p/sub.assembly",
+        &scope,
+        &assemblies,
+        "/p/bracket.part",
+        "depth",
+        "d",
+    )
+    .unwrap();
     assert!(none.is_none());
 }
 
@@ -290,15 +340,23 @@ study bracket_static {
     analysis static { structural static {} }
 }
 "#;
-    let change = rename_region_in_study(study, "/s/load.fea", "/parts/bracket.part", "mount", "base")
-        .unwrap()
-        .expect("the study reads the bracket's region");
+    let change =
+        rename_region_in_study(study, "/s/load.fea", "/parts/bracket.part", "mount", "base")
+            .unwrap()
+            .expect("the study reads the bracket's region");
     // The bracket geometry's selection follows; the study's own region name and the STEP
     // geometry's label of the same spelling stay.
     assert_eq!(change.edits.len(), 1, "{}", change.source);
-    assert!(change.source.contains("region mount : face { select name \"base\"; expect exactly_one }\n}\n\ngeometry scan"), "{}", change.source);
+    assert!(
+        change.source.contains(
+            "region mount : face { select name \"base\"; expect exactly_one }\n}\n\ngeometry scan"
+        ),
+        "{}",
+        change.source
+    );
     assert!(change.source.contains("file = \"./scan.step\"\n    units = mm\n    region mount : face { select name \"mount\""), "{}", change.source);
     // A study of another part isn't touched.
-    let other = rename_region_in_study(study, "/s/load.fea", "/parts/plate.part", "mount", "base").unwrap();
+    let other =
+        rename_region_in_study(study, "/s/load.fea", "/parts/plate.part", "mount", "base").unwrap();
     assert!(other.is_none());
 }

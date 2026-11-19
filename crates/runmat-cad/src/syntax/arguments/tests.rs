@@ -4,12 +4,28 @@ use super::*;
 fn every_operation_and_argument_has_a_summary() {
     let mut seen = std::collections::BTreeSet::new();
     for op in operations() {
-        assert!(seen.insert((format!("{:?}", op.group), op.word)), "{} twice", op.word);
+        assert!(
+            seen.insert((format!("{:?}", op.group), op.word)),
+            "{} twice",
+            op.word
+        );
         assert!(op.summary.ends_with('.'), "{}: {}", op.word, op.summary);
         for a in op.arguments {
-            assert!(a.summary.ends_with('.'), "{}.{}: {}", op.word, a.name, a.summary);
+            assert!(
+                a.summary.ends_with('.'),
+                "{}.{}: {}",
+                op.word,
+                a.name,
+                a.summary
+            );
             for c in a.choices {
-                assert!(c.summary.ends_with('.'), "{}.{} = {}", op.word, a.name, c.word);
+                assert!(
+                    c.summary.ends_with('.'),
+                    "{}.{} = {}",
+                    op.word,
+                    a.name,
+                    c.word
+                );
             }
         }
     }
@@ -24,8 +40,14 @@ fn regeneration_paths_find_their_quantity() {
     assert_eq!(kind("extrude", "draft.angle"), Some(Quantity::Angle));
     assert_eq!(kind("hole", "end.depth"), Some(Quantity::Length));
     assert_eq!(kind("hole", "form.angle"), Some(Quantity::Angle));
-    assert_eq!(kind("hole", "form.counterbore.diameter"), Some(Quantity::Length));
-    assert_eq!(kind("fillet.variable", "variable[2].at"), Some(Quantity::Number));
+    assert_eq!(
+        kind("hole", "form.counterbore.diameter"),
+        Some(Quantity::Length)
+    );
+    assert_eq!(
+        kind("fillet.variable", "variable[2].at"),
+        Some(Quantity::Number)
+    );
     assert_eq!(kind("fillet", "profile.rho"), Some(Quantity::Number));
     assert_eq!(kind("pattern", "rows[0].dx"), Some(Quantity::Length));
     assert_eq!(kind("pattern", "first_spacing"), Some(Quantity::Length));
@@ -36,7 +58,9 @@ fn regeneration_paths_find_their_quantity() {
 #[test]
 fn signatures_list_call_arguments_only() {
     let extrude = operation("extrude").unwrap();
-    assert!(extrude.signature().starts_with("extrude(profile, distance, through_all"));
+    assert!(extrude
+        .signature()
+        .starts_with("extrude(profile, distance, through_all"));
     assert!(!extrude.signature().contains("thin.thickness"));
     let (arg, counterbore) = choice_call(operation("hole").unwrap(), "counterbore").unwrap();
     assert_eq!(arg.name, "form");
@@ -47,7 +71,10 @@ fn signatures_list_call_arguments_only() {
 fn docs_blocks_rewrite_between_markers() {
     let page = "a\n<!-- arguments:table rib -->\nold\n<!-- /arguments -->\nb\n";
     let out = rewrite_docs(page);
-    assert!(out.contains("| `thickness` | length (mm) | required |"), "{out}");
+    assert!(
+        out.contains("| `thickness` | length (mm) | required |"),
+        "{out}"
+    );
     assert!(!out.contains("old"));
     assert_eq!(rewrite_docs(&out), out);
 }

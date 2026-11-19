@@ -1,9 +1,9 @@
 //! Calibration of the operations estimate against the usage ledger of real solves.
 use crate::adaptation::structural_recovery::qualification_tests::mesh::structured_cantilever;
+use crate::contracts::ComputeBackend;
 use crate::contracts::LinearStaticSolveOptions;
 use crate::fixtures::{fixture_model, FixtureId};
 use crate::solve::preconditioner::SpdPreconditionerKind;
-use crate::contracts::ComputeBackend;
 use runmat_meshing_core::{ElementOrder, SolverMeshArtifact};
 use runmat_simulation_usage::{CompletedUsage, OperationCount, UsageContext, UsageLedger};
 use std::sync::Arc;
@@ -160,8 +160,8 @@ fn static_plan(
                 StaticSolvePath::ProvingFactorization => SpdPreconditionerKind::Auto,
                 StaticSolvePath::ElasticRigidityMultigrid => SpdPreconditionerKind::Amg,
             },
-            observation_execution:
-                crate::results::observation::ObservationExecutionPolicy::serial(),
+            observation_execution: crate::results::observation::ObservationExecutionPolicy::serial(
+            ),
             mesh: Some(mesh),
             constraints: &constraints,
             observations: &observations,
@@ -187,7 +187,11 @@ fn assert_calibrated(
     for (category, measured, estimated) in [
         ("meshing", measured.meshing, estimate.meshing),
         ("assembly", measured.assembly, estimate.assembly),
-        ("factorization", measured.factorization, estimate.factorization),
+        (
+            "factorization",
+            measured.factorization,
+            estimate.factorization,
+        ),
         ("solve", measured.solve, estimate.solve),
         ("other", measured.other, estimate.other),
     ] {
@@ -233,7 +237,10 @@ fn calibrate(label: &str, mesh: &SolverMeshArtifact, factor: bool) {
             let per_iteration = measured.solve.operations() / u64::from(iterations.max(1));
             let estimated = estimate.solve.operations() / covered;
             eprintln!("G87 calibration {label} solve per iteration: measured {per_iteration} estimate {estimated}");
-            assert!(estimated <= 2 * per_iteration + 200_000, "{label}: {estimated} per iteration");
+            assert!(
+                estimated <= 2 * per_iteration + 200_000,
+                "{label}: {estimated} per iteration"
+            );
             assert_calibrated(&label, measured, &estimate, &["assembly", "other"]);
         } else {
             assert_calibrated(

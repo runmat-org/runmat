@@ -126,7 +126,10 @@ mod tests {
             for (i, a) in command.inputs.iter().enumerate() {
                 for b in &command.inputs[i + 1..] {
                     if a.label == b.label && !exclusive(a, b) {
-                        clashes.push(format!("{}: {} and {} are both \"{}\"", command.id, a.id, b.id, a.label));
+                        clashes.push(format!(
+                            "{}: {} and {} are both \"{}\"",
+                            command.id, a.id, b.id, a.label
+                        ));
                     }
                 }
             }

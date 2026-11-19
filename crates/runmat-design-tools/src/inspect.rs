@@ -405,7 +405,9 @@ fn part(s: &mut Sections, path: &str, text: &str) -> Result<(), ToolError> {
                             value
                         }
                         Err(reason) => {
-                            s.out.notes.push(format!("mass: {path}: mass unknown: {reason}"));
+                            s.out
+                                .notes
+                                .push(format!("mass: {path}: mass unknown: {reason}"));
                             // The geometry stays measured: volume, its centroid, the principal
                             // axes' directions and the extent. Mass, centre of mass and the
                             // moments of inertia need a density, so they are unknown.

@@ -195,7 +195,9 @@ pub fn build_drawing_index(
                 let shown = rows
                     .iter()
                     .map(|r| match at {
-                        Some(at) => fill_fields(r, |f| super::note_field(model, at, &doc.tables, f)),
+                        Some(at) => {
+                            fill_fields(r, |f| super::note_field(model, at, &doc.tables, f))
+                        }
                         None => r.clone(),
                     })
                     .collect();

@@ -150,8 +150,13 @@ pub(crate) fn in_small_loop(pts: &[f64], b: &Bx) -> bool {
     let q = [(b[0] + b[2]) / 2.0, (b[1] + b[3]) / 2.0];
     let mut odd = false;
     for i in 0..n - 1 {
-        let (a, c) = ([pts[2 * i], pts[2 * i + 1]], [pts[2 * i + 2], pts[2 * i + 3]]);
-        if (a[1] > q[1]) != (c[1] > q[1]) && q[0] < a[0] + (q[1] - a[1]) / (c[1] - a[1]) * (c[0] - a[0]) {
+        let (a, c) = (
+            [pts[2 * i], pts[2 * i + 1]],
+            [pts[2 * i + 2], pts[2 * i + 3]],
+        );
+        if (a[1] > q[1]) != (c[1] > q[1])
+            && q[0] < a[0] + (q[1] - a[1]) / (c[1] - a[1]) * (c[0] - a[0])
+        {
             odd = !odd;
         }
     }

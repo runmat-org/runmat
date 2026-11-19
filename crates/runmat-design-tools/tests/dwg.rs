@@ -635,7 +635,11 @@ fn a_plan_s_grid_lines_export_as_center_lines_beside_their_dimension_row() {
     )
     .unwrap_or_else(|e| panic!("{e}"));
     let sheet = dxf::read(out["files"][0]["content"].as_str().unwrap()).unwrap();
-    let center = sheet.entities.iter().filter(|e| e.layer == "CENTER").count();
+    let center = sheet
+        .entities
+        .iter()
+        .filter(|e| e.layer == "CENTER")
+        .count();
     assert!(center >= 3, "{center} center-layer entities");
     let rows = sheet
         .entities

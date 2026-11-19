@@ -35,7 +35,10 @@ fn heartbeats_repeat_the_last_count_every_two_seconds_while_a_phase_is_open() {
     assert!(!relay.heartbeat_at(after(3_000)));
     assert!(relay.heartbeat_at(after(4_500)));
     relay.emit_at(event(FeaProgressStatus::Completed, None), after(4_600));
-    assert!(!relay.heartbeat_at(after(9_000)), "a closed phase sends no heartbeats");
+    assert!(
+        !relay.heartbeat_at(after(9_000)),
+        "a closed phase sends no heartbeats"
+    );
 
     let events = events.lock().unwrap();
     let heartbeats = events

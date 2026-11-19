@@ -1249,11 +1249,11 @@ impl FsProvider for RemoteFsProvider {
         let pinned = Self {
             inner: Arc::new(inner),
         };
-        let bytes = if size == 0 {
-            pinned.inner.download_chunk(&self.normalize(path), 0, 1)?
-        } else {
-            pinned.download_raw_file(&self.normalize(path), size)?
-        };
+        // An empty version has no bytes to fetch; asking for one is out of range.
+        if size == 0 {
+            return Ok(Vec::new());
+        }
+        let bytes = pinned.download_raw_file(&self.normalize(path), size)?;
         if bytes.len() as u64 != size {
             return Err(io::Error::new(
                 ErrorKind::InvalidData,
@@ -2051,6 +2051,10 @@ mod tests {
             std::fs::read(harness.resolve(&params.path)).map_err(|_| StatusCode::NOT_FOUND)?;
         let offset = params.offset.unwrap_or(0) as usize;
         let length = params.length.unwrap_or(data.len().saturating_sub(offset));
+        // Like the server: a range past the end of the file is refused.
+        if length > 0 && offset + length > data.len() {
+            return Err(StatusCode::RANGE_NOT_SATISFIABLE);
+        }
         let end = std::cmp::min(offset + length, data.len());
         if offset < data.len() {
             data = data[offset..end].to_vec();
@@ -2568,6 +2572,43 @@ mod tests {
         assert_eq!(data, read_back);
         executor::block_on(provider.remove_file(Path::new("/reports/data.bin"))).expect("remove");
         assert!(!harness.resolve("/reports/data.bin").exists());
+    }
+
+    #[test]
+    fn an_empty_pinned_version_reads_as_no_bytes() {
+        let (base, harness, _rt) = spawn_server();
+        let provider = RemoteFsProvider::new(RemoteFsConfig {
+            base_url: base,
+            auth_token: None,
+            chunk_bytes: 1024,
+            parallel_requests: 4,
+            direct_read_threshold_bytes: u64::MAX,
+            direct_write_threshold_bytes: 1024,
+            timeout: Duration::from_secs(30),
+            ..RemoteFsConfig::default()
+        })
+        .expect("provider");
+        std::fs::create_dir_all(harness.resolve("/scripts")).expect("mkdir");
+        std::fs::write(harness.resolve("/scripts/empty.m"), b"").expect("write");
+
+        let bytes = executor::block_on(provider.read_version(
+            Path::new("/scripts/empty.m"),
+            "version-1",
+            0,
+            "",
+        ))
+        .expect("an empty version reads without a range request");
+        assert!(bytes.is_empty());
+
+        std::fs::write(harness.resolve("/scripts/one.m"), b"x").expect("write");
+        let bytes = executor::block_on(provider.read_version(
+            Path::new("/scripts/one.m"),
+            "version-2",
+            1,
+            "",
+        ))
+        .expect("a one-byte version");
+        assert_eq!(bytes, b"x");
     }
 
     #[test]

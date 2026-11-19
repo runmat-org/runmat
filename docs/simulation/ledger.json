@@ -20355,7 +20355,8 @@
       ],
       "acceptance": "Thermal studies chain into preload, prestressed modal, harmonic and buckling studies from one `.fea` file, with the thermomechanical references the page quotes.",
       "owners": [
-        "crates/runmat-analysis/fea/src/physics/coupling/thermo_mechanical.rs"
+        "crates/runmat-analysis/core/src/study/sequence.rs",
+        "crates/runmat-analysis/fea/src/pipeline/thermo_mechanical.rs"
       ],
       "obligations": [
         {
@@ -20901,7 +20902,7 @@
       ],
       "acceptance": "Electrothermal studies run from a `.fea` study with temperature-dependent conductivity iterated to convergence, transient heating, and harmonic AC loss chained into a transient heat analysis.",
       "owners": [
-        "crates/runmat-analysis/fea/src/physics/coupling/electro_thermal.rs"
+        "crates/runmat-analysis/fea/src/execution/electrothermal/coupled.rs"
       ],
       "obligations": [
         {

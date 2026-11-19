@@ -225,10 +225,7 @@ fn flipped(frame: &Frame) -> Frame {
 }
 
 /// The prism's caps along the profile frame's z for `extent`.
-fn caps(
-    extent: &Extent,
-    both: bool,
-) -> Result<(f64, f64, PrismBound, PrismBound), String> {
+fn caps(extent: &Extent, both: bool) -> Result<(f64, f64, PrismBound, PrismBound), String> {
     Ok(match extent {
         Extent::Blind { distance } => {
             (0.0, positive(distance, "the depth")?, PrismBound::Blind, PrismBound::Blind)
@@ -275,7 +272,13 @@ fn hole_points(sketch: &ResolvedSketch) -> Vec<(String, [f64; 2])> {
 fn path_points(sketch: &ResolvedSketch) -> Result<Vec<[f64; 2]>, String> {
     let mut segments: Vec<(SketchEntityKey, [f64; 2], [f64; 2])> = Vec::new();
     for entity in sketch.sketch.entities.iter().filter(|e| !e.construction) {
-        let get = |role| sketch.solved.points.get(&(entity.id.clone(), role)).copied();
+        let get = |role| {
+            sketch
+                .solved
+                .points
+                .get(&(entity.id.clone(), role))
+                .copied()
+        };
         match entity.geometry {
             SketchGeometry::Line { .. } => {
                 if let (Some(a), Some(b)) = (get(PointRole::Start), get(PointRole::End)) {
@@ -283,9 +286,11 @@ fn path_points(sketch: &ResolvedSketch) -> Result<Vec<[f64; 2]>, String> {
                 }
             }
             SketchGeometry::Arc { .. } => {
-                if let (Some(a), Some(b), Some(c)) =
-                    (get(PointRole::Start), get(PointRole::End), get(PointRole::Center))
-                {
+                if let (Some(a), Some(b), Some(c)) = (
+                    get(PointRole::Start),
+                    get(PointRole::End),
+                    get(PointRole::Center),
+                ) {
                     segments.push((SketchEntityKey::Arc(c), a, b));
                 }
             }
@@ -387,9 +392,9 @@ pub fn tool(op: &OperationKind, sketch: &ResolvedSketch) -> Result<OperationTool
             both,
             ..
         } => {
-            let loops = sketch.profile().map_err(|e| {
-                format!("`{}` has no closed profile to cut: {e}", sketch.id)
-            })?;
+            let loops = sketch
+                .profile()
+                .map_err(|e| format!("`{}` has no closed profile to cut: {e}", sketch.id))?;
             if loops.is_empty() {
                 return Err(format!(
                     "`{}` has no closed profile to cut; close its outline",
@@ -483,7 +488,10 @@ pub fn tool(op: &OperationKind, sketch: &ResolvedSketch) -> Result<OperationTool
             let leg = positive(size, "the weld size")?;
             let chain = path_points(sketch)?;
             let place = Transform::from_frame(&sketch.frame);
-            let path: Vec<[f64; 3]> = chain.iter().map(|p| place.apply([p[0], p[1], 0.0])).collect();
+            let path: Vec<[f64; 3]> = chain
+                .iter()
+                .map(|p| place.apply([p[0], p[1], 0.0]))
+                .collect();
             let along = sub(path[1], path[0]);
             let along = normalize(along);
             // The profile's frame: z along the path, y the sketch's normal, x = y × z to the

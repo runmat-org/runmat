@@ -282,7 +282,10 @@ pub(super) fn field_param(name: &str, value: &Expr, source: SourceKey) -> Read<P
     ) {
         if nominal.dim != crate::units::dim_of(expected) {
             if let Ok(q) = crate::units::param_quantity(name, written) {
-                param.value = ParamValue::Quantity { nominal: q, tol: *tol };
+                param.value = ParamValue::Quantity {
+                    nominal: q,
+                    tol: *tol,
+                };
             }
         }
     }
@@ -522,7 +525,8 @@ pub(super) fn read_net(
             "global" => net.global = bool_of(value)?,
             "renamed_from" => net.renamed_from = Some(word_of(Some(value), span)?),
             _ => {
-                net.params.insert(field.clone(), field_param(&field, &value, source.clone())?);
+                net.params
+                    .insert(field.clone(), field_param(&field, &value, source.clone())?);
             }
         }
     }

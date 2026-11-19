@@ -1100,6 +1100,10 @@ impl FsProvider for RemoteFsProvider {
         snapshot: &str,
     ) -> io::Result<Vec<u8>> {
         let mut bytes = Vec::new();
+        // An empty version has no bytes to fetch; asking for one is out of range.
+        if size == 0 {
+            return Ok(bytes);
+        }
         loop {
             let remaining = size.saturating_sub(bytes.len() as u64);
             let length = remaining.min(self.chunk_bytes as u64) as usize;
@@ -1107,7 +1111,7 @@ impl FsProvider for RemoteFsProvider {
                 ("path", self.normalize(path)),
                 ("versionId", version.to_owned()),
                 ("offset", bytes.len().to_string()),
-                ("length", length.max(1).to_string()),
+                ("length", length.to_string()),
             ];
             if !snapshot.is_empty() {
                 query.push(("snapshotId", snapshot.to_owned()));

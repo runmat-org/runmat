@@ -8,12 +8,18 @@ use std::collections::BTreeSet;
 
 /// RIG with the block's height an input, `lift` (40 mm).
 fn rig() -> String {
-    RIG.replace("assembly rig {\n", "assembly rig {\n    input lift : length = 40 mm\n")
-        .replace("[30 mm, 10 mm, 40 mm]", "[30 mm, 10 mm, input.lift]")
+    RIG.replace(
+        "assembly rig {\n",
+        "assembly rig {\n    input lift : length = 40 mm\n",
+    )
+    .replace("[30 mm, 10 mm, 40 mm]", "[30 mm, 10 mm, input.lift]")
 }
 
 fn configure(text: &str, values: Value) -> String {
-    run(text, json!({ "command": "assembly.configurations", "values": values }))
+    run(
+        text,
+        json!({ "command": "assembly.configurations", "values": values }),
+    )
 }
 
 fn row<'a>(index: &'a Value, name: &str) -> &'a Value {
@@ -63,23 +69,48 @@ fn a_configuration_sets_inputs_and_suppresses_components_when_it_is_active() {
     assert!(r.get("active").is_none(), "{r}");
     assert!((block_z(&c.display, &c.index) - 0.040).abs() < 1e-6);
     // Active: the block rises to 60 mm and pin2 drops out.
-    let (index, display, problems) =
-        compile_assembly_known("/p/rig.assembly", &text, &files(), Some("raised"), &BTreeSet::new())
-            .unwrap();
-    assert!(problems.iter().all(|d| d.severity != "error"), "{problems:?}");
+    let (index, display, problems) = compile_assembly_known(
+        "/p/rig.assembly",
+        &text,
+        &files(),
+        Some("raised"),
+        &BTreeSet::new(),
+    )
+    .unwrap();
+    assert!(
+        problems.iter().all(|d| d.severity != "error"),
+        "{problems:?}"
+    );
     assert_eq!(index["configuration"], "raised");
     assert_eq!(row(&index, "raised")["active"], true);
     let z = block_z(&display, &index);
-    assert!((z - 0.060).abs() < 1e-6, "z = {z}\n{text}\n{}", index["diagnostics"]);
-    assert!(index["suppressed"].to_string().contains("pin2"), "{}", index["suppressed"]);
+    assert!(
+        (z - 0.060).abs() < 1e-6,
+        "z = {z}\n{text}\n{}",
+        index["diagnostics"]
+    );
+    assert!(
+        index["suppressed"].to_string().contains("pin2"),
+        "{}",
+        index["suppressed"]
+    );
 }
 
 #[test]
 fn the_same_name_changes_it_in_place_and_unknown_inputs_are_refused() {
-    let text = configure(&rig(), json!({ "kind": "configuration", "name": "raised", "values": "lift = 60 mm" }));
-    let text = configure(&text, json!({ "kind": "configuration", "name": "raised", "values": "lift = 80 mm" }));
+    let text = configure(
+        &rig(),
+        json!({ "kind": "configuration", "name": "raised", "values": "lift = 60 mm" }),
+    );
+    let text = configure(
+        &text,
+        json!({ "kind": "configuration", "name": "raised", "values": "lift = 80 mm" }),
+    );
     assert_eq!(text.matches("configuration raised").count(), 1, "{text}");
-    assert_eq!(row(&compile(&text).index, "raised")["values"], "lift = 80 mm");
+    assert_eq!(
+        row(&compile(&text).index, "raised")["values"],
+        "lift = 80 mm"
+    );
     let out: Value = serde_json::from_str(&edit_json(
         "/p/rig.assembly",
         &text,
@@ -88,17 +119,35 @@ fn the_same_name_changes_it_in_place_and_unknown_inputs_are_refused() {
     ))
     .unwrap();
     assert_eq!(out["ok"], false);
-    assert!(out["message"].as_str().unwrap().contains("has no input `width`; it has lift"), "{out}");
+    assert!(
+        out["message"]
+            .as_str()
+            .unwrap()
+            .contains("has no input `width`; it has lift"),
+        "{out}"
+    );
 }
 
 #[test]
 fn a_display_state_lists_what_it_hides_and_rows_delete() {
     let text = rig();
     let pin = format!("occurrence:{}", compile(&text).uuid("pin"));
-    let text = configure(&text, json!({ "kind": "display_state", "name": "no_pins", "hidden": [pin] }));
-    let line = text.lines().find(|l| l.contains("display_state no_pins = {")).unwrap_or_else(|| panic!("{text}"));
-    assert!(line.contains("hidden = [") && line.contains("pin"), "{text}");
-    let text = configure(&text, json!({ "kind": "configuration", "name": "raised", "values": "lift = 60 mm" }));
+    let text = configure(
+        &text,
+        json!({ "kind": "display_state", "name": "no_pins", "hidden": [pin] }),
+    );
+    let line = text
+        .lines()
+        .find(|l| l.contains("display_state no_pins = {"))
+        .unwrap_or_else(|| panic!("{text}"));
+    assert!(
+        line.contains("hidden = [") && line.contains("pin"),
+        "{text}"
+    );
+    let text = configure(
+        &text,
+        json!({ "kind": "configuration", "name": "raised", "values": "lift = 60 mm" }),
+    );
     let c = compile(&text);
     let r = row(&c.index, "no_pins");
     assert_eq!(r["kind"], "display_state");
@@ -108,5 +157,8 @@ fn a_display_state_lists_what_it_hides_and_rows_delete() {
         &text,
         json!({ "command": "assembly.delete", "selection": ["display_state:no_pins", "configuration:raised"] }),
     );
-    assert!(!text.contains("display_state") && !text.contains("configuration raised"), "{text}");
+    assert!(
+        !text.contains("display_state") && !text.contains("configuration raised"),
+        "{text}"
+    );
 }

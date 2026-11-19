@@ -38,10 +38,7 @@ fn after(command: &str, values: Value) -> (String, f64) {
         ],
     );
     assert_eq!(mass["ok"], true, "{mass}");
-    (
-        text,
-        mass["data"]["total"]["volume"].as_f64().unwrap() * 1e9,
-    )
+    (text, mass["data"]["volume"].as_f64().unwrap() * 1e9)
 }
 
 const HOLE: f64 = PI * 4.0; // the 4 mm hole's section, mm²
@@ -116,7 +113,7 @@ fn volume_of(text: &str) -> f64 {
         ],
     );
     assert_eq!(mass["ok"], true, "{mass}");
-    mass["data"]["total"]["volume"].as_f64().unwrap() * 1e9
+    mass["data"]["volume"].as_f64().unwrap() * 1e9
 }
 
 #[test]

@@ -7,7 +7,9 @@
 
 use super::{model, parse_pick, Compiled};
 use crate::features::picks_of;
-use runmat_cad::assembly::model::{AssemblyDocument, AssemblyPublish, AssemblyPublishTarget, RelPath};
+use runmat_cad::assembly::model::{
+    AssemblyDocument, AssemblyPublish, AssemblyPublishTarget, RelPath,
+};
 use runmat_cad::ids::PublishName;
 use runmat_cad::syntax::edit::EditFailure;
 use serde_json::{Map, Value};
@@ -43,7 +45,9 @@ pub(super) fn apply(
         .ok_or_else(|| model("pick a mate connector or a component to publish"))?;
     let target = if let Some(connector) = pick.strip_prefix("connector:") {
         if document.connector(connector).is_none() {
-            return Err(model(format!("the assembly has no connector `{connector}`")));
+            return Err(model(format!(
+                "the assembly has no connector `{connector}`"
+            )));
         }
         AssemblyPublishTarget::Connector {
             connector: connector.to_owned(),
@@ -63,7 +67,11 @@ pub(super) fn apply(
             }
         }
     };
-    if let Some(existing) = document.publishes.iter_mut().find(|p| p.name.as_str() == name) {
+    if let Some(existing) = document
+        .publishes
+        .iter_mut()
+        .find(|p| p.name.as_str() == name)
+    {
         existing.target = target;
         return Ok(format!("Changed publish {name}"));
     }

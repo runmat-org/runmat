@@ -35,7 +35,11 @@ fn chosen_or_all(
     if document.occurrences.is_empty() {
         return Err(model("the assembly has no components"));
     }
-    Ok(document.occurrences.iter().map(|o| o.name.clone()).collect())
+    Ok(document
+        .occurrences
+        .iter()
+        .map(|o| o.name.clone())
+        .collect())
 }
 
 /// `assembly.update-pins`.
@@ -50,7 +54,11 @@ pub(super) fn update(
     let released = match text_value(&request.values, "to") {
         "" | "latest" => false,
         "released" => true,
-        other => return Err(model(format!("update to `{other}`? Choose latest or released"))),
+        other => {
+            return Err(model(format!(
+                "update to `{other}`? Choose latest or released"
+            )))
+        }
     };
     let mut changed = Vec::new();
     for name in &names {

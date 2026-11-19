@@ -61,7 +61,11 @@ fn rename_follows_references_in_the_part_and_its_drawings() {
         .unwrap()
         .contains("references = [feature.slab.face.start, feature.slab.face.end]"));
     // The renamed part builds every feature, as before.
-    assert!(statuses(part).iter().all(|(_, s)| s == "regenerated"), "{:?}", statuses(part));
+    assert!(
+        statuses(part).iter().all(|(_, s)| s == "regenerated"),
+        "{:?}",
+        statuses(part)
+    );
 }
 
 #[test]
@@ -94,10 +98,19 @@ fn input_and_region_renames_follow_into_assemblies_and_studies() {
     );
     assert_eq!(out["ok"], true, "{out}");
     assert_eq!(out["summary"], "Renamed top to deck_face and in 1 study");
-    assert!(out["files"][0]["text"].as_str().unwrap().contains("region deck_face : face"), "{out}");
+    assert!(
+        out["files"][0]["text"]
+            .as_str()
+            .unwrap()
+            .contains("region deck_face : face"),
+        "{out}"
+    );
     assert_eq!(out["files"][1]["path"], "/s/plate.fea");
     let text = out["files"][1]["text"].as_str().unwrap();
-    assert!(text.contains("region deck : face { select name \"deck_face\";"), "{text}");
+    assert!(
+        text.contains("region deck : face { select name \"deck_face\";"),
+        "{text}"
+    );
 }
 
 #[test]
@@ -111,7 +124,10 @@ fn properties_name_field_and_rename_share_one_handler() {
         PLATE,
         json!({ "command": "part.rename", "selection": ["input:width"], "values": { "name": "span" } }),
     );
-    assert!(text.contains("input span : length") && text.contains("[input.span, 0 mm]"), "{text}");
+    assert!(
+        text.contains("input span : length") && text.contains("[input.span, 0 mm]"),
+        "{text}"
+    );
     let clash = refused(
         PLATE,
         json!({ "command": "part.rename", "selection": ["feature:body"], "values": { "name": "round" } }),
@@ -152,7 +168,9 @@ fn rollback_writes_the_bar_and_the_model_stops_there() {
     assert!(again.contains("rolled back to body already"), "{again}");
     let end = applied(&back, json!({ "command": "part.rollback-end" }));
     assert_eq!(end, PLATE);
-    assert!(refused(PLATE, json!({ "command": "part.rollback-end" })).contains("at the end already"));
+    assert!(
+        refused(PLATE, json!({ "command": "part.rollback-end" })).contains("at the end already")
+    );
     // Renaming or deleting the feature the bar sits after keeps the bar with it.
     let renamed = applied(
         &back,
@@ -206,16 +224,27 @@ fn parents_and_children_lists_the_dependency_data() {
         .map(|r| serde_json::from_value(r["cells"].clone()).unwrap())
         .collect();
     let has = |rel: &str, name: &str| rows.iter().any(|r| r[0] == rel && r[1] == name);
-    assert!(has("Parent", "s1") && has("Child", "round") && has("Child", "top"), "{rows:?}");
+    assert!(
+        has("Parent", "s1") && has("Child", "round") && has("Child", "top"),
+        "{rows:?}"
+    );
     assert_eq!(out["data"]["parents"]["features"], json!(["s1"]));
     // The sketch reads the input; Show references on the input lists the sketch.
     let sketch = ask("part.parents-children", "feature:s1");
-    assert_eq!(sketch["data"]["parents"]["inputs"], json!(["width"]), "{sketch}");
+    assert_eq!(
+        sketch["data"]["parents"]["inputs"],
+        json!(["width"]),
+        "{sketch}"
+    );
     let input = ask("part.show-references", "input:width");
     assert_eq!(input["data"]["children"], json!(["s1"]), "{input}");
     let region = ask("part.show-references", "region:top");
     // The fillet shapes the body the region selects from, so it is a parent too.
-    assert_eq!(region["data"]["parents"], json!(["body", "round"]), "{region}");
+    assert_eq!(
+        region["data"]["parents"],
+        json!(["body", "round"]),
+        "{region}"
+    );
     let none = ask("part.parents-children", "origin:top");
     assert_eq!(none["ok"], false);
 }

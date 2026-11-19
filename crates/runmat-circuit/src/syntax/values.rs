@@ -147,9 +147,10 @@ fn unit_mismatch(v: &Val, expected: DynamicDimension, unit: &str) -> FeaSyntaxDi
     let found = match parse_unit_expression(unit) {
         Ok(definition) => FoundUnit::Authored(unit, DynamicDimension::from_unit(definition)),
         Err(_) => {
-            let kind = runmat_types::physical::unit_kind(expected.dimension(), expected.angle_power())
-                .map(|row| (row.kind, row.suggestions.join(", ")))
-                .unwrap_or(("value", String::new()));
+            let kind =
+                runmat_types::physical::unit_kind(expected.dimension(), expected.angle_power())
+                    .map(|row| (row.kind, row.suggestions.join(", ")))
+                    .unwrap_or(("value", String::new()));
             return diagnostic(
                 v.span,
                 format!("unknown unit `{unit}`; a {} takes {}", kind.0, kind.1),

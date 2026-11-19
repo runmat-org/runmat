@@ -47,10 +47,17 @@ fn mass_properties_of_an_unknown_material_are_unknown() {
         "{summary}"
     );
     let cells = &out["rows"][0]["cells"];
-    assert_eq!((&cells[3], &cells[5]), (&json!("unknown"), &json!("unknown")), "{out}");
+    assert_eq!(
+        (&cells[3], &cells[5]),
+        (&json!("unknown"), &json!("unknown")),
+        "{out}"
+    );
     assert_eq!(out["rows"][0]["severity"], "warning");
     assert!(
-        out["problems"][0].as_str().unwrap().contains("`material.unobtainium`"),
+        out["problems"][0]
+            .as_str()
+            .unwrap()
+            .contains("`material.unobtainium`"),
         "{out}"
     );
     assert!(out["data"]["total"].is_null(), "{out}");
@@ -441,10 +448,14 @@ const PAIR: &str = "runmat 0.7\nstd 1\n\nassembly pair {\n    use part block as 
 
 #[test]
 fn assembly_visualization_sorts_and_colors_components_by_mass_and_count() {
-    let files: Files = [("/p/block.part", BLOCK_100), ("/p/small.part", SMALL), ("/p/pair.assembly", PAIR)]
-        .map(|(p, t)| (p.to_owned(), t.to_owned()))
-        .into_iter()
-        .collect();
+    let files: Files = [
+        ("/p/block.part", BLOCK_100),
+        ("/p/small.part", SMALL),
+        ("/p/pair.assembly", PAIR),
+    ]
+    .map(|(p, t)| (p.to_owned(), t.to_owned()))
+    .into_iter()
+    .collect();
     let run = |by: &str| -> Value {
         serde_json::from_str(&analyze_json(
             "/p/pair.assembly",
@@ -461,9 +472,19 @@ fn assembly_visualization_sorts_and_colors_components_by_mass_and_count() {
     // The 100 mm block is heaviest: first, in the top band (red).
     assert_eq!(rows[0]["cells"][0], "big", "{out}");
     let legend = out["colors"]["legend"].as_array().unwrap();
-    assert_eq!(rows[0]["legend"].as_u64(), Some(legend.len() as u64 - 1), "{out}");
+    assert_eq!(
+        rows[0]["legend"].as_u64(),
+        Some(legend.len() as u64 - 1),
+        "{out}"
+    );
     assert_eq!(out["colors"]["faces"].as_array().unwrap().len(), 3, "{out}");
-    assert!(out["colors"]["faces"][0]["item"].as_str().unwrap().starts_with("occurrence:"), "{out}");
+    assert!(
+        out["colors"]["faces"][0]["item"]
+            .as_str()
+            .unwrap()
+            .starts_with("occurrence:"),
+        "{out}"
+    );
     // By count: the two small blocks share a part.
     let out = run("count");
     assert_eq!(out["rows"][0]["cells"][2], "2", "{out}");

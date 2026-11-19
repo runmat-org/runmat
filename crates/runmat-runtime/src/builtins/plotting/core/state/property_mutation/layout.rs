@@ -15,6 +15,7 @@ pub(crate) fn select_subplot_region_for_property(
     let mut reg = property.registry(PropertyLocation::CurrentFigure)?;
     let handle = reg.current;
     let existed = reg.figures.contains_key(&handle);
+    pin_legacy_axes_to_subplot_grid(&mut get_state_mut(&mut reg, handle).figure, region);
     let (matching, targets, index) = {
         let state = get_state_for_query(&mut reg, handle);
         let figure = &state.figure;
@@ -95,6 +96,30 @@ pub(crate) fn select_subplot_region_for_property(
         cols,
         active_index: index,
     })
+}
+
+/// The first subplot on a figure still laid out as a uniform grid takes that
+/// grid's axes into the requested grid by index. Axes `i` becomes slot `i`, as
+/// it did when subplot reconfigured the figure grid. Without this step, the
+/// default full-figure axes would overlap every requested cell. Subplot would
+/// then retire that axes, with any plot already drawn in it, and hand out
+/// index 0 for every first slot. For example, `subplot(1,2,2)` would return
+/// axes 0 instead of axes 1.
+fn pin_legacy_axes_to_subplot_grid(figure: &mut Figure, region: AxesGridCell) {
+    if figure.axes_use_independent_layout() {
+        return;
+    }
+    let slots = region.rows.saturating_mul(region.columns) as usize;
+    for index in 0..figure.axes_count().min(slots) {
+        let legacy = figure.axes_metadata(index).is_some_and(|metadata| {
+            metadata.overlay_parent.is_none() && !metadata.position_explicit
+        }) && figure.axes_grid_cell(index).is_none();
+        if legacy {
+            let cell = AxesGridCell::single(region.rows, region.columns, index as u32);
+            // A valid single cell always has a normalized position.
+            let _ = figure.set_axes_grid_cell(index, cell);
+        }
+    }
 }
 
 fn subplot_region_overlaps(figure: &Figure, index: usize, region: AxesGridCell) -> bool {

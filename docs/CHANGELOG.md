@@ -2,6 +2,121 @@
 
 _What's new across RunMat. See [GitHub Releases](https://github.com/runmat-org/runmat/releases) for runtime release binaries._
 
+## v0.7.2 - November 2026
+
+_November 18, 2026_
+
+### Runtime and Native Packaging
+
+#### Added
+
+* Added a separate compile-time runtime pack for `runmat compile`. Each release publishes one pack per platform beside the CLI archive. Install it with `runmat aot install`, or pass `--install-aot-runtime` to let a noninteractive compile install it. On an offline machine, install a downloaded pack with `runmat aot install --offline --from PATH`. The CLI accepts only the pack whose digest matches its embedded manifest. Running scripts does not need the pack.
+* The install scripts can install the compile-time pack with the CLI: `--with-aot-runtime` on Linux and macOS, `-WithAotRuntime` on Windows.
+
+#### Changed
+
+* Static analysis follows array shapes through function calls, multiple return values, indexed writes, slices, concatenation, dimension arithmetic and bounded indexed loops. Diagnostics in a calling script use the shapes a called function returns.
+* Reduced interpreter overhead per call by passing execution state without copying it.
+
+#### Fixed
+
+* Fixed subplots that span several grid cells and axes placed with `Position`, in live figures and in exported images. A flat line now autoscales to a padded range, and the x-axis label stays below the tick labels.
+* Fixed browser projects resolving the same relative path differently in memory and in IndexedDB storage.
+* Markdown reports escape literal table cells and restrict image links.
+* STEP files whose names contain non-ASCII characters import with their names intact.
+
+### Desktop, SDK, and Editor
+
+#### Added
+
+* Added language-server support for `.part`, `.assembly`, `.drawing` and `.circuit` files: hovers and completion for keywords, operations, arguments, allowed values, units, materials, parts and packages, generated from the same registries the design tools read.
+* Measure draws its dimension in the model and reports distance, ΔX, ΔY, ΔZ and angle in every design editor. A normal distance is drawn along the normal, with extension lines to the face it stands off.
+* The Trace's Steps view shows each FEA study phase. The Trace follows the Log level and keeps a run's spans at every level.
+* Long FEA phases report live progress: the stage's elapsed time, the run's elapsed time, and counts when the stage reports them. A percentage appears only when the runtime measured one.
+* Added `RunMatSession.previewFeaStudyGeometry` to the SDK. `createFeaFieldScene` accepts legend terms from the study display and run assessments, and geometry summaries report `coordinateUnits`. `setLogFilter` works in browser builds.
+
+#### Changed
+
+* Design editors show notices and errors in a strip below the view.
+* A trackpad pinch zooms the model or sheet under the fingers in every design view.
+* The Results pane and circuit simulation results use one table and toolbar. Variables lists the script workspace only.
+* The language server resolves `.fea` studies within the project root and keeps its session across project switches. An open study on a `.part` file is checked once, not every few seconds.
+* Unit quick fixes apply to vectors, for example `[0, 0, -10] mm` where a force is expected.
+
+#### Fixed
+
+* Fixed program worker transfers stopping at a fixed 128 MiB limit; the runtime admits requests and results against the run budget.
+* Fixed dialogs and menus appearing behind native MCAD and ECAD viewports.
+
+### Mechanical Design
+
+#### Added
+
+* Added assembly sketches on an origin plane or a component face, with every part sketch tool. Sketch points, lines and circles can serve as layout geometry for mates. Use edges brings component edges into a sketch, and the converted curves follow the component when it changes.
+* Added assembly features: cuts, holes through several parts and weld beads, made from an assembly sketch.
+* Added assembly commands for mate connectors and publishing, configurations and display states, options and effectivity, copy with mates, contact regions, envelopes, skeleton parts, release pins with Update pins, and document units. Components can draw as full, envelope, defeatured, midsurface or beam representations, and Visualization colors components by mass, volume, cost or count.
+* Added assembly checks: Interface check, Hole alignment and Hole/fastener check.
+* Added motion studies: kinematic animation with collision detection, a mate controller with named positions, dragging through a mate's free directions, and Basic motion for rigid-body dynamics. Results to .fea passes one part's mate loads and inertia to an FEA study. A motion study's plot is a RunMat figure with a playhead and click-to-scrub.
+* Added part commands: Use edges (project, intersection, silhouette, offset on surface), Edit sketch plane, Instant 3D, Replace reference, Recognize features on an imported body, a weldment profile library (EN 10365 IPE, HEA and HEB sections and ASME B36.10M pipe), library features, and document settings for units, decimals, ISO or ASME standard and ISO 2768-1 tolerance class. Sheet-metal parts accept gauge tables and bend tables (DIN 6935 or a project CSV).
+* Added sketch ellipses and elliptical arcs, regular polygons, splines through picked points, and single-line text that can be cut or extruded. Delete removes picked sketch curves and points in parts and assemblies.
+* Added Evaluate commands for parts and assemblies: Check geometry, Section properties, Thickness, Curvature, Zebra, Deviation, DFM checks against a company rule pack, Cost from entered shop rates, and Check sketch.
+* Added 3D annotations on parts: datums, GD&T, dimensions, surface finish, coatings, weld symbols, notes, auto-dimension and annotation views.
+* Added Simulate commands on parts: named regions, defeatured representations, and full, defeatured, midsurface or beam representations. New study on a part or assembly opens the Simulation setup guide.
+* Added drawing commands: Edit view, Check drawing (references, model, ISO 7200 title block and overlap) and Auto-explode. Drawings support imperial units, plan and cross sections, view titles, callouts with leaders, section lining by material, plan grids, level marks and occurrence-qualified dimensions on assembly views.
+
+#### Changed
+
+* Mass properties never assume a density. A part without a material shows its density as Unknown, with the reason.
+* Values read in the units they display in, including `g`, `mm²` and `°`. Where a mass is expected, `g` is the gram.
+* Renaming an input or region updates the assemblies and studies that use it.
+* `.part`, `.circuit.layout` and `.fea` files report a wrong unit with one shared diagnostic at the value.
+* Move face moves along a plane's normal, an edge or an axis. Offset face moves faces with rounds along them, including on imported STEP parts. Delete face removes a hole whose wall has several faces, and reports when it can't.
+* Sweep and loft options that are not supported yet (guides, twist, tangency, centerline, close and thin) are refused by name. Earlier versions ignored them.
+* Drawing notes wrap within their width and form a numbered list of general notes. Dimension figures keep clear of model lines, and each view draws its own tangent edges.
+
+#### Fixed
+
+* Fixed an extruded cut from a sketch on a face cutting away from the body.
+* An assembly component whose part does not compile is placed without its model, and the assembly says which part failed.
+* Section views of imported STEP parts draw solid caps.
+
+### Electronic Design
+
+#### Added
+
+* Added schematic and board commands: Rules, Net class, Change part, Footprint, Fitted (variant overrides), Swap pins or gates, Place, Align and Net length.
+* View ▸ Grid draws the plane grid on the schematic and board tabs. Opening the Outline on a circuit without a board writes its first `.circuit.layout`.
+
+#### Changed
+
+* Design review identifies I²C lines by the parts' I²C pins. USB D+ and D− on a power-only port can be waived with `no_erc`.
+
+### Finite-Element Analysis
+
+#### Added
+
+* Studies read RunMat MCAD `.part` and `.assembly` files as geometry. Region names come from the CAD file and are qualified by occurrence path in assemblies. A `select name` that matches no region is refused, and the message lists the names the file contains.
+* Added a study `display` statement for field outputs, with unit, fixed range and precision. A fixed range clips values and marks the overflow. Each published assessment carries one summary line with the peak value and its location, and the Results rows show it.
+* `runmat check` estimates the mesh size and its memory before a run and refuses a study that cannot fit. A run plan estimates its operations and refuses a run that the simulation allowance cannot cover.
+* Added a shared material library with nominal properties and their sources. The siemens is a supported unit.
+* The FEA source check reports each study's parameterized signals evaluated at the study's own inputs (`FeaSemanticProgram.evaluatedSignals` in the SDK), so a load can be labeled with its value before a run.
+
+#### Changed
+
+* FEA assembly reads declared material properties only. A study whose material declares no elastic properties fails with an error that names the material.
+* Browser FEA derives its memory budget from the platform and the measured WebAssembly memory. The browser geometry host can grow to 4 GB. Meshing charges volume construction to its memory ceiling and refuses an oversized mesh with `MemoryBudgetExceeded`.
+* Thermal result publication and factorization solves are admitted against the run's memory budget.
+* Results name the run field they read, publish fields in a fixed order and omit empty fields. Stored run records carry a format version that changes with their shape.
+* Results no longer report thermomechanical or electrothermal summary values that no solve computed. Thermomechanical fields come only from solved thermal or eigenstrain paths.
+
+#### Fixed
+
+* Fixed browser FEA checks on MCAD parts that never finished; they now fail promptly with the reason.
+* Fixed the source check hiding file read errors; it reports the error at the file it names.
+* Fixed a completed run without saved render topology failing to redraw its view.
+
+RunMat FEA, mechanical design, and electrical design are currently in beta. We will mark them as production-ready when development and validation are complete. Many capabilities are available; see the documentation for supported workflows and current limitations.
+
 ## v0.7.1 - November 2026
 
 _November 10, 2026_

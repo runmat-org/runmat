@@ -1,6 +1,6 @@
 //! Unit expressions use the same physical authority as geometry and solvers.
-pub use runmat_types::physical::{parse_unit_expression, UnitExpressionError};
 use runmat_types::physical::{dimension_requirement, unit_mismatch_message, FoundUnit};
+pub use runmat_types::physical::{parse_unit_expression, UnitExpressionError};
 use runmat_types::PhysicalDimension;
 
 /// A quantity type as an author reads it: the semantic kind when known (`temperature difference`),
@@ -93,7 +93,11 @@ pub(crate) fn unit_mismatch(
     }
     // The shared formatter (runmat-types::physical::unit_message) writes the one wrong-unit
     // message every design language reports.
-    let text = unit_mismatch_message(subject, expected_dimension, FoundUnit::Authored(unit, found));
+    let text = unit_mismatch_message(
+        subject,
+        expected_dimension,
+        FoundUnit::Authored(unit, found),
+    );
     Some((text.message, text.label))
 }
 

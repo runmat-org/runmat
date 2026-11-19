@@ -74,13 +74,16 @@ pub fn study_checks(
             message: format!(
                 "{} has no density ({}): the study can't assign its material",
                 part.path,
-                part.mass_unknown.as_deref().unwrap_or("its density is unknown")
+                part.mass_unknown
+                    .as_deref()
+                    .unwrap_or("its density is unknown")
             ),
             items: part.item.iter().cloned().collect(),
         });
     }
     if mass.parts.iter().any(|p| p.mass.is_some())
-        && mass.total.as_ref().is_some_and(|t| t.mass <= 0.0) {
+        && mass.total.as_ref().is_some_and(|t| t.mass <= 0.0)
+    {
         checks.push(StudyCheck {
             check: "mass",
             severity: "error",

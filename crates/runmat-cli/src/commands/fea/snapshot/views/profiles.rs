@@ -1160,7 +1160,7 @@ impl CaptureProfile {
                 Some(ModeEigenvalue::LoadFactor(_)) => {
                     format!("Buckling mode {number} relative amplitude")
                 }
-                _ => format!("Mode {number} relative amplitude"),
+                _ => runmat_runtime::analysis::field_scene::legend::mode_amplitude_label(number),
             };
             let label = match eigenvalue {
                 Some(ModeEigenvalue::FrequencyHertz(hertz)) => {
@@ -1183,7 +1183,7 @@ impl CaptureProfile {
                 legend,
                 deformation: deforms.then(|| field.clone()),
                 field: Some(field),
-                unit: "relative".into(),
+                unit: runmat_runtime::analysis::field_scene::legend::RELATIVE_AMPLITUDE_UNIT.into(),
                 shape: if deforms { "exaggerated" } else { "undeformed" },
                 relative: true,
                 volume: None,

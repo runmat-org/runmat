@@ -29,11 +29,17 @@ fn corpus_arguments_are_registered() {
     for file in &files {
         let text = std::fs::read_to_string(file).unwrap();
         let parsed = runmat_cad::syntax::parse_part(&file.to_string_lossy(), &text);
-        let Some(document) = parsed.document else { continue };
+        let Some(document) = parsed.document else {
+            continue;
+        };
         for feature in &document.features {
             let value = serde_json::to_value(&feature.kind).unwrap();
-            let serde_json::Value::Object(fields) = value else { continue };
-            let Some(tag) = fields.get("feature").and_then(|v| v.as_str()) else { continue };
+            let serde_json::Value::Object(fields) = value else {
+                continue;
+            };
+            let Some(tag) = fields.get("feature").and_then(|v| v.as_str()) else {
+                continue;
+            };
             if tag == "sketch" {
                 continue;
             }
@@ -43,7 +49,10 @@ fn corpus_arguments_are_registered() {
             });
             let (subtag_key, op) = match sub {
                 Some((k, op)) => (Some(k), op),
-                None => (None, operation(tag).unwrap_or_else(|| panic!("no operation `{tag}`"))),
+                None => (
+                    None,
+                    operation(tag).unwrap_or_else(|| panic!("no operation `{tag}`")),
+                ),
             };
             if op.arguments.is_empty() {
                 continue;
@@ -66,7 +75,11 @@ fn corpus_arguments_are_registered() {
     missing.sort();
     missing.dedup();
     assert!(checked > 50, "only {checked} arguments checked");
-    assert!(missing.is_empty(), "unregistered arguments:\n{}", missing.join("\n"));
+    assert!(
+        missing.is_empty(),
+        "unregistered arguments:\n{}",
+        missing.join("\n")
+    );
 }
 
 #[test]
@@ -78,7 +91,10 @@ fn docs_tables_are_generated() {
     if std::env::var_os("RUNMAT_ARGUMENT_DOCS_WRITE").is_some() {
         std::fs::write(&path, &fresh).unwrap();
     } else {
-        assert_eq!(text, fresh, "features.md is stale: rerun with RUNMAT_ARGUMENT_DOCS_WRITE=1");
+        assert_eq!(
+            text, fresh,
+            "features.md is stale: rerun with RUNMAT_ARGUMENT_DOCS_WRITE=1"
+        );
     }
 }
 

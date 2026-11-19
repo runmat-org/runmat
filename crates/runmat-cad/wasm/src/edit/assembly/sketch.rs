@@ -202,21 +202,19 @@ pub(super) fn layout_pick(
         let drawn = compiled.display()["sketches"]
             .as_array()
             .and_then(|a| a.iter().find(|s| s["id"] == sketch))
-            .ok_or_else(|| model(format!("the sketch `{sketch}` isn't drawn, so it can't be mated")))?;
+            .ok_or_else(|| {
+                model(format!(
+                    "the sketch `{sketch}` isn't drawn, so it can't be mated"
+                ))
+            })?;
         let e = drawn["entities"]
             .as_array()
             .and_then(|a| a.iter().find(|e| e["id"] == entity))
             .ok_or_else(|| model(format!("the sketch `{sketch}` has no `{entity}`")))?;
-        let v3 = |v: &Value| -> Option<V3> {
-            Some([v[0].as_f64()?, v[1].as_f64()?, v[2].as_f64()?])
-        };
+        let v3 =
+            |v: &Value| -> Option<V3> { Some([v[0].as_f64()?, v[1].as_f64()?, v[2].as_f64()?]) };
         let f = &drawn["frame"];
-        let (o, fx, fy, fz) = (
-            v3(&f["origin"]),
-            v3(&f["x"]),
-            v3(&f["y"]),
-            v3(&f["z"]),
-        );
+        let (o, fx, fy, fz) = (v3(&f["origin"]), v3(&f["x"]), v3(&f["y"]), v3(&f["z"]));
         let (Some(o), Some(fx), Some(fy), Some(fz)) = (o, fx, fy, fz) else {
             return Err(model(format!("the sketch `{sketch}` has no frame")));
         };

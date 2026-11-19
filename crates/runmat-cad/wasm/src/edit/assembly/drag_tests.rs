@@ -76,10 +76,19 @@ fn run(text: &str, request: Value) -> String {
 fn assert_quarter_turn(text: &str) {
     let t = transform(text, "arm");
     // x axis (first column) now along +Y.
-    assert!(t[0].abs() < 1e-3 && (t[3] - 1.0).abs() < 1e-3, "{t:?}\n{text}");
+    assert!(
+        t[0].abs() < 1e-3 && (t[3] - 1.0).abs() < 1e-3,
+        "{t:?}\n{text}"
+    );
     assert!((t[8] - 1.0).abs() < 1e-6, "Z stays the hinge axis: {t:?}");
-    assert!(t[9].abs() < 1e-7 && t[10].abs() < 1e-7, "origin on the axis: {t:?}");
-    assert!((t[11] - 0.015).abs() < 1e-7, "the arm stays on the base: {t:?}");
+    assert!(
+        t[9].abs() < 1e-7 && t[10].abs() < 1e-7,
+        "origin on the axis: {t:?}"
+    );
+    assert!(
+        (t[11] - 0.015).abs() < 1e-7,
+        "the arm stays on the base: {t:?}"
+    );
 }
 
 #[test]

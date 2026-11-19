@@ -283,7 +283,9 @@ pub fn add_datum(
 /// Declares datum `label` on `on` in `pmi`: false when it is there on that face already.
 pub fn declare_datum(pmi: &mut PmiSet, label: &str, on: &Reference) -> Result<bool, EditFailure> {
     let ok = !label.is_empty()
-        && label.chars().all(|c| c.is_ascii_uppercase() || c.is_ascii_digit())
+        && label
+            .chars()
+            .all(|c| c.is_ascii_uppercase() || c.is_ascii_digit())
         && !label.contains(['I', 'O', 'Q']);
     if !ok {
         return Err(model(format!(
@@ -489,8 +491,7 @@ pub fn declare_dimension(
             let name = match name {
                 Some(n) => n.to_owned(),
                 None => {
-                    let names: Vec<&str> =
-                        pmi.locations.iter().map(|s| s.name.as_str()).collect();
+                    let names: Vec<&str> = pmi.locations.iter().map(|s| s.name.as_str()).collect();
                     fresh(&names, "distance")
                 }
             };

@@ -392,7 +392,8 @@ material invalid {
     assert!(!program.is_valid());
     assert!(program.diagnostics.iter().any(|diagnostic| {
         diagnostic.code == "fea.semantic.material"
-            && diagnostic.message == "youngs modulus needs a unit of force per area such as Pa; m measures length"
+            && diagnostic.message
+                == "youngs modulus needs a unit of force per area such as Pa; m measures length"
             && diagnostic.label.as_deref() == Some("expected Pa")
     }));
     assert!(program.materials.is_empty());

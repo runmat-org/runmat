@@ -91,7 +91,11 @@ fn mesh_request(step: Vec<u8>) -> String {
 }
 
 fn unit(event: &FeaProgressEvent) -> &str {
-    event.metadata.get(UNIT_METADATA).map(String::as_str).unwrap_or("")
+    event
+        .metadata
+        .get(UNIT_METADATA)
+        .map(String::as_str)
+        .unwrap_or("")
 }
 
 #[test]

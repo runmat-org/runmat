@@ -32,9 +32,7 @@ fn uuid(text: &str, files: &Files, path: &str) -> String {
 /// The first `bounds` under `v`.
 fn bounds(v: &Value) -> Option<&Value> {
     match v {
-        Value::Object(m) => m
-            .get("bounds")
-            .or_else(|| m.values().find_map(bounds)),
+        Value::Object(m) => m.get("bounds").or_else(|| m.values().find_map(bounds)),
         Value::Array(a) => a.iter().find_map(bounds),
         _ => None,
     }
@@ -49,7 +47,11 @@ fn block_height(text: &str, files: &Files) -> f64 {
         .as_array()
         .unwrap()
         .iter()
-        .find(|p| p["file"].as_str().is_some_and(|f| f.ends_with("block.part")))
+        .find(|p| {
+            p["file"]
+                .as_str()
+                .is_some_and(|f| f.ends_with("block.part"))
+        })
         .unwrap();
     let b = bounds(proto).unwrap();
     (b["max"][2].as_f64().unwrap() - b["min"][2].as_f64().unwrap()) * 1000.0
@@ -66,7 +68,13 @@ fn a_component_pinned_to_its_release_keeps_the_released_geometry() {
         json!({ "command": "assembly.update-pins", "values": { "to": "released", "components": [block] } }),
     );
     assert_eq!(out["ok"], false, "{out}");
-    assert!(out["message"].as_str().unwrap().contains("block.part has no released revision"), "{out}");
+    assert!(
+        out["message"]
+            .as_str()
+            .unwrap()
+            .contains("block.part has no released revision"),
+        "{out}"
+    );
     // Release the block's file from its row.
     let out = edit(
         RIG,
@@ -126,7 +134,11 @@ fn a_component_pinned_to_its_release_keeps_the_released_geometry() {
 #[test]
 fn release_with_nothing_selected_releases_the_assembly() {
     let files = files();
-    let out = edit(RIG, &files, json!({ "command": "assembly.release", "values": {} }));
+    let out = edit(
+        RIG,
+        &files,
+        json!({ "command": "assembly.release", "values": {} }),
+    );
     assert_eq!(out["ok"], true, "{out}");
     assert_eq!(out["summary"], "Released rig.assembly as R1", "{out}");
     assert!(out["files"]
@@ -170,7 +182,13 @@ fn properties_make_a_component_a_reference_and_back() {
         json!({ "command": "assembly.set-property", "values": { "reference": false }, "selection": [block] }),
     );
     assert_eq!(out["ok"], true, "{out}");
-    assert!(!out["files"][0]["text"].as_str().unwrap().contains("reference"), "{out}");
+    assert!(
+        !out["files"][0]["text"]
+            .as_str()
+            .unwrap()
+            .contains("reference"),
+        "{out}"
+    );
 }
 
 #[test]

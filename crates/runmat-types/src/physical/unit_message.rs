@@ -48,43 +48,235 @@ const fn row(
 /// `force times length` (moment and energy share it) and `[0, 0, -1]` as `frequency`.
 pub const UNIT_KINDS: &[UnitKind] = &[
     row([0; 8], 0, "dimensionless", "1", &[]),
-    row([1, 0, 0, 0, 0, 0, 0, 0], 0, "length", "m", &["mm", "cm", "m", "in"]),
-    row([2, 0, 0, 0, 0, 0, 0, 0], 0, "area", "m^2", &["mm^2", "cm^2", "m^2"]),
-    row([3, 0, 0, 0, 0, 0, 0, 0], 0, "volume", "m^3", &["mm^3", "cm^3", "m^3"]),
+    row(
+        [1, 0, 0, 0, 0, 0, 0, 0],
+        0,
+        "length",
+        "m",
+        &["mm", "cm", "m", "in"],
+    ),
+    row(
+        [2, 0, 0, 0, 0, 0, 0, 0],
+        0,
+        "area",
+        "m^2",
+        &["mm^2", "cm^2", "m^2"],
+    ),
+    row(
+        [3, 0, 0, 0, 0, 0, 0, 0],
+        0,
+        "volume",
+        "m^3",
+        &["mm^3", "cm^3", "m^3"],
+    ),
     row([0, 0, 1, 0, 0, 0, 0, 0], 0, "time", "s", &["s", "ms", "us"]),
-    row([0, 0, -1, 0, 0, 0, 0, 0], 0, "frequency", "Hz", &["Hz", "kHz", "MHz"]),
+    row(
+        [0, 0, -1, 0, 0, 0, 0, 0],
+        0,
+        "frequency",
+        "Hz",
+        &["Hz", "kHz", "MHz"],
+    ),
     row([0, 1, 0, 0, 0, 0, 0, 0], 0, "mass", "kg", &["kg", "gram"]),
-    row([-3, 1, 0, 0, 0, 0, 0, 0], 0, "mass per volume", "kg/m^3", &["kg/m^3"]),
-    row([0, 0, 0, 0, 1, 0, 0, 0], 0, "temperature", "K", &["K", "degC"]),
-    row([1, 0, -1, 0, 0, 0, 0, 0], 0, "length per time", "m/s", &["m/s", "mm/s"]),
-    row([1, 0, -2, 0, 0, 0, 0, 0], 0, "length per time squared", "m/s^2", &["m/s^2", "g"]),
+    row(
+        [-3, 1, 0, 0, 0, 0, 0, 0],
+        0,
+        "mass per volume",
+        "kg/m^3",
+        &["kg/m^3"],
+    ),
+    row(
+        [0, 0, 0, 0, 1, 0, 0, 0],
+        0,
+        "temperature",
+        "K",
+        &["K", "degC"],
+    ),
+    row(
+        [1, 0, -1, 0, 0, 0, 0, 0],
+        0,
+        "length per time",
+        "m/s",
+        &["m/s", "mm/s"],
+    ),
+    row(
+        [1, 0, -2, 0, 0, 0, 0, 0],
+        0,
+        "length per time squared",
+        "m/s^2",
+        &["m/s^2", "g"],
+    ),
     row([1, 1, -2, 0, 0, 0, 0, 0], 0, "force", "N", &["N", "kN"]),
-    row([2, 1, -2, 0, 0, 0, 0, 0], 0, "force times length", "N*m", &["N*m", "N*mm"]),
-    row([-1, 1, -2, 0, 0, 0, 0, 0], 0, "force per area", "Pa", &["Pa", "kPa", "MPa", "GPa"]),
-    row([-2, 1, -2, 0, 0, 0, 0, 0], 0, "force per volume", "N/m^3", &["N/m^3"]),
-    row([0, 1, -2, 0, 0, 0, 0, 0], 0, "force per length", "N/m", &["N/m", "N/mm"]),
-    row([2, 1, -3, 0, 0, 0, 0, 0], 0, "power", "W", &["W", "mW", "kW"]),
-    row([0, 1, -3, 0, 0, 0, 0, 0], 0, "power per area", "W/m^2", &["W/m^2"]),
-    row([-1, 1, -3, 0, 0, 0, 0, 0], 0, "power per volume", "W/m^3", &["W/m^3"]),
-    row([1, 1, -3, 0, -1, 0, 0, 0], 0, "thermal conductivity", "W/(m*K)", &["W/m/K"]),
-    row([2, 0, -2, 0, -1, 0, 0, 0], 0, "specific heat", "J/(kg*K)", &["J/kg/K"]),
-    row([0, 0, 0, 1, 0, 0, 0, 0], 0, "electric current", "A", &["A", "mA"]),
-    row([2, 1, -3, -1, 0, 0, 0, 0], 0, "electric potential", "V", &["V", "mV", "kV"]),
+    row(
+        [2, 1, -2, 0, 0, 0, 0, 0],
+        0,
+        "force times length",
+        "N*m",
+        &["N*m", "N*mm"],
+    ),
+    row(
+        [-1, 1, -2, 0, 0, 0, 0, 0],
+        0,
+        "force per area",
+        "Pa",
+        &["Pa", "kPa", "MPa", "GPa"],
+    ),
+    row(
+        [-2, 1, -2, 0, 0, 0, 0, 0],
+        0,
+        "force per volume",
+        "N/m^3",
+        &["N/m^3"],
+    ),
+    row(
+        [0, 1, -2, 0, 0, 0, 0, 0],
+        0,
+        "force per length",
+        "N/m",
+        &["N/m", "N/mm"],
+    ),
+    row(
+        [2, 1, -3, 0, 0, 0, 0, 0],
+        0,
+        "power",
+        "W",
+        &["W", "mW", "kW"],
+    ),
+    row(
+        [0, 1, -3, 0, 0, 0, 0, 0],
+        0,
+        "power per area",
+        "W/m^2",
+        &["W/m^2"],
+    ),
+    row(
+        [-1, 1, -3, 0, 0, 0, 0, 0],
+        0,
+        "power per volume",
+        "W/m^3",
+        &["W/m^3"],
+    ),
+    row(
+        [1, 1, -3, 0, -1, 0, 0, 0],
+        0,
+        "thermal conductivity",
+        "W/(m*K)",
+        &["W/m/K"],
+    ),
+    row(
+        [2, 0, -2, 0, -1, 0, 0, 0],
+        0,
+        "specific heat",
+        "J/(kg*K)",
+        &["J/kg/K"],
+    ),
+    row(
+        [0, 0, 0, 1, 0, 0, 0, 0],
+        0,
+        "electric current",
+        "A",
+        &["A", "mA"],
+    ),
+    row(
+        [2, 1, -3, -1, 0, 0, 0, 0],
+        0,
+        "electric potential",
+        "V",
+        &["V", "mV", "kV"],
+    ),
     row([0, 0, 1, 1, 0, 0, 0, 0], 0, "electric charge", "C", &["C"]),
-    row([-2, 0, 0, 1, 0, 0, 0, 0], 0, "current per area", "A/m^2", &["A/m^2"]),
-    row([-3, 0, 1, 1, 0, 0, 0, 0], 0, "charge per volume", "C/m^3", &["C/m^3"]),
-    row([0, 1, -2, -1, 0, 0, 0, 0], 0, "magnetic flux density", "T", &["T", "mT"]),
-    row([1, 1, -2, -1, 0, 0, 0, 0], 0, "flux density times length", "T*m", &["T*m"]),
-    row([3, 0, -1, 0, 0, 0, 0, 0], 0, "volume per time", "m^3/s", &["m^3/s"]),
-    row([0, 1, -1, 0, 0, 0, 0, 0], 0, "mass per time", "kg/s", &["kg/s"]),
-    row([2, 1, -3, -2, 0, 0, 0, 0], 0, "electric resistance", "ohm", &["ohm", "kohm", "Mohm"]),
-    row([-2, -1, 3, 2, 0, 0, 0, 0], 0, "electric conductance", "S", &["mS", "S"]),
-    row([-2, -1, 4, 2, 0, 0, 0, 0], 0, "capacitance", "F", &["pF", "nF", "uF"]),
-    row([2, 1, -2, -2, 0, 0, 0, 0], 0, "inductance", "H", &["nH", "uH", "mH"]),
+    row(
+        [-2, 0, 0, 1, 0, 0, 0, 0],
+        0,
+        "current per area",
+        "A/m^2",
+        &["A/m^2"],
+    ),
+    row(
+        [-3, 0, 1, 1, 0, 0, 0, 0],
+        0,
+        "charge per volume",
+        "C/m^3",
+        &["C/m^3"],
+    ),
+    row(
+        [0, 1, -2, -1, 0, 0, 0, 0],
+        0,
+        "magnetic flux density",
+        "T",
+        &["T", "mT"],
+    ),
+    row(
+        [1, 1, -2, -1, 0, 0, 0, 0],
+        0,
+        "flux density times length",
+        "T*m",
+        &["T*m"],
+    ),
+    row(
+        [3, 0, -1, 0, 0, 0, 0, 0],
+        0,
+        "volume per time",
+        "m^3/s",
+        &["m^3/s"],
+    ),
+    row(
+        [0, 1, -1, 0, 0, 0, 0, 0],
+        0,
+        "mass per time",
+        "kg/s",
+        &["kg/s"],
+    ),
+    row(
+        [2, 1, -3, -2, 0, 0, 0, 0],
+        0,
+        "electric resistance",
+        "ohm",
+        &["ohm", "kohm", "Mohm"],
+    ),
+    row(
+        [-2, -1, 3, 2, 0, 0, 0, 0],
+        0,
+        "electric conductance",
+        "S",
+        &["mS", "S"],
+    ),
+    row(
+        [-2, -1, 4, 2, 0, 0, 0, 0],
+        0,
+        "capacitance",
+        "F",
+        &["pF", "nF", "uF"],
+    ),
+    row(
+        [2, 1, -2, -2, 0, 0, 0, 0],
+        0,
+        "inductance",
+        "H",
+        &["nH", "uH", "mH"],
+    ),
     row([0; 8], 1, "angle", "rad", &["deg", "rad"]),
-    row([0, 0, -1, 0, 0, 0, 0, 0], 1, "angle per time", "rad/s", &["rad/s", "deg/s", "rpm"]),
-    row([0, 0, -2, 0, 0, 0, 0, 0], 1, "angle per time squared", "rad/s^2", &["rad/s^2", "deg/s^2"]),
-    row([2, 1, -2, 0, 0, 0, 0, 0], -1, "moment per angle", "N*m/rad", &["N*m/rad", "N*m/deg"]),
+    row(
+        [0, 0, -1, 0, 0, 0, 0, 0],
+        1,
+        "angle per time",
+        "rad/s",
+        &["rad/s", "deg/s", "rpm"],
+    ),
+    row(
+        [0, 0, -2, 0, 0, 0, 0, 0],
+        1,
+        "angle per time squared",
+        "rad/s^2",
+        &["rad/s^2", "deg/s^2"],
+    ),
+    row(
+        [2, 1, -2, 0, 0, 0, 0, 0],
+        -1,
+        "moment per angle",
+        "N*m/rad",
+        &["N*m/rad", "N*m/deg"],
+    ),
     row(
         [2, 1, -1, 0, 0, 0, 0, 0],
         -1,
@@ -102,9 +294,7 @@ pub fn unit_kind(dimension: PhysicalDimension, angle_power: i8) -> Option<&'stat
 }
 
 /// What a non-angular dimension measures and its coherent SI unit (`force per area`, `Pa`).
-pub fn dimension_requirement(
-    dimension: PhysicalDimension,
-) -> Option<(&'static str, &'static str)> {
+pub fn dimension_requirement(dimension: PhysicalDimension) -> Option<(&'static str, &'static str)> {
     unit_kind(dimension, 0).map(|row| (row.kind, row.si_example))
 }
 
@@ -226,8 +416,7 @@ fn vector_literal_end(text: &str) -> Option<usize> {
 
 /// The end of the number literal that starts `text` (`-2.5e-3` in `-2.5e-3 mm`).
 fn number_literal_end(text: &str) -> usize {
-    text
-        .char_indices()
+    text.char_indices()
         .find(|&(at, c)| {
             !(c.is_ascii_digit()
                 || c == '.'
@@ -373,22 +562,28 @@ mod tests {
         assert_eq!(quantity_text(3.0, ""), "3");
         assert_eq!(quantity_text(1.0 / 3.0, "mm"), "0.333333333 mm");
         assert_eq!(display_quantity(0.00635, of("m")), "6.35 mm");
-        assert_eq!(display_quantity(std::f64::consts::FRAC_PI_2, of("deg")), "90 deg");
+        assert_eq!(
+            display_quantity(std::f64::consts::FRAC_PI_2, of("deg")),
+            "90 deg"
+        );
         assert_eq!(display_quantity(5.0, of("N")), "5 N");
     }
 
     #[test]
     fn quick_fixes_keep_the_number_and_offer_units_of_the_kind() {
-        let message = unit_mismatch_message("distance", of("m"), FoundUnit::Authored("kg", of("kg")));
+        let message =
+            unit_mismatch_message("distance", of("m"), FoundUnit::Authored("kg", of("kg")));
         let example = expected_si_example(&message.message).unwrap();
         assert_eq!(example, "m");
-        assert_eq!(unit_fixes("10 kg", example), ["10 mm", "10 cm", "10 m", "10 in"]);
+        assert_eq!(
+            unit_fixes("10 kg", example),
+            ["10 mm", "10 cm", "10 m", "10 in"]
+        );
         assert_eq!(unit_fixes("-2.5e-3", example)[0], "-2.5e-3 mm");
         assert_eq!(unit_fixes("10 mm", example), ["10 cm", "10 m", "10 in"]);
         assert!(unit_fixes("input.width", example).is_empty());
         // A vector keeps its numbers and brackets as written.
-        let force =
-            unit_mismatch_message("force", of("N"), FoundUnit::Authored("mm", of("mm")));
+        let force = unit_mismatch_message("force", of("N"), FoundUnit::Authored("mm", of("mm")));
         let force = expected_si_example(&force.message).unwrap();
         assert_eq!(
             unit_fixes("[0, 0, -10] mm", force),
@@ -396,7 +591,12 @@ mod tests {
         );
         assert_eq!(
             unit_fixes("[1.5,-2e3] N", "m"),
-            ["[1.5,-2e3] mm", "[1.5,-2e3] cm", "[1.5,-2e3] m", "[1.5,-2e3] in"]
+            [
+                "[1.5,-2e3] mm",
+                "[1.5,-2e3] cm",
+                "[1.5,-2e3] m",
+                "[1.5,-2e3] in"
+            ]
         );
         assert!(unit_fixes("[0, input.load, 0] mm", force).is_empty());
         assert!(unit_fixes("[0 N, 1 N] mm", force).is_empty());

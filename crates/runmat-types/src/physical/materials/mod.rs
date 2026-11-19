@@ -29,7 +29,10 @@ pub struct Cited<K: QuantityMarker> {
 
 impl<K: QuantityMarker> Cited<K> {
     pub const fn new(value: f64, citation: &'static Citation) -> Self {
-        Self { value: Quantity::new(value), citation }
+        Self {
+            value: Quantity::new(value),
+            citation,
+        }
     }
 
     /// The value in the kind's SI canonical unit.
@@ -98,9 +101,7 @@ pub fn material_named(name: &str) -> Option<&'static Material> {
             .map(str::to_ascii_lowercase)
             .collect()
     };
-    if let Some(found) =
-        materials().find(|m| m.id == name || m.label.eq_ignore_ascii_case(name))
-    {
+    if let Some(found) = materials().find(|m| m.id == name || m.label.eq_ignore_ascii_case(name)) {
         return Some(found);
     }
     let wanted = words(name);
@@ -129,20 +130,42 @@ impl Material {
     /// acceptance criterion, not from the material block. `modulus_temperature_coefficient` is
     /// written only when the library holds a cited one.
     pub fn fea_properties(&self) -> Vec<(&'static str, String)> {
-        let coefficient = self.modulus_temperature_coefficient
-            .map(|coefficient| ("modulus_temperature_coefficient", format!("{} K^-1", number(coefficient.si()))));
+        let coefficient = self.modulus_temperature_coefficient.map(|coefficient| {
+            (
+                "modulus_temperature_coefficient",
+                format!("{} K^-1", number(coefficient.si())),
+            )
+        });
         [
-            ("mass_density", format!("{} kg/m^3", number(self.mass_density.si()))),
-            ("youngs_modulus", format!("{} GPa", number(self.youngs_modulus.si() / GPA))),
+            (
+                "mass_density",
+                format!("{} kg/m^3", number(self.mass_density.si())),
+            ),
+            (
+                "youngs_modulus",
+                format!("{} GPa", number(self.youngs_modulus.si() / GPA)),
+            ),
             ("poisson_ratio", number(self.poisson_ratio.si())),
-            ("reference_temperature", format!("{} K", number(self.property_temperature.si()))),
+            (
+                "reference_temperature",
+                format!("{} K", number(self.property_temperature.si())),
+            ),
         ]
         .into_iter()
         .chain(coefficient)
         .chain([
-            ("expansion_coefficient", format!("{} K^-1", number(self.expansion_coefficient.si()))),
-            ("conductivity", format!("{} W/m/K", number(self.conductivity.si()))),
-            ("specific_heat", format!("{} J/kg/K", number(self.specific_heat.si()))),
+            (
+                "expansion_coefficient",
+                format!("{} K^-1", number(self.expansion_coefficient.si())),
+            ),
+            (
+                "conductivity",
+                format!("{} W/m/K", number(self.conductivity.si())),
+            ),
+            (
+                "specific_heat",
+                format!("{} J/kg/K", number(self.specific_heat.si())),
+            ),
         ])
         .collect()
     }
@@ -173,5 +196,9 @@ impl Material {
 fn number(value: f64) -> String {
     let text = format!("{value:.9}");
     let text = text.trim_end_matches('0').trim_end_matches('.');
-    if text == "-0" { "0".to_owned() } else { text.to_owned() }
+    if text == "-0" {
+        "0".to_owned()
+    } else {
+        text.to_owned()
+    }
 }

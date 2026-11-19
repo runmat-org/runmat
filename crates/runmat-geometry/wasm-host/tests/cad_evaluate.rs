@@ -166,8 +166,14 @@ fn a_keep_out_envelope_lists_what_intrudes_except_its_owner() {
     assert_eq!(out["ok"], true, "{out}");
     let overlaps = out["data"]["overlaps"].as_array().unwrap();
     assert_eq!(overlaps.len(), 1, "{out}");
-    let pair = [overlaps[0]["a"].as_str().unwrap(), overlaps[0]["b"].as_str().unwrap()];
-    assert!(pair.contains(&"b") && pair.contains(&"envelope.zone"), "{out}");
+    let pair = [
+        overlaps[0]["a"].as_str().unwrap(),
+        overlaps[0]["b"].as_str().unwrap(),
+    ];
+    assert!(
+        pair.contains(&"b") && pair.contains(&"envelope.zone"),
+        "{out}"
+    );
     // b's 100 x 5 x 10 mm inside the zone.
     assert!(
         (overlaps[0]["volume"].as_f64().unwrap() - 5e-6).abs() < 1e-8,

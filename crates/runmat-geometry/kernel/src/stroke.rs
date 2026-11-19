@@ -174,7 +174,11 @@ fn line_circle(a: P, b: P, c: P, r: f64, eps: f64) -> Vec<P> {
         return Vec::new();
     }
     let w = (r * r - h * h).max(0.0).sqrt();
-    let along = if w <= eps { vec![s] } else { vec![s - w, s + w] };
+    let along = if w <= eps {
+        vec![s]
+    } else {
+        vec![s - w, s + w]
+    };
     along
         .into_iter()
         .filter(|t| (-eps..=l + eps).contains(t))
@@ -228,7 +232,12 @@ pub fn stroke_outline(
         });
     }
     let bbox = |c: &Curve| match *c {
-        Curve::Line { a, b } => [a[0].min(b[0]), a[1].min(b[1]), a[0].max(b[0]), a[1].max(b[1])],
+        Curve::Line { a, b } => [
+            a[0].min(b[0]),
+            a[1].min(b[1]),
+            a[0].max(b[0]),
+            a[1].max(b[1]),
+        ],
         Curve::Circle { c } => [c[0] - r, c[1] - r, c[0] + r, c[1] + r],
     };
     let boxes: Vec<[f64; 4]> = curves.iter().map(bbox).collect();
@@ -379,7 +388,10 @@ pub fn stroke_outline(
                 if let Piece::Circle { c } = chain[0] {
                     return Some(vec![ProfileSegment {
                         curve: curve.clone(),
-                        kind: SegmentKind::Circle { center: c, radius: r },
+                        kind: SegmentKind::Circle {
+                            center: c,
+                            radius: r,
+                        },
                         start: [c[0] + r, c[1]],
                         end: [c[0] + r, c[1]],
                     }]);
@@ -432,7 +444,10 @@ fn merge(chain: Vec<Piece>, r: f64, eps: f64, curve: &SketchEntityId) -> Vec<Pro
         let c = *c;
         return vec![ProfileSegment {
             curve: curve.clone(),
-            kind: SegmentKind::Circle { center: c, radius: r },
+            kind: SegmentKind::Circle {
+                center: c,
+                radius: r,
+            },
             start: [c[0] + r, c[1]],
             end: [c[0] + r, c[1]],
         }];

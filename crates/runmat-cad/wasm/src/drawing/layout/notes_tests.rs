@@ -20,12 +20,8 @@ fn compile(name: &str, drawing: &str) -> Value {
         (path.clone(), drawing.to_owned()),
     ]
     .into();
-    let out: Value = serde_json::from_str(&crate::drawing::compile_json(
-        &path,
-        drawing,
-        &files,
-    ))
-    .unwrap();
+    let out: Value =
+        serde_json::from_str(&crate::drawing::compile_json(&path, drawing, &files)).unwrap();
     let errors: Vec<&Value> = out["diagnostics"]
         .as_array()
         .into_iter()
@@ -54,10 +50,14 @@ fn union(boxes: impl IntoIterator<Item = BoxR>) -> Option<BoxR> {
 
 /// The title block's box: everything drawn for `title`.
 fn title_box(p: &[Prim]) -> BoxR {
-    union(p.iter().filter(|q| q.id == "title").filter_map(|q| match &q.shape {
-        Shape::Rect { x, y, w, h } => Some(BoxR::new(*x, *y, x + w, y + h)),
-        _ => text_box(q),
-    }))
+    union(
+        p.iter()
+            .filter(|q| q.id == "title")
+            .filter_map(|q| match &q.shape {
+                Shape::Rect { x, y, w, h } => Some(BoxR::new(*x, *y, x + w, y + h)),
+                _ => text_box(q),
+            }),
+    )
     .expect("a title block")
 }
 
@@ -80,7 +80,11 @@ fn an_agent_s_long_notes_wrap_and_keep_clear_of_the_title_block_the_border_and_e
         assert!(lines.len() > 1, "{n} wraps onto more lines: {lines:?}");
         // Every word is drawn, in order.
         let drawn: Vec<String> = lines.iter().flat_map(|l| words(&l.0)).collect();
-        assert_eq!(drawn, words(&notes::sheet_case(texts[n].as_str().unwrap())), "{n}");
+        assert_eq!(
+            drawn,
+            words(&notes::sheet_case(texts[n].as_str().unwrap())),
+            "{n}"
+        );
         // Lines start at one x and step down by the standard's pitch (ISO: 1.7 x 3.5 mm).
         for w in lines.windows(2) {
             assert!((w[0].1 - w[1].1).abs() < 1e-9, "{n}: {w:?}");
@@ -88,7 +92,10 @@ fn an_agent_s_long_notes_wrap_and_keep_clear_of_the_title_block_the_border_and_e
         }
         let b = union(lines.iter().map(|l| l.3)).unwrap();
         assert!(b.inside(&frame), "{n} {b:?} runs past the border {frame:?}");
-        assert!(!b.hits(&title), "{n} {b:?} overprints the title block {title:?}");
+        assert!(
+            !b.hits(&title),
+            "{n} {b:?} overprints the title block {title:?}"
+        );
         boxes.push((n.to_owned(), b));
     }
     for (i, (a, ba)) in boxes.iter().enumerate() {
@@ -99,7 +106,10 @@ fn an_agent_s_long_notes_wrap_and_keep_clear_of_the_title_block_the_border_and_e
     // No note text sits on any other text on the sheet.
     for (n, b) in &boxes {
         let id = format!("annotation:{n}");
-        for q in p.iter().filter(|q| q.id != id && matches!(q.shape, Shape::Text { .. })) {
+        for q in p
+            .iter()
+            .filter(|q| q.id != id && matches!(q.shape, Shape::Text { .. }))
+        {
             let Some(qb) = text_box(q) else { continue };
             assert!(!b.hits(&qb), "{n} {b:?} overprints {} {:?}", q.id, q.shape);
         }
@@ -115,7 +125,12 @@ fn an_agent_s_long_notes_wrap_and_keep_clear_of_the_title_block_the_border_and_e
     assert!(!moved.is_empty(), "{:#}", layout["findings"]);
     for f in &moved {
         let m = f["message"].as_str().unwrap();
-        assert!(m.contains("has no room there") && m.contains("`at`") && m.contains("table notes = notes("), "{m}");
+        assert!(
+            m.contains("has no room there")
+                && m.contains("`at`")
+                && m.contains("table notes = notes("),
+            "{m}"
+        );
     }
 }
 
@@ -123,12 +138,18 @@ fn an_agent_s_long_notes_wrap_and_keep_clear_of_the_title_block_the_border_and_e
 fn the_general_notes_list_numbers_each_note_with_a_hanging_indent_above_the_title_block() {
     let out = compile("l_bracket_notes", LISTED);
     let layout = sheet(&out, "1");
-    assert_eq!(layout["findings"], serde_json::json!([]), "{:#}", layout["findings"]);
+    assert_eq!(
+        layout["findings"],
+        serde_json::json!([]),
+        "{:#}",
+        layout["findings"]
+    );
     let p = prims(&layout);
     let lines = lines_of(&p, "table:notes");
     assert_eq!(lines[0].0, "NOTES:");
     let x0 = lines[0].1;
-    let numbers: Vec<&(String, f64, f64, BoxR)> = lines.iter().filter(|l| l.1 == x0).skip(1).collect();
+    let numbers: Vec<&(String, f64, f64, BoxR)> =
+        lines.iter().filter(|l| l.1 == x0).skip(1).collect();
     assert_eq!(
         numbers.iter().map(|l| l.0.as_str()).collect::<Vec<_>>(),
         ["1.", "2.", "3."]
@@ -149,7 +170,10 @@ fn the_general_notes_list_numbers_each_note_with_a_hanging_indent_above_the_titl
     let joined = drawn.join(" ");
     assert!(joined.contains("LEG THICKNESS: 3 mm EACH."), "{drawn:?}");
     assert!(joined.contains("MATERIAL: ALUMINUM 6061."), "{drawn:?}");
-    for row in out["projection"]["data"]["notes"]["notes"].as_array().unwrap() {
+    for row in out["projection"]["data"]["notes"]["notes"]
+        .as_array()
+        .unwrap()
+    {
         for w in words(&notes::sheet_case(row.as_str().unwrap())) {
             assert!(drawn.contains(&w), "{w} isn't drawn");
         }
@@ -157,11 +181,20 @@ fn the_general_notes_list_numbers_each_note_with_a_hanging_indent_above_the_titl
     // As wide as the title block, sitting on it, clear of it.
     let title = title_box(&p);
     let b = union(lines.iter().map(|l| l.3)).unwrap();
-    assert!(b.x1 - b.x0 <= runmat_cad::drawing::title_layout::BLOCK_WIDTH + 1e-6, "{b:?}");
-    assert!(b.y0 - title.y1 >= 2.0 && b.y0 - title.y1 < 15.0, "{b:?} above {title:?}");
+    assert!(
+        b.x1 - b.x0 <= runmat_cad::drawing::title_layout::BLOCK_WIDTH + 1e-6,
+        "{b:?}"
+    );
+    assert!(
+        b.y0 - title.y1 >= 2.0 && b.y0 - title.y1 < 15.0,
+        "{b:?} above {title:?}"
+    );
     assert!(!b.hits(&title));
     // No ruled grid: the list is text only.
-    assert!(p.iter().filter(|q| q.id == "table:notes").all(|q| matches!(q.shape, Shape::Text { .. })));
+    assert!(p
+        .iter()
+        .filter(|q| q.id == "table:notes")
+        .all(|q| matches!(q.shape, Shape::Text { .. })));
 }
 
 /// Sheet notes are set in capitals (ASME Y14.2, ISO 3098), fields included; a unit symbol
@@ -170,10 +203,19 @@ fn the_general_notes_list_numbers_each_note_with_a_hanging_indent_above_the_titl
 fn note_text_is_set_in_capitals_and_units_after_a_number_keep_their_case() {
     let case = notes::sheet_case;
     assert_eq!(case("Material: Aluminum 6061."), "MATERIAL: ALUMINUM 6061.");
-    assert_eq!(case("break edges 0.2 mm, mass 25kg; Ra 0.8 µm"), "BREAK EDGES 0.2 mm, MASS 25kg; RA 0.8 µm");
-    assert_eq!(case("6X ⌀5.5 THRU\nM5 clearance"), "6X ⌀5.5 THRU\nM5 CLEARANCE");
+    assert_eq!(
+        case("break edges 0.2 mm, mass 25kg; Ra 0.8 µm"),
+        "BREAK EDGES 0.2 mm, MASS 25kg; RA 0.8 µm"
+    );
+    assert_eq!(
+        case("6X ⌀5.5 THRU\nM5 clearance"),
+        "6X ⌀5.5 THRU\nM5 CLEARANCE"
+    );
     assert_eq!(case("0.5 MM CHAMFER"), "0.5 MM CHAMFER");
-    assert_eq!(case("position: ⌀0.2 mm to datums"), "POSITION: ⌀0.2 mm TO DATUMS");
+    assert_eq!(
+        case("position: ⌀0.2 mm to datums"),
+        "POSITION: ⌀0.2 mm TO DATUMS"
+    );
     // A word after a number that isn't a unit is capitalized.
     assert_eq!(case("4 places"), "4 PLACES");
 }
@@ -184,15 +226,29 @@ fn a_note_wraps_to_its_width_and_breaks_where_the_text_says() {
         let d = format!("runmat 0.7\nstd 1\n\ndrawing ring {{\n    format a3 = {{ size = {{ size = iso, name = A3 }}, title_block = [] }}\n    sheet \"1\" = {{ format = a3, scale = [1, 2], projection = third_angle }}\n    view top = standard(orientation = top, sheet = \"1\", model = {{ part = ring }}, at = [200, 150], display = visible_lines)\n    annotation n = note({args}, view = top)\n}}\n");
         lines_of(&prims(&sheet(&compile_ring(&d), "1")), "annotation:n")
     };
-    let long = "DEBURR ALL HOLES BOTH SIDES AND BREAK EVERY SHARP EDGE 0.2 TO 0.5 MM BEFORE ANODIZING";
+    let long =
+        "DEBURR ALL HOLES BOTH SIDES AND BREAK EVERY SHARP EDGE 0.2 TO 0.5 MM BEFORE ANODIZING";
     let lines = drawing(&format!("text = \"{long}\", width = 60 mm, at = [30, 270]"));
     assert!(lines.len() >= 3, "{lines:?}");
-    assert!(lines.iter().all(|l| Std::text_width(&l.0, 3.5) <= 60.0 + 1e-9), "{lines:?}");
-    assert_eq!(lines.iter().flat_map(|l| words(&l.0)).collect::<Vec<_>>(), words(long));
+    assert!(
+        lines
+            .iter()
+            .all(|l| Std::text_width(&l.0, 3.5) <= 60.0 + 1e-9),
+        "{lines:?}"
+    );
+    assert_eq!(
+        lines.iter().flat_map(|l| words(&l.0)).collect::<Vec<_>>(),
+        words(long)
+    );
     assert_eq!(lines[0].1, 30.0, "a note with room stays where it was put");
     // A width in inches.
     let inches = drawing(&format!("text = \"{long}\", width = 2 in, at = [30, 270]"));
-    assert!(inches.iter().all(|l| Std::text_width(&l.0, 3.5) <= 50.8 + 1e-9), "{inches:?}");
+    assert!(
+        inches
+            .iter()
+            .all(|l| Std::text_width(&l.0, 3.5) <= 50.8 + 1e-9),
+        "{inches:?}"
+    );
     // `\n` breaks a line; every line is the standard's height.
     let broken = drawing("text = \"6X ⌀5.5 THRU\\nM5 CLEARANCE\", at = [30, 270]");
     assert_eq!(
@@ -200,7 +256,9 @@ fn a_note_wraps_to_its_width_and_breaks_where_the_text_says() {
         ["6X ⌀5.5 THRU", "M5 CLEARANCE"]
     );
     // A leadered note wraps under its shoulder.
-    let leadered = drawing(&format!("text = \"{long}\", width = 50 mm, leader = feature.body.face.end"));
+    let leadered = drawing(&format!(
+        "text = \"{long}\", width = 50 mm, leader = feature.body.face.end"
+    ));
     assert!(leadered.len() >= 3, "{leadered:?}");
 }
 
@@ -214,8 +272,16 @@ fn a_note_put_past_the_sheet_edge_moves_onto_the_sheet_and_says_so() {
             .iter()
             .filter(|f| f["code"] == "note_moved")
             .count();
-        let b = union(lines_of(&prims(&layout), "annotation:notes").iter().map(|l| l.3)).unwrap();
-        (found, b.inside(&super::border::frame_box([420.0, 297.0], true)))
+        let b = union(
+            lines_of(&prims(&layout), "annotation:notes")
+                .iter()
+                .map(|l| l.3),
+        )
+        .unwrap();
+        (
+            found,
+            b.inside(&super::border::frame_box([420.0, 297.0], true)),
+        )
     };
     assert_eq!(moved("[320, 120]"), (0, true), "a note on free sheet");
     assert_eq!(moved("[-60, 40]"), (1, true), "a note at a negative x");
@@ -235,6 +301,9 @@ fn a_note_with_no_room_on_the_sheet_is_reported_with_what_to_change() {
         .collect();
     assert_eq!(f.len(), 1, "{:#}", layout["findings"]);
     let m = f[0]["message"].as_str().unwrap();
-    assert!(m.starts_with("Note big doesn't fit on the sheet: it needs"), "{m}");
+    assert!(
+        m.starts_with("Note big doesn't fit on the sheet: it needs"),
+        "{m}"
+    );
     assert!(m.contains("`width`") && m.contains("larger sheet"), "{m}");
 }

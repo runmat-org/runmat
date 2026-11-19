@@ -170,9 +170,10 @@ impl<'a> Publisher<'a> {
                 };
                 self.publish(file, target, feature, true)?
             }
-            Anchor::Origin | Anchor::Frozen { .. } | Anchor::Connector(_) | Anchor::Sketch { .. } => {
-                return Ok(None)
-            }
+            Anchor::Origin
+            | Anchor::Frozen { .. }
+            | Anchor::Connector(_)
+            | Anchor::Sketch { .. } => return Ok(None),
         }))
     }
 

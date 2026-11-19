@@ -748,7 +748,9 @@ mod tests {
 
     #[test]
     fn names_sort_in_natural_order() {
-        let mut names = vec!["c10", "c2", "c1", "c01", "b", "c", "adc[10]", "adc[3]", "c2a"];
+        let mut names = vec![
+            "c10", "c2", "c1", "c01", "b", "c", "adc[10]", "adc[3]", "c2a",
+        ];
         names.sort_by(|a, b| natural_cmp(a, b));
         assert_eq!(
             names,

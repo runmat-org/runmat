@@ -13,8 +13,7 @@ use runmat_types::physical::{
 use super::design::{design_dialect, DesignDocumentAnalysis, DesignFiles, DesignValues};
 use super::position::position_to_offset;
 
-const LAYOUT: &str =
-    include_str!("../../../runmat-circuit/tests/projects/io/io.circuit.layout");
+const LAYOUT: &str = include_str!("../../../runmat-circuit/tests/projects/io/io.circuit.layout");
 const CIRCUIT: &str = include_str!("../../../runmat-circuit/tests/projects/io/io.circuit");
 const LOCK: &str = include_str!("../../../runmat-circuit/tests/projects/io/io.circuit.lock");
 
@@ -105,7 +104,14 @@ fn check_part(case: &Case) {
     assert_eq!(code, "cad.value.unit");
     assert_eq!(fixes, unit_fixes(case.value, case.expected), ".part fixes");
     let titles: Vec<String> = analysis
-        .code_actions(analysis.diagnostics().iter().find(|d| d.message == message).unwrap().range)
+        .code_actions(
+            analysis
+                .diagnostics()
+                .iter()
+                .find(|d| d.message == message)
+                .unwrap()
+                .range,
+        )
         .into_iter()
         .filter_map(|a| match a {
             CodeActionOrCommand::CodeAction(a) => Some(a.title),
@@ -118,7 +124,11 @@ fn check_part(case: &Case) {
 
 fn check_layout(case: &Case) {
     let path = "/p/io.circuit.layout";
-    let text = LAYOUT.replacen("clearance = 0.15", &format!("clearance = {}", case.value), 1);
+    let text = LAYOUT.replacen(
+        "clearance = 0.15",
+        &format!("clearance = {}", case.value),
+        1,
+    );
     assert_ne!(text, LAYOUT);
     let files = DesignFiles::from([
         ("/p/io.circuit".to_string(), CIRCUIT.to_string()),
@@ -137,14 +147,26 @@ fn check_layout(case: &Case) {
     );
     assert_eq!(underlined, case.value, ".circuit.layout span");
     assert_eq!(code, "circuit.value.unit");
-    assert_eq!(fixes, unit_fixes(case.value, case.expected), ".circuit.layout fixes");
+    assert_eq!(
+        fixes,
+        unit_fixes(case.value, case.expected),
+        ".circuit.layout fixes"
+    );
 }
 
 fn check_fea(field: &str, subject: &str, case: &Case, code_prefix: &str) {
     let temporary = tempfile::tempdir().unwrap();
     let main_path = temporary.path().join("main.fea");
-    let size = if field == "target_size" { case.value } else { "0.1 m" };
-    let modulus = if field == "youngs_modulus" { case.value } else { "200 GPa" };
+    let size = if field == "target_size" {
+        case.value
+    } else {
+        "0.1 m"
+    };
+    let modulus = if field == "youngs_modulus" {
+        case.value
+    } else {
+        "200 GPa"
+    };
     let source = format!(
         r#"material steel {{
     elastic {{

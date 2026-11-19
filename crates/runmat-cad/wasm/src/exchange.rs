@@ -267,7 +267,11 @@ pub fn part_study_step_in(
 /// The 1-based line of byte `offset` in `text`.
 fn line_of(text: &str, offset: u32) -> usize {
     let end = (offset as usize).min(text.len());
-    text.as_bytes()[..end].iter().filter(|b| **b == b'\n').count() + 1
+    text.as_bytes()[..end]
+        .iter()
+        .filter(|b| **b == b'\n')
+        .count()
+        + 1
 }
 
 fn part_step_of(

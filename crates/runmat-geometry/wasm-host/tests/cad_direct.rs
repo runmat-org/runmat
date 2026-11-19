@@ -134,11 +134,18 @@ fn delete_face_that_nothing_can_close_over_is_a_named_failure() {
         .collect();
     assert_eq!(errors.len(), 1, "{errors:?}");
     let message = errors[0]["message"].as_str().unwrap();
-    assert!(message.contains("pick every face of the hole, boss or pocket"), "{message}");
+    assert!(
+        message.contains("pick every face of the hole, boss or pocket"),
+        "{message}"
+    );
     // The diagnostic points at the delete feature's line.
     let start = errors[0]["start"].as_u64().unwrap() as usize;
     let end = errors[0]["end"].as_u64().unwrap() as usize;
-    assert!(text[start..end].contains("direct.delete_faces("), "{}", &text[start..end]);
+    assert!(
+        text[start..end].contains("direct.delete_faces("),
+        "{}",
+        &text[start..end]
+    );
 }
 
 /// A heatsink's 38 x 38 x 6 mm pedestal on a 56 x 56 x 2 mm plate, with four 6.8 mm standoffs

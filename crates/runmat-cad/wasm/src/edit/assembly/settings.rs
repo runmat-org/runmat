@@ -23,7 +23,10 @@ pub(super) fn apply(
         }
     };
     if document.settings.as_ref().map(|s| s.units) == Some(units) {
-        return Err(model(format!("the assembly already reads in {}", label(units))));
+        return Err(model(format!(
+            "the assembly already reads in {}",
+            label(units)
+        )));
     }
     document
         .settings

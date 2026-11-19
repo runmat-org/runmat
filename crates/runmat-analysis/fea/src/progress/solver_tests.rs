@@ -29,8 +29,10 @@ fn krylov_iterations_and_factorization_reach_the_installed_handler() {
 
     let events = events.lock().unwrap();
     assert_eq!(events.len(), 3, "{events:?}");
-    assert!(events.iter().all(|event| event.phase == FeaProgressPhase::Solve
-        && event.status == FeaProgressStatus::Advanced));
+    assert!(events
+        .iter()
+        .all(|event| event.phase == FeaProgressPhase::Solve
+            && event.status == FeaProgressStatus::Advanced));
     assert_eq!(events[0].metadata[UNIT_METADATA], "factorization");
     assert_eq!((events[0].current, events[0].total), (Some(0), Some(1)));
     assert_eq!((events[1].current, events[1].total), (Some(1), Some(1)));

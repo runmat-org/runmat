@@ -105,11 +105,7 @@ fn folder(path: &str) -> &str {
 fn relative_to(base: &str, file: &str) -> String {
     let base: Vec<&str> = base.split('/').filter(|s| !s.is_empty()).collect();
     let target: Vec<&str> = file.split('/').filter(|s| !s.is_empty()).collect();
-    let common = base
-        .iter()
-        .zip(&target)
-        .take_while(|(a, b)| a == b)
-        .count();
+    let common = base.iter().zip(&target).take_while(|(a, b)| a == b).count();
     let mut out: Vec<&str> = vec![".."; base.len() - common];
     out.extend(&target[common..]);
     out.join("/")
@@ -196,7 +192,9 @@ mod tests {
     #[test]
     fn header_timestamp_is_fixed_and_names_the_source_closure() {
         let out = deterministic_header(HEADER, "abc");
-        assert!(out.contains("FILE_DESCRIPTION(('RunMat study geometry','sources sha256:abc'),'2;1');"));
+        assert!(
+            out.contains("FILE_DESCRIPTION(('RunMat study geometry','sources sha256:abc'),'2;1');")
+        );
         assert!(out.contains("FILE_NAME('Open CASCADE Shape Model','1970-01-01T00:00:00',"));
         // The data section is untouched, timestamp-like strings included.
         assert!(out.contains("#1 = PRODUCT('a;b','2026-11-07T09:25:36','',(#2));"));
@@ -221,15 +219,30 @@ mod tests {
         files.insert("/p/mech/other/other.part".into(), "runmat 0.7\n".into());
         let closure = source_closure("/p/sim/study.assembly", &files);
         assert_eq!(closure[0], "/p/sim/study.assembly");
-        assert!(closure.contains(&"/p/mech/arm/arm.part".to_owned()), "{closure:?}");
-        assert!(closure.contains(&"/p/mech/arm/arm.step".to_owned()), "{closure:?}");
+        assert!(
+            closure.contains(&"/p/mech/arm/arm.part".to_owned()),
+            "{closure:?}"
+        );
+        assert!(
+            closure.contains(&"/p/mech/arm/arm.step".to_owned()),
+            "{closure:?}"
+        );
         assert!(!closure.contains(&"/p/mech/other/other.part".to_owned()));
         let before = source_closure_digest("/p/sim/study.assembly", &files);
         // Unrelated files leave the identity alone; a dependency's edit changes it.
-        files.insert("/p/mech/other/other.part".into(), "runmat 0.7\n// edited\n".into());
-        assert_eq!(before, source_closure_digest("/p/sim/study.assembly", &files));
+        files.insert(
+            "/p/mech/other/other.part".into(),
+            "runmat 0.7\n// edited\n".into(),
+        );
+        assert_eq!(
+            before,
+            source_closure_digest("/p/sim/study.assembly", &files)
+        );
         files.insert("/p/mech/arm/arm.step".into(), "ISO-10303-21; edited".into());
-        assert_ne!(before, source_closure_digest("/p/sim/study.assembly", &files));
+        assert_ne!(
+            before,
+            source_closure_digest("/p/sim/study.assembly", &files)
+        );
         // Moving the project keeps the identity.
         let moved: Files = files
             .iter()
@@ -248,13 +261,19 @@ mod tests {
         files.insert("/p/mech/skid.part".into(), part.into());
         let error = study_geometry("/p/mech/skid.part", &files, None)
             .expect_err("a failed feature refuses the study geometry");
-        assert!(error.starts_with("`skid.part` doesn't regenerate (line 5): "), "{error}");
+        assert!(
+            error.starts_with("`skid.part` doesn't regenerate (line 5): "),
+            "{error}"
+        );
         assert!(error.contains("missing"), "{error}");
     }
 
     #[test]
     fn relative_paths_climb_out_of_the_study_folder() {
-        assert_eq!(relative_to("/p/sim", "/p/mech/arm.part"), "../mech/arm.part");
+        assert_eq!(
+            relative_to("/p/sim", "/p/mech/arm.part"),
+            "../mech/arm.part"
+        );
         assert_eq!(relative_to("/p/sim", "/p/sim/a.part"), "a.part");
     }
 }

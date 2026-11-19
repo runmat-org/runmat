@@ -30,8 +30,14 @@ fn known_surface_partitions_sum_to_a_model_wide_count() {
     assert_eq!(started.metadata[UNIT_METADATA], "stages");
     assert_eq!(started.metadata[STAGE_METADATA], "surface_mesh");
     map.stage_started(stage, second);
-    assert_eq!(counts(map.work_count(Some(stage), Some(0), &faces(1, 6))), (1, 10));
-    assert_eq!(counts(map.work_count(Some(stage), Some(0), &faces(6, 6))), (6, 10));
+    assert_eq!(
+        counts(map.work_count(Some(stage), Some(0), &faces(1, 6))),
+        (1, 10)
+    );
+    assert_eq!(
+        counts(map.work_count(Some(stage), Some(0), &faces(6, 6))),
+        (6, 10)
+    );
     // A partition restored from cache reports nothing until it finishes.
     let finished = map.stage_completed(stage, second);
     assert_eq!(counts(finished.clone()), (10, 10));

@@ -67,7 +67,11 @@ impl Hole {
 
 fn v3(v: &Value) -> Option<V3> {
     let a = v.as_array()?;
-    Some([a.first()?.as_f64()?, a.get(1)?.as_f64()?, a.get(2)?.as_f64()?])
+    Some([
+        a.first()?.as_f64()?,
+        a.get(1)?.as_f64()?,
+        a.get(2)?.as_f64()?,
+    ])
 }
 
 /// A display face's cylinder in part coordinates, when it is a concave one (a hole): a point on
@@ -117,7 +121,11 @@ fn bore(face: &Value) -> Option<(V3, V3, f64)> {
     } else {
         let tris = indices(&face["triangles"]);
         for t in tris.chunks_exact(3) {
-            let (a, b, c) = (*positions.get(t[0])?, *positions.get(t[1])?, *positions.get(t[2])?);
+            let (a, b, c) = (
+                *positions.get(t[0])?,
+                *positions.get(t[1])?,
+                *positions.get(t[2])?,
+            );
             let n = cross(sub(b, a), sub(c, a));
             let mid = scale(frames::add(frames::add(a, b), c), 1.0 / 3.0);
             facing += dot(n, unit(radial(mid)));
@@ -200,11 +208,7 @@ fn holes(index: &Value, display: &Value) -> Vec<Hole> {
                     .collect();
                 let from = along.iter().cloned().fold(f64::INFINITY, f64::min);
                 let to = along.iter().cloned().fold(f64::NEG_INFINITY, f64::max);
-                let pick = format!(
-                    "occurrence:{uuid}/face:{}:{}",
-                    body["index"],
-                    face["index"]
-                );
+                let pick = format!("occurrence:{uuid}/face:{}:{}", body["index"], face["index"]);
                 let hole = Hole {
                     path: path.clone(),
                     item: format!("occurrence:{uuid}"),
@@ -416,16 +420,19 @@ pub fn hole_check(
                     ));
                     severity = Some("error");
                 }
-                let worst = on
-                    .iter()
-                    .map(|h| (h.off_axis(p), h))
-                    .fold((0.0, None), |(m, w), (o, h)| {
-                        if o > m {
-                            (o, Some(h))
-                        } else {
-                            (m, w)
-                        }
-                    });
+                let worst =
+                    on.iter()
+                        .map(|h| (h.off_axis(p), h))
+                        .fold(
+                            (0.0, None),
+                            |(m, w), (o, h)| {
+                                if o > m {
+                                    (o, Some(h))
+                                } else {
+                                    (m, w)
+                                }
+                            },
+                        );
                 if let (o, Some(h)) = worst {
                     if o > (h.radius * 2.0 - d).max(0.0) / 2.0 + tolerance {
                         findings.push(format!("{} off {}'s hole axis", mm(o), h.path));
@@ -459,11 +466,7 @@ pub fn hole_check(
                     stack += cy - cx;
                 }
                 if grip > 0.0 && (stack - grip).abs() > tolerance.max(0.0005) {
-                    findings.push(format!(
-                        "Grip {} for a {} stack",
-                        mm(grip),
-                        mm(stack)
-                    ));
+                    findings.push(format!("Grip {} for a {} stack", mm(grip), mm(stack)));
                     severity = severity.or(Some("warning"));
                 }
                 if severity.is_some() {

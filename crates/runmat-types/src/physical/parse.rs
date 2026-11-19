@@ -351,7 +351,10 @@ mod tests {
         assert_eq!(parse_unit_expression("Gohm").unwrap().scale(), 1e9);
         assert_eq!(parse_unit_expression("kJ").unwrap().scale(), 1e3);
         // Named units win over a prefix reading: `ms` is a millisecond, `mm` a millimetre.
-        assert_eq!(parse_unit_expression("ms").unwrap().dimension, PhysicalDimension::TIME);
+        assert_eq!(
+            parse_unit_expression("ms").unwrap().dimension,
+            PhysicalDimension::TIME
+        );
         assert_eq!(parse_unit_expression("mm").unwrap().scale(), 1e-3);
         // Units that take no prefix.
         assert!(parse_unit_expression("mg").is_err());
@@ -381,10 +384,16 @@ mod tests {
         assert!((density.scale() - 1e3).abs() < 1e-9);
         // Elsewhere `g` stays standard gravity, and `mg` stays unknown.
         let acceleration = PhysicalDimension::ACCELERATION;
-        assert_eq!(parse_unit_expecting("g", acceleration).unwrap().dimension, acceleration);
+        assert_eq!(
+            parse_unit_expecting("g", acceleration).unwrap().dimension,
+            acceleration
+        );
         assert!(parse_unit_expecting("mg", PhysicalDimension::LENGTH).is_err());
         // A unit that fits neither reading is the ordinary one, for the mismatch message.
-        assert_eq!(parse_unit_expecting("mm", mass).unwrap().dimension, PhysicalDimension::LENGTH);
+        assert_eq!(
+            parse_unit_expecting("mm", mass).unwrap().dimension,
+            PhysicalDimension::LENGTH
+        );
     }
 
     #[test]

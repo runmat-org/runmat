@@ -16,11 +16,9 @@ use crate::assembly::resolve::Resolver;
 use crate::diagnostics::{DiagCode, Severity, Site};
 use crate::ids::{FeatureId, SketchEntityId};
 use crate::model::datum::{DatumRef, Frame, PlaneRef};
-use crate::model::sketch::{
-    PointRole, Sketch, SketchGeometry, SketchSolveStatus, SolvedSketch,
-};
-use crate::regen::kernel::Transform;
+use crate::model::sketch::{PointRole, Sketch, SketchGeometry, SketchSolveStatus, SolvedSketch};
 use crate::model::{Feature, FeatureKind};
+use crate::regen::kernel::Transform;
 use crate::sketch_solver::{last_solved, ConstraintSketchSolver, SketchSolver};
 use crate::value::ValueEnv;
 
@@ -37,9 +35,7 @@ impl ResolvedSketch {
     /// The sketch's closed profile loops, the largest first, in its plane's coordinates (place
     /// them with [`ResolvedSketch::frame`], which is in assembly coordinates). This is what an
     /// assembly feature's `profile = sketch.<name>` cuts, holes or extrudes through the parts.
-    pub fn profile(
-        &self,
-    ) -> Result<Vec<Vec<runmat_geometry_kernel::op::ProfileSegment>>, String> {
+    pub fn profile(&self) -> Result<Vec<Vec<runmat_geometry_kernel::op::ProfileSegment>>, String> {
         crate::regen::engine::profile_loops(&self.sketch, &self.solved)
     }
 }
@@ -82,7 +78,9 @@ pub fn sketch_point_frame(
         (None, SketchGeometry::Point { .. }) => Ok(at(point(PointRole::At)?)),
         (
             None,
-            SketchGeometry::Circle { .. } | SketchGeometry::Arc { .. } | SketchGeometry::Ellipse { .. },
+            SketchGeometry::Circle { .. }
+            | SketchGeometry::Arc { .. }
+            | SketchGeometry::Ellipse { .. },
         ) => Ok(at(point(PointRole::Center)?)),
         (None, SketchGeometry::Line { .. }) => {
             let (a, b) = (

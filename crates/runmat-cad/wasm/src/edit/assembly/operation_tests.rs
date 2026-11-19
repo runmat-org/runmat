@@ -20,7 +20,10 @@ fn rig_with_sketch() -> String {
 }
 
 fn feature(text: &str, values: Value) -> String {
-    run(text, json!({ "command": "assembly.feature", "values": values }))
+    run(
+        text,
+        json!({ "command": "assembly.feature", "values": values }),
+    )
 }
 
 /// The face count of component `name`'s first body, as the display draws it.
@@ -33,7 +36,9 @@ fn faces(c: &super::tests::Compiled, name: &str) -> usize {
         .find(|o| o["uuid"] == uuid.as_str())
         .unwrap();
     let p = occurrence["prototype"].as_u64().unwrap() as usize;
-    let bodies = c.display["prototypes"][p]["part"]["bodies"].as_array().unwrap();
+    let bodies = c.display["prototypes"][p]["part"]["bodies"]
+        .as_array()
+        .unwrap();
     bodies
         .iter()
         .map(|b| b["faces"].as_array().map_or(0, Vec::len))
@@ -49,7 +54,10 @@ fn bodies(c: &super::tests::Compiled, name: &str) -> usize {
         .find(|o| o["uuid"] == uuid.as_str())
         .unwrap();
     let p = occurrence["prototype"].as_u64().unwrap() as usize;
-    c.display["prototypes"][p]["part"]["bodies"].as_array().unwrap().len()
+    c.display["prototypes"][p]["part"]["bodies"]
+        .as_array()
+        .unwrap()
+        .len()
 }
 
 #[test]
@@ -67,7 +75,11 @@ fn a_cut_through_all_both_ways_cuts_the_components_it_names_only() {
         "{text}"
     );
     let after = compile(&text);
-    assert_eq!(faces(&after, "plate"), plate + 4, "the square pocket's four walls");
+    assert_eq!(
+        faces(&after, "plate"),
+        plate + 4,
+        "the square pocket's four walls"
+    );
     assert_eq!(faces(&after, "block"), block, "the block isn't named");
     let row = &after.index["operations"][0];
     assert_eq!(row["name"], "cut1");
@@ -80,14 +92,23 @@ fn a_cut_through_all_both_ways_cuts_the_components_it_names_only() {
         &text,
         json!({ "name": "cut1", "type": "cut", "profile": ["feature:sketch1"], "end": "through_all_both" }),
     );
-    assert!(text.contains("operation cut1 = cut(profile = sketch.sketch1, extent = through_all, both)"), "{text}");
+    assert!(
+        text.contains("operation cut1 = cut(profile = sketch.sketch1, extent = through_all, both)"),
+        "{text}"
+    );
     assert_eq!(faces(&compile(&text), "block"), block + 4);
 
     // Suppress, then delete, from the row.
-    let text = run(&text, json!({ "command": "assembly.suppress", "selection": ["operation:cut1"] }));
+    let text = run(
+        &text,
+        json!({ "command": "assembly.suppress", "selection": ["operation:cut1"] }),
+    );
     assert!(text.contains("both, suppressed)"), "{text}");
     assert_eq!(faces(&compile(&text), "plate"), plate);
-    let text = run(&text, json!({ "command": "assembly.delete", "selection": ["operation:cut1"] }));
+    let text = run(
+        &text,
+        json!({ "command": "assembly.delete", "selection": ["operation:cut1"] }),
+    );
     assert!(!text.contains("operation"), "{text}");
 }
 
@@ -120,7 +141,10 @@ fn a_hole_drills_at_each_point_with_its_fasteners_clearance_and_counterbore() {
         json!({ "type": "hole", "profile": ["feature:sketch1"], "end": "through_all", "size": "M6", "hole_type": "counterbore" }),
     );
     assert!(text.contains("operation hole1 = hole("), "{text}");
-    assert!(text.contains("diameter = 6.6 mm"), "M6 normal clearance: {text}");
+    assert!(
+        text.contains("diameter = 6.6 mm"),
+        "M6 normal clearance: {text}"
+    );
     assert!(text.contains("counterbore = {"), "{text}");
     let c = compile(&text);
     assert!(faces(&c, "plate") > plate, "the hole's walls");
@@ -146,7 +170,9 @@ fn a_weld_bead_follows_the_sketch_and_is_drawn_with_the_first_component() {
         json!({ "type": "weld", "profile": ["feature:sketch1"], "weld_size": 4, "components": [format!("occurrence:{}", c.uuid("plate"))] }),
     );
     assert!(
-        text.contains("operation weld1 = weld(path = sketch.sketch1, size = 4 mm, components = [plate])"),
+        text.contains(
+            "operation weld1 = weld(path = sketch.sketch1, size = 4 mm, components = [plate])"
+        ),
         "{text}"
     );
     assert_eq!(bodies(&compile(&text), "plate"), plate + 1);
@@ -162,12 +188,20 @@ fn a_feature_on_an_open_profile_says_so() {
         &text,
         json!({ "command": "sketch.line", "values": { "sketch": "sketch1", "start": { "x": 0, "y": 0 }, "end": { "x": 40, "y": 0 } } }),
     );
-    let text = feature(&text, json!({ "type": "cut", "profile": ["feature:sketch1"] }));
+    let text = feature(
+        &text,
+        json!({ "type": "cut", "profile": ["feature:sketch1"] }),
+    );
     let (index, _, problems) =
         crate::runtime::compile_assembly("/p/rig.assembly", &text, &super::tests::files()).unwrap();
-    assert!(index["operations"][0]["problem"].as_str().unwrap().contains("closed profile"));
+    assert!(index["operations"][0]["problem"]
+        .as_str()
+        .unwrap()
+        .contains("closed profile"));
     assert!(
-        problems.iter().any(|d| d.message.contains("assembly feature `cut1`")),
+        problems
+            .iter()
+            .any(|d| d.message.contains("assembly feature `cut1`")),
         "{problems:?}"
     );
 }

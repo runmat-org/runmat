@@ -169,11 +169,18 @@ fn a_component_whose_part_does_not_compile_says_so_on_the_assembly() {
         .as_array()
         .unwrap()
         .iter()
-        .filter(|o| o["definition"]["file"].as_str().is_some_and(|f| f.ends_with("arm.part")))
+        .filter(|o| {
+            o["definition"]["file"]
+                .as_str()
+                .is_some_and(|f| f.ends_with("arm.part"))
+        })
         .collect();
     assert!(!rows.is_empty(), "{}", index["occurrences"]);
     for row in rows {
         let problem = row["problem"].as_str().unwrap_or_default();
-        assert!(problem.contains("doesn't compile") && problem.contains("input.length"), "{row}");
+        assert!(
+            problem.contains("doesn't compile") && problem.contains("input.length"),
+            "{row}"
+        );
     }
 }

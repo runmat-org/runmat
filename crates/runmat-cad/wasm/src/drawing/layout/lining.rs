@@ -46,12 +46,16 @@ pub fn lining(
             out.extend(strokes(region.parallel(-45.0, spacing, 0.5)));
             out
         }
-        SectionSymbol::Wood => strokes(region.pieces().flat_map(|(lo, hi)| {
-            let mut runs = region.clip(&[lo, hi]);
-            runs.extend(region.clip(&[[lo[0], hi[1]], [hi[0], lo[1]]]));
-            runs
-        })
-        .collect()),
+        SectionSymbol::Wood => strokes(
+            region
+                .pieces()
+                .flat_map(|(lo, hi)| {
+                    let mut runs = region.clip(&[lo, hi]);
+                    runs.extend(region.clip(&[[lo[0], hi[1]], [hi[0], lo[1]]]));
+                    runs
+                })
+                .collect(),
+        ),
         SectionSymbol::Insulation => strokes(
             region
                 .pieces()
@@ -373,10 +377,8 @@ mod tests {
             for p in points(&prims) {
                 let tol = 1e-6;
                 let outside = p[0] < -tol || p[0] > 40.0 + tol || p[1] < -tol || p[1] > 10.0 + tol;
-                let in_hole = p[0] > 15.0 + tol
-                    && p[0] < 25.0 - tol
-                    && p[1] > 3.0 + tol
-                    && p[1] < 7.0 - tol;
+                let in_hole =
+                    p[0] > 15.0 + tol && p[0] < 25.0 - tol && p[1] > 3.0 + tol && p[1] < 7.0 - tol;
                 assert!(!outside && !in_hole, "{symbol:?} draws at {p:?}");
             }
         }

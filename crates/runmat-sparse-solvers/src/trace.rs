@@ -39,7 +39,12 @@ impl IterationBatches {
             self.close();
         }
         self.open = Some((
-            tracing::info_span!("solver.iterations", first = iteration, last = Empty, residual = Empty),
+            tracing::info_span!(
+                "solver.iterations",
+                first = iteration,
+                last = Empty,
+                residual = Empty
+            ),
             iteration,
         ));
         self.last = iteration;

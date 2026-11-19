@@ -9,9 +9,9 @@ use crate::simulation::{
     SimAnalysis, SimMeasure, SimModel, SimProbe, SimSource, SimTolerance, SimWave, SimulationDef,
     SourceKind,
 };
-use runmat_design_syntax::json::format_f64;
-use runmat_rules::{parse_quantity};
 use crate::units::RegistryUnits;
+use runmat_design_syntax::json::format_f64;
+use runmat_rules::parse_quantity;
 
 const PREFIXES: &[(&str, f64)] = &[
     ("T", 1e12),
@@ -430,8 +430,8 @@ pub fn print(sim: &SimulationDef) -> String {
 #[cfg(test)]
 mod tests {
     use super::{as_written, qty};
-    use runmat_rules::{parse_quantity};
-use crate::units::RegistryUnits;
+    use crate::units::RegistryUnits;
+    use runmat_rules::parse_quantity;
 
     #[test]
     fn quantities_print_with_a_prefix_and_read_back_exactly() {

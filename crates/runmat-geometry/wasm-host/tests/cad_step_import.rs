@@ -334,3 +334,138 @@ fn a_configured_part_with_an_angle_input_exports_and_imports_back() {
     let ext = |k: usize| b["max"][k].as_f64().unwrap() - b["min"][k].as_f64().unwrap();
     assert!((ext(2) - 0.012).abs() < 1e-6, "bounds {b}");
 }
+
+/// A 60 x 40 x 10 mm plate with a 5 mm blind hole whose 118° drill point is a cone with a
+/// negative semi-angle, and a 6 mm hole with a 12 mm, 90° countersink.
+const CONED: &str = r#"runmat 0.7
+std 1
+
+part coned {
+    sketch s on origin.xy {
+        l1 = line(start = [0 mm, 0 mm], end = [60 mm, 0 mm])
+        l2 = line(start = l1.end, end = [60 mm, 40 mm])
+        l3 = line(start = l2.end, end = [0 mm, 40 mm])
+        l4 = line(start = l3.end, end = l1.start)
+    }
+    feature body = extrude(profile = sketch.s, distance = 10 mm)
+    feature blind = hole(face = feature.body.face.end, at = { c = point(20 mm, 20 mm, 10 mm) }, diameter = 5 mm, depth = 6 mm, drill_point = 118 deg)
+    feature cs = hole(face = feature.body.face.end, at = { a = point(42 mm, 20 mm, 10 mm) }, diameter = 6 mm, depth = 8 mm, form = countersink(diameter = 12 mm, angle = 90 deg))
+}
+"#;
+
+/// A part whose faces include cones (a drill point with a negative semi-angle, a countersink)
+/// exports as AP242 with every face, and reads back as one closed solid whose face names and
+/// colours survive. OCCT 8.0's STEP writer dropped the drill point's face and wrote the rest, so
+/// the file read back was an open shell.
+#[test]
+fn a_part_with_a_drill_point_and_a_countersink_exports_a_closed_named_coloured_solid() {
+    use runmat_cad::refs::history::SurfaceKind;
+    use runmat_cad::regen::kernel::{ExchangeFaceColor, ExchangeFaceName};
+    runmat_geometry_wasm_host::cad::install_occt();
+    let part = regenerate_part("/p/coned.part", CONED).expect("compiles");
+    let bodies = &part.result.state.bodies;
+    assert_eq!(bodies.len(), 1);
+    let faces = &bodies[0].topology.faces;
+    let cones: Vec<u32> = (0..faces.len() as u32)
+        .filter(|&i| matches!(faces[i as usize].geom.surface, SurfaceKind::Other))
+        .collect();
+    assert_eq!(cones.len(), 2, "a drill point and a countersink");
+    const RED: [f64; 3] = [1.0, 0.0, 0.0];
+    const BLUE: [f64; 3] = [0.0, 0.0, 1.0];
+    let doc = ExchangeDocument {
+        name: "coned".into(),
+        parts: vec![ExchangePart {
+            name: "coned".into(),
+            bodies: vec![&bodies[0].handle],
+            color: None,
+            material: None,
+            face_names: (0..faces.len() as u32)
+                .map(|face| ExchangeFaceName {
+                    body: 0,
+                    face,
+                    name: format!("face {face}"),
+                })
+                .collect(),
+            face_colors: (0..faces.len() as u32)
+                .map(|face| ExchangeFaceColor {
+                    body: 0,
+                    face,
+                    color: if cones.contains(&face) { RED } else { BLUE },
+                })
+                .collect(),
+        }],
+        occurrences: Vec::new(),
+    };
+    let step = part
+        .kernel
+        .export(&doc, ExchangeFormat::Ap242)
+        .expect("OCCT writes STEP");
+    let text = String::from_utf8(step).expect("STEP is text");
+    assert_eq!(
+        text.matches("ADVANCED_FACE(").count(),
+        faces.len(),
+        "every face is written"
+    );
+
+    // Closed: the exact import makes one body with no boundary (laminar) edge.
+    let dir = std::env::temp_dir().join(format!("runmat-coned-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let file = dir.join("coned.step");
+    std::fs::write(&file, &text).unwrap();
+    let housing = format!(
+        "runmat 0.7\nstd 1\n\npart housing {{\n    feature step = import(source = \"{}\", digest = \"unrecorded\")\n}}\n",
+        file.display()
+    );
+    let back = regenerate_part("/p/housing.part", &housing).expect("compiles");
+    let read = &back.result.state.bodies;
+    assert_eq!(read.len(), 1, "one body");
+    assert_eq!(read[0].topology.faces.len(), faces.len(), "every face");
+    assert!(
+        !read[0].topology.edges.iter().any(|e| e.laminar),
+        "the shell is closed"
+    );
+
+    // Names and colours: each face region keeps its name, cones red and the rest blue.
+    let imported = runmat_geometry_io::import_geometry(
+        "coned.step",
+        text.as_bytes(),
+        runmat_geometry_io::GeometryImportOptions::default(),
+    )
+    .expect("imports");
+    let _ = std::fs::remove_dir_all(&dir);
+    let regions: Vec<_> = imported
+        .asset
+        .regions
+        .iter()
+        .filter_map(|r| {
+            let owner = r.cad_ownership.as_ref()?;
+            owner.face_id?;
+            Some((
+                r.name.clone(),
+                owner
+                    .color
+                    .as_ref()
+                    .map(|c| c.hex_rgba.to_ascii_lowercase()),
+            ))
+        })
+        .collect();
+    assert_eq!(regions.len(), faces.len(), "{regions:?}");
+    for face in 0..faces.len() as u32 {
+        let name = format!("face {face}");
+        let (_, color) = regions
+            .iter()
+            .find(|(n, _)| *n == name)
+            .unwrap_or_else(|| panic!("no region {name}: {regions:?}"));
+        let want = if cones.contains(&face) {
+            "ff0000"
+        } else {
+            "0000ff"
+        };
+        assert!(
+            color
+                .as_deref()
+                .is_some_and(|c| c.trim_start_matches('#').starts_with(want)),
+            "{name}: colour {color:?}, want {want}"
+        );
+    }
+}

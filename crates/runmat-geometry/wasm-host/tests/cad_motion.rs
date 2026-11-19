@@ -34,7 +34,10 @@ fn stop_reports_the_first_frame_where_the_arm_meets_the_stop() {
     // The arm's far corner (28.3 mm out) reaches the stop's near edge (5 mm past the axis)
     // well before the quarter turn ends, and not at the start.
     assert!(t > 0.0 && t < 2.0, "{out}");
-    assert!(out["summary"].as_str().unwrap().contains("stops at"), "{out}");
+    assert!(
+        out["summary"].as_str().unwrap().contains("stops at"),
+        "{out}"
+    );
     assert_eq!(out["rows"].as_array().unwrap().len(), 1, "{out}");
 }
 
@@ -48,7 +51,10 @@ fn highlight_lists_the_contact_to_the_end_of_the_study() {
     assert!(c["from"].as_f64().unwrap() > 0.0, "{out}");
     assert!((c["to"].as_f64().unwrap() - 2.0).abs() < 1e-9, "{out}");
     // At the end the arm (x −20…0, y 0…20) and the stop (x −25…−5, y 5…25) share 15 × 15 × 15 mm.
-    assert!((c["volume"].as_f64().unwrap() - 3.375e-6).abs() < 1e-8, "{out}");
+    assert!(
+        (c["volume"].as_f64().unwrap() - 3.375e-6).abs() < 1e-8,
+        "{out}"
+    );
     assert_eq!(out["data"]["frames"], 25, "{out}");
 }
 
@@ -73,7 +79,10 @@ fn a_drag_into_the_stop_stops_at_the_last_clear_pose() {
     .to_string();
     let out = call("edit", &["/p/hinge.assembly", HINGE, &files, &request]);
     assert_eq!(out["ok"], true, "{out}");
-    assert!(out.to_string().contains("stopped where arm meets stop"), "{out}");
+    assert!(
+        out.to_string().contains("stopped where arm meets stop"),
+        "{out}"
+    );
     // Without the check the same pull goes the whole quarter turn.
     let free = json!({ "command": "motion.drag", "values": {
         "component": [format!("occurrence:{arm}")], "dx": -20, "collisions": false } })

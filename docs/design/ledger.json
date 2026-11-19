@@ -134,8 +134,9 @@
       "title": "Imports from other electronics tools",
       "kind": "exchange",
       "area": "ecad",
-      "status": "pending",
-      "acceptance": "Clean-room readers for the other common tools' binary, text and JSON schematic and board formats write circuits and boards with part declarations and a report of what did not carry over, tested on an openly licensed corpus."
+      "status": "release",
+      "acceptance": "Clean-room readers for the other common tools' binary, text and JSON schematic and board formats write circuits and boards with part declarations and a report of what did not carry over, tested on an openly licensed corpus.",
+      "landed_in": "0.7.1"
     },
     {
       "id": "design.ecad.import.kicad-roundtrip",

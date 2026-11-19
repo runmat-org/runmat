@@ -186,7 +186,10 @@ pub fn plan(ctx: &mut Ctx<'_>, views: &[ViewPlan]) -> Plans {
             key_refs.sort();
             // A plan's grids repeat on every plan they're drawn on: their row is keyed by view.
             let key = if grids {
-                format!("{model}|{vi}|{}|{}|{:.3}", key_refs[0], key_refs[1], measurement)
+                format!(
+                    "{model}|{vi}|{}|{}|{:.3}",
+                    key_refs[0], key_refs[1], measurement
+                )
             } else {
                 format!("{model}|{}|{}|{:.3}", key_refs[0], key_refs[1], measurement)
             };
@@ -328,7 +331,9 @@ pub fn plan(ctx: &mut Ctx<'_>, views: &[ViewPlan]) -> Plans {
                     a["kind"]["annotation"] == "grids"
                         && a["view"].as_str() == Some(v.name.as_str())
                         && dims.iter().any(|d| {
-                            d.view == vi && d.axis == axis && a["id"].as_str() == Some(d.id.as_str())
+                            d.view == vi
+                                && d.axis == axis
+                                && a["id"].as_str() == Some(d.id.as_str())
                         })
                 });
             let need = if bubbles {

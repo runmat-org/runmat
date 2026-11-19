@@ -43,7 +43,10 @@ fn an_event_without_a_message_is_named_by_its_target_not_its_source_path() {
         ["runmat.fea.solve", "Solving", "fea.solve.assembled"]
     );
     assert_eq!(
-        logs[0].fields.as_ref().and_then(|fields| fields.get("nodes")),
+        logs[0]
+            .fields
+            .as_ref()
+            .and_then(|fields| fields.get("nodes")),
         Some(&serde_json::json!("3"))
     );
 

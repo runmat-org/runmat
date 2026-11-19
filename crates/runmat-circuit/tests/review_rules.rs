@@ -117,7 +117,10 @@ fn usb_design(waive: bool) -> Design {
     b.component("R1", "R0402-10K");
     b.component("R2", "R0402-10K");
     b.wire("VBUS", &[("J1", "VBUS")]);
-    b.wire("GND", &[("J1", "GND"), ("J1", "SHIELD"), ("R1", "2"), ("R2", "2")]);
+    b.wire(
+        "GND",
+        &[("J1", "GND"), ("J1", "SHIELD"), ("R1", "2"), ("R2", "2")],
+    );
     b.wire("CC1", &[("J1", "CC1"), ("R1", "1")]);
     b.wire("CC2", &[("J1", "CC2"), ("R2", "1")]);
     for p in ["SBU1", "SBU2"] {

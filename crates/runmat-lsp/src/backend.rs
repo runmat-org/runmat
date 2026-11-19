@@ -566,9 +566,9 @@ impl LanguageServer for RunMatLanguageServer {
                 }),
             ),
             document_formatting_provider: Some(OneOf::Left(true)),
-            code_action_provider: Some(
-                tower_lsp::lsp_types::CodeActionProviderCapability::Simple(true),
-            ),
+            code_action_provider: Some(tower_lsp::lsp_types::CodeActionProviderCapability::Simple(
+                true,
+            )),
             completion_provider: Some(CompletionOptions {
                 resolve_provider: Some(false),
                 trigger_characters: None,

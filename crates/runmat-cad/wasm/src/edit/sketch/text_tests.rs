@@ -34,13 +34,29 @@ fn other_fonts_text_along_a_curve_and_empty_text_say_why() {
         "sketch.text",
         json!({ "sketch": "s1", "text": "A", "at": { "x": 5, "y": 5 }, "height": 6, "font": "Inter" }),
     );
-    assert!(other["message"].as_str().unwrap().contains("single-line font"), "{other}");
+    assert!(
+        other["message"]
+            .as_str()
+            .unwrap()
+            .contains("single-line font"),
+        "{other}"
+    );
     let along = run(
         PLATE,
         "sketch.text",
         json!({ "sketch": "s1", "text": "A", "at": { "x": 5, "y": 5 }, "height": 6, "along": ["sketch.s1.l1"] }),
     );
-    assert!(along["message"].as_str().unwrap().contains("along a curve"), "{along}");
-    let empty = run(PLATE, "sketch.text", json!({ "sketch": "s1", "text": " ", "at": { "x": 5, "y": 5 }, "height": 6 }));
-    assert!(empty["message"].as_str().unwrap().contains("type the text"), "{empty}");
+    assert!(
+        along["message"].as_str().unwrap().contains("along a curve"),
+        "{along}"
+    );
+    let empty = run(
+        PLATE,
+        "sketch.text",
+        json!({ "sketch": "s1", "text": " ", "at": { "x": 5, "y": 5 }, "height": 6 }),
+    );
+    assert!(
+        empty["message"].as_str().unwrap().contains("type the text"),
+        "{empty}"
+    );
 }

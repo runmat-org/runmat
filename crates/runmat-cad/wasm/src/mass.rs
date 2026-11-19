@@ -368,29 +368,44 @@ pub fn fill_part_masses(
         }
         let file = node.definition.file.0.clone();
         let digest = node.configuration.digest();
-        if !done.insert((node.definition.clone(), node.revision.clone(), digest.clone())) {
+        if !done.insert((
+            node.definition.clone(),
+            node.revision.clone(),
+            digest.clone(),
+        )) {
             continue;
         }
         let content = crate::evaluate::content_key(&file, &digest, files);
         let found = match content.and_then(kept::get) {
             Some(found) => found,
             None => {
-                let Some(document) = documents.get(&file) else { continue };
+                let Some(document) = documents.get(&file) else {
+                    continue;
+                };
                 let configured = document.in_configuration(node.configuration.name.as_ref());
                 let (result, kernel) = regenerate_configured(document, &node.configuration);
-                let Ok(found) = integrate(&configured, &result, kernel.as_ref()) else { continue };
+                let Ok(found) = integrate(&configured, &result, kernel.as_ref()) else {
+                    continue;
+                };
                 if let Some(k) = content {
                     kept::put(k, found.clone());
                 }
                 found
             }
         };
-        let Ok((density, _)) = found.density else { continue };
-        let m = scaled(&found.unit, density);
-        let Some(part) = source.parts.get_mut(&(node.definition.clone(), node.revision.clone())) else {
+        let Ok((density, _)) = found.density else {
             continue;
         };
-        let Some(summary) = part.configured.get(&digest) else { continue };
+        let m = scaled(&found.unit, density);
+        let Some(part) = source
+            .parts
+            .get_mut(&(node.definition.clone(), node.revision.clone()))
+        else {
+            continue;
+        };
+        let Some(summary) = part.configured.get(&digest) else {
+            continue;
+        };
         let mut filled = (**summary).clone();
         filled.mass = Some(m.mass);
         filled.center_of_mass = Some(m.center);
@@ -481,9 +496,7 @@ pub fn assembly_mass(
                     node.world.apply(part.unit.center),
                 ));
                 match &part.density {
-                    Ok((d, _)) => {
-                        placed_masses.push(placed(&scaled(&part.unit, *d), &node.world))
-                    }
+                    Ok((d, _)) => placed_masses.push(placed(&scaled(&part.unit, *d), &node.world)),
                     Err(reason) => report.problems.push(no_density(&occurrence, reason)),
                 }
             }
@@ -588,7 +601,11 @@ mod tests {
         let row = &report.parts[0];
         assert_eq!(row.material.as_deref(), Some("material.unobtainium"));
         assert_eq!(row.mass, None);
-        assert!(row.mass_unknown.as_deref().unwrap().contains("material.unobtainium"));
+        assert!(row
+            .mass_unknown
+            .as_deref()
+            .unwrap()
+            .contains("material.unobtainium"));
         // A `density` property on the same part gives it a mass.
         let stated = text.replace(
             "material = \"material.unobtainium\" }",
@@ -605,7 +622,9 @@ mod tests {
         files.insert("/p/block.part".into(), BLOCK.into());
         files.insert(
             "/p/odd.part".into(),
-            BLOCK.replace("block", "odd").replace("material.steel", "material.unobtainium"),
+            BLOCK
+                .replace("block", "odd")
+                .replace("material.steel", "material.unobtainium"),
         );
         let text = "runmat 0.7\nstd 1\n\nassembly pair {\n    use part block as a\n    use part odd as b {\n        placement = { placement = offset, offset = { translation = [0 mm, 100 mm, 0 mm] } }\n    }\n}\n";
         let report = assembly_mass("/p/pair.assembly", text, &files, None).unwrap();
@@ -613,7 +632,10 @@ mod tests {
         // The steel copy's mass is not passed off as the assembly's.
         assert_eq!(report.total, None);
         let reason = report.unknown.as_deref().unwrap();
-        assert!(reason.contains("b: mass unknown") && reason.contains("material.unobtainium"), "{reason}");
+        assert!(
+            reason.contains("b: mass unknown") && reason.contains("material.unobtainium"),
+            "{reason}"
+        );
         assert!(report.parts[0].mass.is_some() && report.parts[1].mass.is_none());
         assert!((report.volume - 2e-5).abs() < 1e-9);
     }

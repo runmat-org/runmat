@@ -25,7 +25,11 @@ fn spans_reach_the_trace_feed_once_with_their_fields() {
     });
 
     {
-        let run = tracing::info_span!("runtime.execute", input_len = 42u64, step = tracing::field::Empty);
+        let run = tracing::info_span!(
+            "runtime.execute",
+            input_len = 42u64,
+            step = tracing::field::Empty
+        );
         // An async span is entered at every poll; the feed still shows one span.
         for _ in 0..3 {
             let _entered = run.enter();
@@ -41,7 +45,10 @@ fn spans_reach_the_trace_feed_once_with_their_fields() {
     }
 
     let events = traces.lock().unwrap().clone();
-    let spans: Vec<&TraceEvent> = events.iter().filter(|e| e.ph == "B" || e.ph == "E").collect();
+    let spans: Vec<&TraceEvent> = events
+        .iter()
+        .filter(|e| e.ph == "B" || e.ph == "E")
+        .collect();
     let phases = |name: &str| {
         spans
             .iter()
@@ -53,8 +60,18 @@ fn spans_reach_the_trace_feed_once_with_their_fields() {
     assert_eq!(phases("runtime.compile"), ["B", "E"]);
     assert_eq!(phases("interpreter.run"), ["B", "E"]);
 
-    let begin = |name: &str| *spans.iter().find(|e| e.name == name && e.ph == "B").unwrap();
-    let end = |name: &str| *spans.iter().find(|e| e.name == name && e.ph == "E").unwrap();
+    let begin = |name: &str| {
+        *spans
+            .iter()
+            .find(|e| e.name == name && e.ph == "B")
+            .unwrap()
+    };
+    let end = |name: &str| {
+        *spans
+            .iter()
+            .find(|e| e.name == name && e.ph == "E")
+            .unwrap()
+    };
     let execute = begin("runtime.execute");
     let compile = begin("runtime.compile");
     let interpreter = begin("interpreter.run");

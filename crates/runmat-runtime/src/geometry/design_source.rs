@@ -30,12 +30,12 @@ use runmat_cad_wasm::runtime::Files;
 mod closure;
 mod study_host;
 
+#[cfg(target_arch = "wasm32")]
+pub use study_host::install_js_study_geometry_provider;
 pub use study_host::{
     installed_study_geometry_provider, set_study_geometry_provider, StudyGeometryFuture,
     StudyGeometryProvider,
 };
-#[cfg(target_arch = "wasm32")]
-pub use study_host::install_js_study_geometry_provider;
 
 /// The design files a dependency folder is listed for.
 const FOLDER_EXTENSIONS: &[&str] = &[".part", ".assembly"];

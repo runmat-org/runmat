@@ -20,7 +20,10 @@ pub(super) fn draw(
     values: &Map<String, Value>,
     name: &mut dyn FnMut(&str) -> String,
 ) -> Result<(Vec<SketchEntity>, Vec<SketchConstraint>), EditFailure> {
-    if values.get("along").is_some_and(|v| !v.is_null() && v != "" && v != &Value::Array(vec![])) {
+    if values
+        .get("along")
+        .is_some_and(|v| !v.is_null() && v != "" && v != &Value::Array(vec![]))
+    {
         return Err(model(
             "text along a curve isn't in the sketch model yet; place it on a straight baseline",
         ));
@@ -48,7 +51,11 @@ pub(super) fn draw(
     let stroke = match values.get("stroke").and_then(num) {
         None => None,
         Some(w) if w > 0.0 && w < height => Some(super::mm(w)),
-        Some(_) => return Err(model("the stroke is wider than nothing and narrower than the text")),
+        Some(_) => {
+            return Err(model(
+                "the stroke is wider than nothing and narrower than the text",
+            ))
+        }
     };
     let angle = values.get("angle").and_then(num).unwrap_or(0.0);
     Ok((

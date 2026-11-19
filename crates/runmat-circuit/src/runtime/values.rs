@@ -16,9 +16,9 @@
 
 use super::{modules, Files};
 use crate::ir::{Design, Param, ParamValue, ValueCall};
+use crate::units::RegistryUnits;
 use runmat_design_syntax::m_calls::{call_key, effect_of, parameters_of, PendingCall, TableResult};
 use runmat_rules::{parse_quantity, Quantity, SourceKey};
-use crate::units::RegistryUnits;
 use std::collections::BTreeMap;
 
 /// Results the host evaluated, by [`call_key`].
