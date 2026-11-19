@@ -554,3 +554,53 @@ fn reference_picks_resolve_like_topology_picks() {
     );
     assert_eq!(by_reference.rows, by_index.rows);
 }
+
+/// Two bosses side by side, 40 mm apart, both 8 mm tall.
+const TWINS: &str = "runmat 0.7\nstd 1\n\npart twins {\n    sketch s1 on origin.xy {\n        a = circle(center = [0 mm, 0 mm], radius = 10 mm)\n        b = circle(center = [40 mm, 0 mm], radius = 10 mm)\n    }\n    feature body = extrude(profile = sketch.s1, distance = 8 mm)\n}\n";
+
+#[test]
+fn coplanar_circles_draw_their_axis_distance_not_a_zero_normal_distance() {
+    let d = match crate::runtime::regenerate_part_in(
+        "/p/twins.part",
+        TWINS,
+        None,
+        &TessellationOptions::default(),
+    ) {
+        Ok(part) => part.display,
+        Err(d) => panic!(
+            "doesn't regenerate: {:?}",
+            d.iter().map(|d| d.message.clone()).collect::<Vec<_>>()
+        ),
+    };
+    // The two top rims, at z = 8 mm.
+    let mut rims = Vec::new();
+    for b in &d.bodies {
+        for e in &b.edges {
+            if e.points.len() > 9
+                && e.points
+                    .chunks_exact(3)
+                    .all(|p| (p[2] as f64 - 8.0 * MM).abs() < 1e-6)
+            {
+                rims.push(format!("edge:{}:{}", b.index, e.index));
+            }
+        }
+    }
+    assert_eq!(rims.len(), 2, "{rims:?}");
+    let a = run("/p/twins.part", TWINS, "distance", &rims).unwrap();
+    close(value(&a, "Minimum distance"), 20.0);
+    close(value(&a, "Normal distance"), 0.0);
+    close(value(&a, "Axis distance"), 40.0);
+    assert_eq!(
+        a.rows
+            .iter()
+            .filter(|r| r.cells[0] == "Axis distance")
+            .count(),
+        1
+    );
+    assert_eq!(a.dimensions.len(), 1);
+    assert_eq!(a.dimensions[0].label, "40.000 mm");
+    close(
+        norm(sub(a.dimensions[0].to, a.dimensions[0].from)) * 1e3,
+        40.0,
+    );
+}

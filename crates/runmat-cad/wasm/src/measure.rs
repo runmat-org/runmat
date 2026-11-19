@@ -85,6 +85,9 @@ fn deg(r: f64) -> String {
 /// Parallel within about a hundredth of a degree.
 const PARALLEL: f64 = 0.999_999_98;
 
+/// Parallel planes closer than this (in metres, a tenth of a micrometre) are one plane.
+const COPLANAR: f64 = 1e-7;
+
 /// The picks of a part file.
 fn part_items(
     path: &str,
@@ -359,6 +362,16 @@ fn pair(
             )
         }),
         _ => None,
+    };
+    // Coplanar items keep their 0 normal distance as a row, but the drawn dimension is their axis
+    // distance or, without axes, the minimum distance: a 0 line says nothing about two circles
+    // side by side on one face.
+    let planes = match planes {
+        Some((name, (g, _))) if g <= COPLANAR => {
+            rows.push(row(name, mm(g)));
+            None
+        }
+        planes => planes,
     };
     // Two parallel circles report both: how far apart their planes are and their axes.
     if let (Some(_), Some((name, (g, _)))) = (&planes, &axes) {

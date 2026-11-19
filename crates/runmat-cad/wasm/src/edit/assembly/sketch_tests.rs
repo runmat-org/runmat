@@ -459,3 +459,25 @@ fn check_sketch_finds_an_assembly_sketchs_open_ends_and_passes_a_closed_one() {
     );
     assert!(out["rows"].as_array().unwrap().is_empty(), "{out}");
 }
+
+/// An assembly sketch's point fields take the origin and a clicked point too, placed on the
+/// sketch's plane.
+#[test]
+fn an_assembly_sketch_point_field_takes_the_origin_and_a_clicked_point() {
+    let text = sketch(RIG, "origin:top");
+    let text = tool(
+        &text,
+        "sketch.circle",
+        json!({ "sketch": "sketch1", "type": "center", "center": ["origin:point"], "radius": 4 }),
+    );
+    assert!(
+        text.contains("circle(center = [0 mm, 0 mm], radius = 4 mm)"),
+        "{text}"
+    );
+    let text = tool(
+        &text,
+        "sketch.point",
+        json!({ "sketch": "sketch1", "at": ["point(12 mm, -3 mm, 0 mm)"] }),
+    );
+    assert!(text.contains("point(at = [12 mm, -3 mm])"), "{text}");
+}

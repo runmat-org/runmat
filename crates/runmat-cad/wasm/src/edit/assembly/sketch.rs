@@ -87,9 +87,12 @@ pub(super) fn new_sketch(
     Ok(format!("Added {id}"))
 }
 
-/// A `sketch.*` tool on the assembly's open sketch (`values.sketch`).
+/// A `sketch.*` tool on the assembly's open sketch (`values.sketch`). A point field given as a
+/// point of the model (a click on the plane, the origin, a component's vertex) lands on the
+/// sketch's plane ([`crate::edit::sketch::placed`]).
 pub(super) fn tool(
     document: &mut AssemblyDocument,
+    compiled: &Compiled,
     command: &str,
     values: &Map<String, Value>,
 ) -> Result<String, EditFailure> {
@@ -98,6 +101,24 @@ pub(super) fn tool(
         .and_then(Value::as_str)
         .ok_or_else(|| model("open a sketch first"))?
         .to_owned();
+    let values = &{
+        let doc: &AssemblyDocument = document;
+        crate::edit::sketch::placed::placed_points(
+            values,
+            &id,
+            |pick| {
+                let vertex = parse_pick(pick)
+                    .is_some_and(|p| matches!(p.entity, Some(super::Entity::Vertex { .. })));
+                if !vertex {
+                    return None;
+                }
+                mate::resolve(doc, compiled, pick, "the point")
+                    .ok()?
+                    .world_origin()
+            },
+            || crate::edit::sketch::placed::SketchFrame::of_display(compiled.display(), &id),
+        )?
+    };
     let sketch = match document
         .features
         .iter_mut()
