@@ -6,7 +6,7 @@
   "encoding": "git-mode-type-blob-path-tuples-v1"
  },
  "accepted_inputs": {
-  "sha256": "a96369a3f5b61abcc5bf29712cb268913ebc1495412239cab2d2f95d32f0ca5a",
+  "sha256": "e61a531b92c6977e768a9672cf42ab90a34c9e0ac12e2901fd8d32147b4934de",
   "files": 26439,
   "encoding": "git-mode-type-blob-path-tuples-v1"
  },
@@ -16,7 +16,7 @@
  "qualification_evidence": [
   {
    "path": "qualification/scientific/evidence/cargo-fmt-072-20261118.json",
-   "sha256": "41022b6b29b07b046fb2d73a24b4fb565519446e5a08fbc6ff48813e41d136dc"
+   "sha256": "f91a431bd9d2a76c8345524d154b00661099464e51628990b6c112e682bb6356"
   }
  ],
  "changed_inputs": [
@@ -2189,6 +2189,20 @@
     "695abe9b28f030308b74fcae01a8c054902337d1"
    ],
    "reason": "Formatting only: cargo fmt --all with the pinned rustfmt (rustc 1.90.0) and the repository rustfmt.toml. Tokens, expressions, arguments and control flow are unchanged."
+  },
+  {
+   "path": "crates/runmat-design-tools/tests/recognize.rs",
+   "before": [
+    "100644",
+    "blob",
+    "6d799ba3eeffac62e6c6814295ffc97f03a2ce07"
+   ],
+   "after": [
+    "100644",
+    "blob",
+    "a6fc67aada65318f31a3cc277bcaa18c31472b60"
+   ],
+   "reason": "Test only: escapes the temp STEP path's backslashes in the part source so the recognize tests compile on Windows (no-op on Linux and macOS). No production code changes. No cohort runs it."
   },
   {
    "path": "crates/runmat-design-tools/tests/tools.rs",

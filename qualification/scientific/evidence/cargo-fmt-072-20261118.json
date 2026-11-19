@@ -1,6 +1,6 @@
 {
  "schema_version": 1,
- "source_revision": "4a438badc6d34d99e595130d5e7d0ab31cd95050",
+ "source_revision": "e5c12dca8ad79c0cdf0c3b8a60603f6ee8bd713e",
  "previous_revision": "3583e216622e45db0732caaa314ce109ed5565c1",
  "measured_revision": "912f34e3cd484efcb72e2bbda9d018fded199b56",
  "changed_scientific_inputs": [
@@ -159,6 +159,7 @@
   "crates/runmat-design-tools/src/workspace.rs",
   "crates/runmat-design-tools/tests/drawing_notes.rs",
   "crates/runmat-design-tools/tests/dwg.rs",
+  "crates/runmat-design-tools/tests/recognize.rs",
   "crates/runmat-design-tools/tests/tools.rs",
   "crates/runmat-filesystem/src/pinned/tests.rs",
   "crates/runmat-filesystem/src/remote/native.rs",

@@ -102,14 +102,14 @@
       "encoding": "git-mode-type-blob-path-tuples-v1"
     },
     "accepted_inputs": {
-      "sha256": "a96369a3f5b61abcc5bf29712cb268913ebc1495412239cab2d2f95d32f0ca5a",
+      "sha256": "e61a531b92c6977e768a9672cf42ab90a34c9e0ac12e2901fd8d32147b4934de",
       "files": 26439,
       "encoding": "git-mode-type-blob-path-tuples-v1"
     },
     "reason": "Conserves the fresh 0.7.2 scientific measurements across the CI repairs. cargo fmt --all on the measured source (3583e21662, whose scientific inputs equal the measured 912f34e3cd inventory) reproduces the 191 formatted Rust files of bd7dd3a4d1 blob for blob. Other changed inputs: the regenerated FEA highlighting grammar and the regenerated wasm builtin registry (fingerprint line only), which adds one field-quantity word and no execution path reads it; the empty pinned-file read in the remote filesystem providers (3af73068ba); the mode-shape legend wording in the live field scene and CLI snapshot (1e945c104a; legend text and range only); the subplot axes-slot repair in runtime plotting state (8b33ada885), which no cohort exercises; the OCCT host's per-thread STEP import table (a6fb58c3ad; the airliner cohort imports no STEP file, so its table is empty either way); the STEP exporter's direct-surface pass (d36e979417; no cohort exports STEP); and test-only edits that no cohort runs (eight OCCT CAD tests read the always-known mass-properties volume; the G128 multigrid memory test is ignored). Solver arithmetic, model inputs, dependencies, features and thresholds are unchanged. This review is not a rerun of the scientific or performance measurements.",
     "review": {
       "path": "qualification/scientific/reviews/cargo-fmt-072-20261118-authored-cli-physics.json",
-      "sha256": "ffac75a7b310c88e9a9dea32ed712daa0f16e5750b6ff19ffec1901d703a7edf"
+      "sha256": "b3c82ea7940b6e91c553c6440f86c56b65389ba092e8919c6584fd331e1dea9e"
     }
   }
 }
