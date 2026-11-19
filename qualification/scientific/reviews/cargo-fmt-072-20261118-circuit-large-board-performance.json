@@ -6,8 +6,8 @@
   "encoding": "git-mode-type-blob-path-tuples-v1"
  },
  "accepted_inputs": {
-  "sha256": "e61a531b92c6977e768a9672cf42ab90a34c9e0ac12e2901fd8d32147b4934de",
-  "files": 26439,
+  "sha256": "56052a994423cb306f39bf40b8404b23f41554124330d90fee0a81d7823bfa16",
+  "files": 26444,
   "encoding": "git-mode-type-blob-path-tuples-v1"
  },
  "cohorts": [
@@ -16,10 +16,38 @@
  "qualification_evidence": [
   {
    "path": "qualification/scientific/evidence/cargo-fmt-072-20261118.json",
-   "sha256": "f91a431bd9d2a76c8345524d154b00661099464e51628990b6c112e682bb6356"
+   "sha256": "2c594eafc5ccc8a2b81287db7d3a15a41ccbfd4e4bbc0e3b5b5a9e567c261ddc"
   }
  ],
  "changed_inputs": [
+  {
+   "path": "crates/runmat-accelerate-api/src/wgpu_access/mod.rs",
+   "before": [
+    "100644",
+    "blob",
+    "47596777fefc4352b83c36d369e3d5b519158812"
+   ],
+   "after": [
+    "100644",
+    "blob",
+    "a361f71455b0a4955909124dcd771b92842a3ead"
+   ],
+   "reason": "Rendering only (Windows pan fix, WPAN-R a6b169e91b/ba195739b9/c3113a728b): a GPU buffer owner can record the device that made it, so a renderer on another device copies provider data once per data change. Solver arithmetic, published values and receipt measurements are unchanged; no cohort renders an interactive native surface."
+  },
+  {
+   "path": "crates/runmat-accelerate-api/src/wgpu_buffer_owner.rs",
+   "before": [
+    "100644",
+    "blob",
+    "33e10c820b1e9d3244d2a2af24c64c429b7acc7f"
+   ],
+   "after": [
+    "100644",
+    "blob",
+    "3e06ec994f95985851e864f1dac4954439a2e35d"
+   ],
+   "reason": "Rendering only (Windows pan fix, WPAN-R a6b169e91b/ba195739b9/c3113a728b): a GPU buffer owner can record the device that made it, so a renderer on another device copies provider data once per data change. Solver arithmetic, published values and receipt measurements are unchanged; no cohort renders an interactive native surface."
+  },
   {
    "path": "crates/runmat-analysis/core/src/lib.rs",
    "before": [
@@ -2709,6 +2737,364 @@
    "reason": "Formatting only: cargo fmt --all with the pinned rustfmt (rustc 1.90.0) and the repository rustfmt.toml. Tokens, expressions, arguments and control flow are unchanged."
   },
   {
+   "path": "crates/runmat-plot/src/core/plot_renderer.rs",
+   "before": [
+    "100644",
+    "blob",
+    "c54d0335d4de7f6df70b919b2e451d0fde1c33bc"
+   ],
+   "after": [
+    "100644",
+    "blob",
+    "5562622fe69f66b04b2f73d29c0c98aa9324be6c"
+   ],
+   "reason": "Rendering only (Windows pan fix, WPAN-R a6b169e91b/ba195739b9/c3113a728b): plot renderer shares scenes by Arc, caches the offscreen fallback renderer, retains presented frames only on request, and copies foreign-device buffers once per data change. Solver arithmetic, published values and receipt measurements are unchanged; no cohort renders an interactive native surface."
+  },
+  {
+   "path": "crates/runmat-plot/src/core/plot_renderer/foreign_buffers.rs",
+   "before": null,
+   "after": [
+    "100644",
+    "blob",
+    "0e00cb945eebcaba866d186c1a6b404a7ac48571"
+   ],
+   "reason": "Rendering only (Windows pan fix, WPAN-R a6b169e91b/ba195739b9/c3113a728b): plot renderer shares scenes by Arc, caches the offscreen fallback renderer, retains presented frames only on request, and copies foreign-device buffers once per data change. Solver arithmetic, published values and receipt measurements are unchanged; no cohort renders an interactive native surface."
+  },
+  {
+   "path": "crates/runmat-plot/src/core/plot_renderer/geometry_presentation.rs",
+   "before": [
+    "100644",
+    "blob",
+    "0a9eed8b4ef8f8233f7f9a7854932ad715da21c6"
+   ],
+   "after": [
+    "100644",
+    "blob",
+    "47221912b9e8de3310718d3f508577f769204f9d"
+   ],
+   "reason": "Rendering only (Windows pan fix, WPAN-R a6b169e91b/ba195739b9/c3113a728b): plot renderer shares scenes by Arc, caches the offscreen fallback renderer, retains presented frames only on request, and copies foreign-device buffers once per data change. Solver arithmetic, published values and receipt measurements are unchanged; no cohort renders an interactive native surface."
+  },
+  {
+   "path": "crates/runmat-plot/src/core/plot_renderer/render_frame.rs",
+   "before": [
+    "100644",
+    "blob",
+    "1336bf73ab90943eb07304e0e50b83d5bce0df27"
+   ],
+   "after": [
+    "100644",
+    "blob",
+    "2aab75cf540ca7d7d658491e81a2e112b5d1125a"
+   ],
+   "reason": "Rendering only (Windows pan fix, WPAN-R a6b169e91b/ba195739b9/c3113a728b): plot renderer shares scenes by Arc, caches the offscreen fallback renderer, retains presented frames only on request, and copies foreign-device buffers once per data change. Solver arithmetic, published values and receipt measurements are unchanged; no cohort renders an interactive native surface."
+  },
+  {
+   "path": "crates/runmat-plot/src/core/plot_renderer/scene_setup.rs",
+   "before": [
+    "100644",
+    "blob",
+    "53364758c2ef26a4703037e952236bbeeee078d0"
+   ],
+   "after": [
+    "100644",
+    "blob",
+    "17f1969088201540c589e3b9ce7999a81ce58710"
+   ],
+   "reason": "Rendering only (Windows pan fix, WPAN-R a6b169e91b/ba195739b9/c3113a728b): plot renderer shares scenes by Arc, caches the offscreen fallback renderer, retains presented frames only on request, and copies foreign-device buffers once per data change. Solver arithmetic, published values and receipt measurements are unchanged; no cohort renders an interactive native surface."
+  },
+  {
+   "path": "crates/runmat-plot/src/core/plot_renderer/view_fit.rs",
+   "before": [
+    "100644",
+    "blob",
+    "2bfd4077d2de26002721c59e9b2b520ff8a87b59"
+   ],
+   "after": [
+    "100644",
+    "blob",
+    "3168f3d89884ba5e02d8dde1108333b322eb03a0"
+   ],
+   "reason": "Rendering only (Windows pan fix, WPAN-R a6b169e91b/ba195739b9/c3113a728b): plot renderer shares scenes by Arc, caches the offscreen fallback renderer, retains presented frames only on request, and copies foreign-device buffers once per data change. Solver arithmetic, published values and receipt measurements are unchanged; no cohort renders an interactive native surface."
+  },
+  {
+   "path": "crates/runmat-plot/src/export/native_surface.rs",
+   "before": [
+    "100644",
+    "blob",
+    "31dbdcffef95d17475bd7ccdeb96fbf4aa9d6465"
+   ],
+   "after": [
+    "100644",
+    "blob",
+    "10a36239113dd59ecaf88cf990053f1c2b081131"
+   ],
+   "reason": "Rendering only (Windows pan fix, WPAN-R a6b169e91b/ba195739b9/c3113a728b): plot renderer shares scenes by Arc, caches the offscreen fallback renderer, retains presented frames only on request, and copies foreign-device buffers once per data change. Solver arithmetic, published values and receipt measurements are unchanged; no cohort renders an interactive native surface."
+  },
+  {
+   "path": "crates/runmat-plot/src/export/native_surface/foreign_device_tests.rs",
+   "before": null,
+   "after": [
+    "100644",
+    "blob",
+    "749245b88c982ffdb97a0dbfdcd31d41c09f4e4c"
+   ],
+   "reason": "Test only (WPAN-R): GPU frame-reuse and cross-device pixel-parity tests. No cohort runs them."
+  },
+  {
+   "path": "crates/runmat-plot/src/export/native_surface/frame_reuse_tests.rs",
+   "before": null,
+   "after": [
+    "100644",
+    "blob",
+    "eec623a77b8ea0ceb162f8a368cc042f7928da59"
+   ],
+   "reason": "Test only (WPAN-R): GPU frame-reuse and cross-device pixel-parity tests. No cohort runs them."
+  },
+  {
+   "path": "crates/runmat-plot/src/export/native_surface/presented_frame.rs",
+   "before": null,
+   "after": [
+    "100644",
+    "blob",
+    "f47791be7fdaba4621d0b0b51c6b97eefb61cc3d"
+   ],
+   "reason": "Rendering only (Windows pan fix, WPAN-R a6b169e91b/ba195739b9/c3113a728b): plot renderer shares scenes by Arc, caches the offscreen fallback renderer, retains presented frames only on request, and copies foreign-device buffers once per data change. Solver arithmetic, published values and receipt measurements are unchanged; no cohort renders an interactive native surface."
+  },
+  {
+   "path": "crates/runmat-plot/src/export/native_surface/shared_scene.rs",
+   "before": null,
+   "after": [
+    "100644",
+    "blob",
+    "9df66e5dd01c5f5758b8337f0e4a993ec7b4dd28"
+   ],
+   "reason": "Rendering only (Windows pan fix, WPAN-R a6b169e91b/ba195739b9/c3113a728b): plot renderer shares scenes by Arc, caches the offscreen fallback renderer, retains presented frames only on request, and copies foreign-device buffers once per data change. Solver arithmetic, published values and receipt measurements are unchanged; no cohort renders an interactive native surface."
+  },
+  {
+   "path": "crates/runmat-plot/src/gpu/area.rs",
+   "before": [
+    "100644",
+    "blob",
+    "0e091517bea31527308fe9d0adf0277984e28ce9"
+   ],
+   "after": [
+    "100644",
+    "blob",
+    "dec7823c776a5437a89ec6a5b7785dd88b8686bd"
+   ],
+   "reason": "Rendering only (Windows pan fix, WPAN-R a6b169e91b/ba195739b9/c3113a728b): GPU packers tag their vertex and indirect buffers with their device. Solver arithmetic, published values and receipt measurements are unchanged; no cohort renders an interactive native surface."
+  },
+  {
+   "path": "crates/runmat-plot/src/gpu/bar.rs",
+   "before": [
+    "100644",
+    "blob",
+    "5ad3fe01a44a47ab61641af4ebbd776e801c9eca"
+   ],
+   "after": [
+    "100644",
+    "blob",
+    "681a5afbc2c2b6ac8c4e1b1155025b43a8e1f96f"
+   ],
+   "reason": "Rendering only (Windows pan fix, WPAN-R a6b169e91b/ba195739b9/c3113a728b): GPU packers tag their vertex and indirect buffers with their device. Solver arithmetic, published values and receipt measurements are unchanged; no cohort renders an interactive native surface."
+  },
+  {
+   "path": "crates/runmat-plot/src/gpu/contour.rs",
+   "before": [
+    "100644",
+    "blob",
+    "0d4757ff9ba3b073475d5baa6c108e0417aeab4b"
+   ],
+   "after": [
+    "100644",
+    "blob",
+    "8a9483d5c3187acfe2eb99850c9f8f387ece789e"
+   ],
+   "reason": "Rendering only (Windows pan fix, WPAN-R a6b169e91b/ba195739b9/c3113a728b): GPU packers tag their vertex and indirect buffers with their device. Solver arithmetic, published values and receipt measurements are unchanged; no cohort renders an interactive native surface."
+  },
+  {
+   "path": "crates/runmat-plot/src/gpu/contour_fill.rs",
+   "before": [
+    "100644",
+    "blob",
+    "6c252fe663f35e22444055250f8b0d38b73a50fd"
+   ],
+   "after": [
+    "100644",
+    "blob",
+    "42c7e339c1f60dedc28c267a00cc65e660adfc09"
+   ],
+   "reason": "Rendering only (Windows pan fix, WPAN-R a6b169e91b/ba195739b9/c3113a728b): GPU packers tag their vertex and indirect buffers with their device. Solver arithmetic, published values and receipt measurements are unchanged; no cohort renders an interactive native surface."
+  },
+  {
+   "path": "crates/runmat-plot/src/gpu/errorbar.rs",
+   "before": [
+    "100644",
+    "blob",
+    "05af0c4a9937f9f4ca2fb4de2e35f068491c7fbc"
+   ],
+   "after": [
+    "100644",
+    "blob",
+    "caf56e386f2753db7e1dd86c7215e5cf36e0ce3d"
+   ],
+   "reason": "Rendering only (Windows pan fix, WPAN-R a6b169e91b/ba195739b9/c3113a728b): GPU packers tag their vertex and indirect buffers with their device. Solver arithmetic, published values and receipt measurements are unchanged; no cohort renders an interactive native surface."
+  },
+  {
+   "path": "crates/runmat-plot/src/gpu/image.rs",
+   "before": [
+    "100644",
+    "blob",
+    "26022773394ef72ba615158386bf019c7f22bbb3"
+   ],
+   "after": [
+    "100644",
+    "blob",
+    "95de4788ca225ee731c103125d1513964368d878"
+   ],
+   "reason": "Rendering only (Windows pan fix, WPAN-R a6b169e91b/ba195739b9/c3113a728b): GPU packers tag their vertex and indirect buffers with their device. Solver arithmetic, published values and receipt measurements are unchanged; no cohort renders an interactive native surface."
+  },
+  {
+   "path": "crates/runmat-plot/src/gpu/line.rs",
+   "before": [
+    "100644",
+    "blob",
+    "d97c4f2f039fc4c2ae0d2e24b9417ce87c162ca3"
+   ],
+   "after": [
+    "100644",
+    "blob",
+    "18d03c7eccf7afb6db074f4e185ec3bfa7d2d7b0"
+   ],
+   "reason": "Rendering only (Windows pan fix, WPAN-R a6b169e91b/ba195739b9/c3113a728b): GPU packers tag their vertex and indirect buffers with their device. Solver arithmetic, published values and receipt measurements are unchanged; no cohort renders an interactive native surface."
+  },
+  {
+   "path": "crates/runmat-plot/src/gpu/line3.rs",
+   "before": [
+    "100644",
+    "blob",
+    "f516c62b7bd468ed98e1a636307b3e4b9455394c"
+   ],
+   "after": [
+    "100644",
+    "blob",
+    "5aa6b1a729b2ce1958c6f1f47ca463a9c3b585ae"
+   ],
+   "reason": "Rendering only (Windows pan fix, WPAN-R a6b169e91b/ba195739b9/c3113a728b): GPU packers tag their vertex and indirect buffers with their device. Solver arithmetic, published values and receipt measurements are unchanged; no cohort renders an interactive native surface."
+  },
+  {
+   "path": "crates/runmat-plot/src/gpu/quiver.rs",
+   "before": [
+    "100644",
+    "blob",
+    "b7a512506a0a3d9d4c3ca99c4efc9c53dc5959f0"
+   ],
+   "after": [
+    "100644",
+    "blob",
+    "477b10317ec351260e2aa22d01b638303e8d2edf"
+   ],
+   "reason": "Rendering only (Windows pan fix, WPAN-R a6b169e91b/ba195739b9/c3113a728b): GPU packers tag their vertex and indirect buffers with their device. Solver arithmetic, published values and receipt measurements are unchanged; no cohort renders an interactive native surface."
+  },
+  {
+   "path": "crates/runmat-plot/src/gpu/scatter2.rs",
+   "before": [
+    "100644",
+    "blob",
+    "95ea7f45424eac23bb31f7b7ce8d366c0fa56854"
+   ],
+   "after": [
+    "100644",
+    "blob",
+    "07955625e85c65eb8f591c97fa40d2b2280cd8ee"
+   ],
+   "reason": "Rendering only (Windows pan fix, WPAN-R a6b169e91b/ba195739b9/c3113a728b): GPU packers tag their vertex and indirect buffers with their device. Solver arithmetic, published values and receipt measurements are unchanged; no cohort renders an interactive native surface."
+  },
+  {
+   "path": "crates/runmat-plot/src/gpu/scatter3.rs",
+   "before": [
+    "100644",
+    "blob",
+    "4c8461b102846396422a82b385d995b4bf9ba9c0"
+   ],
+   "after": [
+    "100644",
+    "blob",
+    "4fb9a618453b101eda26a7a1c0d0ceff29e50017"
+   ],
+   "reason": "Rendering only (Windows pan fix, WPAN-R a6b169e91b/ba195739b9/c3113a728b): GPU packers tag their vertex and indirect buffers with their device. Solver arithmetic, published values and receipt measurements are unchanged; no cohort renders an interactive native surface."
+  },
+  {
+   "path": "crates/runmat-plot/src/gpu/stairs.rs",
+   "before": [
+    "100644",
+    "blob",
+    "bab658371b2a69cab5b4dd6ee55ff5c6c8a0b078"
+   ],
+   "after": [
+    "100644",
+    "blob",
+    "8f4f4a4c75bbb3222053222ceeba4f30656abb6e"
+   ],
+   "reason": "Rendering only (Windows pan fix, WPAN-R a6b169e91b/ba195739b9/c3113a728b): GPU packers tag their vertex and indirect buffers with their device. Solver arithmetic, published values and receipt measurements are unchanged; no cohort renders an interactive native surface."
+  },
+  {
+   "path": "crates/runmat-plot/src/gpu/stem.rs",
+   "before": [
+    "100644",
+    "blob",
+    "1817ca5b326c8b2213970f244ce0a9e77ee5eac8"
+   ],
+   "after": [
+    "100644",
+    "blob",
+    "52e5f6d15b9e85f37d647a213760587f18bfed4c"
+   ],
+   "reason": "Rendering only (Windows pan fix, WPAN-R a6b169e91b/ba195739b9/c3113a728b): GPU packers tag their vertex and indirect buffers with their device. Solver arithmetic, published values and receipt measurements are unchanged; no cohort renders an interactive native surface."
+  },
+  {
+   "path": "crates/runmat-plot/src/gpu/surface.rs",
+   "before": [
+    "100644",
+    "blob",
+    "cdedcc59f6800ccae2b7719906e797c1c89bfa76"
+   ],
+   "after": [
+    "100644",
+    "blob",
+    "6fe3df987c10a8c9630dbaeadd0cccb578fd5b35"
+   ],
+   "reason": "Rendering only (Windows pan fix, WPAN-R a6b169e91b/ba195739b9/c3113a728b): GPU packers tag their vertex and indirect buffers with their device. Solver arithmetic, published values and receipt measurements are unchanged; no cohort renders an interactive native surface."
+  },
+  {
+   "path": "crates/runmat-plot/src/plots/figure/geometry_source.rs",
+   "before": [
+    "100644",
+    "blob",
+    "0ffc0f39f26145e877bc498abf9ec620d872bdf8"
+   ],
+   "after": [
+    "100644",
+    "blob",
+    "808a83c223de416b77683ca7ee7e21c2a8d6e0b3"
+   ],
+   "reason": "Rendering only (Windows pan fix, WPAN-R a6b169e91b/ba195739b9/c3113a728b): plot renderer shares scenes by Arc, caches the offscreen fallback renderer, retains presented frames only on request, and copies foreign-device buffers once per data change. Solver arithmetic, published values and receipt measurements are unchanged; no cohort renders an interactive native surface."
+  },
+  {
+   "path": "crates/runmat-plot/src/web.rs",
+   "before": [
+    "100644",
+    "blob",
+    "e0d481cc6832b672c62a9ddedad4418255fa82fc"
+   ],
+   "after": [
+    "100644",
+    "blob",
+    "5478f11f8559d0a0e33350efd2a179bc5d1cac1b"
+   ],
+   "reason": "Rendering only (Windows pan fix, WPAN-R a6b169e91b/ba195739b9/c3113a728b): plot renderer shares scenes by Arc, caches the offscreen fallback renderer, retains presented frames only on request, and copies foreign-device buffers once per data change. Solver arithmetic, published values and receipt measurements are unchanged; no cohort renders an interactive native surface."
+  },
+  {
    "path": "crates/runmat-runtime/src/analysis/field_scene.rs",
    "before": [
     "100644",
@@ -2718,9 +3104,9 @@
    "after": [
     "100644",
     "blob",
-    "2dbaf9d1ee5cbe642c93c9b7158171bdbc9998dd"
+    "abb6f83bbf74e496b3bd61af61423b29a308bff4"
    ],
-   "reason": "Display only: 1e945c104a (disp072) labels a mode-ordinal field in the live field-scene legend as 'Mode N relative amplitude', 0 to 1, as the snapshot posters already do, and carries the mode index on FieldData for that label. It changes legend text and range only; solver arithmetic, published field values, units in the store and receipt measurements are unchanged."
+   "reason": "Display only: 1e945c104a (disp072) labels a mode-ordinal field in the live field-scene legend as 'Mode N relative amplitude', 0 to 1, as the snapshot posters already do, and carries the mode index on FieldData for that label. It changes legend text and range only; solver arithmetic, published field values, units in the store and receipt measurements are unchanged. Then 18dc173c6f (field_scene cleanup): FieldData's normalized flag is replaced by mode.is_some(), the one source it was always derived from; field_scene.rs returns to 600 lines. Display only; no behaviour change."
   },
   {
    "path": "crates/runmat-runtime/src/analysis/field_scene/deformation.rs",
@@ -2735,6 +3121,20 @@
     "0a9f01ec5a6300f18e370bd2695e3bdcfe3b0ede"
    ],
    "reason": "Display only: 1e945c104a (disp072) labels a mode-ordinal field in the live field-scene legend as 'Mode N relative amplitude', 0 to 1, as the snapshot posters already do, and carries the mode index on FieldData for that label. It changes legend text and range only; solver arithmetic, published field values, units in the store and receipt measurements are unchanged."
+  },
+  {
+   "path": "crates/runmat-runtime/src/analysis/field_scene/geometry.rs",
+   "before": [
+    "100644",
+    "blob",
+    "281d3ed1c2ffe7639f9633cc2a6489a08dc05d0e"
+   ],
+   "after": [
+    "100644",
+    "blob",
+    "6e16237a9ca4b8d53859502ef4941c7a50fee390"
+   ],
+   "reason": "Display only: the field-scene cleanup reads a mode shape as mode.is_some() instead of the removed normalized flag it was derived from. No behaviour change; solver arithmetic and published values are unchanged. No cohort renders a live field scene."
   },
   {
    "path": "crates/runmat-runtime/src/analysis/field_scene/legend.rs",
@@ -2765,6 +3165,20 @@
    "reason": "Formatting only: cargo fmt --all with the pinned rustfmt (rustc 1.90.0) and the repository rustfmt.toml. Tokens, expressions, arguments and control flow are unchanged."
   },
   {
+   "path": "crates/runmat-runtime/src/analysis/field_scene/stats.rs",
+   "before": [
+    "100644",
+    "blob",
+    "d1794d80d8ed359056a385f196b9d5e6126843de"
+   ],
+   "after": [
+    "100644",
+    "blob",
+    "b11ae94d59dd2f2685be3a44bee61883a273f858"
+   ],
+   "reason": "Display only: the field-scene cleanup reads a mode shape as mode.is_some() instead of the removed normalized flag it was derived from. No behaviour change; solver arithmetic and published values are unchanged. No cohort renders a live field scene."
+  },
+  {
    "path": "crates/runmat-runtime/src/analysis/field_scene/view.rs",
    "before": [
     "100644",
@@ -2774,9 +3188,9 @@
    "after": [
     "100644",
     "blob",
-    "41167297631f8e763aa6dbf510cd2637ab77fad4"
+    "83161fee82712b93d8d85b396772aca729a7c6cb"
    ],
-   "reason": "Display only: 1e945c104a (disp072) labels a mode-ordinal field in the live field-scene legend as 'Mode N relative amplitude', 0 to 1, as the snapshot posters already do, and carries the mode index on FieldData for that label. It changes legend text and range only; solver arithmetic, published field values, units in the store and receipt measurements are unchanged."
+   "reason": "Display only: 1e945c104a (disp072) labels a mode-ordinal field in the live field-scene legend as 'Mode N relative amplitude', 0 to 1, as the snapshot posters already do, and carries the mode index on FieldData for that label. It changes legend text and range only; solver arithmetic, published field values, units in the store and receipt measurements are unchanged. Then 18dc173c6f (field_scene cleanup): FieldData's normalized flag is replaced by mode.is_some(), the one source it was always derived from; field_scene.rs returns to 600 lines. Display only; no behaviour change."
   },
   {
    "path": "crates/runmat-runtime/src/analysis/mod.rs",
@@ -2830,9 +3244,23 @@
    "after": [
     "100644",
     "blob",
-    "12c6b5a59fba201397801a40449930119c810d46"
+    "51738d5704d793af7fb4c630f19a7419c9b017c8"
    ],
-   "reason": "Generated: scripts/regenerate-wasm-registry.sh after the subplot axes-slot repair (8b33ada885) changed the builtin source fingerprint. Only REGISTRY_SOURCE_FINGERPRINT changes; the 3084 registry entries, builtin and constant counts and manifest digest are identical. It is read only by the wasm32 build; no cohort runs a wasm build."
+   "reason": "Generated: scripts/regenerate-wasm-registry.sh after the subplot axes-slot repair (8b33ada885) changed the builtin source fingerprint. Only REGISTRY_SOURCE_FINGERPRINT changes; the 3084 registry entries, builtin and constant counts and manifest digest are identical. It is read only by the wasm32 build; no cohort runs a wasm build. Then: Generated: wasm builtin registry regenerated after the plotting builtin source changes; only REGISTRY_SOURCE_FINGERPRINT changes; 3084 entries identical. Read only by the wasm32 build."
+  },
+  {
+   "path": "crates/runmat-runtime/src/builtins/plotting/core/geometry_scene.rs",
+   "before": [
+    "100644",
+    "blob",
+    "53c775bc935bdf01276f61381ae838941455fabe"
+   ],
+   "after": [
+    "100644",
+    "blob",
+    "4fe80bde374ad9b9da8f57dd8117c398d7e44301"
+   ],
+   "reason": "Rendering only (Windows pan fix, WPAN-R a6b169e91b/ba195739b9/c3113a728b): the geometry-scene registry shares scenes by Arc (copy-on-write edits) so a camera-only frame copies no geometry; clone_geometry_scene keeps its behaviour. Solver arithmetic, published values and receipt measurements are unchanged; no cohort renders an interactive native surface."
   },
   {
    "path": "crates/runmat-runtime/src/builtins/plotting/core/state/property_mutation/layout.rs",
@@ -2847,6 +3275,34 @@
     "b9ca350ed14e15cda6f423caa05a4f92077605c0"
    ],
    "reason": "Formatted by the cargo fmt pass, then 8b33ada885 adds pin_legacy_axes_to_subplot_grid: on the first subplot of a uniform-grid figure, axes i takes slot i of the requested grid instead of being retired. This is the plotting state for subplot only. None of the four cohorts calls subplot: typed_fea_geometry_cli, remote::driver_replacement_tests, runtime_scale and cad_airliner_drawing contain no subplot call."
+  },
+  {
+   "path": "crates/runmat-runtime/src/builtins/plotting/core/web.rs",
+   "before": [
+    "100644",
+    "blob",
+    "519d71dd94c072be5d86d1b79fcc149bf0bc5cf0"
+   ],
+   "after": [
+    "100644",
+    "blob",
+    "5733fb74b6c5d83b2577f13bfab1026943af9702"
+   ],
+   "reason": "Rendering only (Windows pan fix, WPAN-R a6b169e91b/ba195739b9/c3113a728b): the geometry-scene registry shares scenes by Arc (copy-on-write edits) so a camera-only frame copies no geometry; clone_geometry_scene keeps its behaviour. Solver arithmetic, published values and receipt measurements are unchanged; no cohort renders an interactive native surface."
+  },
+  {
+   "path": "crates/runmat-runtime/src/builtins/plotting/mod.rs",
+   "before": [
+    "100644",
+    "blob",
+    "cec397724dadf0cf4d6f2e667b8cfe3175e3f393"
+   ],
+   "after": [
+    "100644",
+    "blob",
+    "e19f1a1b6e8009e7b65654a21d8973b0a297a65e"
+   ],
+   "reason": "Rendering only (Windows pan fix, WPAN-R a6b169e91b/ba195739b9/c3113a728b): the geometry-scene registry shares scenes by Arc (copy-on-write edits) so a camera-only frame copies no geometry; clone_geometry_scene keeps its behaviour. Solver arithmetic, published values and receipt measurements are unchanged; no cohort renders an interactive native surface."
   },
   {
    "path": "crates/runmat-runtime/src/geometry/design_source.rs",
@@ -3031,5 +3487,5 @@
    "reason": "Formatting only: cargo fmt --all with the pinned rustfmt (rustc 1.90.0) and the repository rustfmt.toml. Tokens, expressions, arguments and control flow are unchanged."
   }
  ],
- "reason": "Conserves the fresh 0.7.2 scientific measurements across the CI repairs. cargo fmt --all on the measured source (3583e21662, whose scientific inputs equal the measured 912f34e3cd inventory) reproduces the 191 formatted Rust files of bd7dd3a4d1 blob for blob. Other changed inputs: the regenerated FEA highlighting grammar and the regenerated wasm builtin registry (fingerprint line only), which adds one field-quantity word and no execution path reads it; the empty pinned-file read in the remote filesystem providers (3af73068ba); the mode-shape legend wording in the live field scene and CLI snapshot (1e945c104a; legend text and range only); the subplot axes-slot repair in runtime plotting state (8b33ada885), which no cohort exercises; the OCCT host's per-thread STEP import table (a6fb58c3ad; the airliner cohort imports no STEP file, so its table is empty either way); the STEP exporter's direct-surface pass (d36e979417; no cohort exports STEP); and test-only edits that no cohort runs (eight OCCT CAD tests read the always-known mass-properties volume; the G128 multigrid memory test is ignored). Solver arithmetic, model inputs, dependencies, features and thresholds are unchanged. This review is not a rerun of the scientific or performance measurements."
+ "reason": "Conserves the fresh 0.7.2 scientific measurements across the CI repairs. cargo fmt --all on the measured source (3583e21662, whose scientific inputs equal the measured 912f34e3cd inventory) reproduces the 191 formatted Rust files of bd7dd3a4d1 blob for blob. Other changed inputs: the regenerated FEA highlighting grammar and the regenerated wasm builtin registry (fingerprint line only), which adds one field-quantity word and no execution path reads it; the empty pinned-file read in the remote filesystem providers (3af73068ba); the mode-shape legend wording in the live field scene and CLI snapshot (1e945c104a; legend text and range only); the Windows pan renderer work (WPAN-R: shared scenes, cached fallback, cross-device GPU buffers; rendering only); the subplot axes-slot repair in runtime plotting state (8b33ada885), which no cohort exercises; the OCCT host's per-thread STEP import table (a6fb58c3ad; the airliner cohort imports no STEP file, so its table is empty either way); the STEP exporter's direct-surface pass (d36e979417; no cohort exports STEP); and test-only edits that no cohort runs (eight OCCT CAD tests read the always-known mass-properties volume; the G128 multigrid memory test is ignored). Solver arithmetic, model inputs, dependencies, features and thresholds are unchanged. This review is not a rerun of the scientific or performance measurements."
 }

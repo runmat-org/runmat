@@ -420,8 +420,9 @@ impl PlotRenderer {
                         }
                     } else {
                         log::trace!(target: "runmat_plot", "draw direct vertices");
-                        if let Some((args, offset)) = Self::gpu_indirect_args(render_data) {
-                            render_pass.draw_indirect(args, offset);
+                        if let Some((args, offset)) = self.gpu_indirect_args(emission, render_data)
+                        {
+                            render_pass.draw_indirect(&args, offset);
                             continue;
                         }
                         if is_markers {

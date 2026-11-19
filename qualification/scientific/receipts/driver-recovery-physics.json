@@ -111,14 +111,14 @@
       "encoding": "git-mode-type-blob-path-tuples-v1"
     },
     "accepted_inputs": {
-      "sha256": "e61a531b92c6977e768a9672cf42ab90a34c9e0ac12e2901fd8d32147b4934de",
-      "files": 26439,
+      "sha256": "56052a994423cb306f39bf40b8404b23f41554124330d90fee0a81d7823bfa16",
+      "files": 26444,
       "encoding": "git-mode-type-blob-path-tuples-v1"
     },
-    "reason": "Conserves the fresh 0.7.2 scientific measurements across the CI repairs. cargo fmt --all on the measured source (3583e21662, whose scientific inputs equal the measured 912f34e3cd inventory) reproduces the 191 formatted Rust files of bd7dd3a4d1 blob for blob. Other changed inputs: the regenerated FEA highlighting grammar and the regenerated wasm builtin registry (fingerprint line only), which adds one field-quantity word and no execution path reads it; the empty pinned-file read in the remote filesystem providers (3af73068ba); the mode-shape legend wording in the live field scene and CLI snapshot (1e945c104a; legend text and range only); the subplot axes-slot repair in runtime plotting state (8b33ada885), which no cohort exercises; the OCCT host's per-thread STEP import table (a6fb58c3ad; the airliner cohort imports no STEP file, so its table is empty either way); the STEP exporter's direct-surface pass (d36e979417; no cohort exports STEP); and test-only edits that no cohort runs (eight OCCT CAD tests read the always-known mass-properties volume; the G128 multigrid memory test is ignored). Solver arithmetic, model inputs, dependencies, features and thresholds are unchanged. This review is not a rerun of the scientific or performance measurements.",
+    "reason": "Conserves the fresh 0.7.2 scientific measurements across the CI repairs. cargo fmt --all on the measured source (3583e21662, whose scientific inputs equal the measured 912f34e3cd inventory) reproduces the 191 formatted Rust files of bd7dd3a4d1 blob for blob. Other changed inputs: the regenerated FEA highlighting grammar and the regenerated wasm builtin registry (fingerprint line only), which adds one field-quantity word and no execution path reads it; the empty pinned-file read in the remote filesystem providers (3af73068ba); the mode-shape legend wording in the live field scene and CLI snapshot (1e945c104a; legend text and range only); the Windows pan renderer work (WPAN-R: shared scenes, cached fallback, cross-device GPU buffers; rendering only); the subplot axes-slot repair in runtime plotting state (8b33ada885), which no cohort exercises; the OCCT host's per-thread STEP import table (a6fb58c3ad; the airliner cohort imports no STEP file, so its table is empty either way); the STEP exporter's direct-surface pass (d36e979417; no cohort exports STEP); and test-only edits that no cohort runs (eight OCCT CAD tests read the always-known mass-properties volume; the G128 multigrid memory test is ignored). Solver arithmetic, model inputs, dependencies, features and thresholds are unchanged. This review is not a rerun of the scientific or performance measurements.",
     "review": {
       "path": "qualification/scientific/reviews/cargo-fmt-072-20261118-driver-recovery-physics.json",
-      "sha256": "e827eecf395b718a78e14f33eb1c9f963154ba2b7291988722f84c5e8ff3cbbb"
+      "sha256": "1275d3bdb69449db1a149ef9c834edbd394db2fb87408a04b53bdbd795f3e1bd"
     }
   }
 }

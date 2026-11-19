@@ -100,17 +100,15 @@ pub fn pack_contour_vertices(
     ));
 
     let output_size = (vertex_count as u64) * std::mem::size_of::<Vertex>() as u64;
-    let output_buffer = runmat_accelerate_api::WgpuBufferOwner::new(device.create_buffer(
-        &wgpu::BufferDescriptor {
-            label: Some("contour-gpu-vertices"),
-            size: output_size,
-            usage: wgpu::BufferUsages::STORAGE
-                | wgpu::BufferUsages::VERTEX
-                | wgpu::BufferUsages::COPY_DST
-                | wgpu::BufferUsages::COPY_SRC,
-            mapped_at_creation: false,
-        },
-    ));
+    let output_buffer = emission.own_buffer(device.create_buffer(&wgpu::BufferDescriptor {
+        label: Some("contour-gpu-vertices"),
+        size: output_size,
+        usage: wgpu::BufferUsages::STORAGE
+            | wgpu::BufferUsages::VERTEX
+            | wgpu::BufferUsages::COPY_DST
+            | wgpu::BufferUsages::COPY_SRC,
+        mapped_at_creation: false,
+    }));
 
     let uniforms = ContourUniforms {
         min_z: params.min_z,

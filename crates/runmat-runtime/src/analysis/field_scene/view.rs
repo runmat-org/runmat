@@ -60,7 +60,7 @@ pub fn build_scene_view(
     // A mode shape's relative amplitude has no unit, study range or limit, as in the snapshot
     // posters: the study's display and assessments don't apply to it.
     let no_terms = legend::FieldLegendTerms::default();
-    let terms = if field.as_ref().is_some_and(|field| field.normalized) {
+    let terms = if field.as_ref().is_some_and(|field| field.mode.is_some()) {
         &no_terms
     } else {
         terms
@@ -110,7 +110,7 @@ pub fn build_scene_view(
     model_bounds.expand_by_box(&scene.bounds);
     scene.bounds = model_bounds;
     if let Some(overlay) = scene.overlay.as_mut() {
-        if let Some(field) = field.as_ref().filter(|field| field.normalized) {
+        if let Some(field) = field.as_ref().filter(|field| field.mode.is_some()) {
             present_mode_amplitude(overlay, field)?;
         } else {
             present_field_legend(overlay, field.as_ref(), terms, run_id)?;

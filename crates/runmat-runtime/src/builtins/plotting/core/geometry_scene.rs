@@ -3,20 +3,22 @@ use std::cell::RefCell;
 use std::collections::HashMap;
 #[cfg(feature = "plot-core")]
 use std::sync::atomic::{AtomicU64, Ordering};
+#[cfg(feature = "plot-core")]
+use std::sync::Arc;
 #[cfg(all(feature = "plot-core", not(target_arch = "wasm32")))]
 use std::sync::{Mutex, OnceLock};
 
 use super::import_registry::{register_imported_geometry_scene, take_imported_geometry_scene};
 
 #[cfg(all(feature = "plot-core", not(target_arch = "wasm32")))]
-type GeometrySceneRegistry = Mutex<HashMap<u32, runmat_plot::GeometryScene>>;
+type GeometrySceneRegistry = Mutex<HashMap<u32, Arc<runmat_plot::GeometryScene>>>;
 
 #[cfg(feature = "plot-core")]
 static NEXT_GEOMETRY_SCENE_HANDLE: AtomicU64 = AtomicU64::new(1);
 
 #[cfg(all(feature = "plot-core", target_arch = "wasm32"))]
 thread_local! {
-    static GEOMETRY_SCENE_REGISTRY: RefCell<HashMap<u32, runmat_plot::GeometryScene>> =
+    static GEOMETRY_SCENE_REGISTRY: RefCell<HashMap<u32, Arc<runmat_plot::GeometryScene>>> =
         RefCell::new(HashMap::new());
 }
 
@@ -46,8 +48,17 @@ pub fn import_geometry_scene(scene: runmat_plot::GeometryScene) -> crate::Builti
     Ok(handle)
 }
 
+/// An owned copy of a geometry scene, for a caller that edits it. A renderer that only draws
+/// the scene takes [`shared_geometry_scene`] instead, which copies no geometry.
 #[cfg(feature = "plot-core")]
 pub fn clone_geometry_scene(handle: u32) -> Option<runmat_plot::GeometryScene> {
+    get_geometry_scene(handle).map(Arc::unwrap_or_clone)
+}
+
+/// The registry's geometry scene, shared. Edits through this module replace the registry's
+/// copy (copy-on-write), so a holder keeps the scene it was given.
+#[cfg(feature = "plot-core")]
+pub fn shared_geometry_scene(handle: u32) -> Option<Arc<runmat_plot::GeometryScene>> {
     get_geometry_scene(handle)
 }
 
@@ -57,7 +68,7 @@ pub fn replace_geometry_scene(
     scene: runmat_plot::GeometryScene,
 ) -> crate::BuiltinResult<()> {
     with_geometry_scene_mut(handle, |current| {
-        *current = scene;
+        *current = Arc::new(scene);
     })
 }
 
@@ -68,6 +79,9 @@ pub fn append_geometry_scene_chunks(
     overlay: Option<runmat_plot::GeometrySceneOverlay>,
 ) -> crate::BuiltinResult<()> {
     with_geometry_scene_mut(handle, |scene| {
+        // A renderer may hold the current scene; it keeps that one and the registry takes a
+        // copy (copy-on-write). The next present hands the renderer the new scene.
+        let scene = Arc::make_mut(scene);
         if !chunks.is_empty() {
             scene.append_chunks(chunks);
         }
@@ -85,7 +99,7 @@ pub fn close_geometry_scene(handle: u32) -> bool {
 
 #[cfg(feature = "plot-core")]
 pub fn export_geometry_scene(handle: u32) -> crate::BuiltinResult<Option<Vec<u8>>> {
-    let Some(scene) = clone_geometry_scene(handle) else {
+    let Some(scene) = shared_geometry_scene(handle) else {
         return Ok(None);
     };
     let scene = runmat_plot::event::FigureScene::from_geometry_scene(&scene);
@@ -213,7 +227,7 @@ fn geometry_scene_limits() -> crate::replay::limits::ReplayLimits {
 
 #[cfg(feature = "plot-core")]
 pub fn present_geometry_scene_on_surface(surface_id: u32, handle: u32) -> crate::BuiltinResult<()> {
-    let Some(scene) = clone_geometry_scene(handle) else {
+    let Some(scene) = shared_geometry_scene(handle) else {
         return Err(crate::build_runtime_error(format!(
             "geometry scene handle {handle} does not exist"
         ))
@@ -243,7 +257,7 @@ fn insert_geometry_scene(
             .with_builtin("plot")
             .build()
     })?;
-    guard.insert(handle, scene);
+    guard.insert(handle, Arc::new(scene));
     Ok(())
 }
 
@@ -253,25 +267,25 @@ fn insert_geometry_scene(
     scene: runmat_plot::GeometryScene,
 ) -> crate::BuiltinResult<()> {
     GEOMETRY_SCENE_REGISTRY.with(|registry| {
-        registry.borrow_mut().insert(handle, scene);
+        registry.borrow_mut().insert(handle, Arc::new(scene));
     });
     Ok(())
 }
 
 #[cfg(all(feature = "plot-core", not(target_arch = "wasm32")))]
-fn get_geometry_scene(handle: u32) -> Option<runmat_plot::GeometryScene> {
+fn get_geometry_scene(handle: u32) -> Option<Arc<runmat_plot::GeometryScene>> {
     geometry_scene_registry().lock().ok()?.get(&handle).cloned()
 }
 
 #[cfg(all(feature = "plot-core", target_arch = "wasm32"))]
-fn get_geometry_scene(handle: u32) -> Option<runmat_plot::GeometryScene> {
+fn get_geometry_scene(handle: u32) -> Option<Arc<runmat_plot::GeometryScene>> {
     GEOMETRY_SCENE_REGISTRY.with(|registry| registry.borrow().get(&handle).cloned())
 }
 
 #[cfg(all(feature = "plot-core", not(target_arch = "wasm32")))]
 fn with_geometry_scene_mut(
     handle: u32,
-    update: impl FnOnce(&mut runmat_plot::GeometryScene),
+    update: impl FnOnce(&mut Arc<runmat_plot::GeometryScene>),
 ) -> crate::BuiltinResult<()> {
     let mut guard = geometry_scene_registry().lock().map_err(|_| {
         crate::build_runtime_error("geometry scene registry lock poisoned")
@@ -290,7 +304,7 @@ fn with_geometry_scene_mut(
 #[cfg(all(feature = "plot-core", target_arch = "wasm32"))]
 fn with_geometry_scene_mut(
     handle: u32,
-    update: impl FnOnce(&mut runmat_plot::GeometryScene),
+    update: impl FnOnce(&mut Arc<runmat_plot::GeometryScene>),
 ) -> crate::BuiltinResult<()> {
     GEOMETRY_SCENE_REGISTRY.with(|registry| {
         let mut registry = registry.borrow_mut();

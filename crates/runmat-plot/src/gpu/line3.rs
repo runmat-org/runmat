@@ -72,17 +72,15 @@ pub fn pack_vertices_from_xyz(
             entry_point: "main",
         });
 
-    let output_buffer = runmat_accelerate_api::WgpuBufferOwner::new(device.create_buffer(
-        &wgpu::BufferDescriptor {
-            label: Some("line3-gpu-vertices"),
-            size: max_vertices * std::mem::size_of::<Vertex>() as u64,
-            usage: wgpu::BufferUsages::STORAGE
-                | wgpu::BufferUsages::VERTEX
-                | wgpu::BufferUsages::COPY_DST
-                | wgpu::BufferUsages::COPY_SRC,
-            mapped_at_creation: false,
-        },
-    ));
+    let output_buffer = emission.own_buffer(device.create_buffer(&wgpu::BufferDescriptor {
+        label: Some("line3-gpu-vertices"),
+        size: max_vertices * std::mem::size_of::<Vertex>() as u64,
+        usage: wgpu::BufferUsages::STORAGE
+            | wgpu::BufferUsages::VERTEX
+            | wgpu::BufferUsages::COPY_DST
+            | wgpu::BufferUsages::COPY_SRC,
+        mapped_at_creation: false,
+    }));
 
     let uniforms = Line3Uniforms {
         color: params.color.to_array(),

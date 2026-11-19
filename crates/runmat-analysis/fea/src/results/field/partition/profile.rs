@@ -24,6 +24,26 @@ impl RecoveredFieldPartition {
         sample: RecoveredFieldSample,
         entity_count: usize,
     ) -> Result<SerializedCanonicalProfile, RecoveredFieldError> {
+        Self::profile_shapes(definition, sample, entity_count).map(|(profile, _)| profile)
+    }
+
+    /// Typed storage of one decoded canonical host partition of this shape, priced from the
+    /// serialization shape as `canonical_payload_typed_resident_bytes_estimate` prices the wire
+    /// (without the encoded bytes that estimate keeps alongside).
+    pub fn profile_shape_typed_resident_bytes(
+        definition: &RecoveredFieldDefinition,
+        sample: RecoveredFieldSample,
+        entity_count: usize,
+    ) -> Result<u64, RecoveredFieldError> {
+        Self::profile_shapes(definition, sample, entity_count).map(|(_, typed)| typed)
+    }
+
+    /// The wire profile and the typed resident estimate of one partition shape.
+    fn profile_shapes(
+        definition: &RecoveredFieldDefinition,
+        sample: RecoveredFieldSample,
+        entity_count: usize,
+    ) -> Result<(SerializedCanonicalProfile, u64), RecoveredFieldError> {
         definition.validate()?;
         sample.validate()?;
         if entity_count == 0 || entity_count > super::super::RECOVERED_FIELD_PARTITION_ENTITY_COUNT
@@ -50,18 +70,22 @@ impl RecoveredFieldPartition {
         // Transparent digest identities always serialize to fixed-width hexadecimal strings.
         // These are profile-only placeholders; no artifact or semantic identity is published.
         let placeholder = Digest::sha256([]);
-        profile_serialized_shape(
-            &PartitionSerialization {
-                schema_version: 1,
-                identity: placeholder,
-                source_field: placeholder,
-                definition,
-                sample,
-                source_indices: &indices,
-                storage: &storage,
-            },
-            FIELD_PARTITION_LIMITS,
-        )
-        .map_err(|error| RecoveredFieldError::Encoding(error.to_string()))
+        let shape = PartitionSerialization {
+            schema_version: 1,
+            identity: placeholder,
+            source_field: placeholder,
+            definition,
+            sample,
+            source_indices: &indices,
+            storage: &storage,
+        };
+        let encoding = |error: runmat_canonical_codec::CanonicalCodecError| {
+            RecoveredFieldError::Encoding(error.to_string())
+        };
+        Ok((
+            profile_serialized_shape(&shape, FIELD_PARTITION_LIMITS).map_err(encoding)?,
+            runmat_canonical_codec::profile_typed_resident_bytes(&shape, FIELD_PARTITION_LIMITS)
+                .map_err(encoding)?,
+        ))
     }
 }

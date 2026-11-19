@@ -25,6 +25,12 @@ mod tests;
 pub struct PreparedThermalInputs {
     pub inputs: Vec<PreparedAnalysisObjects>,
     pub resource_plan: FeaResourcePlan,
+    /// Transport bound of the result header and one sample of every recovered field.
+    pub sample_output_bytes: u64,
+    /// Workspace an original-object import charges for the complete result.
+    pub result_import_bytes: u64,
+    /// Typed storage of the complete decoded result.
+    pub result_typed_bytes: u64,
 }
 
 /// Recompute the worker plan using validated imported inputs, without cloning their buffers.
@@ -156,10 +162,18 @@ pub(crate) fn prepare_thermal_inputs_with_source(
     };
     let resource_plan =
         build_thermal_resource_plan_from(workload, mesh, &numerical, policy.chunk_bytes(), facts)?;
+    let sample_output_bytes = numerical
+        .sample_transport_profile(policy.chunk_bytes())?
+        .total_bytes_upper_bound;
+    let result_import_bytes = numerical.result_import_workspace_bytes(policy.chunk_bytes())?;
+    let result_typed_bytes = numerical.result_typed_resident_bytes(policy.chunk_bytes())?;
     drop(numerical);
     Ok(PreparedThermalInputs {
         inputs,
         resource_plan,
+        sample_output_bytes,
+        result_import_bytes,
+        result_typed_bytes,
     })
 }
 
