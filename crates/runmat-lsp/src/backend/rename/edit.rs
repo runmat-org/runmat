@@ -8,6 +8,7 @@ use tower_lsp::lsp_types::{
 };
 
 use crate::core::fea::FeaFunctionImportPath;
+use crate::core::workspace::{path_to_uri, uri_to_path};
 use runmat_lexer::{fea::FeaKeyword, Token};
 
 use super::super::RunMatLanguageServer;
@@ -96,7 +97,7 @@ pub(super) fn location_edits(
 }
 
 pub(super) fn file_rename(uri: &Url, old_name: &str, new_name: &str) -> Option<(Url, Url)> {
-    let mut path = uri.to_file_path().ok()?;
+    let mut path = uri_to_path(uri)?;
     if path.file_stem()?.to_str()? != old_name {
         return None;
     }
@@ -105,7 +106,7 @@ pub(super) fn file_rename(uri: &Url, old_name: &str, new_name: &str) -> Option<(
         .and_then(|value| value.to_str())
         .unwrap_or("m");
     path.set_file_name(format!("{new_name}.{extension}"));
-    Some((uri.clone(), Url::from_file_path(path).ok()?))
+    Some((uri.clone(), path_to_uri(&path)?))
 }
 
 fn quoted_renamed_import(source: &str, new_name: &str) -> String {

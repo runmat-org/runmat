@@ -589,34 +589,8 @@ async fn analyze_fea_document(uri: &str, entry: &DocEntry) -> Result<FeaDocument
 }
 
 fn wasm_file_path(uri: &Url) -> Option<PathBuf> {
-    if uri.scheme() != "file" {
-        return None;
-    }
-    let encoded = uri.path().as_bytes();
-    let mut decoded = Vec::with_capacity(encoded.len());
-    let mut index = 0;
-    while index < encoded.len() {
-        if encoded[index] == b'%' && index + 2 < encoded.len() {
-            let high = hex_value(encoded[index + 1])?;
-            let low = hex_value(encoded[index + 2])?;
-            decoded.push((high << 4) | low);
-            index += 3;
-        } else {
-            decoded.push(encoded[index]);
-            index += 1;
-        }
-    }
-    let path = PathBuf::from(String::from_utf8(decoded).ok()?);
+    let path = crate::core::workspace::uri_to_path(uri)?;
     runmat_filesystem::normalize_virtual_path(&path).ok()
-}
-
-fn hex_value(value: u8) -> Option<u8> {
-    match value {
-        b'0'..=b'9' => Some(value - b'0'),
-        b'a'..=b'f' => Some(value - b'a' + 10),
-        b'A'..=b'F' => Some(value - b'A' + 10),
-        _ => None,
-    }
 }
 
 #[wasm_bindgen]

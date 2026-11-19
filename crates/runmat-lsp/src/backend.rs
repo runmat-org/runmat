@@ -14,7 +14,8 @@ use crate::core::fea::FeaDocumentAnalysis;
 use crate::core::position::position_to_offset;
 use crate::core::project::ProjectContext;
 use crate::core::workspace::{
-    merge_workspace_symbols, workspace_symbols_from_documents, workspace_symbols_with_project,
+    merge_workspace_symbols, path_to_uri, uri_to_path, workspace_symbols_from_documents,
+    workspace_symbols_with_project,
 };
 use log::{debug, info};
 use runmat_config::runtime::{ConfigLoader, LanguageCompatMode};
@@ -229,10 +230,7 @@ impl RunMatLanguageServer {
         let (text, source_name) = {
             let state = self.state.read().await;
             let doc = state.documents.get(uri)?;
-            let source_name = uri
-                .to_file_path()
-                .ok()
-                .and_then(|path| path.to_str().map(str::to_string));
+            let source_name = uri_to_path(uri).and_then(|path| path.to_str().map(str::to_string));
             (doc.text.clone(), source_name)
         };
         let analysis =
@@ -247,7 +245,7 @@ impl RunMatLanguageServer {
             let doc = state.documents.get_mut(uri)?;
             doc.analysis = Some(analysis.clone());
             if let Some(cache) = state.project_cache.as_mut() {
-                if let Ok(path) = uri.to_file_path() {
+                if let Some(path) = uri_to_path(uri) {
                     if cache.files.contains_key(&path) {
                         cache.files.insert(
                             path,
@@ -298,7 +296,7 @@ impl RunMatLanguageServer {
             let mut state = self.state.write().await;
             state.documents.remove(uri);
             if let Some(cache) = state.project_cache.as_mut() {
-                if let Ok(path) = uri.to_file_path() {
+                if let Some(path) = uri_to_path(uri) {
                     cache.files.remove(&path);
                 }
             }
@@ -377,7 +375,7 @@ impl RunMatLanguageServer {
             {
                 let mut updated = cache;
                 for (uri, text, analysis) in open_docs {
-                    if let Ok(path) = uri.to_file_path() {
+                    if let Some(path) = uri_to_path(&uri) {
                         updated.files.insert(
                             path,
                             CachedProjectDoc {
@@ -398,9 +396,7 @@ impl RunMatLanguageServer {
         let open_doc_by_path = open_docs
             .iter()
             .filter_map(|(uri, text, analysis)| {
-                uri.to_file_path()
-                    .ok()
-                    .map(|path| (path, (uri.clone(), text.clone(), analysis.clone())))
+                uri_to_path(uri).map(|path| (path, (uri.clone(), text.clone(), analysis.clone())))
             })
             .collect::<HashMap<_, _>>();
 
@@ -421,7 +417,7 @@ impl RunMatLanguageServer {
                     .ok()?;
             let source_name = source_file.to_str();
             let analysis = analyze_document_with_compat_and_source(&text, compat_mode, source_name);
-            let uri = Url::from_file_path(source_file).ok()?;
+            let uri = path_to_uri(source_file)?;
             files.insert(
                 source_file.clone(),
                 CachedProjectDoc {
@@ -456,9 +452,7 @@ fn symmetric_diff_symbols(
 }
 
 fn uri_file_path_string(uri: &Url) -> Option<String> {
-    uri.to_file_path()
-        .ok()
-        .and_then(|path| path.to_str().map(str::to_owned))
+    uri_to_path(uri).and_then(|path| path.to_str().map(str::to_owned))
 }
 
 fn symbol_name_under_cursor(
@@ -1095,13 +1089,13 @@ fn compat_mode_from_workspace(params: &InitializeParams) -> Option<LanguageCompa
 fn workspace_roots(params: &InitializeParams) -> Vec<PathBuf> {
     let mut roots = Vec::new();
     if let Some(root_uri) = &params.root_uri {
-        if let Ok(path) = root_uri.to_file_path() {
+        if let Some(path) = uri_to_path(root_uri) {
             roots.push(path);
         }
     }
     if let Some(folders) = &params.workspace_folders {
         for folder in folders {
-            if let Ok(path) = folder.uri.to_file_path() {
+            if let Some(path) = uri_to_path(&folder.uri) {
                 if !roots.contains(&path) {
                     roots.push(path);
                 }
@@ -1116,12 +1110,12 @@ fn apply_workspace_folder_change(
     params: &DidChangeWorkspaceFoldersParams,
 ) {
     for folder in &params.event.removed {
-        if let Ok(path) = folder.uri.to_file_path() {
+        if let Some(path) = uri_to_path(&folder.uri) {
             roots.retain(|root| root != &path);
         }
     }
     for folder in &params.event.added {
-        if let Ok(path) = folder.uri.to_file_path() {
+        if let Some(path) = uri_to_path(&folder.uri) {
             if !roots.contains(&path) {
                 roots.push(path);
             }

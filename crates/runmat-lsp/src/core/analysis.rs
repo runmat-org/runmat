@@ -1252,24 +1252,7 @@ fn read_file_text(path: &std::path::Path) -> Option<String> {
 }
 
 fn uri_file_source_name(uri: &Url) -> Option<String> {
-    #[cfg(not(target_arch = "wasm32"))]
-    {
-        uri.to_file_path()
-            .ok()
-            .and_then(|path| path.to_str().map(str::to_owned))
-    }
-    #[cfg(target_arch = "wasm32")]
-    {
-        if uri.scheme() != "file" {
-            return None;
-        }
-        let path = uri.path();
-        if path.is_empty() {
-            None
-        } else {
-            Some(path.to_string())
-        }
-    }
+    crate::core::workspace::uri_to_path(uri).and_then(|path| path.to_str().map(str::to_owned))
 }
 
 fn dedupe_locations(locations: &mut Vec<Location>) {
@@ -1288,20 +1271,7 @@ fn dedupe_locations(locations: &mut Vec<Location>) {
 }
 
 fn file_path_to_url(path: &std::path::Path) -> Option<Url> {
-    #[cfg(not(target_arch = "wasm32"))]
-    {
-        Url::from_file_path(path).ok()
-    }
-    #[cfg(target_arch = "wasm32")]
-    {
-        let raw = path.to_str()?;
-        let normalized = if raw.starts_with('/') {
-            raw.to_string()
-        } else {
-            format!("/{raw}")
-        };
-        Url::parse(&format!("file://{normalized}")).ok()
-    }
+    crate::core::workspace::path_to_uri(path)
 }
 
 pub fn function_definitions_in_document(

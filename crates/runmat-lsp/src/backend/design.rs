@@ -5,6 +5,8 @@
 
 use tower_lsp::lsp_types::Url;
 
+use crate::core::workspace::uri_to_path;
+
 use crate::core::design::{
     design_dependencies, design_dialect, DesignDocumentAnalysis, DesignFiles, DesignValues,
 };
@@ -61,7 +63,7 @@ pub(super) async fn reanalyze_open_documents(server: &RunMatLanguageServer) {
             .documents
             .iter()
             .filter_map(|(uri, d)| {
-                let path = uri.to_file_path().ok()?;
+                let path = uri_to_path(uri)?;
                 Some((path.to_string_lossy().into_owned(), d.text.clone()))
             })
             .collect();
@@ -71,10 +73,9 @@ pub(super) async fn reanalyze_open_documents(server: &RunMatLanguageServer) {
         let Some(dialect) = design_dialect(&uri) else {
             continue;
         };
-        let path = uri
-            .to_file_path()
+        let path = uri_to_path(&uri)
             .map(|p| p.to_string_lossy().into_owned())
-            .unwrap_or_else(|_| uri.path().to_string());
+            .unwrap_or_else(|| uri.path().to_string());
         let files = gather(dialect, &path, &text, &open);
         let analysis = DesignDocumentAnalysis::analyze(&uri, dialect, &text, &files, &values);
         let diagnostics = analysis.diagnostics();

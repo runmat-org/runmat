@@ -6,6 +6,7 @@ use serde_json::json;
 use tower_lsp::lsp_types::{Diagnostic, DiagnosticSeverity, NumberOrString, Position, Range, Url};
 
 use crate::core::fea::{analyze_fea_source, is_fea_uri, FeaDocumentAnalysis};
+use crate::core::workspace::uri_to_path;
 
 use super::{RunMatLanguageServer, RunmatStatusNotification};
 
@@ -40,15 +41,13 @@ pub(super) async fn workspace_analyses(
         let source_overlays = state
             .documents
             .iter()
-            .filter_map(|(uri, document)| Some((uri.to_file_path().ok()?, document.text.clone())))
+            .filter_map(|(uri, document)| Some((uri_to_path(uri)?, document.text.clone())))
             .collect::<BTreeMap<_, _>>();
         let open_documents = state
             .documents
             .iter()
             .filter(|(uri, _)| is_fea_uri(uri))
-            .filter_map(|(uri, document)| {
-                Some((uri.to_file_path().ok()?, document.fea_analysis.clone()))
-            })
+            .filter_map(|(uri, document)| Some((uri_to_path(uri)?, document.fea_analysis.clone())))
             .collect::<Vec<_>>();
         (
             state.workspace_roots.clone(),
@@ -130,7 +129,7 @@ async fn reanalyze_document(server: &RunMatLanguageServer, uri: &Url) {
             .documents
             .iter()
             .filter_map(|(document_uri, document)| {
-                Some((document_uri.to_file_path().ok()?, document.text.clone()))
+                Some((uri_to_path(document_uri)?, document.text.clone()))
             })
             .collect::<BTreeMap<_, _>>();
         (
@@ -140,9 +139,9 @@ async fn reanalyze_document(server: &RunMatLanguageServer, uri: &Url) {
             state.compat_mode,
         )
     };
-    let result = match uri.to_file_path() {
-        Ok(path) => check_study(text.clone(), path, roots, source_overlays, compat).await,
-        Err(()) => Err("FEA language tooling requires a file-backed document".to_string()),
+    let result = match uri_to_path(uri) {
+        Some(path) => check_study(text.clone(), path, roots, source_overlays, compat).await,
+        None => Err("FEA language tooling requires a file-backed document".to_string()),
     };
     let (analysis, error) = match result {
         Ok(analysis) => (Some(analysis), None),
