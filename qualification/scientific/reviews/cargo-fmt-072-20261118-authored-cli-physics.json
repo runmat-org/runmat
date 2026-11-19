@@ -6,7 +6,7 @@
   "encoding": "git-mode-type-blob-path-tuples-v1"
  },
  "accepted_inputs": {
-  "sha256": "fb50e0e1c4f12212a6a588cb41e927dd6ae8de49dbde0eaf3c58ec7932dcb612",
+  "sha256": "8e1b8894a45d76409ba8338c4f60f4fb1271f0e2569227639d2b25ac39132e3a",
   "files": 26439,
   "encoding": "git-mode-type-blob-path-tuples-v1"
  },
@@ -16,7 +16,7 @@
  "qualification_evidence": [
   {
    "path": "qualification/scientific/evidence/cargo-fmt-072-20261118.json",
-   "sha256": "aca1aa0cfec6ceb351c8e611f8ddd5ffd6d55ab0b4fc27477f28dd079ce63a62"
+   "sha256": "5ecb54a5134299b369637da6fa3fd7dff9c7df8c9a81210731ad6979120da429"
   }
  ],
  "changed_inputs": [
@@ -2037,6 +2037,34 @@
    "reason": "Formatting only: cargo fmt --all with the pinned rustfmt (rustc 1.90.0) and the repository rustfmt.toml. Tokens, expressions, arguments and control flow are unchanged."
   },
   {
+   "path": "crates/runmat-cli/src/commands/fea/snapshot/views.rs",
+   "before": [
+    "100644",
+    "blob",
+    "f0f2dbc2434016eae8719c007705ddc4b21e8370"
+   ],
+   "after": [
+    "100644",
+    "blob",
+    "76decc91d4da02c9736a82599251bab416ab691b"
+   ],
+   "reason": "Display only: 1e945c104a (disp072) makes the CLI snapshot poster call the shared mode-shape legend function in runmat-runtime field_scene/legend.rs instead of its own copy. The poster label, unit and range are unchanged (47 CLI snapshot tests pass). Solver arithmetic, published fields and receipt measurements are unchanged."
+  },
+  {
+   "path": "crates/runmat-cli/src/commands/fea/snapshot/views/profiles.rs",
+   "before": [
+    "100644",
+    "blob",
+    "d0580bef5afd0eade987f2af8fc18b8b93748ac3"
+   ],
+   "after": [
+    "100644",
+    "blob",
+    "25e75b690693b51b7dcb6a33d87c7f3663422b62"
+   ],
+   "reason": "Display only: 1e945c104a (disp072) makes the CLI snapshot poster call the shared mode-shape legend function in runmat-runtime field_scene/legend.rs instead of its own copy. The poster label, unit and range are unchanged (47 CLI snapshot tests pass). Solver arithmetic, published fields and receipt measurements are unchanged."
+  },
+  {
    "path": "crates/runmat-cli/tests/check_cli.rs",
    "before": [
     "100644",
@@ -2639,6 +2667,48 @@
    "reason": "Formatting only: cargo fmt --all with the pinned rustfmt (rustc 1.90.0) and the repository rustfmt.toml. Tokens, expressions, arguments and control flow are unchanged."
   },
   {
+   "path": "crates/runmat-runtime/src/analysis/field_scene.rs",
+   "before": [
+    "100644",
+    "blob",
+    "b99263dba56f04ab4300f1cae3db36975e652d7b"
+   ],
+   "after": [
+    "100644",
+    "blob",
+    "2dbaf9d1ee5cbe642c93c9b7158171bdbc9998dd"
+   ],
+   "reason": "Display only: 1e945c104a (disp072) labels a mode-ordinal field in the live field-scene legend as 'Mode N relative amplitude', 0 to 1, as the snapshot posters already do, and carries the mode index on FieldData for that label. It changes legend text and range only; solver arithmetic, published field values, units in the store and receipt measurements are unchanged."
+  },
+  {
+   "path": "crates/runmat-runtime/src/analysis/field_scene/deformation.rs",
+   "before": [
+    "100644",
+    "blob",
+    "7e6496510f4e0759eef7bbab86b1e4b21d0517e1"
+   ],
+   "after": [
+    "100644",
+    "blob",
+    "0a9f01ec5a6300f18e370bd2695e3bdcfe3b0ede"
+   ],
+   "reason": "Display only: 1e945c104a (disp072) labels a mode-ordinal field in the live field-scene legend as 'Mode N relative amplitude', 0 to 1, as the snapshot posters already do, and carries the mode index on FieldData for that label. It changes legend text and range only; solver arithmetic, published field values, units in the store and receipt measurements are unchanged."
+  },
+  {
+   "path": "crates/runmat-runtime/src/analysis/field_scene/legend.rs",
+   "before": [
+    "100644",
+    "blob",
+    "f5dce334181e98cbb139008126a780499172e3b5"
+   ],
+   "after": [
+    "100644",
+    "blob",
+    "9c5af0d0c8d2b244ada9f3f987bfb6c84e1ff672"
+   ],
+   "reason": "Display only: 1e945c104a (disp072) labels a mode-ordinal field in the live field-scene legend as 'Mode N relative amplitude', 0 to 1, as the snapshot posters already do, and carries the mode index on FieldData for that label. It changes legend text and range only; solver arithmetic, published field values, units in the store and receipt measurements are unchanged."
+  },
+  {
    "path": "crates/runmat-runtime/src/analysis/field_scene/legend/tests.rs",
    "before": [
     "100644",
@@ -2651,6 +2721,20 @@
     "6e01f8bd7d17233703a306aa72327021474b70fb"
    ],
    "reason": "Formatting only: cargo fmt --all with the pinned rustfmt (rustc 1.90.0) and the repository rustfmt.toml. Tokens, expressions, arguments and control flow are unchanged."
+  },
+  {
+   "path": "crates/runmat-runtime/src/analysis/field_scene/view.rs",
+   "before": [
+    "100644",
+    "blob",
+    "0fdec65b38a72cf422d18c4fb6cdff6bbb4653a9"
+   ],
+   "after": [
+    "100644",
+    "blob",
+    "41167297631f8e763aa6dbf510cd2637ab77fad4"
+   ],
+   "reason": "Display only: 1e945c104a (disp072) labels a mode-ordinal field in the live field-scene legend as 'Mode N relative amplitude', 0 to 1, as the snapshot posters already do, and carries the mode index on FieldData for that label. It changes legend text and range only; solver arithmetic, published field values, units in the store and receipt measurements are unchanged."
   },
   {
    "path": "crates/runmat-runtime/src/analysis/mod.rs",
@@ -2905,5 +2989,5 @@
    "reason": "Formatting only: cargo fmt --all with the pinned rustfmt (rustc 1.90.0) and the repository rustfmt.toml. Tokens, expressions, arguments and control flow are unchanged."
   }
  ],
- "reason": "Conserves the fresh 0.7.2 scientific measurements across the CI repairs. cargo fmt --all on the measured source (3583e21662, whose scientific inputs equal the measured 912f34e3cd inventory) reproduces the 191 formatted Rust files of bd7dd3a4d1 blob for blob. Other changed inputs: the regenerated FEA highlighting grammar and the regenerated wasm builtin registry (fingerprint line only), which adds one field-quantity word and no execution path reads it; the subplot axes-slot repair in runtime plotting state (8b33ada885), which no cohort exercises; the OCCT host's per-thread STEP import table (a6fb58c3ad; the airliner cohort imports no STEP file, so its table is empty either way); the STEP exporter's direct-surface pass (d36e979417; no cohort exports STEP); and test-only edits that no cohort runs (eight OCCT CAD tests read the always-known mass-properties volume; the G128 multigrid memory test is ignored). Solver arithmetic, model inputs, dependencies, features and thresholds are unchanged. This review is not a rerun of the scientific or performance measurements."
+ "reason": "Conserves the fresh 0.7.2 scientific measurements across the CI repairs. cargo fmt --all on the measured source (3583e21662, whose scientific inputs equal the measured 912f34e3cd inventory) reproduces the 191 formatted Rust files of bd7dd3a4d1 blob for blob. Other changed inputs: the regenerated FEA highlighting grammar and the regenerated wasm builtin registry (fingerprint line only), which adds one field-quantity word and no execution path reads it; the mode-shape legend wording in the live field scene and CLI snapshot (1e945c104a; legend text and range only); the subplot axes-slot repair in runtime plotting state (8b33ada885), which no cohort exercises; the OCCT host's per-thread STEP import table (a6fb58c3ad; the airliner cohort imports no STEP file, so its table is empty either way); the STEP exporter's direct-surface pass (d36e979417; no cohort exports STEP); and test-only edits that no cohort runs (eight OCCT CAD tests read the always-known mass-properties volume; the G128 multigrid memory test is ignored). Solver arithmetic, model inputs, dependencies, features and thresholds are unchanged. This review is not a rerun of the scientific or performance measurements."
 }

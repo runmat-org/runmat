@@ -95,14 +95,14 @@
       "encoding": "git-mode-type-blob-path-tuples-v1"
     },
     "accepted_inputs": {
-      "sha256": "fb50e0e1c4f12212a6a588cb41e927dd6ae8de49dbde0eaf3c58ec7932dcb612",
+      "sha256": "8e1b8894a45d76409ba8338c4f60f4fb1271f0e2569227639d2b25ac39132e3a",
       "files": 26439,
       "encoding": "git-mode-type-blob-path-tuples-v1"
     },
-    "reason": "Conserves the fresh 0.7.2 scientific measurements across the CI repairs. cargo fmt --all on the measured source (3583e21662, whose scientific inputs equal the measured 912f34e3cd inventory) reproduces the 191 formatted Rust files of bd7dd3a4d1 blob for blob. Other changed inputs: the regenerated FEA highlighting grammar and the regenerated wasm builtin registry (fingerprint line only), which adds one field-quantity word and no execution path reads it; the subplot axes-slot repair in runtime plotting state (8b33ada885), which no cohort exercises; the OCCT host's per-thread STEP import table (a6fb58c3ad; the airliner cohort imports no STEP file, so its table is empty either way); the STEP exporter's direct-surface pass (d36e979417; no cohort exports STEP); and test-only edits that no cohort runs (eight OCCT CAD tests read the always-known mass-properties volume; the G128 multigrid memory test is ignored). Solver arithmetic, model inputs, dependencies, features and thresholds are unchanged. This review is not a rerun of the scientific or performance measurements.",
+    "reason": "Conserves the fresh 0.7.2 scientific measurements across the CI repairs. cargo fmt --all on the measured source (3583e21662, whose scientific inputs equal the measured 912f34e3cd inventory) reproduces the 191 formatted Rust files of bd7dd3a4d1 blob for blob. Other changed inputs: the regenerated FEA highlighting grammar and the regenerated wasm builtin registry (fingerprint line only), which adds one field-quantity word and no execution path reads it; the mode-shape legend wording in the live field scene and CLI snapshot (1e945c104a; legend text and range only); the subplot axes-slot repair in runtime plotting state (8b33ada885), which no cohort exercises; the OCCT host's per-thread STEP import table (a6fb58c3ad; the airliner cohort imports no STEP file, so its table is empty either way); the STEP exporter's direct-surface pass (d36e979417; no cohort exports STEP); and test-only edits that no cohort runs (eight OCCT CAD tests read the always-known mass-properties volume; the G128 multigrid memory test is ignored). Solver arithmetic, model inputs, dependencies, features and thresholds are unchanged. This review is not a rerun of the scientific or performance measurements.",
     "review": {
       "path": "qualification/scientific/reviews/cargo-fmt-072-20261118-cad-airliner-drawing-memory.json",
-      "sha256": "1a26aef2dff131bf818a8ae6def688885a3513f7ec879bc931d1bfc9fc2a6bcd"
+      "sha256": "5d3155d9901e87be7e1bff82c1885df429de7e1317b06a3f0272983c2c93b0a2"
     }
   }
 }
