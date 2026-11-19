@@ -37,7 +37,7 @@ impl SceneStats {
                 .iter()
                 .find(|summary| summary.field_id == field.label)
                 .map(|summary| {
-                    deformation::automatic_scale(diagonal, summary.maximum, field.normalized)
+                    deformation::automatic_scale(diagonal, summary.maximum, field.mode.is_some())
                 })
         });
         Self {

@@ -11,8 +11,8 @@ impl PlotRenderer {
     ) {
         // A figure imported from a saved field result or model draws as that geometry scene,
         // with its legend, color bar and outlines.
-        if let Some(scene) = figure.geometry_source() {
-            self.set_geometry_scene(scene.clone());
+        if let Some(scene) = figure.shared_geometry_source() {
+            self.set_geometry_scene(Arc::clone(scene));
             return;
         }
         self.last_geometry_scene_key = None;
@@ -112,12 +112,10 @@ impl PlotRenderer {
         }
     }
 
-    /// Set a chunked geometry scene to render.
-    ///
-    /// Unlike figures, geometry scenes are expected to represent large, stable CAD/FEA
-    /// datasets. Re-applying the same cache key preserves scene nodes and GPU buffers so
-    /// camera motion only updates uniforms and redraws the existing buffers.
-    pub fn set_geometry_scene(&mut self, geometry_scene: GeometryScene) {
+    /// Set a chunked geometry scene (owned, or a shared `Arc` so a frame copies no geometry).
+    /// Re-applying the same cache key preserves scene nodes and GPU buffers so camera motion
+    /// only updates uniforms and redraws the existing buffers.
+    pub fn set_geometry_scene(&mut self, geometry_scene: impl Into<Arc<GeometryScene>>) {
         self.set_geometry_scene_with_presentation(
             geometry_scene,
             self.geometry_presentation.clone(),
@@ -126,9 +124,10 @@ impl PlotRenderer {
 
     pub fn set_geometry_scene_with_presentation(
         &mut self,
-        geometry_scene: GeometryScene,
+        geometry_scene: impl Into<Arc<GeometryScene>>,
         mut presentation: GeometryScenePresentation,
     ) {
+        let geometry_scene: Arc<GeometryScene> = geometry_scene.into();
         self.figure_camera_fit.fill(FigureCameraFitState::Inactive);
         let cache_key = geometry_scene.cache_key();
         let same_scene_identity = self
@@ -146,7 +145,7 @@ impl PlotRenderer {
         self.geometry_overlay = geometry_scene.overlay.clone();
         let geometry_xray_enabled = scene_authored_as_xray(&geometry_scene);
         if self.last_geometry_scene_key.as_ref() == Some(&cache_key) {
-            self.last_geometry_scene = Some(geometry_scene.clone());
+            self.last_geometry_scene = Some(Arc::clone(&geometry_scene));
             let show_grid = presentation.show_grid.unwrap_or(geometry_scene.show_grid);
             if self.figure_show_grid != show_grid {
                 self.figure_show_grid = show_grid;
@@ -171,7 +170,7 @@ impl PlotRenderer {
             self.geometry_hidden_owner_node_ids.clear();
         }
         self.last_geometry_scene_key = Some(cache_key);
-        self.last_geometry_scene = Some(geometry_scene.clone());
+        self.last_geometry_scene = Some(Arc::clone(&geometry_scene));
         self.geometry_presentation = presentation;
         self.geometry_xray_enabled = preserved_xray_enabled.unwrap_or(geometry_xray_enabled);
         self.last_figure = None;

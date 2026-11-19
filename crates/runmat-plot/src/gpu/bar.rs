@@ -143,17 +143,15 @@ pub fn pack_vertices_from_values(
 
     let vertex_count = inputs.row_count as u64 * VERTICES_PER_BAR as u64;
     let output_size = vertex_count * std::mem::size_of::<Vertex>() as u64;
-    let output_buffer = runmat_accelerate_api::WgpuBufferOwner::new(device.create_buffer(
-        &wgpu::BufferDescriptor {
-            label: Some("bar-gpu-vertices"),
-            size: output_size,
-            usage: wgpu::BufferUsages::STORAGE
-                | wgpu::BufferUsages::VERTEX
-                | wgpu::BufferUsages::COPY_DST
-                | wgpu::BufferUsages::COPY_SRC,
-            mapped_at_creation: false,
-        },
-    ));
+    let output_buffer = emission.own_buffer(device.create_buffer(&wgpu::BufferDescriptor {
+        label: Some("bar-gpu-vertices"),
+        size: output_size,
+        usage: wgpu::BufferUsages::STORAGE
+            | wgpu::BufferUsages::VERTEX
+            | wgpu::BufferUsages::COPY_DST
+            | wgpu::BufferUsages::COPY_SRC,
+        mapped_at_creation: false,
+    }));
 
     let uniforms = BarUniforms {
         color: params.color.to_array(),

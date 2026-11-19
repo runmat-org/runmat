@@ -53,6 +53,11 @@ impl PlotRenderer {
             .is_none_or(|scene| scene.show_orientation_triad)
     }
 
+    /// The geometry scene the renderer holds, shared with whoever passed it in.
+    pub fn shared_geometry_scene(&self) -> Option<&Arc<GeometryScene>> {
+        self.last_geometry_scene.as_ref()
+    }
+
     pub fn geometry_xray_enabled(&self) -> bool {
         self.geometry_xray_enabled
     }

@@ -27,9 +27,7 @@ struct FieldData {
     values: FieldValues,
     label: String,
     unit: String,
-    /// A mode shape: its amplitude is an arbitrary eigenvector normalization, not metres.
-    normalized: bool,
-    /// The zero-based mode a mode-shape field belongs to (its published `Mode` ordinal).
+    /// A mode shape's zero-based `Mode` ordinal; its amplitude is a normalization, not metres.
     mode: Option<usize>,
     /// A nodal displacement (or displacement mode shape) that can displace the drawn shape.
     deforms: bool,
@@ -121,7 +119,6 @@ impl FieldData {
             values: FieldValues::Inline(values),
             label: label.into(),
             unit: unit.into(),
-            normalized: false,
             mode: None,
             deforms: location == AnalysisFieldLocation::Node && components == 3,
         }
@@ -130,7 +127,6 @@ impl FieldData {
     /// The same values as a published mode shape (arbitrary normalization).
     #[cfg(test)]
     fn mode_shape(mut self) -> Self {
-        self.normalized = true;
         self.mode = Some(0);
         self
     }
@@ -331,7 +327,6 @@ fn load_field(run_id: &str, selection: &AnalysisFieldSelection) -> Result<FieldD
         },
         label: field_id.to_string(),
         unit: descriptor.unit.clone().unwrap_or_default(),
-        normalized: mode.is_some(),
         mode,
         deforms,
     })
