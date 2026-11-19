@@ -58,7 +58,8 @@ fn imported(source: &str, name: &str) -> (String, String) {
     let path = format!("/p/{name}.part");
     let text = format!(
         "runmat 0.7\nstd 1\n\npart {name} {{\n    feature step = import(source = \"{}\", digest = sha256_test)\n}}\n",
-        file.display()
+        // A Windows temp path has backslashes, which a source string must escape.
+        file.display().to_string().replace('\\', "\\\\")
     );
     (path, text)
 }
