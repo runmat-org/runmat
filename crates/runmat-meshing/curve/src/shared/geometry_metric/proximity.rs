@@ -998,8 +998,7 @@ mod tests {
             Some(&expected)
         );
         // The adjacent face faces the top across 0.03 (no shared vertex), so it is a gap.
-        let adjacent_size =
-            MetricTensor3::isotropic_length_m(layer_edge_length(0.03, 4)).unwrap();
+        let adjacent_size = MetricTensor3::isotropic_length_m(layer_edge_length(0.03, 4)).unwrap();
         assert_eq!(
             sized.get(&id(PersistentEntityKind::Face, 4)),
             Some(&adjacent_size)
