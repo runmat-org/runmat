@@ -126,3 +126,82 @@ async fn empty_analysis_wave_returns_no_execution_or_attempt_evidence() {
     .unwrap();
     assert!(result.is_empty());
 }
+
+fn reserved_interval(wall_millis: u64) -> runmat_execution_runner::AttemptResourceAccounting {
+    runmat_execution_runner::AttemptResourceAccounting::new(
+        runmat_execution::identity::AttemptId::derive(&[b"replaced-driver-attempt"]),
+        runmat_execution::identity::WorkerId::derive(&[b"replaced-driver-worker"]),
+        runmat_execution::resource::ResourceAccounting::for_reserved_interval(
+            ResourceRequest {
+                cpu_millicores: 1_000,
+                memory_bytes: 2_048,
+                scratch_bytes: 1_024,
+                max_wall_millis: 10_000,
+                max_artifact_bytes: 4_096,
+                max_egress_bytes: 0,
+                max_relay_bytes: 0,
+                accelerators: Vec::new(),
+                required_capabilities: BTreeSet::new(),
+            },
+            wall_millis,
+            0,
+            0,
+            0,
+        )
+        .unwrap(),
+    )
+    .unwrap()
+}
+
+/// Receipt a9866c3531: the replaced driver measured a committed wave at 1,978 ms. The
+/// replacement driver restored that wave from the checkpoint and observed 1,828 ms for its
+/// whole rerun of the workflow.
+#[test]
+fn workflow_wall_encloses_a_wave_measured_under_a_replaced_driver() {
+    let restored_interval = reserved_interval(1_978);
+    let rerun_observed = Duration::from_millis(1_828);
+
+    let observed_only = workflow_wall_millis(rerun_observed, 0).unwrap();
+    let error = runmat_execution_runner::AttemptResourceAggregate::new(
+        vec![restored_interval.clone()],
+        observed_only,
+    )
+    .unwrap_err();
+    assert!(
+        error.contains(
+            "graph wall time is shorter than a measured interval: graph=1828 ms, interval=1978 ms"
+        ),
+        "{error}"
+    );
+
+    // The restored wave returned within 2 ms of local observation.
+    let carried = carried_wave_millis([Some(1_978)], Duration::from_millis(2));
+    assert_eq!(carried, 1_976);
+    let wall = workflow_wall_millis(rerun_observed, carried).unwrap();
+    assert_eq!(wall, 3_804);
+    let aggregate =
+        runmat_execution_runner::AttemptResourceAggregate::new(vec![restored_interval], wall)
+            .unwrap();
+    assert_eq!(aggregate.summary.usage.wall_millis, 3_804);
+}
+
+#[test]
+fn only_wave_time_before_local_observation_is_carried() {
+    // A wave measured within this process's observation began here and carries nothing.
+    assert_eq!(
+        carried_wave_millis([Some(40), None], Duration::from_millis(45)),
+        0
+    );
+    assert_eq!(
+        carried_wave_millis([None, None], Duration::from_millis(45)),
+        0
+    );
+    assert_eq!(carried_wave_millis([], Duration::ZERO), 0);
+    // A wave interrupted by the replacement keeps the durable clock it began with.
+    assert_eq!(
+        carried_wave_millis([Some(900), Some(2_400)], Duration::from_millis(600)),
+        1_800
+    );
+    // A pool whose waves always begin in this process carries no time.
+    assert_eq!(UntouchedPool.carried_wave_millis(), 0);
+}
