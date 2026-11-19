@@ -18,6 +18,26 @@ fn typed<T: serde::Serialize + ?Sized>(value: &T) -> AnalysisBridgeResult<u64> {
 fn capacity(message: &'static str) -> AnalysisBridgeError {
     runmat_analysis_fea::execution::AnalysisExecutionError::Limit(message).into()
 }
+/// Encoded bound of `count` observation entity identities, each charged as the widest
+/// single-identity entity.
+fn entity_identity_bytes(count: usize) -> AnalysisBridgeResult<u64> {
+    struct Repeated(usize);
+    impl serde::Serialize for Repeated {
+        fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+            let widest =
+                runmat_analysis_fea::results::observation::ObservationEntity::IntegrationPoint(
+                    runmat_meshing_core::StableDigest::from_bytes([u8::MAX; 32]),
+                );
+            serializer.collect_seq(std::iter::repeat_n(&widest, self.0))
+        }
+    }
+    runmat_canonical_codec::profile_serialized_shape(
+        &Repeated(count),
+        runmat_canonical_codec::CanonicalLimits::platform_content(65_536, 64),
+    )
+    .map(|profile| profile.encoded_bytes_upper_bound)
+    .map_err(|_| capacity("thermal observation identity bound overflow"))
+}
 fn add(total: &mut u64, bytes: u64) -> AnalysisBridgeResult<()> {
     *total = total
         .checked_add(bytes)
@@ -169,20 +189,29 @@ impl CompletedThermalStudy {
 impl ThermalStudyCoordinator {
     /// Pre-solve upper bound on the memory publication needs, from the planned solve.
     ///
-    /// Requires the prepared solve task: its plan's projected output transports bound the encoded
-    /// result (`E`: every recovered field of every sample, the receipt and the state profiles). A decoded
-    /// recovered-field partition holds, per entity, `k >= 1` f64 values and one index, which
-    /// encode to at least `9k + 1` bytes and decode to `8k + 8`, so its typed storage is at most
-    /// twice its encoding. Each declared state and each field observation is a copy of at most
-    /// the result, encoded and decoded.
+    /// Requires the prepared solve task. Its plan's projected output transports bound the encoded
+    /// result, receipt and state profiles (`R`). The task also prices the decoded result as the
+    /// shared codec estimators price it: typed storage `T` (each field partition from its shape,
+    /// the header at the codec's per-byte typed decode bound) and the import workspace `M` (see
+    /// `PreparedThermalPrimarySolve::result_import_workspace_bytes`).
+    ///
+    /// States and observations are copies of parts of the result. A thermal state holds the
+    /// terminal temperature (and interface temperature) with the node IDs; a field observation
+    /// holds one sample of one field over its selected entities, with an identity per entity.
+    /// Their values and ID inventories are bounded by the result header plus one sample of every
+    /// recovered field (`S`, the task's `sample_output_bytes`); a field observation's entity
+    /// identities add at most one widest identity per mesh entity (`I`). A history observation
+    /// holds one field over at most every sample: at most the result plus `I` per sample. These
+    /// products (`P`, encoded) and the receipt and profiles are decoded at the codec's per-byte
+    /// typed decode bound.
     ///
     /// The bulk owners that coexist during publication's source phase (the binding phase):
     /// - runtime staging: the public completion projection and its copy (definition plus decoded
-    ///   fields and states), and the solver mesh;
-    /// - the retained completion and its replay: definition, mesh, encoded result, states and
-    ///   field observations, each twice (see `publication_workspace_bytes`);
-    /// - the replay's import: three transport-sized buffers of every encoded object plus its
-    ///   typed contents.
+    ///   fields, states and observations), and the solver mesh;
+    /// - the retained completion and its replay: definition, mesh, encoded result and products,
+    ///   and the products' typed values, each twice (see `publication_workspace_bytes`);
+    /// - the replay's import: `M` for the result; three transport copies plus the typed decode
+    ///   for every other object.
     ///
     /// Small metadata (closures, receipts, usage and accuracy evidence, scalar observations,
     /// the root wire) is charged at the codec's fixed per-contract allowance for every phase
@@ -204,36 +233,64 @@ impl ThermalStudyCoordinator {
         else {
             return Err(invalid("thermal solve plan carries another demand"));
         };
-        let result = [
-            &demand.result_output,
-            &demand.receipt_output,
-            &demand.state_profiles_output,
-        ]
-        .iter()
-        .try_fold(0_u64, |total, output| {
-            total.checked_add(output.transport_closure_bytes_upper_bound.0)
-        })
-        .ok_or_else(overflow)?;
-        let copies = (step.state_outputs.len() as u64)
+        let result = demand.result_output.transport_closure_bytes_upper_bound.0;
+        let small = demand
+            .receipt_output
+            .transport_closure_bytes_upper_bound
+            .0
             .checked_add(
-                step.observations
-                    .iter()
-                    .filter(|o| matches!(o, runmat_analysis_core::ObservationRequest::Field(_)))
-                    .count() as u64,
+                demand
+                    .state_profiles_output
+                    .transport_closure_bytes_upper_bound
+                    .0,
             )
-            .and_then(|n| n.checked_add(1))
             .ok_or_else(overflow)?;
-        let encoded = result.checked_mul(copies).ok_or_else(overflow)?;
-        let decoded = encoded.checked_mul(2).ok_or_else(overflow)?;
-        // The completion keeps the result encoded; states and field observations also typed.
-        let typed_copies = result
-            .checked_mul(2)
-            .and_then(|n| n.checked_mul(copies - 1))
+        let states = step.state_outputs.len() as u64;
+        let count = |field: bool| {
+            step.observations
+                .iter()
+                .filter(|o| match o {
+                    runmat_analysis_core::ObservationRequest::Field(_) => field,
+                    runmat_analysis_core::ObservationRequest::History(_) => !field,
+                    _ => false,
+                })
+                .count() as u64
+        };
+        let (field_observations, histories) = (count(true), count(false));
+        let topology = &self.preparation.mesh.topology;
+        let identities =
+            entity_identity_bytes(topology.nodes.len().max(topology.volume_elements.len()))?;
+        let field_observation = task
+            .sample_output_bytes
+            .checked_add(identities)
             .ok_or_else(overflow)?;
+        let history = identities
+            .checked_mul(demand.sample_count.0)
+            .and_then(|n| n.checked_add(result))
+            .ok_or_else(overflow)?;
+        let products = task
+            .sample_output_bytes
+            .checked_mul(states)
+            .and_then(|n| n.checked_add(field_observation.checked_mul(field_observations)?))
+            .and_then(|n| n.checked_add(history.checked_mul(histories)?))
+            .ok_or_else(overflow)?;
+        // Everything but the result, encoded, and its typed storage.
+        let others = small.checked_add(products).ok_or_else(overflow)?;
+        let others_typed =
+            runmat_canonical_codec::projected_canonical_typed_decode_resident_bytes_estimate(
+                others, 0,
+            )
+            .ok_or_else(overflow)?;
+        let products_typed =
+            runmat_canonical_codec::projected_canonical_typed_decode_resident_bytes_estimate(
+                products, 0,
+            )
+            .ok_or_else(overflow)?;
+        let encoded = result.checked_add(others).ok_or_else(overflow)?;
         // Solve, observations, accuracy, states, baseline, terminal usage and publication, each
         // with its response, evidence, manifest and objects.
         let phases = (step.observations.len() as u64)
-            .checked_add(step.state_outputs.len() as u64)
+            .checked_add(states)
             .and_then(|n| n.checked_add(5))
             .ok_or_else(overflow)?;
         let metadata =
@@ -248,11 +305,12 @@ impl ThermalStudyCoordinator {
                 .try_fold(0_u64, |total, term| total.checked_add(*term))
                 .ok_or_else(overflow)
         };
-        let projection = sum(&[definition, decoded, metadata])?;
-        let completion = sum(&[definition, mesh, encoded, typed_copies, metadata])?;
+        let projection = sum(&[definition, task.result_typed_bytes, others_typed, metadata])?;
+        let completion = sum(&[definition, mesh, encoded, products_typed, metadata])?;
         let import = sum(&[
-            encoded.checked_mul(3).ok_or_else(overflow)?,
-            decoded,
+            task.result_import_bytes,
+            others.checked_mul(3).ok_or_else(overflow)?,
+            others_typed,
             metadata,
         ])?;
         sum(&[projection, projection, mesh, completion, completion, import])

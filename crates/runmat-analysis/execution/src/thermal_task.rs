@@ -36,6 +36,15 @@ pub struct PreparedThermalTask {
     pub inputs: Vec<PreparedAnalysisObjects>,
     pub resource_plan: FeaResourcePlan,
     pub output_policy: AnalysisOutputPolicy,
+    /// Transport bound of the result header and one sample of every recovered field: the most
+    /// a single-sample product of this solve (a state, a field observation) copies from it.
+    pub sample_output_bytes: u64,
+    /// Workspace an original-object import charges for the complete result (see
+    /// `PreparedThermalPrimarySolve::result_import_workspace_bytes`).
+    pub result_import_bytes: u64,
+    /// Typed storage of the complete decoded result (see
+    /// `PreparedThermalPrimarySolve::result_typed_resident_bytes`).
+    pub result_typed_bytes: u64,
 }
 
 pub fn prepare_thermal_task(
@@ -53,6 +62,11 @@ pub fn prepare_thermal_task(
         preparation.maximum_resident_bytes.unwrap_or(u64::MAX),
     )?;
     let resource_plan = prepared.resource_plan;
+    let (sample_output_bytes, result_import_bytes, result_typed_bytes) = (
+        prepared.sample_output_bytes,
+        prepared.result_import_bytes,
+        prepared.result_typed_bytes,
+    );
     let mut inputs = prepared.inputs;
     inputs.push(prepare_analysis_objects(
         AnalysisNumericalObjectKind::ResourcePlan,
@@ -120,5 +134,8 @@ pub fn prepare_thermal_task(
         inputs,
         resource_plan,
         output_policy: preparation.output_policy,
+        sample_output_bytes,
+        result_import_bytes,
+        result_typed_bytes,
     })
 }

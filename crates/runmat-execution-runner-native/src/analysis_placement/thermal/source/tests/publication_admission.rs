@@ -1,6 +1,6 @@
 //! Publication memory is admitted with the plan: a study that cannot publish is refused before
 //! its solve, and the planned requirement covers the memory publication actually holds.
-use super::standalone_publication::standalone_preparation;
+use super::standalone_publication::{standalone_preparation, standalone_preparation_with};
 use super::*;
 use runmat_analysis_execution::import_thermal_study_completion;
 use runmat_analysis_fea::planning::resource::ResourcePlanningError;
@@ -43,6 +43,83 @@ fn root_wire_bytes(root: &runmat_analysis_execution::PreparedThermalStudyRoot) -
 
 #[test]
 fn thermal_publication_is_admitted_with_the_plan() {
+    check(
+        |allocation| standalone_preparation(ElementOrder::Tet10, false, allocation),
+        true,
+    );
+}
+
+/// The transient study shape of a warm-up example: 201 samples of every recovered field,
+/// terminal temperature states and a final temperature field observation. Each of those
+/// single-sample products is charged as one sample of the result plus its entity identities,
+/// not as a further copy of the whole result, and the plan still covers what publication holds.
+#[test]
+fn transient_publication_charges_single_sample_products_as_one_sample() {
+    let plan = |field: bool| {
+        let preparation = standalone_preparation_with(
+            ElementOrder::Tet10,
+            Some((200, false, field)),
+            "thermal-publication-transient-plan",
+        );
+        let entities = preparation
+            .mesh
+            .topology
+            .nodes
+            .len()
+            .max(preparation.mesh.topology.volume_elements.len()) as u64;
+        let mut coordinator =
+            runmat_analysis_execution::ThermalStudyCoordinator::new(preparation).unwrap();
+        let step = coordinator.selected_step();
+        assert!(!step.state_outputs.is_empty());
+        assert_eq!(step.observations.len(), usize::from(field));
+        let task = coordinator.prepare_solve().unwrap();
+        let runmat_analysis_fea::planning::resource::FeaResourceDemand::ThermalSolve(demand) =
+            &task.resource_plan.input.demand
+        else {
+            panic!("thermal solve demand");
+        };
+        assert_eq!(demand.sample_count.0, 201);
+        let result = demand.result_output.transport_closure_bytes_upper_bound.0;
+        let sample = task.sample_output_bytes;
+        assert!(
+            sample < result,
+            "one sample {sample} of the result {result}"
+        );
+        assert!(task.result_import_bytes > 3 * result);
+        let required = coordinator.planned_publication_bytes().unwrap();
+        (required, result, sample, entities)
+    };
+    let (without, result, sample, entities) = plan(false);
+    let (with, ..) = plan(true);
+    eprintln!(
+        "transient publication plan {with} bytes ({without} without the field observation); \
+         result bound {result}, one sample {sample}"
+    );
+    // One product is held typed by the projection and its copy (2 x 25, the codec's per-byte
+    // typed decode bound), encoded and typed by the completion and its replay (2 x 26), and
+    // imported at three transport copies plus its typed decode (28): 130 times its encoding.
+    // Its phase adds four fixed contract allowances to the projections, completions and import.
+    let added = with - without;
+    let identities = entities * 128;
+    let phase = 5 * 4 * runmat_canonical_codec::CANONICAL_MATERIALIZATION_FIXED_BYTES_PER_CONTRACT;
+    assert!(
+        added >= 130 * sample && added <= 130 * (sample + identities) + phase,
+        "a field observation added {added} bytes; one sample is {sample}, the result {result}"
+    );
+    // The runtime's default staging budget in tests is below this study's import workspace,
+    // so the plan's coverage of the source phase is checked without publishing.
+    check(
+        |allocation| {
+            standalone_preparation_with(ElementOrder::Tet10, Some((200, false, true)), allocation)
+        },
+        false,
+    );
+}
+
+fn check(
+    preparation: impl Fn(&str) -> runmat_analysis_execution::ThermalStudyPreparation,
+    publish: bool,
+) {
     let runtime = tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()
@@ -55,7 +132,7 @@ fn thermal_publication_is_admitted_with_the_plan() {
     let execute = |publication_memory_bytes: u64, pool: &mut RecordingPool| {
         runtime.block_on(Box::pin(crate::analysis_thermal::execute_with_pool(
             pool,
-            standalone_preparation(ElementOrder::Tet10, false, &allocation),
+            preparation(&allocation),
             policy(publication_memory_bytes),
         )))
     };
@@ -155,6 +232,9 @@ fn thermal_publication_is_admitted_with_the_plan() {
         "planned publication {required} must cover the source phase {actual}"
     );
 
+    if !publish {
+        return;
+    }
     let definition = dto.compiled.definition_digest().unwrap();
     let reader = ThermalStudyObjectSource::new(source);
     publish_thermal_study_result(
