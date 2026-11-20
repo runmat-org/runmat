@@ -77,6 +77,9 @@ _November 18, 2026_
 #### Fixed
 
 * Fixed an extruded cut from a sketch on a face cutting away from the body.
+* Fixed sketch point fields (a circle's or polygon's center, a text anchor, a split point) not taking a click on the sketch plane, the origin, or a model vertex.
+* Fixed Offset of a model edge in a part sketch being refused.
+* Measure draws the axis distance between two circles on one plane instead of their zero normal distance.
 * An assembly component whose part does not compile is placed without its model, and the assembly says which part failed.
 * Section views of imported STEP parts draw solid caps.
 
@@ -108,12 +111,16 @@ _November 18, 2026_
 * Thermal result publication and factorization solves are admitted against the run's memory budget.
 * Results name the run field they read, publish fields in a fixed order and omit empty fields. Stored run records carry a format version that changes with their shape.
 * Results no longer report thermomechanical or electrothermal summary values that no solve computed. Thermomechanical fields come only from solved thermal or eigenstrain paths.
+* Mode shapes and the other per-mode fields of a modal run are published as relative values (unit `1`).
+* Thin plates mesh with the gap between adjacent faces sized from the cell diagonal, about half the elements of before on a thin plate.
 
 #### Fixed
 
 * Fixed browser FEA checks on MCAD parts that never finished; they now fail promptly with the reason.
 * Fixed the source check hiding file read errors; it reports the error at the file it names.
 * Fixed a completed run without saved render topology failing to redraw its view.
+* Fixed a run that retries after its solver process is replaced failing its resource accounting check.
+* The multigrid coarse solve factors in place and no longer allocates a scratch buffer sized from the CPU cache, so its memory stays within the run plan.
 
 RunMat FEA, mechanical design, and electrical design are currently in beta. We will mark them as production-ready when development and validation are complete. Many capabilities are available; see the documentation for supported workflows and current limitations.
 
