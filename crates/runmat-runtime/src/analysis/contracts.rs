@@ -8,7 +8,6 @@ use runmat_analysis_fea::execution::{SequenceIdentity, SolverResultIdentity, Sta
 use runmat_analysis_fea::{
     AnalysisRunIdentity, ComputeBackend, ExecutionBackend, FeaProgressEvent, FeaRunResult,
 };
-use runmat_analysis_language::output_operation_extension;
 use runmat_execution::Digest;
 use runmat_geometry_core::GeometryAsset;
 use runmat_meshing_core::MeshingRequestSettings;
@@ -36,6 +35,11 @@ pub use render_topology::{
 };
 mod execution_choices;
 pub use execution_choices::*;
+mod authoring_catalog;
+pub use authoring_catalog::{
+    analysis_authoring_workflow, analysis_language_reference_paths, analysis_output_operation_ids,
+    analysis_procedure_ids,
+};
 mod field_units;
 use field_units::infer_field_unit;
 mod study_step_run;
@@ -815,43 +819,6 @@ impl AnalysisRuntimeCapabilities {
             language_compiler_version: runmat_analysis_language::reference::COMPILER_VERSION.into(),
         }
     }
-}
-
-pub fn analysis_authoring_workflow() -> Vec<String> {
-    vec![
-        "edit <study>.fea with workspace file tools".to_string(),
-        "runmat check <study>.fea [--study <id> | --sweep <id>]".to_string(),
-        "runmat plan <study>.fea [--study <id> | --sweep <id>] --json".to_string(),
-        "runmat run <study>.fea [--study <id> | --sweep <id>] [--cluster <profile>]".to_string(),
-    ]
-}
-
-pub fn analysis_procedure_ids() -> Vec<String> {
-    AnalysisProcedure::ALL
-        .into_iter()
-        .map(|procedure| {
-            serde_json::to_value(procedure)
-                .expect("analysis procedure must serialize")
-                .as_str()
-                .expect("analysis procedure must serialize as a string")
-                .to_string()
-        })
-        .collect()
-}
-
-pub fn analysis_output_operation_ids() -> Vec<String> {
-    output_operation_extension()
-        .operations
-        .into_iter()
-        .map(|operation| operation.identity.to_string())
-        .collect()
-}
-
-pub fn analysis_language_reference_paths() -> Vec<String> {
-    runmat_analysis_language::reference::FEA_LANGUAGE_REFERENCE_IDS
-        .iter()
-        .map(|id| (*id).to_owned())
-        .collect()
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -2315,6 +2282,7 @@ pub(crate) fn format_quality_policy(mode: QualityPolicy) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use runmat_analysis_language::output_operation_extension;
 
     #[test]
     fn agent_authoring_facts_come_from_closed_runtime_catalogs() {
