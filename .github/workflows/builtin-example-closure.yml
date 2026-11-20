@@ -18,7 +18,7 @@ env:
 jobs:
   plan:
     name: Freeze builtin example inventory and plan
-    runs-on: warp-ubuntu-latest-x64-16x
+    runs-on: runmat-gcp-linux-x64
     outputs:
       execution_matrix: ${{ steps.freeze.outputs.execution_matrix }}
     steps:
@@ -54,7 +54,7 @@ jobs:
 
   products:
     name: Build and identify native and browser products
-    runs-on: warp-ubuntu-latest-x64-16x
+    runs-on: runmat-gcp-linux-x64
     steps:
       - uses: actions/checkout@v4
         with:

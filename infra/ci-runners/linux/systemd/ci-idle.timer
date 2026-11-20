@@ -1,0 +1,9 @@
+[Unit]
+Description=Check every two minutes whether the runner VM is idle
+
+[Timer]
+OnBootSec=5min
+OnUnitActiveSec=2min
+
+[Install]
+WantedBy=timers.target

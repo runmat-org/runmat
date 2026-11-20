@@ -1,0 +1,22 @@
+[Unit]
+Description=GitHub Actions runner slot %i (RunMat GCP CI)
+After=network-online.target docker.service
+RequiresMountsFor=/ci/work /ci/cache
+Wants=network-online.target
+PartOf=ci-runners.target
+
+[Service]
+User=runner
+WorkingDirectory=/opt/ci-runner/%i
+Environment=CI_SLOT=%i
+# Before the runner starts: release locks and wipe the slot, in case a crash skipped the job-completed hook.
+ExecStartPre=+/bin/sh -c '/usr/bin/python3 /opt/ci/common/ci_cache.py slot-start %i && mkdir -p /ci/work/%i/w /ci/work/%i/home /ci/work/%i/tmp /ci/work/%i/cold-target && chown -R runner:runner /ci/work/%i'
+ExecStart=/opt/ci-runner/%i/run.sh
+KillMode=process
+KillSignal=SIGTERM
+TimeoutStopSec=5min
+Restart=always
+RestartSec=15
+
+[Install]
+WantedBy=ci-runners.target
