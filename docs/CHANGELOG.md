@@ -111,7 +111,7 @@ _November 18, 2026_
 * Thermal result publication and factorization solves are admitted against the run's memory budget.
 * Results name the run field they read, publish fields in a fixed order and omit empty fields. Stored run records carry a format version that changes with their shape.
 * Results no longer report thermomechanical or electrothermal summary values that no solve computed. Thermomechanical fields come only from solved thermal or eigenstrain paths.
-* Mode shapes and the other per-mode fields of a modal run are published as relative values (unit `1`).
+* Mode shapes (modal, buckling and acoustic) and the other per-mode fields of a modal run are published as relative values (unit `1`).
 * Thin plates mesh with the gap between adjacent faces sized from the cell diagonal, about half the elements of before on a thin plate.
 
 #### Fixed
@@ -119,7 +119,7 @@ _November 18, 2026_
 * Fixed browser FEA checks on MCAD parts that never finished; they now fail promptly with the reason.
 * Fixed the source check hiding file read errors; it reports the error at the file it names.
 * Fixed a completed run without saved render topology failing to redraw its view.
-* Fixed a run that retries after its solver process is replaced failing its resource accounting check.
+* Fixed a run that resumes on another worker after its driver is replaced failing its resource accounting check.
 * The multigrid coarse solve factors in place and no longer allocates a scratch buffer sized from the CPU cache, so its memory stays within the run plan.
 
 RunMat FEA, mechanical design, and electrical design are currently in beta. We will mark them as production-ready when development and validation are complete. Many capabilities are available; see the documentation for supported workflows and current limitations.
