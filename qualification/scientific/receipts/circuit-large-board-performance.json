@@ -102,5 +102,22 @@
       "log_location": "gh-linux-20260327-125436:/home/nallana/rm1293/logs/integration-071-777b5146bf-scientific.circuit-large-board-performance.log",
       "disposition": "Renewed failed N1 comparison; the reference-Mac receipt retains the unchanged 500 ms budget."
     }
-  ]
+  ],
+  "conservation": {
+    "measured_inputs": {
+      "sha256": "82e3f3ef00d70b90678b39c575d9e94442cc2cbae2cbcd0077890c46639851fc",
+      "files": 26448,
+      "encoding": "git-mode-type-blob-path-tuples-v1"
+    },
+    "accepted_inputs": {
+      "sha256": "3e8870de46a03715aacaa8ef0b57a056df50e263427bc1e52ccce5cd5932db3d",
+      "files": 26449,
+      "encoding": "git-mode-type-blob-path-tuples-v1"
+    },
+    "reason": "Conserves the fresh 0.7.2 scientific measurements on dac88251ba across G132 24074bbb35: pure move of analysis_authoring_workflow, analysis_procedure_ids, analysis_output_operation_ids, analysis_language_reference_paths into contracts/authoring_catalog.rs, re-exported at the same path; no behaviour change; debt ceiling file lowered 2467\u21922442; FEA OK 2026-11-20. Every line removed from contracts.rs is in the new module; the only other lines are the mod line, the re-export, the module doc comment, its import and one test import. scripts/development/fea-module-size-debt.json is not a scientific input. Solver arithmetic, model inputs, dependencies, features and thresholds are unchanged. This review is not a rerun of the scientific or performance measurements.",
+    "review": {
+      "path": "qualification/scientific/reviews/g132-authoring-catalog-move-20261120-circuit-large-board-performance.json",
+      "sha256": "0ddedbf8ca7d5d64116243e0a6ecedc1684acde435498b544cda0ed3b355032a"
+    }
+  }
 }

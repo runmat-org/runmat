@@ -1,0 +1,32 @@
+{
+ "schema_version": 1,
+ "source_revision": "24074bbb356f5ed8d0f613fab5aa595a83548164",
+ "measured_revision": "dac88251baaa60d5834296cbce89c727092da233",
+ "changed_scientific_inputs": [
+  "crates/runmat-runtime/src/analysis/contracts.rs",
+  "crates/runmat-runtime/src/analysis/contracts/authoring_catalog.rs"
+ ],
+ "checks": [
+  {
+   "name": "pure-move",
+   "revision": "24074bbb356f5ed8d0f613fab5aa595a83548164",
+   "host": "local (git only)",
+   "method": "git diff -U0 dac88251ba 24074bbb35 of contracts.rs: every removed line occurs in contracts/authoring_catalog.rs (multiset match); the remaining module lines are its two doc comment lines and use runmat_analysis_core::AnalysisProcedure; contracts.rs adds only the mod line, the pub use re-export and one test import (output_operation_extension).",
+   "removed_lines": 38,
+   "removed_lines_missing_from_new_module": 0
+  },
+  {
+   "name": "architecture-boundaries",
+   "revision": "24074bbb356f5ed8d0f613fab5aa595a83548164",
+   "exit_code": 0,
+   "reviewed_findings": 103,
+   "command": "scripts/development/check-architecture-boundaries.sh"
+  },
+  {
+   "name": "fea-review",
+   "revision": "24074bbb356f5ed8d0f613fab5aa595a83548164",
+   "result": "FEA gave written OK on 2026-11-20 to conserve the four dac88251ba receipts across 24074bbb35."
+  }
+ ],
+ "review": "Conserves the fresh 0.7.2 scientific measurements on dac88251ba across G132 24074bbb35: pure move of analysis_authoring_workflow, analysis_procedure_ids, analysis_output_operation_ids, analysis_language_reference_paths into contracts/authoring_catalog.rs, re-exported at the same path; no behaviour change; debt ceiling file lowered 2467\u21922442; FEA OK 2026-11-20. Every line removed from contracts.rs is in the new module; the only other lines are the mod line, the re-export, the module doc comment, its import and one test import. scripts/development/fea-module-size-debt.json is not a scientific input. Solver arithmetic, model inputs, dependencies, features and thresholds are unchanged. This review is not a rerun of the scientific or performance measurements."
+}
