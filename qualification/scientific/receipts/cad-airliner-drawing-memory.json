@@ -3,7 +3,7 @@
   "cohort": "cad-airliner-drawing-memory",
   "policy_sha256": "eeab2d440d501db5062b1302e786dd0680fa4bf1065d061bfe57f6691b7a233b",
   "measured": {
-    "source_revision": "912f34e3cd484efcb72e2bbda9d018fded199b56",
+    "source_revision": "dac88251baaa60d5834296cbce89c727092da233",
     "target": "linux-x86_64",
     "hardware": "GCP N1 highmem-16 (design-build-0716), Intel Xeon, 16 vCPU and 104 GiB RAM",
     "toolchain": "rustc 1.90.0 (1159e78c4 2025-09-14)",
@@ -28,8 +28,8 @@
       "incremental": false,
       "rust_test_nocapture": true
     },
-    "log_sha256": "36c61fbe6824b05ca6faef4e7a9ae779b7422f8679db5bef6b19b70adeab4e1f",
-    "log_location": "design-build-0716:/home/nallana/runs/rel072-receipts/cad-airliner-drawing-memory.tests.log (copy: runmat-acc-2 design-coord/release/evidence/receipts-912f34e3cd)",
+    "log_sha256": "e607f1145836aa0590facaac9a4506e80364928e828168e38d5003c8471047b2",
+    "log_location": "design-build-0716:/home/nallana/runs/f-receipts-0716/cad-airliner-drawing-memory.tests.log (copy: runmat-acc-2 design-coord/release/evidence/receipts-dac88251ba/linux-0716)",
     "passed": 1,
     "failed": 0,
     "ignored": 0,
@@ -40,45 +40,46 @@
     ],
     "selected_filter": null,
     "inputs": {
-      "sha256": "bbf50649dc5805138f95ccfbd66d20c23944b229b17da7803bedda1f3dd051af",
-      "files": 26439,
+      "sha256": "82e3f3ef00d70b90678b39c575d9e94442cc2cbae2cbcd0077890c46639851fc",
+      "files": 26448,
       "encoding": "git-mode-type-blob-path-tuples-v1"
     },
     "artifacts": [
       {
-        "sha256": "ce99f090f06ef421e5faf32eb25928588d0f51a6f10551886e4d53196f04f5d6",
+        "sha256": "c30049d11190bd498d797d68b5cb178085a479e0eed83777654aa858061e3bb4",
         "location": "design-build-0716:/home/nallana/targets/rel072-receipts/release/deps/cad_airliner_drawing-d34f646c16f9bbdc"
       }
     ],
-    "test_seconds": 261.71,
+    "test_seconds": 266.37,
     "source_verification": {
       "status": "verified",
-      "revision": "912f34e3cd484efcb72e2bbda9d018fded199b56",
-      "files": 27644,
+      "revision": "dac88251baaa60d5834296cbce89c727092da233",
+      "files": 27660,
       "before_and_after": true,
       "checks": [
         {
-          "revision": "912f34e3cd484efcb72e2bbda9d018fded199b56",
+          "revision": "dac88251baaa60d5834296cbce89c727092da233",
           "host": "design-build-0716",
-          "tracked_files": 27644,
-          "differing": 0,
-          "checked_at": "2026-11-18T07:08Z",
-          "method": "vm-sync.sh: fresh git archive of the revision rsynced with checksums and --delete into ~/src/rel072/runmat-source just before the receipt job started (the sync printed the revision)"
-        },
-        {
-          "revision": "912f34e3cd484efcb72e2bbda9d018fded199b56",
-          "host": "design-build-0716",
-          "tracked_files": 27644,
+          "tracked_files": 27660,
           "differing": 0,
           "diff_lines": [],
-          "checked_at": "2026-11-18T11:37:59Z",
+          "checked_at": "2026-11-19T23:53:06Z",
+          "method": "git archive of the revision vs the receipt source tree, rsync -rlpcni (checksums, tracked files only)"
+        },
+        {
+          "revision": "dac88251baaa60d5834296cbce89c727092da233",
+          "host": "design-build-0716",
+          "tracked_files": 27660,
+          "differing": 0,
+          "diff_lines": [],
+          "checked_at": "2026-11-20T03:37:57Z",
           "method": "git archive of the revision vs the receipt source tree, rsync -rlpcni (checksums, tracked files only)"
         }
       ]
     },
-    "source_scope": "All 27,644 tracked source files of 912f34e3cd matched the receipt tree before the run (checksum sync) and after it (checksum dry-run, 0 differing)."
+    "source_scope": "All 27,660 tracked source files of dac88251ba matched the receipt tree before the run (checksum sync) and after it (checksum dry-run, 0 differing)."
   },
-  "scope": "Fresh 0.7.2 combined-qualification run on the frozen candidate 912f34e3cd (GCP N1 highmem-16 (design-build-0716), Intel Xeon, 16 vCPU and 104 GiB RAM). The complete staged drawing passes the unchanged Rust-heap ceiling through the optimized native browser-host adapter. Measurements exclude the C++ allocator and operating-system RSS. Distributed browser artifact acceptance is separate. The test spawns no runmat CLI.",
+  "scope": "Fresh 0.7.2 combined-qualification run on the frozen candidate dac88251ba (GCP N1 highmem-16 (design-build-0716), Intel Xeon, 16 vCPU and 104 GiB RAM). The complete staged drawing passes the unchanged Rust-heap ceiling through the optimized native browser-host adapter. Measurements exclude the C++ allocator and operating-system RSS. Distributed browser artifact acceptance is separate. The test spawns no runmat CLI.",
   "comparison_runs": [
     {
       "source_revision": "80226433e07bba08d7f002da89db5cc3a4a3ef25",
@@ -87,22 +88,5 @@
       "termination": "Owner-controlled SIGTERM of the exact test process after 19m28s while the last view was computing; incomplete, not a passing measurement or an observed assertion failure.",
       "log_location": "gh-linux-20260327-125436:/home/nallana/rm1293/logs/intake-80226433e0-airliner-r2.tests.log"
     }
-  ],
-  "conservation": {
-    "measured_inputs": {
-      "sha256": "bbf50649dc5805138f95ccfbd66d20c23944b229b17da7803bedda1f3dd051af",
-      "files": 26439,
-      "encoding": "git-mode-type-blob-path-tuples-v1"
-    },
-    "accepted_inputs": {
-      "sha256": "56052a994423cb306f39bf40b8404b23f41554124330d90fee0a81d7823bfa16",
-      "files": 26444,
-      "encoding": "git-mode-type-blob-path-tuples-v1"
-    },
-    "reason": "Conserves the fresh 0.7.2 scientific measurements across the CI repairs. cargo fmt --all on the measured source (3583e21662, whose scientific inputs equal the measured 912f34e3cd inventory) reproduces the 191 formatted Rust files of bd7dd3a4d1 blob for blob. Other changed inputs: the regenerated FEA highlighting grammar and the regenerated wasm builtin registry (fingerprint line only), which adds one field-quantity word and no execution path reads it; the empty pinned-file read in the remote filesystem providers (3af73068ba); the mode-shape legend wording in the live field scene and CLI snapshot (1e945c104a; legend text and range only); the Windows pan renderer work (WPAN-R: shared scenes, cached fallback, cross-device GPU buffers; rendering only); the subplot axes-slot repair in runtime plotting state (8b33ada885), which no cohort exercises; the OCCT host's per-thread STEP import table (a6fb58c3ad; the airliner cohort imports no STEP file, so its table is empty either way); the STEP exporter's direct-surface pass (d36e979417; no cohort exports STEP); and test-only edits that no cohort runs (eight OCCT CAD tests read the always-known mass-properties volume; the G128 multigrid memory test is ignored). Solver arithmetic, model inputs, dependencies, features and thresholds are unchanged. This review is not a rerun of the scientific or performance measurements.",
-    "review": {
-      "path": "qualification/scientific/reviews/cargo-fmt-072-20261118-cad-airliner-drawing-memory.json",
-      "sha256": "0fc2bf6afed6d1c65a0230b5bdb2d1bbcaa126d565b956a6d888151606fd8871"
-    }
-  }
+  ]
 }
