@@ -53,54 +53,76 @@ pub(crate) fn profile_loops(
     build_loops(sketch, solved, &[])
 }
 
+/// One sketch curve as a kernel segment, from its solved points: lines, arcs, circles, splines
+/// and ellipses; `None` for points, text and curves the solve didn't place.
+pub(crate) fn curve_segment(
+    sketch: &Sketch,
+    solved: &SolvedSketch,
+    id: &crate::ids::SketchEntityId,
+) -> Option<ProfileSegment> {
+    let e = sketch.entities.iter().find(|e| &e.id == id)?;
+    match &e.geometry {
+        SketchGeometry::Line { .. } => Some(ProfileSegment {
+            curve: id.clone(),
+            kind: SegmentKind::Line,
+            start: solved.point(id, PointRole::Start)?,
+            end: solved.point(id, PointRole::End)?,
+        }),
+        SketchGeometry::Arc { .. } => Some(ProfileSegment {
+            curve: id.clone(),
+            kind: SegmentKind::Arc {
+                center: solved.point(id, PointRole::Center)?,
+                clockwise: false,
+            },
+            start: solved.point(id, PointRole::Start)?,
+            end: solved.point(id, PointRole::End)?,
+        }),
+        SketchGeometry::Circle { .. } => {
+            let c = solved.point(id, PointRole::Center)?;
+            let r = *solved.radii.get(id)?;
+            Some(ProfileSegment {
+                curve: id.clone(),
+                kind: SegmentKind::Circle {
+                    center: c,
+                    radius: r,
+                },
+                start: [c[0] + r, c[1]],
+                end: [c[0] + r, c[1]],
+            })
+        }
+        SketchGeometry::Spline { points, closed } => {
+            spline_segment(id, points.len(), *closed, solved)
+        }
+        SketchGeometry::Ellipse { start, .. } => solved.ellipse_segment(id, start.is_some()),
+        // Text is closed loops of its own (`text_loops`), not one segment.
+        SketchGeometry::Point { .. } | SketchGeometry::Text { .. } => None,
+    }
+}
+
 pub(super) fn build_loops(
     sketch: &Sketch,
     solved: &SolvedSketch,
     explicit: &[Vec<crate::ids::SketchEntityId>],
 ) -> Result<Vec<Vec<ProfileSegment>>, String> {
-    let seg_of = |id: &crate::ids::SketchEntityId| -> Option<ProfileSegment> {
-        let e = sketch.entities.iter().find(|e| &e.id == id)?;
-        match &e.geometry {
-            SketchGeometry::Line { .. } => Some(ProfileSegment {
-                curve: id.clone(),
-                kind: SegmentKind::Line,
-                start: solved.point(id, PointRole::Start)?,
-                end: solved.point(id, PointRole::End)?,
-            }),
-            SketchGeometry::Arc { .. } => Some(ProfileSegment {
-                curve: id.clone(),
-                kind: SegmentKind::Arc {
-                    center: solved.point(id, PointRole::Center)?,
-                    clockwise: false,
-                },
-                start: solved.point(id, PointRole::Start)?,
-                end: solved.point(id, PointRole::End)?,
-            }),
-            SketchGeometry::Circle { .. } => {
-                let c = solved.point(id, PointRole::Center)?;
-                let r = *solved.radii.get(id)?;
-                Some(ProfileSegment {
-                    curve: id.clone(),
-                    kind: SegmentKind::Circle {
-                        center: c,
-                        radius: r,
-                    },
-                    start: [c[0] + r, c[1]],
-                    end: [c[0] + r, c[1]],
-                })
-            }
-            SketchGeometry::Spline { points, closed } => {
-                spline_segment(id, points.len(), *closed, solved)
-            }
-            SketchGeometry::Point { .. } => None,
-        }
-    };
+    let seg_of = |id: &crate::ids::SketchEntityId| curve_segment(sketch, solved, id);
     let close = |a: [f64; 2], b: [f64; 2]| (a[0] - b[0]).abs() < 1e-9 && (a[1] - b[1]).abs() < 1e-9;
     let mut loops: Vec<Vec<ProfileSegment>> = Vec::new();
     if !explicit.is_empty() {
         // Each listed loop in chain order, whatever order and direction its curves are listed
         // in (a region picked in the view lists them as found).
         for l in explicit {
+            // A text listed alone is every loop of its outline.
+            if let [id] = l.as_slice() {
+                if let Some(SketchGeometry::Text { text, .. }) = sketch
+                    .entities
+                    .iter()
+                    .find(|e| &e.id == id)
+                    .map(|e| &e.geometry)
+                {
+                    loops.extend(solved.text_loops(id, text));
+                    continue;
+                }
+            }
             let mut pool = Vec::new();
             for id in l {
                 pool.push(seg_of(id).ok_or_else(|| format!("`{}` is not a profile curve", id))?);
@@ -138,6 +160,11 @@ pub(super) fn build_loops(
             loops.push(chain);
         }
     } else {
+        for e in sketch.entities.iter().filter(|e| !e.construction) {
+            if let SketchGeometry::Text { text, .. } = &e.geometry {
+                loops.extend(solved.text_loops(&e.id, text));
+            }
+        }
         let mut pool: Vec<ProfileSegment> = sketch
             .entities
             .iter()
@@ -236,7 +263,7 @@ pub(super) fn reverse_segment(s: &mut ProfileSegment) {
 }
 
 /// Points along a segment from start to end: the ends for a line, samples for an arc.
-pub(super) fn segment_samples(s: &ProfileSegment) -> Vec<[f64; 2]> {
+pub(crate) fn segment_samples(s: &ProfileSegment) -> Vec<[f64; 2]> {
     match s.kind {
         SegmentKind::Ellipse { .. } | SegmentKind::Spline { .. } => s.polyline(24),
         SegmentKind::Line => vec![s.start, s.end],
@@ -414,4 +441,65 @@ pub(super) fn slot_tie_candidates(
         }
     }
     out
+}
+
+/// Each pair of straight sides in a closed loop that cross through each other's interior, by
+/// curve name, with the crossing point in sketch coordinates. Sides that only meet at a shared
+/// end are not crossings. Empty when the loop is simple.
+pub(super) fn loop_crossings(lp: &[ProfileSegment], tol: f64) -> Vec<(String, String, [f64; 2])> {
+    let lines: Vec<&ProfileSegment> = lp
+        .iter()
+        .filter(|s| matches!(s.kind, SegmentKind::Line))
+        .collect();
+    let orient = |a: [f64; 2], b: [f64; 2], c: [f64; 2]| {
+        (b[0] - a[0]) * (c[1] - a[1]) - (b[1] - a[1]) * (c[0] - a[0])
+    };
+    let strict = |x: f64, y: f64, e: f64| (x > e && y < -e) || (x < -e && y > e);
+    let mut out = Vec::new();
+    for i in 0..lines.len() {
+        for j in i + 1..lines.len() {
+            let (p, q) = (lines[i], lines[j]);
+            let lp_ = (p.end[0] - p.start[0]).hypot(p.end[1] - p.start[1]);
+            let lq = (q.end[0] - q.start[0]).hypot(q.end[1] - q.start[1]);
+            let (d1, d2) = (
+                orient(p.start, p.end, q.start),
+                orient(p.start, p.end, q.end),
+            );
+            let (d3, d4) = (
+                orient(q.start, q.end, p.start),
+                orient(q.start, q.end, p.end),
+            );
+            if strict(d1, d2, tol * lp_.max(1e-9)) && strict(d3, d4, tol * lq.max(1e-9)) {
+                // q.start + t (q.end - q.start), with t from the signed areas on p's line.
+                let t = d1 / (d1 - d2);
+                let at = [
+                    q.start[0] + t * (q.end[0] - q.start[0]),
+                    q.start[1] + t * (q.end[1] - q.start[1]),
+                ];
+                out.push((p.curve.0.clone(), q.curve.0.clone(), at));
+            }
+        }
+    }
+    out
+}
+
+/// The check's sentence for a profile whose sides cross: each crossing pair and its point in
+/// millimetres, so the sketch can be repaired where it crosses.
+pub(super) fn crossing_message(crossings: &[(String, String, [f64; 2])]) -> String {
+    let mm = |v: f64| {
+        let r = (v * 1000.0 * 1000.0).round() / 1000.0;
+        if r == 0.0 {
+            "0".to_string()
+        } else {
+            format!("{r}")
+        }
+    };
+    let pairs: Vec<String> = crossings
+        .iter()
+        .map(|(a, b, p)| format!("`{a}` crosses `{b}` at ({}, {}) mm", mm(p[0]), mm(p[1])))
+        .collect();
+    format!(
+        "the profile crosses itself, so it bounds no single region: {}; move or trim those lines so the outline only meets at its corners",
+        pairs.join(", ")
+    )
 }

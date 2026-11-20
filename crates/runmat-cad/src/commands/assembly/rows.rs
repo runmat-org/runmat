@@ -18,12 +18,14 @@ pub(super) fn add_rows(catalog: &mut Catalog) {
         mode: EditMode::Model,
         default_tab: "assemble".into(),
         document_bar: vec![
+            c("view.configuration"),
             c("assembly.options"),
             c("view.representation"),
             c("view.working-set"),
         ],
         view_cluster: cluster_3d(vec![]),
         shortcut_box: [
+            "assembly.sketch",
             "assembly.insert",
             "assembly.mate",
             "assembly.move",
@@ -41,6 +43,7 @@ pub(super) fn add_rows(catalog: &mut Catalog) {
                 "assemble",
                 "Assemble",
                 vec![
+                    group("sketch", "Sketch", vec![c("assembly.sketch")]),
                     group(
                         "components",
                         "Components",
@@ -256,7 +259,11 @@ pub(super) fn add_rows(catalog: &mut Catalog) {
                             c("assembly.document-settings"),
                         ],
                     ),
-                    group("references", "References", vec![c("assembly.update-pins")]),
+                    group(
+                        "references",
+                        "References",
+                        vec![c("assembly.release"), c("assembly.update-pins")],
+                    ),
                     group(
                         "display",
                         "Display",

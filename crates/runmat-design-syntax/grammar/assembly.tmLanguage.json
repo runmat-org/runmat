@@ -16,7 +16,7 @@
       "end": "\""
     },
     {
-      "match": "(-?\\b\\d+(?:\\.\\d+)?(?:[eE][+\\-]?\\d+)?\\b|\\])(\\s*)((?:delta_degC|degC|gram|inch|GHz|GPa|GiB|KiB|MHz|MPa|MiB|deg|kHz|kPa|rad|Hz|MV|MW|Pa|cm|ft|in|kA|kN|kV|kW|kg|km|mA|mT|mV|mW|mm|ms|nm|ns|um|us|A|B|C|J|K|N|T|V|W|g|m|s|%)(?:\\s*[/*]\\s*(?:delta_degC|degC|gram|inch|GHz|GPa|GiB|KiB|MHz|MPa|MiB|deg|kHz|kPa|rad|Hz|MV|MW|Pa|cm|ft|in|kA|kN|kV|kW|kg|km|mA|mT|mV|mW|mm|ms|nm|ns|um|us|A|B|C|J|K|N|T|V|W|g|m|s|%)|\\^-?\\d+)*)(?![\\w%])",
+      "match": "(-?\\b\\d+(?:\\.\\d+)?(?:[eE][+\\-]?\\d+)?\\b|\\])(\\s*)((?:delta_degC|Mohm|degC|gram|inch|kohm|thou|GHz|GPa|GiB|KiB|MHz|MPa|MiB|deg|kHz|kPa|mil|ohm|rad|rpm|Hz|MV|MW|Pa|cm|ft|in|kA|kN|kV|kW|kg|km|mA|mT|mV|mW|mm|ms|nm|ns|um|us|A|B|C|F|H|J|K|N|S|T|V|W|g|m|s|%)(?:\\s*[/*]\\s*(?:delta_degC|Mohm|degC|gram|inch|kohm|thou|GHz|GPa|GiB|KiB|MHz|MPa|MiB|deg|kHz|kPa|mil|ohm|rad|rpm|Hz|MV|MW|Pa|cm|ft|in|kA|kN|kV|kW|kg|km|mA|mT|mV|mW|mm|ms|nm|ns|um|us|A|B|C|F|H|J|K|N|S|T|V|W|g|m|s|%)|\\^-?\\d+)*)(?![\\w%])",
       "captures": {
         "1": {
           "patterns": [
@@ -37,7 +37,7 @@
     },
     {
       "name": "storage.type.assembly",
-      "match": "(?<![\\w])(?:configuration|occurrence|connector|fasteners|envelope|exploded|property|pattern|publish|mirror|sketch|mate|view|use)(?![\\w])"
+      "match": "(?<![\\w])(?:configuration|display_state|occurrence|connector|fasteners|operation|envelope|exploded|position|property|contact|feature|pattern|publish|mirror|motion|sketch|mate|view|use)(?![\\w])"
     },
     {
       "name": "keyword.other.assembly",
@@ -86,13 +86,19 @@
         "words": [
           "configuration",
           "connector",
+          "contact",
+          "display_state",
           "envelope",
           "exploded",
           "fasteners",
+          "feature",
           "mate",
           "mirror",
+          "motion",
           "occurrence",
+          "operation",
           "pattern",
+          "position",
           "property",
           "publish",
           "sketch",
@@ -130,9 +136,11 @@
         "A",
         "B",
         "C",
+        "F",
         "GHz",
         "GPa",
         "GiB",
+        "H",
         "Hz",
         "J",
         "K",
@@ -142,8 +150,10 @@
         "MV",
         "MW",
         "MiB",
+        "Mohm",
         "N",
         "Pa",
+        "S",
         "T",
         "V",
         "W",
@@ -164,17 +174,22 @@
         "kW",
         "kg",
         "km",
+        "kohm",
         "m",
         "mA",
         "mT",
         "mV",
         "mW",
+        "mil",
         "mm",
         "ms",
         "nm",
         "ns",
+        "ohm",
         "rad",
+        "rpm",
         "s",
+        "thou",
         "um",
         "us"
       ]

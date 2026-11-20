@@ -30,10 +30,13 @@ use crate::diagnostics::{Cause, DiagCode, DiagnosticReport, Repair, Severity, Si
 use crate::ids::{FilePath, ItemUuid};
 use crate::refs::lock::LockSection;
 use crate::regen::kernel::Transform;
-use crate::units::{Dimension, UnitAuthority};
+use crate::units::{Dimension, Units};
+use crate::value::ValueError;
 use crate::value::{DynamicValueEvaluator, Evaluator, ValueEnv, ValueExpr};
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
+
+mod groups;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -127,7 +130,17 @@ pub enum ExplodeMotion {
 pub struct ExplodeStep {
     /// Stable across edits and merges.
     pub id: String,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub occurrences: Vec<RelPath>,
+    /// Whole patterns: the path of the assembly that declares the pattern, then the pattern's
+    /// name (`[{ name = fuselage }, { name = forward }, { name = panels }]`). The step moves the
+    /// pattern's seeds and every instance it lays out in this configuration.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub patterns: Vec<RelPath>,
+    /// Whole mirrors, named the same way: the step moves every image the mirror makes (of a
+    /// mirrored pattern, one per seed and instance), and leaves the reflected originals.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub mirrors: Vec<RelPath>,
     pub motion: ExplodeMotion,
 }
 
@@ -225,7 +238,7 @@ impl ExplodedState {
 }
 
 pub struct ExplodeContext<'a> {
-    pub units: &'a dyn UnitAuthority,
+    pub units: &'a Units,
     pub dynamic: &'a dyn DynamicValueEvaluator,
     /// Renamed occurrences resolve through their lock aliases.
     pub lock: Option<&'a LockSection>,
@@ -358,7 +371,7 @@ fn check_view(doc: &AssemblyDocument, v: &ExplodedView, rep: &mut DiagnosticRepo
     }
     for s in &v.steps {
         let p = |x: &str| site(&v.name, &format!("steps.{}.{}", s.id, x));
-        if s.occurrences.is_empty() {
+        if s.occurrences.is_empty() && s.patterns.is_empty() && s.mirrors.is_empty() {
             push(
                 rep,
                 DiagCode::ExplodeUnknownOccurrence,
@@ -367,16 +380,22 @@ fn check_view(doc: &AssemblyDocument, v: &ExplodedView, rep: &mut DiagnosticRepo
                 format!("step `{}` moves no occurrence", s.id),
             );
         }
-        let mut seen = BTreeSet::new();
-        for o in &s.occurrences {
-            if !seen.insert(o) {
-                push(
-                    rep,
-                    DiagCode::ExplodeDuplicate,
-                    Severity::Error,
-                    p("occurrences"),
-                    format!("step `{}` names `{}` twice", s.id, o),
-                );
+        for (field, list) in [
+            ("occurrences", &s.occurrences),
+            ("patterns", &s.patterns),
+            ("mirrors", &s.mirrors),
+        ] {
+            let mut seen = BTreeSet::new();
+            for o in list {
+                if !seen.insert(o) {
+                    push(
+                        rep,
+                        DiagCode::ExplodeDuplicate,
+                        Severity::Error,
+                        p(field),
+                        format!("step `{}` names `{}` twice", s.id, o),
+                    );
+                }
             }
         }
         let zero = |d: [f64; 3]| norm(d) < 1e-12 || d.iter().any(|x| !x.is_finite());
@@ -464,12 +483,19 @@ impl Eval<'_, '_> {
         match self.ev().eval_as(e, &self.env, dim) {
             Ok(v) => Some(v),
             Err(err) => {
+                let (code, message) = match err {
+                    ValueError::UnitMismatch { .. } => {
+                        let field = param.rsplit('.').next().unwrap_or(param);
+                        (DiagCode::ValueUnit, err.with_subject(field).to_string())
+                    }
+                    err => (DiagCode::ValueFailed, format!("`{}`: {}", param, err)),
+                };
                 push(
                     &mut self.rep,
-                    DiagCode::ValueFailed,
+                    code,
                     Severity::Error,
                     site(&self.view, param),
-                    format!("`{}`: {}", param, err),
+                    message,
                 );
                 None
             }
@@ -865,12 +891,11 @@ fn run_views(
         run_includes(e, w, None, world, moved, trails, depth);
         for s in &w.steps {
             let p = |x: &str| format!("steps.{}.{}", s.id, x);
+            let listed = e.step_members(s);
             let mut targets: Vec<NodeId> = Vec::new();
-            for o in &s.occurrences {
-                if let Some(n) = e.node(o, &p("occurrences")) {
-                    if !targets.contains(&n) {
-                        targets.push(n);
-                    }
+            for n in listed.iter().flatten() {
+                if !targets.contains(n) {
+                    targets.push(*n);
                 }
             }
             // Ancestor and descendant in one step.
@@ -902,7 +927,7 @@ fn run_views(
             targets.sort_by_key(|t| tree.node(*t).depth);
             // Poses in the view's frame, motions there, then back to the top frame.
             let local: Vec<Transform> = world.iter().map(|w| inv.compose(w)).collect();
-            let motions = step_motions(e, &local, s, &targets, &p);
+            let motions = step_motions(e, &local, s, &listed, &targets, &p);
             for (t, m) in motions {
                 let mw = frame.compose(&m).compose(&inv);
                 let mut nodes = Vec::new();
@@ -1021,6 +1046,7 @@ fn step_motions(
     e: &mut Eval<'_, '_>,
     world: &[Transform],
     s: &ExplodeStep,
+    listed: &[Option<NodeId>],
     targets: &[NodeId],
     p: &dyn Fn(&str) -> String,
 ) -> Vec<(NodeId, Transform)> {
@@ -1065,14 +1091,10 @@ fn step_motions(
                 },
                 None => 0.0,
             };
-            // Spacing follows the order the step lists its occurrences.
-            for (i, o) in s.occurrences.iter().enumerate() {
-                let Some(n) = e
-                    .found
-                    .get(&(o.clone(), p("occurrences")))
-                    .copied()
-                    .flatten()
-                else {
+            // Spacing follows the order the step lists its occurrences (a pattern's or mirror's
+            // members in their laid-out order).
+            for (i, n) in listed.iter().enumerate() {
+                let Some(n) = *n else {
                     continue;
                 };
                 if !targets.contains(&n) || out.iter().any(|(m, _)| *m == n) {

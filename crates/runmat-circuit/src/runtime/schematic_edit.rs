@@ -574,6 +574,7 @@ impl<'a> Editor<'a> {
         let path = &project.circuit_path;
         if self.edits.is_empty() && self.wire.is_none() {
             return Ok(EditOutput {
+                report: None,
                 files: Vec::new(),
                 summary,
             });
@@ -615,6 +616,7 @@ impl<'a> Editor<'a> {
             out.extend(lock_change(&next, &lock, true));
         }
         Ok(EditOutput {
+            report: None,
             summary,
             files: out,
         })

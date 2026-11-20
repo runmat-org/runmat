@@ -5,12 +5,16 @@
 //!     l1 = line(start = [0 mm, 0 mm], end = [80 mm, 0 mm])
 //!     l2 = line(start = l1.end, end = [80 mm, 50 mm])
 //!     c1 = circle(center = [40 mm, 25 mm], radius = 5 mm, construction)
+//!     e1 = ellipse(center = [40 mm, 25 mm], major = 20 mm, minor = 8 mm, angle = 30 deg)
+//!     t1 = text(text = "RUNMAT", at = [10 mm, 40 mm], height = 6 mm, font = single_line, stroke = 1 mm)
 //!     constrain horizontal(l1)
 //!     constrain distance(l1.start, l2.end, id = d1) = 60 mm
 //!     constrain limit(length(l1, value = 80 mm), min = 60 mm, max = 90 mm)
+//!     constrain major_radius(e1) = 20 mm
 //!     solved {
 //!         l1.start = [0, 0]
 //!         c1.radius = 0.005
+//!         e1.major = 0.02
 //!     }
 //! }
 //! ```
@@ -19,9 +23,18 @@
 //!   makes the two the same point.
 //! - A constraint names entities (`l1`) and their points (`l1.start`); a dimension takes its
 //!   value after `=`. `id = <name>` names the constraint.
+//! - An ellipse takes its centre, semi-axes `major` and `minor`, and the major axis's `angle`
+//!   from the x axis (0 when left out). With `start` and `end` it is the elliptical arc
+//!   counter-clockwise between them. `major_radius(e1)` and `minor_radius(e1)` dimension its
+//!   semi-axes; `horizontal(e1)` and `vertical(e1)` set its major axis's direction.
+//! - Text sets `text` from `at` (the left end of the first line's baseline) at capital height
+//!   `height`, turned `angle` (0 when left out). `font` names the typeface; `single_line`, the
+//!   default and today the only one, draws each glyph as a pen stroke `stroke` wide (0.15 of
+//!   the height when left out), and that stroke's outline is the text's profile.
 //! - `solved { }` holds the solver's last output in SI units, so the file reloads without
-//!   re-solving: `<entity>.<point> = [x, y]`, `<entity>.radius = r`, and
-//!   `<constraint>.hidden_<n> = v` for variables the solver adds.
+//!   re-solving: `<entity>.<point> = [x, y]`, `<entity>.radius = r`, an ellipse's
+//!   `<entity>.major`, `.minor` and `.angle` (radians), and `<constraint>.hidden_<n> = v` for
+//!   variables the solver adds.
 //! - `suppressed = true` and `frozen = "<key>"` are the feature's own settings.
 
 use super::refs::{self, print_plane_or_face, role_of};
@@ -29,14 +42,14 @@ use super::value::{lower_value, print_value};
 use crate::ids::{ConstraintId, SketchEntityId};
 use crate::model::datum::PlaneRef;
 use crate::model::sketch::{
-    PointExpr, PointRole, Sketch, SketchConstraint, SketchConstraintKind as K, SketchEntity,
-    SketchGeometry, SketchTarget, SolvedCache, SolvedKey,
+    EllipseMeasure, PointExpr, PointRole, Sketch, SketchConstraint, SketchConstraintKind as K,
+    SketchEntity, SketchGeometry, SketchProjection, SketchTarget, SolvedCache, SolvedKey, TextFont,
 };
 use crate::value::ValueExpr;
 use runmat_design_syntax::ast::{self, Argument, Expr, Headed, Statement};
 use runmat_design_syntax::document::BlockEntry;
 use runmat_design_syntax::json::{
-    format_f64, is_identifier, lower_expr, print_json, Json, LowerError, ValueSyntax, INDENT,
+    format_f64, is_identifier, lower_expr, print_json, quote, Json, LowerError, ValueSyntax, INDENT,
 };
 use runmat_types::Span;
 
@@ -98,9 +111,58 @@ fn print_entity(entity: &SketchEntity) -> Option<String> {
             }
             arguments
         }
+        SketchGeometry::Ellipse {
+            center,
+            major,
+            minor,
+            angle,
+            start,
+            end,
+        } => {
+            let mut arguments = vec![
+                format!("center = {}", print_point(center)?),
+                format!("major = {}", print_value(major)?),
+                format!("minor = {}", print_value(minor)?),
+            ];
+            if let Some(angle) = angle {
+                arguments.push(format!("angle = {}", print_value(angle)?));
+            }
+            if let Some(start) = start {
+                arguments.push(format!("start = {}", print_point(start)?));
+            }
+            if let Some(end) = end {
+                arguments.push(format!("end = {}", print_point(end)?));
+            }
+            arguments
+        }
+        SketchGeometry::Text {
+            text,
+            at,
+            height,
+            angle,
+            font,
+            stroke,
+        } => {
+            let mut arguments = vec![
+                format!("text = {}", quote(text)),
+                format!("at = {}", print_point(at)?),
+                format!("height = {}", print_value(height)?),
+            ];
+            if let Some(angle) = angle {
+                arguments.push(format!("angle = {}", print_value(angle)?));
+            }
+            arguments.push(format!("font = {}", font.word()));
+            if let Some(stroke) = stroke {
+                arguments.push(format!("stroke = {}", print_value(stroke)?));
+            }
+            arguments
+        }
     };
     if entity.construction {
         arguments.push("construction".into());
+    }
+    if let Some(from) = &entity.projected {
+        arguments.push(format!("from = {}", print_projection(from)?));
     }
     let kind = match entity.geometry {
         SketchGeometry::Point { .. } => "point",
@@ -108,6 +170,8 @@ fn print_entity(entity: &SketchEntity) -> Option<String> {
         SketchGeometry::Arc { .. } => "arc",
         SketchGeometry::Circle { .. } => "circle",
         SketchGeometry::Spline { .. } => "spline",
+        SketchGeometry::Ellipse { .. } => "ellipse",
+        SketchGeometry::Text { .. } => "text",
     };
     Some(format!(
         "{} = {kind}({})",
@@ -142,6 +206,8 @@ fn print_kind(kind: &K, extra: Option<String>) -> Option<(String, Option<String>
         K::Length { line, value } => ("length", vec![target(line)?], Some(value)),
         K::Radius { curve, value } => ("radius", vec![target(curve)?], Some(value)),
         K::Diameter { curve, value } => ("diameter", vec![target(curve)?], Some(value)),
+        K::MajorRadius { curve, value } => ("major_radius", vec![target(curve)?], Some(value)),
+        K::MinorRadius { curve, value } => ("minor_radius", vec![target(curve)?], Some(value)),
         K::Limit {
             dimension,
             min,
@@ -191,6 +257,9 @@ fn solved_target(key: &SolvedKey) -> Option<String> {
             format!("{}.{}", name(&entity.0)?, role_word(*role))
         }
         SolvedKey::Radius { entity } => format!("{}.radius", name(&entity.0)?),
+        SolvedKey::Ellipse { entity, measure } => {
+            format!("{}.{}", name(&entity.0)?, measure.word())
+        }
         SolvedKey::Hidden { constraint, index } => {
             format!("{}.hidden_{index}", name(&constraint.0)?)
         }
@@ -473,10 +542,66 @@ fn lower_entity(id: &str, value: &Expr) -> Result<SketchEntity, LowerError> {
             }
             SketchGeometry::Spline { points, closed }
         }
+        "ellipse" => {
+            let center = lower_point(&call.need("center", span)?)?;
+            let major = lower_value(&call.need("major", span)?)?;
+            let minor = lower_value(&call.need("minor", span)?)?;
+            let angle = call.take("angle").map(|a| lower_value(&a)).transpose()?;
+            let start = call.take("start").map(|p| lower_point(&p)).transpose()?;
+            let end = call.take("end").map(|p| lower_point(&p)).transpose()?;
+            if start.is_some() != end.is_some() {
+                return Err(error(
+                    span,
+                    "an elliptical arc takes both `start` and `end`; a whole ellipse takes neither",
+                ));
+            }
+            SketchGeometry::Ellipse {
+                center,
+                major,
+                minor,
+                angle,
+                start,
+                end,
+            }
+        }
+        "text" => {
+            let text = match call.need("text", span)? {
+                Expr::String(text) => text.value(),
+                other => return Err(error(other.span(), "a text's `text` is a quoted string")),
+            };
+            let at = lower_point(&call.need("at", span)?)?;
+            let height = lower_value(&call.need("height", span)?)?;
+            let angle = call.take("angle").map(|a| lower_value(&a)).transpose()?;
+            let font = match call.take("font") {
+                None => TextFont::default(),
+                Some(Expr::Reference(r))
+                    if r.segments().len() == 1 && TextFont::from_word(&r.segments()[0]).is_some() =>
+                {
+                    TextFont::from_word(&r.segments()[0]).expect("checked")
+                }
+                Some(other) => {
+                    return Err(error(
+                        other.span(),
+                        "a text's `font` is `single_line`, the one font sketches set text in",
+                    ))
+                }
+            };
+            let stroke = call.take("stroke").map(|w| lower_value(&w)).transpose()?;
+            SketchGeometry::Text {
+                text,
+                at,
+                height,
+                angle,
+                font,
+                stroke,
+            }
+        }
         other => {
             return Err(error(
                 span,
-                format!("`{other}` is not a sketch entity (point, line, arc, circle, spline)"),
+                format!(
+                    "`{other}` is not a sketch entity (point, line, arc, circle, spline, ellipse, text)"
+                ),
             ))
         }
     };
@@ -487,12 +612,120 @@ fn lower_entity(id: &str, value: &Expr) -> Result<SketchEntity, LowerError> {
             other => return Err(error(other.span(), "`construction` is true or false")),
         };
     }
+    let projected = call
+        .take("from")
+        .map(|from| lower_projection(&from))
+        .transpose()?;
     call.done(span)?;
     Ok(SketchEntity {
         id: SketchEntityId::new(id),
         geometry,
         construction,
+        projected,
     })
+}
+
+/// A converted entity's `from = …` source.
+fn print_projection(from: &SketchProjection) -> Option<String> {
+    use SketchProjection as P;
+    let r = refs::print_reference;
+    Some(match from {
+        P::Published {
+            occurrence,
+            published,
+        } => format!("published(occurrence = {occurrence}, name = {published})"),
+        P::Project { edge } => format!("project({})", r(edge)?),
+        P::Silhouette { face, chain } => format!("silhouette({}, chain = {chain})", r(face)?),
+        P::Intersection { face, chain } => format!("intersection({}, chain = {chain})", r(face)?),
+        P::OffsetOnSurface {
+            edge,
+            face,
+            distance,
+        } => format!(
+            "offset_on_surface({}, face = {}, distance = {})",
+            r(edge)?,
+            r(face)?,
+            print_value(distance)?
+        ),
+    })
+}
+
+const PROJECTION_FORMS: &str = "`from` is `published(occurrence = <component>, name = <published \
+     edges>)` in an assembly, or `project(<edge>)`, `silhouette(<face>, chain = 0)`, \
+     `intersection(<face>, chain = 0)` or `offset_on_surface(<edge>, face = <face>, distance = \
+     <length>)` in a part";
+
+/// `from = published(occurrence = upper, name = upper_e1)` (an edge set a component publishes)
+/// or one of a part's own edge and face forms: a converted entity's source.
+fn lower_projection(expr: &Expr) -> Result<SketchProjection, LowerError> {
+    let span = expr.span();
+    let mut call = call_parts(expr)?;
+    let word = |e: Expr| match &e {
+        Expr::Reference(r) if !r.segments().is_empty() => Ok(r.segments().join(".")),
+        other => Err(error(other.span(), "expected a name")),
+    };
+    let reference =
+        |call: &mut Call, what: &str| -> Result<crate::refs::reference::Reference, LowerError> {
+            if call.positional.is_empty() {
+                return Err(error(
+                    span,
+                    format!("`{}` needs the {what} first", call.word),
+                ));
+            }
+            let e = call.positional.remove(0);
+            refs::lower_reference(&e).unwrap_or_else(|| {
+                Err(error(
+                    e.span(),
+                    format!("expected a reference to the {what}"),
+                ))
+            })
+        };
+    let chain = |call: &mut Call| -> Result<u32, LowerError> {
+        match call.take("chain") {
+            None => Ok(0),
+            Some(e) => {
+                let n = literal_number(&e)?;
+                if n < 0.0 || n.fract() != 0.0 {
+                    return Err(error(e.span(), "`chain` is 0, 1, 2 …"));
+                }
+                Ok(n as u32)
+            }
+        }
+    };
+    let from = match call.word.as_str() {
+        "published" => SketchProjection::Published {
+            occurrence: word(call.need("occurrence", span)?)?,
+            published: word(call.need("name", span)?)?,
+        },
+        "project" => SketchProjection::Project {
+            edge: reference(&mut call, "edge")?,
+        },
+        "silhouette" => SketchProjection::Silhouette {
+            face: reference(&mut call, "face")?,
+            chain: chain(&mut call)?,
+        },
+        "intersection" => SketchProjection::Intersection {
+            face: reference(&mut call, "face")?,
+            chain: chain(&mut call)?,
+        },
+        "offset_on_surface" => {
+            let edge = reference(&mut call, "edge")?;
+            let face = call.need("face", span)?;
+            let face = refs::lower_reference(&face)
+                .unwrap_or_else(|| Err(error(face.span(), "expected a reference to the face")))?;
+            SketchProjection::OffsetOnSurface {
+                edge,
+                face,
+                distance: lower_value(&call.need("distance", span)?)?,
+            }
+        }
+        _ => return Err(error(span, PROJECTION_FORMS)),
+    };
+    if let Some(extra) = call.positional.first() {
+        return Err(error(extra.span(), PROJECTION_FORMS));
+    }
+    call.done(span)?;
+    Ok(from)
 }
 
 fn lower_kind(expr: &Expr, value: Option<&Expr>) -> Result<(K, Option<ConstraintId>), LowerError> {
@@ -605,6 +838,14 @@ fn lower_kind(expr: &Expr, value: Option<&Expr>) -> Result<(K, Option<Constraint
             curve: targets(1)?.remove(0),
             value: need_value(value)?,
         },
+        "major_radius" => K::MajorRadius {
+            curve: targets(1)?.remove(0),
+            value: need_value(value)?,
+        },
+        "minor_radius" => K::MinorRadius {
+            curve: targets(1)?.remove(0),
+            value: need_value(value)?,
+        },
         "limit" => {
             no_value(&value)?;
             let [dimension] = positional.as_slice() else {
@@ -629,6 +870,10 @@ fn solved_key(target: &[String], span: Span) -> Result<SolvedKey, LowerError> {
     match target {
         [entity, field] if field == "radius" => Ok(SolvedKey::Radius {
             entity: SketchEntityId::new(entity),
+        }),
+        [entity, field] if EllipseMeasure::from_word(field).is_some() => Ok(SolvedKey::Ellipse {
+            entity: SketchEntityId::new(entity),
+            measure: EllipseMeasure::from_word(field).expect("checked"),
         }),
         [owner, field] if field.starts_with("hidden_") => {
             let index = field["hidden_".len()..]

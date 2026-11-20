@@ -26,7 +26,7 @@ pub(super) fn rows(catalog: &Catalog) -> EditorRows {
         mode: EditMode::Model,
         default_tab: "features".into(),
         view_cluster: cluster_3d(vec![]),
-        document_bar: vec![c("view.configuration")],
+        document_bar: vec![c("view.configuration"), c("view.part-representation")],
         shortcut_box: [
             "part.sketch",
             "part.extrude",
@@ -276,7 +276,6 @@ pub(super) fn rows(catalog: &Catalog) -> EditorRows {
                         "Drag",
                         vec![c("direct.instant-3d"), c("direct.pull")],
                     ),
-                    group("relations", "Relations", vec![c("direct.live-relations")]),
                 ],
             ),
             tab(
@@ -594,6 +593,7 @@ pub(super) fn rows(catalog: &Catalog) -> EditorRows {
                         "References",
                         vec![
                             c("manage.find-references"),
+                            c("manage.release"),
                             c("manage.replace-reference"),
                             c("manage.freeze-bar"),
                         ],

@@ -791,6 +791,9 @@ fn k1_hole_table_reads_the_regenerated_part() {
         display: Display::VisibleLines,
         exclude: vec![],
         exploded: None,
+        title: None,
+        centerlines: true,
+        tangent_edges: None,
     };
     let t = hole_table("holes", &HoleTableSpec::default(), &view, &corner, &g);
     let rows: Vec<(String, String)> = t
@@ -1365,6 +1368,7 @@ fn k1_closed_and_open_hems_name_their_faces_as_the_reference_kernel_does() {
                 end: PointExpr::mm(pts[k + 1].0, pts[k + 1].1),
             },
             construction: false,
+            projected: None,
         });
     }
     let named = |role: Role, key: &str, o: u32| {
@@ -1413,6 +1417,7 @@ fn k1_closed_and_open_hems_name_their_faces_as_the_reference_kernel_does() {
         let fake = FakeKernel::new();
         let ctx = RegenContext {
             kernel: &fake,
+            tessellator: Some(&fake),
             ..env.ctx()
         };
         let reference = regenerate(

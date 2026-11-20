@@ -267,7 +267,7 @@ fn estimate_projection_resident_bytes(
     )
 }
 
-fn estimate_topology_resident_bytes(
+pub(in crate::planning::resource) fn estimate_topology_resident_bytes(
     node_count: usize,
     element_count: usize,
     boundary_count: usize,

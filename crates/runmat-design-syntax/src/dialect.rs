@@ -73,6 +73,60 @@ impl GenericForm {
     }
 }
 
+impl GenericForm {
+    /// What the form does, for hovers and the language docs.
+    pub const fn summary(self) -> &'static str {
+        match self {
+            GenericForm::VersionHeader => {
+                "The language version the file is written in (`runmat 0.7`, `std 1`)."
+            }
+            GenericForm::Use => {
+                "Brings in another design, a library or a folder of designs by path."
+            }
+            GenericForm::Constrain => {
+                "A condition the design must meet; with `=`, a relation the solver keeps."
+            }
+            GenericForm::When => "Statements that apply only while a condition holds.",
+            GenericForm::Publish => "A named value or geometry other files may read.",
+            GenericForm::Check => "A named check the design reports on.",
+            GenericForm::Property => "A named property carried into parts lists and exports.",
+            GenericForm::Link => "Links an item in this file to one in another file.",
+            GenericForm::Solved => "The solver's cached results; the editor writes it.",
+        }
+    }
+}
+
+/// What a word every design dialect shares does, for hovers and the language docs: the generic
+/// forms, value words, literals, clause words and the file declarations.
+pub fn word_summary(word: &str) -> Option<&'static str> {
+    if let Some(form) = GenericForm::ALL.iter().find(|f| f.word() == word) {
+        return Some(form.summary());
+    }
+    Some(match word {
+        STD_HEADER_WORD => "The standard library version the file is written against.",
+        "let" => "A named value computed from inputs, other values or a `.m` function.",
+        "input" => "A named, typed value people change: `input width : length = 80 mm`.",
+        "true" | "false" => "A flag's value.",
+        "none" => "No value.",
+        "on" => "The plane, face or item a block is placed on.",
+        "of" => "The item a block describes.",
+        "from" => "Where something comes from: a file path or a base item.",
+        "over" => "The range a block spans.",
+        "at" => "Where something is placed.",
+        "in" => "The container an item belongs to.",
+        "to" => "The target a link or move goes to.",
+        "as" => "A local name for something brought in.",
+        "for" => "What a block applies to.",
+        "part" => "A part: sketches and features that build its bodies, with outputs, regions and tolerances.",
+        "assembly" => "An assembly: occurrences of parts placed by mates.",
+        "drawing" => "A drawing: sheets with views of a part or assembly, dimensions and tables.",
+        "circuit" => "A circuit: components joined by nets, on one or more sheets.",
+        "sheet" => "A schematic sheet of a circuit, or a drawing sheet.",
+        "layout" => "A board layout: footprints, tracks, vias and pours for a circuit.",
+        _ => return None,
+    })
+}
+
 /// The second version-header word.
 pub const STD_HEADER_WORD: &str = "std";
 

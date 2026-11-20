@@ -121,12 +121,25 @@ work protocol. No frontend timer or `Worker.terminate()` manufactures retirement
 ## Simulation execution choices before meshing
 
 `planFeaSource` checks the saved study and returns host choices without creating a
-solver mesh, assembling operators, or running the study. Existing preview extents
-in physical metres and the requested element size can supply a coarse boxed-grid
-workspace estimate. That estimate includes empty space in the bounding box and
-cannot predict all refinement or solver fill-in; it is advisory, not an allocation
-certificate. Missing geometry measurements remain unknown. A high rough estimate
-can recommend desktop without blocking a browser attempt.
+solver mesh, assembling operators, or running the study. For imported CAD, the check
+measures the preview surface once: its enclosed volume, its area, and how much of the
+surface lies at each curvature radius, wall thickness and facing gap. From that measure
+and the study's mesh settings it estimates the solver mesh's tetrahedra and nodes,
+then the memory and scratch of the static solid's multigrid solve from those counts,
+using the same byte formulas as the exact planner. Each candidate carries
+`estimatedElementCount`, `estimatedNodeCount` and `memoryBytes`.
+
+When the estimate exceeds the target's admitted budget, min(authored
+`maximum_resident_bytes`, platform), the candidate carries a `resourceLimit` with the
+term, `requiredBytes`, `maximumBytes` and the next action. In the browser the platform
+figure is one numerical worker's budget, the code is
+`RM.FEA.RUN_STUDY.BROWSER_RESOURCE_LIMIT` and the candidate is `desktop_required`. On
+the desktop it is the memory the machine admits a run, the code is
+`RM.FEA.RUN_STUDY.RESOURCE_LIMIT` and the candidate is `unavailable`.
+
+The estimate is calibrated against meshes the production mesher made, and the
+factorization's fill is not estimated, so it is not an allocation certificate.
+Constructed geometry and geometry without a measured preview get no estimate.
 
 Only an explicit `runFeaSource` prepares the mesh. It rechecks the selected input
 revision, uses the existing geometry/meshing owner and exact resource planner,

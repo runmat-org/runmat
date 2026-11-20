@@ -458,11 +458,12 @@ pub(super) fn add(catalog: &mut Catalog) {
             "drawing.note",
             "Note",
             "note",
-            "Add a note, with an optional leader.",
+            "Add a note, with an optional leader. Long text wraps to the width, else to the room the note has; put sheet-wide notes in the general notes list instead.",
         )
         .inputs(vec![
             text("text", "Text", None),
             pick("attach", "Leader to", &[K::Edge, K::View]).optional(),
+            length("width", "Width", 0.0).optional(),
             place(),
         ])
         .edit(annotation("note")),
@@ -628,6 +629,14 @@ pub(super) fn add(catalog: &mut Catalog) {
         ])
         .edit(table("revision")),
         drw(
+            "table.notes",
+            "General notes",
+            "note",
+            "Add a note to the sheet's numbered general notes, above the title block.",
+        )
+        .inputs(vec![text("text", "Note", None), place()])
+        .edit(table("notes")),
+        drw(
             "table.bend",
             "Bend table",
             "bend-table",
@@ -736,10 +745,18 @@ pub(super) fn add(catalog: &mut Catalog) {
             "drawing.check",
             "Check drawing",
             "check",
-            "Check the drawing against a standards pack.",
+            "Check the drawing against its models and drafting rules, and list the findings.",
         )
-        .inputs(vec![text("pack", "Standard", Some("ISO 128"))])
-        .edit(check("drawing")),
+        .inputs(vec![choice(
+            "standard",
+            "Standard",
+            &[
+                ("sheet", "The sheets' standard"),
+                ("iso", "ISO"),
+                ("asme", "ASME"),
+            ],
+        )])
+        .edit(analyze("drawing_check")),
         drw(
             "drawing.document-settings",
             "Document settings",
@@ -851,10 +868,51 @@ pub(super) fn add(catalog: &mut Catalog) {
             "drawing.edit-view",
             "Edit view",
             "edit",
-            "Open the view's properties.",
+            "Edit the view's scale, orientation, display style, tangent edges, label and place.",
         )
+        .inputs(vec![
+            text("scale", "Scale", Some("sheet")),
+            choice(
+                "orientation",
+                "Orientation",
+                &[
+                    ("front", "Front"),
+                    ("back", "Back"),
+                    ("top", "Top"),
+                    ("bottom", "Bottom"),
+                    ("left", "Left"),
+                    ("right", "Right"),
+                    ("isometric", "Isometric"),
+                    ("dimetric", "Dimetric"),
+                    ("trimetric", "Trimetric"),
+                ],
+            ),
+            choice(
+                "display",
+                "Display",
+                &[
+                    ("hidden_removed", "Hidden lines removed"),
+                    ("hidden_visible", "Hidden lines visible"),
+                    ("shaded", "Shaded"),
+                ],
+            ),
+            // Unset, a pictorial view draws them thin and an orthographic one hides them.
+            choice(
+                "tangent_edges",
+                "Tangent edges",
+                &[
+                    ("thin", "Thin lines"),
+                    ("show", "Visible lines"),
+                    ("hide", "Hidden"),
+                ],
+            )
+            .optional(),
+            text("label", "Label", Some("FRONT VIEW")).optional(),
+            pick("at", "Place at", &[K::Point]).optional(),
+        ])
         .when(selected_one(&[K::View]))
         .on(&[K::View])
+        .preview()
         .edit(edit(EditOp::Edit, Section::Views)),
         drw(
             "drawing.delete",
@@ -1018,6 +1076,7 @@ pub(super) fn add(catalog: &mut Catalog) {
                         c("table.bom"),
                         c("table.hole"),
                         c("table.revision"),
+                        c("table.notes"),
                         c("table.bend"),
                         c("table.weld"),
                         c("table.cut-list"),

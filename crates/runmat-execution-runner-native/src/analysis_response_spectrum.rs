@@ -1,6 +1,5 @@
 use std::collections::BTreeMap;
 use std::sync::Arc;
-use std::time::Instant;
 
 use runmat_analysis_execution::{
     complete_result_publication_resource_usage, prepare_planned_resource_graph_usage,
@@ -14,8 +13,8 @@ use runmat_analysis_execution::{
 use crate::{
     analysis_task_pool::{
         configure_local_analysis, execute_analysis_task_batch, planned_phase_execution,
-        AnalysisTaskBatchPolicy, AnalysisTaskDependency, AnalysisTaskPool, LocalAnalysisTaskPool,
-        PreparedAnalysisTask, RemoteAnalysisTaskPool,
+        AnalysisTaskBatchPolicy, AnalysisTaskDependency, AnalysisTaskPool, AnalysisWorkflowClock,
+        LocalAnalysisTaskPool, PreparedAnalysisTask, RemoteAnalysisTaskPool,
     },
     NativeExecutionConfig, NativeExecutionError, NativeExecutionResult, NativeProgramSession,
     RemotePoolDriver, StructuralSequenceExecutionPolicy,
@@ -72,7 +71,7 @@ async fn execute_with_pool(
     let inventory_limits = preparation.inventory_limits;
     let mut coordinator =
         StructuralModalResponseSpectrumStudyCoordinator::new(preparation).map_err(protocol)?;
-    let workflow_started = Instant::now();
+    let workflow_clock = AnalysisWorkflowClock::start(pool);
 
     let modal = coordinator.prepare_modal().map_err(protocol)?;
     let [executed_modal] = execute_analysis_task_batch(
@@ -204,11 +203,9 @@ async fn execute_with_pool(
         ];
         coordinator.finish_observations().map_err(protocol)?;
     }
-    let graph = PlannedResourceUsageGraph::new(
-        resource_attempts,
-        u64::try_from(workflow_started.elapsed().as_millis()).unwrap_or(u64::MAX),
-    )
-    .map_err(protocol)?;
+    let graph =
+        PlannedResourceUsageGraph::new(resource_attempts, workflow_clock.wall_millis(pool)?)
+            .map_err(protocol)?;
     let resource_usage = prepare_planned_resource_graph_usage(
         &assembly.resource_plan,
         coordinator

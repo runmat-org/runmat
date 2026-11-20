@@ -1,3 +1,4 @@
+use runmat_runtime::geometry::design_source;
 use std::path::{Path, PathBuf};
 
 use runmat_runtime::analysis::{
@@ -66,6 +67,14 @@ impl CheckedFeaSessionSource {
     }
 
     pub async fn read_source(&self, path: &Path) -> Result<Vec<u8>, String> {
+        // A RunMat MCAD part or assembly reads as the exact geometry its regeneration writes,
+        // from the same view as every other source.
+        if design_source::is_design_geometry(&path.to_string_lossy()) {
+            return match self.captured_sources() {
+                Some(files) => design_source::captured_design_geometry(path, files).await,
+                None => design_source::read_design_geometry_async(path).await,
+            };
+        }
         match self.captured_sources() {
             Some(files) => files.get(path).cloned().ok_or_else(|| {
                 format!(
@@ -157,11 +166,13 @@ impl RunMatSession {
                 let physical_path =
                     runmat_runtime::analysis::physical_source_path(&source_root, &logical_path)
                         .map_err(|error| error.to_string())?;
-                if let Ok(source) = runmat_filesystem::read_async(&physical_path).await {
-                    snapshot.add_module(FeaSourceSnapshotBuilder::source_module(
+                // A read error is reported by the check at the module's import.
+                match runmat_filesystem::read_async(&physical_path).await {
+                    Ok(source) => snapshot.add_module(FeaSourceSnapshotBuilder::source_module(
                         logical_path,
                         source,
-                    ))?;
+                    ))?,
+                    Err(error) => snapshot.add_module_read_error(logical_path, error),
                 }
             }
         }
@@ -185,8 +196,17 @@ impl RunMatSession {
             let physical_path =
                 runmat_runtime::analysis::physical_source_path(&source_root, &request.logical_path)
                     .map_err(|error| error.to_string())?;
-            if let Ok(bytes) = runmat_filesystem::read_async(&physical_path).await {
-                prepared.add_geometry(request.logical_path, bytes)?;
+            if design_source::is_design_geometry(request.logical_path.as_str()) {
+                // An evaluation failure is reported at the geometry's `file =` by the check.
+                match design_source::read_design_geometry_async(&physical_path).await {
+                    Ok(bytes) => prepared.add_geometry(request.logical_path, bytes)?,
+                    Err(error) => prepared.add_geometry_failure(request.logical_path, error),
+                }
+            } else {
+                match runmat_filesystem::read_async(&physical_path).await {
+                    Ok(bytes) => prepared.add_geometry(request.logical_path, bytes)?,
+                    Err(error) => prepared.add_geometry_read_error(request.logical_path, error),
+                }
             }
         }
         Ok(CheckedFeaSessionSource {
@@ -391,3 +411,7 @@ async fn read_source(path: &Path, label: &str) -> Result<Vec<u8>, String> {
         .await
         .map_err(|error| format!("cannot read {label} {}: {error}", path.display()))
 }
+
+#[cfg(test)]
+#[path = "fea_source_tests.rs"]
+mod tests;

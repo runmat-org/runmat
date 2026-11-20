@@ -13,6 +13,7 @@ fn compiled(
 ) -> CompiledAnalysisStudy {
     let properties = crate::properties::compile_property_map(&model, Some(mesh)).unwrap();
     CompiledAnalysisStudy {
+        displays: Vec::new(),
         module_path: "tests/magnetic.fea".into(),
         study_id: "magnetic".into(),
         study_inputs: vec![],

@@ -4,7 +4,7 @@ keywords: [fabrication outputs tutorial, Gerber, drill files, pick and place, BO
 ---
 # Make fabrication outputs
 
-This guide sends the pressure sensor board from [Lay out a board](/docs/ecad/guides/lay-out-a-board) out for manufacture: a set of files for the board house that makes the bare board, and a set for the assembly house that places the parts. The Desktop's Fabrication outputs panel, `design.export` and `runmat-design export --format fabrication` make the same files from the same settings.
+This guide sends the pressure sensor board from [Lay out a board](/docs/ecad/guides/lay-out-a-board) out for manufacture: a set of files for the board house that makes the bare board, and a set for the assembly house that places the parts. The Desktop's Fabrication outputs panel, `design.export` and `runmat design export --format fabrication` make the same files from the same settings.
 
 ## 1. Choose a preset
 
@@ -105,9 +105,9 @@ Here the pre-flight is clean, so Generate writes the fab-house package straight 
 The command reads the board's saved settings, and each flag overrides one:
 
 ```sh
-runmat-design export baro.circuit.layout --format fabrication
-runmat-design export baro.circuit.layout --format fabrication --preset assembly --variant "" --out fab/assembly
-runmat-design export baro.circuit.layout --format fabrication --gerber-units inch --revision B --remember
+runmat design export baro.circuit.layout --format fabrication
+runmat design export baro.circuit.layout --format fabrication --preset assembly --variant "" --out fab/assembly
+runmat design export baro.circuit.layout --format fabrication --gerber-units inch --revision B --remember
 ```
 
 `--remember` saves the flags' settings into the board. See [Fabrication outputs and netlists](/docs/ecad/fabrication) for every option.

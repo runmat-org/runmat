@@ -28,14 +28,19 @@ use serde_json::Value;
 use super::fea::highlight::{self, class, TokenClass, FUNCTION, KEYWORD, NAMESPACE, VARIABLE};
 use super::position::{offset_to_position, position_to_offset};
 
+mod calls;
 mod circuit_values;
 mod compile;
+mod help;
 mod modules;
 mod pending;
 pub mod symbols;
+mod words;
 use compile::compile;
 #[cfg(test)]
 mod tests;
+#[cfg(test)]
+mod help_tests;
 
 use symbols::SymbolTable;
 
@@ -209,6 +214,11 @@ impl DesignDocumentAnalysis {
                 ..Diagnostic::default()
             })
             .collect()
+    }
+
+    /// Quick fixes for the problems in `range`: units of the expected kind for a wrong unit.
+    pub fn code_actions(&self, range: Range) -> Vec<lsp_types::CodeActionOrCommand> {
+        super::unit_fixes::unit_code_actions(&self.uri, self.source(), &self.diagnostics(), range)
     }
 
     /// Tokens with the grammar's classes, before any compile: the first paint.
@@ -493,7 +503,25 @@ impl DesignDocumentAnalysis {
     }
 
     pub fn hover(&self, position: &Position) -> Option<Hover> {
-        let (symbol, span) = self.symbol_at(position)?;
+        let offset = position_to_offset(self.source(), position);
+        let facts = self.reference_facts(offset);
+        let with_facts = |mut text: String| {
+            if let Some(facts) = &facts {
+                text.push_str("\n\n");
+                text.push_str(facts);
+            }
+            text
+        };
+        let Some((symbol, span)) = self.symbol_at(position) else {
+            let (text, (start, end)) = self.word_hover(offset)?;
+            return Some(Hover {
+                contents: HoverContents::Markup(MarkupContent {
+                    kind: MarkupKind::Markdown,
+                    value: with_facts(text),
+                }),
+                range: Some(self.range(Span { start, end })),
+            });
+        };
         let s = &self.symbols.symbols[symbol];
         let statement = self.source().get(s.span.start..s.span.end).unwrap_or("");
         let head = statement
@@ -522,7 +550,7 @@ impl DesignDocumentAnalysis {
         Some(Hover {
             contents: HoverContents::Markup(MarkupContent {
                 kind: MarkupKind::Markdown,
-                value: text,
+                value: with_facts(text),
             }),
             range: Some(self.range(span)),
         })
@@ -564,19 +592,16 @@ impl DesignDocumentAnalysis {
                         if let Some(row) = named("inputs", "name") {
                             if let Some(error) = row["error"].as_str() {
                                 out.push(format!("**Value:** doesn't evaluate: {error}"));
-                            } else if let Some(si) = row["si"].as_f64() {
+                            } else if let Some(display) = row["display"].as_str() {
                                 let kind = row["kind"].as_str().unwrap_or("");
-                                out.push(format!("**Value:** {} ({kind})", si_text(si, kind)));
+                                out.push(format!("**Value:** {display} ({kind})"));
                             }
                         }
                     }
                     "let" => {
                         if let Some(row) = named("lets", "name") {
-                            let kind = dimension_kind(&row["dimension"]);
-                            match (row["si"].as_f64(), row["error"].as_str()) {
-                                (Some(si), _) => {
-                                    out.push(format!("**Value:** {}", si_text(si, kind)))
-                                }
+                            match (row["display"].as_str(), row["error"].as_str()) {
+                                (Some(display), _) => out.push(format!("**Value:** {display}")),
                                 (None, Some(error)) if row["function"].is_null() => {
                                     out.push(format!("**Value:** doesn't evaluate: {error}"))
                                 }
@@ -813,6 +838,9 @@ impl DesignDocumentAnalysis {
         {
             return items;
         }
+        if let Some(items) = self.call_completions(offset, before) {
+            return items;
+        }
         let scope = self.symbols.scope_at(offset);
         if let Some(path) = dotted_prefix(before) {
             return self.member_completions(&path, scope);
@@ -1011,7 +1039,11 @@ impl DesignDocumentAnalysis {
             kind: Some(kind),
             ..CompletionItem::default()
         };
-        let pool = || runmat_circuit::fixture::standard_pool();
+        // The compile's pool: the standard library, declared parts and `use` libraries.
+        let pool = || {
+            self.pool()
+                .unwrap_or_else(runmat_circuit::fixture::standard_pool)
+        };
         match (self.dialect, field) {
             (Dialect::Circuit, "part") => {
                 let pool = pool();
@@ -1101,67 +1133,16 @@ fn is_identifier(text: &str) -> bool {
         && chars.all(|c| c.is_ascii_alphanumeric() || c == '_')
 }
 
-/// The `si_text` kind of a dimension (`{ base, angle }`): length, angle or mass, else none.
-fn dimension_kind(dimension: &Value) -> &'static str {
-    let base: Vec<i64> = dimension["base"]
-        .as_array()
-        .into_iter()
-        .flatten()
-        .filter_map(Value::as_i64)
-        .collect();
-    let angle = dimension["angle"].as_i64().unwrap_or(0);
-    let only = |at: usize| {
-        base.len() == 8
-            && base
-                .iter()
-                .enumerate()
-                .all(|(i, e)| *e == i64::from(i == at))
-    };
-    match angle {
-        0 if only(0) => "length",
-        0 if only(1) => "mass",
-        1 if base.iter().all(|e| *e == 0) => "angle",
-        _ => "",
-    }
-}
-
-fn si_text(si: f64, kind: &str) -> String {
-    let unit = match kind {
-        "length" => "m",
-        "angle" => "rad",
-        "mass" => "kg",
-        "area" => "m²",
-        "volume" => "m³",
-        "force" => "N",
-        "pressure" => "Pa",
-        "temperature" => "K",
-        "time" => "s",
-        _ => "",
-    };
-    let value = if si != 0.0 && (si.abs() < 1e-3 || si.abs() >= 1e6) {
-        format!("{si:e}")
-    } else {
-        format!("{}", (si * 1e9).round() / 1e9)
-    };
-    if kind == "length" {
-        format!("{} mm ({value} m)", (si * 1e3 * 1e6).round() / 1e6)
-    } else if kind == "angle" {
-        format!("{}° ({value} rad)", (si.to_degrees() * 1e6).round() / 1e6)
-    } else if unit.is_empty() {
-        value
-    } else {
-        format!("{value} {unit}")
-    }
-}
-
+/// The Monaco language id a hover's code fence names (`design-language.ts`), so it colors.
 fn fence(dialect: Dialect) -> &'static str {
     match dialect {
-        Dialect::Part => "part",
-        Dialect::Assembly => "assembly",
-        Dialect::Drawing => "drawing",
-        Dialect::Circuit => "circuit",
-        Dialect::CircuitLayout => "circuit-layout",
-        Dialect::Fea => "fea",
+        Dialect::Part => "runmat-part",
+        Dialect::Assembly => "runmat-assembly",
+        Dialect::Drawing => "runmat-drawing",
+        Dialect::Circuit => "runmat-circuit",
+        Dialect::CircuitLayout => "runmat-circuit-layout",
+        // `.fea` files open in the `.m` language (`file-language.ts`).
+        Dialect::Fea => "runmat",
     }
 }
 

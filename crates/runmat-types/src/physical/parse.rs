@@ -36,13 +36,68 @@ impl fmt::Display for UnitExpressionError {
 }
 
 pub fn parse_unit_expression(source: &str) -> Result<UnitDefinition, UnitExpressionError> {
-    let normalized = source.replace(['µ', 'μ'], "u");
+    parse_with(source, unit)
+}
+
+/// [`parse_unit_expression`] where the value must measure `expected`. A symbol with two
+/// readings takes the one that fits: `g` is standard gravity, but where a mass is expected it
+/// is the gram, and so are its prefixed forms (`0.35 g`, `2 mg`, `g/cm^3` for a density).
+/// When neither reading fits, the result is the ordinary reading, so the caller reports the
+/// mismatch against the unit as usually read.
+pub fn parse_unit_expecting(
+    source: &str,
+    expected: PhysicalDimension,
+) -> Result<UnitDefinition, UnitExpressionError> {
+    let ordinary = parse_with(source, unit);
+    if matches!(&ordinary, Ok(u) if u.dimension == expected) || expected.mass == 0 {
+        return ordinary;
+    }
+    match parse_with(source, |symbol| gram(symbol).or_else(|| unit(symbol))) {
+        Ok(grams) if grams.dimension == expected => Ok(grams),
+        _ => ordinary,
+    }
+}
+
+/// The gram reading of `g` and its SI-prefixed forms (`mg`, `ug`, `kg`).
+fn gram(symbol: &str) -> Option<UnitDefinition> {
+    let factor = match symbol.strip_suffix('g')? {
+        "" => 1.0,
+        prefix => SI_PREFIXES.iter().find(|(p, _)| *p == prefix)?.1,
+    };
+    Some(UnitDefinition {
+        dimension: PhysicalDimension::MASS,
+        angle_power: 0,
+        scale_bits: (factor * 1e-3_f64).to_bits(),
+        offset_bits: 0.0_f64.to_bits(),
+    })
+}
+
+fn parse_with(
+    source: &str,
+    unit: impl Fn(&str) -> Option<UnitDefinition>,
+) -> Result<UnitDefinition, UnitExpressionError> {
+    // The display forms read back as written: `µm`, `mm²`, `cm³` and `45°`.
+    let normalized = source
+        .replace(['µ', 'μ'], "u")
+        .replace('²', "^2")
+        .replace('³', "^3")
+        .replace('°', "deg");
     let compact = normalized
         .chars()
         .filter(|value| !value.is_whitespace())
         .collect::<String>();
     if compact.is_empty() {
         return Err(UnitExpressionError::Empty);
+    }
+    // `1` is the unit of a bare number (a count or a ratio), as the unit table's dimensionless
+    // row writes it, so a dimensionless quantity has a unit to name.
+    if compact == "1" {
+        return Ok(UnitDefinition {
+            dimension: PhysicalDimension::DIMENSIONLESS,
+            angle_power: 0,
+            scale_bits: 1.0_f64.to_bits(),
+            offset_bits: 0.0_f64.to_bits(),
+        });
     }
     let bytes = compact.as_bytes();
     let mut cursor = 0usize;
@@ -141,7 +196,43 @@ fn is_unit_character(value: u8) -> bool {
     value.is_ascii_alphabetic() || value == b'_'
 }
 
+/// SI prefixes a prefixable unit takes (`pF`, `nH`, `mS`, `kJ`). `u` stands for micro; the
+/// expression reader writes `µ` and `μ` as `u` before it looks a symbol up.
+const SI_PREFIXES: &[(&str, f64)] = &[
+    ("T", 1e12),
+    ("G", 1e9),
+    ("M", 1e6),
+    ("k", 1e3),
+    ("m", 1e-3),
+    ("u", 1e-6),
+    ("n", 1e-9),
+    ("p", 1e-12),
+    ("f", 1e-15),
+];
+
+/// Units an SI prefix may precede. The gravity unit `g`, kelvin, the angle units and the
+/// information units take none, so `mg` and `mK` stay unknown rather than mean something odd.
+const PREFIXABLE: &[&str] = &[
+    "m", "s", "Hz", "N", "Pa", "J", "W", "A", "C", "V", "ohm", "F", "H", "S", "T",
+];
+
 fn unit(symbol: &str) -> Option<UnitDefinition> {
+    named_unit(symbol).or_else(|| {
+        SI_PREFIXES.iter().find_map(|(prefix, factor)| {
+            let base = symbol.strip_prefix(prefix)?;
+            if !PREFIXABLE.contains(&base) {
+                return None;
+            }
+            let base = named_unit(base)?;
+            Some(UnitDefinition {
+                scale_bits: (factor * base.scale()).to_bits(),
+                ..base
+            })
+        })
+    })
+}
+
+fn named_unit(symbol: &str) -> Option<UnitDefinition> {
     let (dimension, scale, offset) = match symbol {
         "m" => (PhysicalDimension::LENGTH, 1.0, 0.0),
         "mm" => (PhysicalDimension::LENGTH, 1e-3, 0.0),
@@ -151,6 +242,7 @@ fn unit(symbol: &str) -> Option<UnitDefinition> {
         "km" => (PhysicalDimension::LENGTH, 1e3, 0.0),
         "in" | "inch" => (PhysicalDimension::LENGTH, 0.0254, 0.0),
         "ft" => (PhysicalDimension::LENGTH, 0.3048, 0.0),
+        "mil" | "thou" => (PhysicalDimension::LENGTH, 2.54e-5, 0.0),
         "s" => (PhysicalDimension::TIME, 1.0, 0.0),
         "ms" => (PhysicalDimension::TIME, 1e-3, 0.0),
         "us" => (PhysicalDimension::TIME, 1e-6, 0.0),
@@ -184,12 +276,25 @@ fn unit(symbol: &str) -> Option<UnitDefinition> {
         "mV" => (PhysicalDimension::ELECTRIC_POTENTIAL, 1e-3, 0.0),
         "kV" => (PhysicalDimension::ELECTRIC_POTENTIAL, 1e3, 0.0),
         "MV" => (PhysicalDimension::ELECTRIC_POTENTIAL, 1e6, 0.0),
+        "ohm" => (PhysicalDimension::new([2, 1, -3, -2, 0, 0, 0, 0]), 1.0, 0.0),
+        "kohm" => (PhysicalDimension::new([2, 1, -3, -2, 0, 0, 0, 0]), 1e3, 0.0),
+        "Mohm" => (PhysicalDimension::new([2, 1, -3, -2, 0, 0, 0, 0]), 1e6, 0.0),
+        // Capacitance, inductance and conductance (circuit component values: `100 nF`).
+        "F" => (PhysicalDimension::new([-2, -1, 4, 2, 0, 0, 0, 0]), 1.0, 0.0),
+        "H" => (PhysicalDimension::new([2, 1, -2, -2, 0, 0, 0, 0]), 1.0, 0.0),
+        "S" => (PhysicalDimension::new([-2, -1, 3, 2, 0, 0, 0, 0]), 1.0, 0.0),
         "T" => (PhysicalDimension::MAGNETIC_FLUX_DENSITY, 1.0, 0.0),
         "mT" => (PhysicalDimension::MAGNETIC_FLUX_DENSITY, 1e-3, 0.0),
         "rad" => (PhysicalDimension::DIMENSIONLESS, 1.0, 0.0),
         "deg" => (
             PhysicalDimension::DIMENSIONLESS,
             std::f64::consts::PI / 180.0,
+            0.0,
+        ),
+        // Revolutions per minute: an angle per time.
+        "rpm" => (
+            PhysicalDimension::FREQUENCY,
+            std::f64::consts::PI / 30.0,
             0.0,
         ),
         "B" => (PhysicalDimension::INFORMATION, 1.0, 0.0),
@@ -204,7 +309,7 @@ fn unit(symbol: &str) -> Option<UnitDefinition> {
     };
     Some(UnitDefinition {
         dimension,
-        angle_power: if matches!(symbol, "rad" | "deg") {
+        angle_power: if matches!(symbol, "rad" | "deg" | "rpm") {
             1
         } else {
             0
@@ -235,6 +340,28 @@ mod tests {
     }
 
     #[test]
+    fn component_units_take_si_prefixes() {
+        let capacitance = PhysicalDimension::new([-2, -1, 4, 2, 0, 0, 0, 0]);
+        let farad = parse_unit_expression("pF").unwrap();
+        assert_eq!(farad.dimension, capacitance);
+        assert_eq!(farad.scale(), 1e-12);
+        assert_eq!(parse_unit_expression("µF").unwrap().scale(), 1e-6);
+        assert_eq!(parse_unit_expression("nH").unwrap().scale(), 1e-9);
+        assert_eq!(parse_unit_expression("mS").unwrap().scale(), 1e-3);
+        assert_eq!(parse_unit_expression("Gohm").unwrap().scale(), 1e9);
+        assert_eq!(parse_unit_expression("kJ").unwrap().scale(), 1e3);
+        // Named units win over a prefix reading: `ms` is a millisecond, `mm` a millimetre.
+        assert_eq!(
+            parse_unit_expression("ms").unwrap().dimension,
+            PhysicalDimension::TIME
+        );
+        assert_eq!(parse_unit_expression("mm").unwrap().scale(), 1e-3);
+        // Units that take no prefix.
+        assert!(parse_unit_expression("mg").is_err());
+        assert!(parse_unit_expression("kdeg").is_err());
+    }
+
+    #[test]
     fn parses_composed_si_and_scaled_units() {
         let density = parse_unit_expression("kg / m^3").unwrap();
         assert_eq!(density.dimension, PhysicalDimension::DENSITY);
@@ -242,6 +369,43 @@ mod tests {
         let pressure = parse_unit_expression("GPa").unwrap();
         assert_eq!(pressure.dimension, PhysicalDimension::PRESSURE);
         assert_eq!(pressure.scale(), 1e9);
+    }
+
+    #[test]
+    fn g_is_the_gram_where_a_mass_is_expected() {
+        let mass = PhysicalDimension::MASS;
+        let gram = parse_unit_expecting("g", mass).unwrap();
+        assert_eq!((gram.dimension, gram.scale()), (mass, 1e-3));
+        assert_eq!(parse_unit_expecting("mg", mass).unwrap().scale(), 1e-6);
+        assert_eq!(parse_unit_expecting("kg", mass).unwrap().scale(), 1.0);
+        assert_eq!(parse_unit_expecting("gram", mass).unwrap().scale(), 1e-3);
+        let density = parse_unit_expecting("g/cm^3", PhysicalDimension::DENSITY).unwrap();
+        assert_eq!(density.dimension, PhysicalDimension::DENSITY);
+        assert!((density.scale() - 1e3).abs() < 1e-9);
+        // Elsewhere `g` stays standard gravity, and `mg` stays unknown.
+        let acceleration = PhysicalDimension::ACCELERATION;
+        assert_eq!(
+            parse_unit_expecting("g", acceleration).unwrap().dimension,
+            acceleration
+        );
+        assert!(parse_unit_expecting("mg", PhysicalDimension::LENGTH).is_err());
+        // A unit that fits neither reading is the ordinary one, for the mismatch message.
+        assert_eq!(
+            parse_unit_expecting("mm", mass).unwrap().dimension,
+            PhysicalDimension::LENGTH
+        );
+    }
+
+    #[test]
+    fn display_forms_read_back() {
+        let area = parse_unit_expression("mm²").unwrap();
+        assert_eq!(area.dimension, PhysicalDimension::LENGTH.power(2).unwrap());
+        assert!((area.scale() - 1e-6).abs() < 1e-18);
+        assert_eq!(parse_unit_expression("m²").unwrap().scale(), 1.0);
+        let volume = parse_unit_expression("cm³").unwrap();
+        assert!((volume.scale() - 1e-6).abs() < 1e-18);
+        let degree = parse_unit_expression("°").unwrap();
+        assert_eq!(degree, parse_unit_expression("deg").unwrap());
     }
 
     #[test]

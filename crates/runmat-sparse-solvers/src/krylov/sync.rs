@@ -125,6 +125,8 @@ struct SyncOperations<'a, T: Scalar> {
     /// A communication failure, reported at the next checkpoint.
     failure: Option<SolverError>,
     capacity_owner: Option<&'a dyn runmat_simulation_usage::AsyncCapacityOwner>,
+    /// Trace spans of this solve's iteration batches.
+    batches: crate::trace::IterationBatches,
 }
 
 impl<T: Scalar> SyncOperations<'_, T> {
@@ -181,6 +183,7 @@ impl<T: Scalar> SyncOperations<'_, T> {
     fn coefficient(&mut self, input: &[T], output: &mut [T]) -> SolverResult<()> {
         self.operator.apply(input, output)?;
         self.operator_applications += 1;
+        self.batches.observe(self.operator_applications, f64::NAN);
         // Progress counts operator applications; the residual is reported in the final report.
         self.control
             .report_iteration(ProgressPhase::Krylov, self.operator_applications, f64::NAN);
@@ -672,6 +675,8 @@ async fn pcg_impl_typed<T: Scalar, E>(
     reservation
         .complete(norm_work)
         .map_err(SolverError::Usage)?;
+    // The owner quotes each iteration's capacity only while no batch is outstanding.
+    drop(reservation);
     if rhs_norm == 0.0 {
         return Ok(zero_rhs_report(x));
     }
@@ -700,6 +705,7 @@ async fn pcg_impl_typed<T: Scalar, E>(
         distribution: None,
         failure: None,
         capacity_owner: None,
+        batches: Default::default(),
     };
     let mut operations = OwnedPcgOperations { inner, owner };
     let outcome = pcg::solve_with::<T, ScalarArithmetic, _>(
@@ -872,6 +878,7 @@ async fn pcg_impl_async<T: Scalar>(
         distribution,
         failure: None,
         capacity_owner: None,
+        batches: Default::default(),
     };
     let outcome = pcg::solve_with::<T, ScalarArithmetic, _>(
         b,
@@ -1135,6 +1142,7 @@ fn gmres_impl<T: Scalar>(
         distribution,
         failure: None,
         capacity_owner: None,
+        batches: Default::default(),
     };
     let outcome = block_on(gmres::solve_with::<T, ScalarArithmetic, _>(
         b,

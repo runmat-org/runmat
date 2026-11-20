@@ -9,5 +9,8 @@ pub mod position;
 pub mod project;
 pub mod semantic;
 pub mod semantic_tokens;
+pub mod unit_fixes;
+#[cfg(all(test, not(target_arch = "wasm32")))]
+mod units_spec;
 mod signatures;
 pub mod workspace;

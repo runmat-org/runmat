@@ -83,10 +83,33 @@ impl WgpuRenderer {
         )
     }
 
+    /// Annotation strokes draw over the scene, or (`depth_tested`) behind the surfaces in front
+    /// of them. A depth-tested symbol leans toward the camera by a slope bias, so its root on its
+    /// own face isn't lost to that face's depth.
     pub(super) fn create_annotation_stroke_pipeline(
         &self,
         emission: &runmat_accelerate_api::WgpuEmission<'_>,
+        depth_tested: bool,
     ) -> wgpu::RenderPipeline {
+        let (depth_compare, bias) = if depth_tested {
+            let toward_camera = match self.depth_mode {
+                crate::core::DepthMode::Standard => -1.0,
+                crate::core::DepthMode::ReversedZ => 1.0,
+            };
+            (
+                self.depth_compare(),
+                wgpu::DepthBiasState {
+                    constant: 0,
+                    slope_scale: toward_camera,
+                    clamp: 0.0,
+                },
+            )
+        } else {
+            (
+                wgpu::CompareFunction::Always,
+                wgpu::DepthBiasState::default(),
+            )
+        };
         let shader = emission
             .device()
             .create_shader_module(wgpu::ShaderModuleDescriptor {
@@ -124,9 +147,9 @@ impl WgpuRenderer {
             depth_stencil: Some(wgpu::DepthStencilState {
                 format: Self::depth_format(),
                 depth_write_enabled: false,
-                depth_compare: wgpu::CompareFunction::Always,
+                depth_compare,
                 stencil: wgpu::StencilState::default(),
-                bias: wgpu::DepthBiasState::default(),
+                bias,
             }),
             multisample: wgpu::MultisampleState {
                 count: self.msaa_sample_count,

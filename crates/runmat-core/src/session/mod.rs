@@ -63,12 +63,19 @@ pub use fea_duration::{
     FeaExecutionTimingKey, FeaExecutionTimingObservation, FeaExecutionTimingProfile, FeaTimingRoute,
 };
 mod fea_preflight;
-pub use fea_preflight::FeaExecutionPreflight;
+pub use fea_preflight::{FeaCheckEstimate, FeaExecutionPreflight, RESOURCE_LIMIT_CODE};
+mod fea_browser_budget;
+pub use fea_browser_budget::{
+    admit_browser_solve, admit_worker_request, BrowserMemoryPlatform, BrowserResourceLimit,
+    BrowserResourceTerm, BROWSER_RESOURCE_LIMIT_CODE, WASM32_ADDRESS_SPACE_BYTES,
+};
 mod fea_execution;
+mod fea_geometry_program;
 pub use fea_execution::{
     FeaGeometryExecutionHost, FeaStudyPreparationError, PreparedSerialFeaExecutionError,
     PreparedSerialFeaStudy,
 };
+pub use fea_geometry_program::FeaStudyGeometryPreviewProgram;
 pub use fea_source::CheckedFeaSessionSource;
 mod fea_changes;
 mod fea_publication;

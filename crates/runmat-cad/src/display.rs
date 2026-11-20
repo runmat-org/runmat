@@ -17,7 +17,7 @@ use crate::assembly::model::DefinitionKind;
 use crate::assembly::resolve::ResolvedAssembly;
 use crate::assembly::source::DesignSource;
 use crate::model::sketch::SketchGeometry;
-use crate::model::{FeatureKind, PartDocument};
+use crate::model::{FeatureKind, OriginPlane, PartDocument};
 use crate::refs::name::{EntityName, NameTable, TopoKind};
 use crate::refs::Reference;
 use crate::regen::engine::RegenResult;
@@ -106,6 +106,10 @@ pub struct BodyDisplay {
     /// absent: the part's appearance.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub color: Option<[f32; 4]>,
+    /// The body's material (`material.douglas_fir_lumber`): its output's, a `material = { body,
+    /// material }` statement's, else the part's. A section view hatches the cut by it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub material: Option<String>,
     /// The sheet metal's flat pattern (`sheet_metal.flat_pattern`), kept apart from the model: the
     /// folded model hides it, its bounds leave it out and an assembly never draws it; the flat
     /// pattern drawing and an on-demand show draw it.
@@ -143,6 +147,10 @@ pub struct PartDisplay {
     /// (see [`references::reference_display`]).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub references: Vec<references::ReferenceDisplay>,
+    /// The part's origin planes (Top, Front, Right) and their frames, so a viewer draws them
+    /// for a plane pick and picks them by the Outline's ids (see [`origin_plane_display`]).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub origin_planes: Vec<OriginPlaneDisplay>,
     /// The color the part draws in: its material's appearance ([`crate::appearance`]), sRGB
     /// and opacity. Absent: the CAD face color.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -152,6 +160,35 @@ pub struct PartDisplay {
     /// draws with fewer triangles. Faces only; edges and names stay on `bodies`.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub levels: Vec<DisplayLevel>,
+    /// The part's 3D annotations as the view draws them (see [`AnnotationDisplay`]).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub annotations: Vec<AnnotationDisplay>,
+}
+
+/// One 3D annotation as the model view draws it: a leader from the point it is attached to
+/// (`anchor`) to its label (`at`), both in metres in part coordinates, the label's text in
+/// cells (a GD&T frame's characteristic, zone and datums), and the annotation view it belongs
+/// to. Recomputed on every rebuild from the annotation's canonical references, so it follows
+/// the geometry.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct AnnotationDisplay {
+    pub id: String,
+    /// `datum`, `gdt`, `dimension`, `finish`, `coating`, `weld` or `note`.
+    pub kind: String,
+    pub cells: Vec<String>,
+    pub anchor: [f32; 3],
+    pub at: [f32; 3],
+    /// The far point of a two-reference dimension, for its dimension line.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub to: Option<[f32; 3]>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub view: Option<String>,
+    /// Whether every reference it names resolved on this rebuild.
+    pub ok: bool,
+    /// A label attached to nothing (a note without a leader, a coating for the whole part):
+    /// drawn without a leader. Its `anchor` is the model's center, which `at` is offset from.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub free: bool,
 }
 
 /// One level of detail: every face of every body as one mesh (part coordinates, metres).
@@ -227,6 +264,41 @@ pub fn display_levels(
         .collect()
 }
 
+/// An origin plane as a viewer draws and picks it: the Outline's id (`origin:top`), its name
+/// and its frame (the language's [`OriginPlane::frame`]).
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct OriginPlaneDisplay {
+    pub id: String,
+    pub name: String,
+    pub frame: FrameDisplay,
+}
+
+/// The origin planes Top (`origin.xy`), Front (`origin.zx`) and Right (`origin.yz`), by the
+/// Outline's ids, which picks read back as those planes.
+pub fn origin_plane_display() -> Vec<OriginPlaneDisplay> {
+    let f32s = |v: [f64; 3]| v.map(|x| x as f32);
+    [
+        ("origin:top", "Top", OriginPlane::Xy),
+        ("origin:front", "Front", OriginPlane::Zx),
+        ("origin:right", "Right", OriginPlane::Yz),
+    ]
+    .into_iter()
+    .map(|(id, name, plane)| {
+        let frame = plane.frame();
+        OriginPlaneDisplay {
+            id: id.into(),
+            name: name.into(),
+            frame: FrameDisplay {
+                origin: f32s(frame.origin),
+                x: f32s(frame.x),
+                y: f32s(frame.y),
+                z: f32s(frame.z),
+            },
+        }
+    })
+    .collect()
+}
+
 /// A sketch plane in part coordinates.
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct FrameDisplay {
@@ -240,18 +312,29 @@ pub struct FrameDisplay {
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct SketchEntityDisplay {
     pub id: String,
-    /// `point`, `line`, `arc`, `circle` or `spline`.
+    /// `point`, `line`, `arc`, `circle`, `spline`, `ellipse` or `text`.
     pub kind: String,
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub construction: bool,
     /// Solved points by role (`at`, `start`, `end`, `center`, and `p<i>` for a spline's
     /// interior through-points).
     pub points: BTreeMap<String, [f32; 2]>,
-    /// A spline's curve sampled as a polyline from start to end (empty for other kinds).
+    /// A spline's or ellipse's curve sampled as a polyline from start to end (empty for other
+    /// kinds).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub samples: Vec<[f32; 2]>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub radius: Option<f32>,
+    /// An ellipse's semi-major and semi-minor axes and its major axis's angle (radians).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ellipse: Option<[f32; 3]>,
+    /// Text's outline as closed rings (outers counter-clockwise, holes clockwise), each
+    /// starting and ending at the same point.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub outlines: Vec<Vec<[f32; 2]>>,
+    /// Text's string.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub text: Option<String>,
     /// Remaining degrees of freedom, where the solver reports them.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub dof: Option<u32>,
@@ -448,6 +531,7 @@ fn body_display(
         vertices,
         triangle_count: mesh.triangle_count() as u32,
         color: None,
+        material: None,
         flat_pattern: false,
         bend_lines: Vec::new(),
     }
@@ -613,6 +697,13 @@ pub struct OccurrenceDisplay {
 pub struct AssemblyDisplay {
     pub prototypes: Vec<Prototype>,
     pub occurrences: Vec<OccurrenceDisplay>,
+    /// The assembly's own sketches on their planes, drawn as a part's are.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub sketches: Vec<SketchDisplay>,
+    /// The assembly's mate connectors, each as three axes where the solve left it (id
+    /// `connector:<name>`, kind `connector`), sized to the assembly.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub references: Vec<references::ReferenceDisplay>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub bounds: Option<Bounds>,
 }
@@ -631,7 +722,7 @@ pub fn assembly_display(
 /// `configured` map: the file and the resolved configuration as JSON.
 pub fn configuration_key(node: &crate::assembly::resolve::OccNode) -> (String, String) {
     (
-        node.definition.file.as_str().to_string(),
+        node.source_key(),
         serde_json::to_string(&node.configuration).unwrap_or_default(),
     )
 }
@@ -645,24 +736,109 @@ pub fn assembly_display_configured(
     parts: &BTreeMap<String, PartDisplay>,
     configured: &BTreeMap<(String, String), PartDisplay>,
 ) -> AssemblyDisplay {
-    let mut out = AssemblyDisplay::default();
+    assembly_display_operated(resolved, source, parts, configured, &BTreeMap::new())
+}
+
+/// The prototype key of node `id`: its [`configuration_key`], or its own key when an assembly
+/// feature changed its geometry (a component the assembly cut, drilled or welded draws its own
+/// prototype).
+pub fn prototype_key<T>(
+    id: usize,
+    node: &crate::assembly::resolve::OccNode,
+    operated: &BTreeMap<u32, T>,
+) -> (String, String) {
+    let (file, configuration) = configuration_key(node);
+    if node.representation == crate::assembly::model::Representation::Envelope {
+        (file, format!("{configuration}#envelope"))
+    } else if operated.contains_key(&(id as u32)) {
+        (file, format!("{configuration}#operated:{id}"))
+    } else {
+        (file, configuration)
+    }
+}
+
+/// Whether node `id` of `resolved` draws a prototype of its own: a part or circuit board no
+/// ancestor stands in for, or an occurrence at the envelope representation (a sub-assembly's
+/// envelope stands in for its contents) ([`crate::assembly::representation::is_envelope`]).
+pub fn draws_prototype(resolved: &ResolvedAssembly, id: usize) -> bool {
+    let node = &resolved.nodes[id];
+    if crate::assembly::representation::is_envelope(resolved, id as u32) {
+        return true;
+    }
+    matches!(
+        node.definition.kind,
+        DefinitionKind::Part | DefinitionKind::Circuit
+    ) && !node.represented_by_ancestor
+}
+
+/// How an envelope draws: its color at this opacity, so what it stands for reads as space
+/// rather than as a part.
+pub const ENVELOPE_ALPHA: f32 = 0.35;
+
+/// [`assembly_display_configured`] where a part occurrence the assembly's features changed
+/// draws its display from `operated` (by node index).
+pub fn assembly_display_operated(
+    resolved: &ResolvedAssembly,
+    source: &dyn DesignSource,
+    parts: &BTreeMap<String, PartDisplay>,
+    configured: &BTreeMap<(String, String), PartDisplay>,
+    operated: &BTreeMap<u32, PartDisplay>,
+) -> AssemblyDisplay {
+    let mut out = AssemblyDisplay {
+        sketches: resolved
+            .sketches
+            .iter()
+            .map(|s| one_sketch_display(&s.id.0, &s.sketch, &s.solved, &s.frame))
+            .collect(),
+        ..Default::default()
+    };
     let mut prototype_of: BTreeMap<(String, String), u32> = BTreeMap::new();
     for (id, node) in resolved.nodes.iter().enumerate() {
-        // Parts and circuit boards are leaves that draw; a board draws its 3D model.
-        let drawn = matches!(
-            node.definition.kind,
-            DefinitionKind::Part | DefinitionKind::Circuit
-        );
-        if !drawn || node.represented_by_ancestor {
+        // Parts and circuit boards are leaves that draw; a board draws its 3D model. An
+        // occurrence at the envelope representation draws as its box.
+        if !draws_prototype(resolved, id) {
             continue;
         }
+        let envelope = crate::assembly::representation::is_envelope(resolved, id as u32);
         let file = node.definition.file.as_str().to_string();
         let configuration = node.configuration.name.as_ref().map(|c| c.to_string());
-        let key = configuration_key(node);
+        let key = prototype_key(id, node, operated);
         let prototype = match prototype_of.get(&key) {
             Some(p) => *p,
+            None if envelope => {
+                let shape = match crate::assembly::representation::envelope_box(
+                    resolved, source, id as u32,
+                ) {
+                    Some(b) => PrototypeShape::Box {
+                        bounds: Bounds {
+                            min: b.min.map(|v| v as f32),
+                            max: b.max.map(|v| v as f32),
+                        },
+                    },
+                    None => PrototypeShape::Empty,
+                };
+                let mut appearance = crate::appearance::material_appearance(
+                    node.material.as_ref().map(|m| m.0.as_str()),
+                )
+                .1;
+                appearance[3] = ENVELOPE_ALPHA;
+                out.prototypes.push(Prototype {
+                    file,
+                    configuration,
+                    material: node.material.as_ref().map(|m| m.0.clone()),
+                    appearance,
+                    shape,
+                });
+                let p = (out.prototypes.len() - 1) as u32;
+                prototype_of.insert(key, p);
+                p
+            }
             None => {
-                let shape = match configured.get(&key).or_else(|| parts.get(&file)) {
+                let shape = match operated
+                    .get(&(id as u32))
+                    .or_else(|| configured.get(&configuration_key(node)))
+                    .or_else(|| parts.get(&node.source_key()))
+                {
                     // An occurrence is the folded part: a sheet metal flat pattern stays out.
                     Some(part) => PrototypeShape::Mesh {
                         part: Box::new(PartDisplay {
@@ -754,6 +930,9 @@ pub fn assembly_display_configured(
             transform,
         });
     }
+    out.references = references::connector_displays(resolved, out.bounds.as_ref());
+    out.references
+        .extend(references::envelope_displays(resolved));
     out
 }
 
@@ -800,9 +979,37 @@ fn spline_samples(
         .collect()
 }
 
+/// Text outline loops as closed rings: lines by their ends, arcs and circles sampled.
+fn text_rings(loops: &[Vec<runmat_geometry_kernel::op::ProfileSegment>]) -> Vec<Vec<[f32; 2]>> {
+    use runmat_geometry_kernel::op::SegmentKind;
+    loops
+        .iter()
+        .map(|l| {
+            let mut ring: Vec<[f32; 2]> = l
+                .first()
+                .map(|s| s.start.map(|x| x as f32))
+                .into_iter()
+                .collect();
+            for s in l {
+                let n = if matches!(s.kind, SegmentKind::Line) {
+                    1
+                } else {
+                    12
+                };
+                ring.extend(
+                    s.polyline(n)
+                        .into_iter()
+                        .skip(1)
+                        .map(|p| p.map(|x| x as f32)),
+                );
+            }
+            ring
+        })
+        .collect()
+}
+
 /// The solved sketches of a regenerated part, in document order.
 pub fn sketch_display(document: &PartDocument, result: &RegenResult) -> Vec<SketchDisplay> {
-    let f32s = |v: [f64; 3]| v.map(|x| x as f32);
     document
         .features
         .iter()
@@ -815,69 +1022,97 @@ pub fn sketch_display(document: &PartDocument, result: &RegenResult) -> Vec<Sket
                 .sketches
                 .get(&feature.id)
                 .or_else(|| result.state.over_defined_sketches.get(&feature.id))?;
-            let entities = sketch
-                .entities
-                .iter()
-                .map(|entity| {
-                    let kind = match entity.geometry {
-                        SketchGeometry::Point { .. } => "point",
-                        SketchGeometry::Line { .. } => "line",
-                        SketchGeometry::Arc { .. } => "arc",
-                        SketchGeometry::Circle { .. } => "circle",
-                        SketchGeometry::Spline { .. } => "spline",
-                    };
-                    let points = entity
-                        .geometry
-                        .points()
-                        .into_iter()
-                        .filter_map(|(role, _)| {
-                            solved
-                                .point(&entity.id, role)
-                                .map(|p| (role.word(), p.map(|x| x as f32)))
-                        })
-                        .collect();
-                    let samples = match &entity.geometry {
-                        SketchGeometry::Spline { points, closed } => {
-                            spline_samples(&entity.id, points.len(), *closed, solved)
-                        }
-                        _ => Vec::new(),
-                    };
-                    SketchEntityDisplay {
-                        id: entity.id.0.clone(),
-                        kind: kind.into(),
-                        construction: entity.construction,
-                        points,
-                        samples,
-                        radius: solved.radii.get(&entity.id).map(|r| *r as f32),
-                        dof: solved.entity_dof.get(&entity.id).copied(),
-                    }
-                })
-                .collect();
-            Some(SketchDisplay {
-                id: feature.id.0.clone(),
-                frame: FrameDisplay {
-                    origin: f32s(frame.origin),
-                    x: f32s(frame.x),
-                    y: f32s(frame.y),
-                    z: f32s(frame.z),
-                },
-                status: serde_json::to_value(solved.status)
-                    .ok()
-                    .and_then(|v| v.as_str().map(str::to_string))
-                    .unwrap_or_default(),
-                dof: solved.dof,
-                entities,
-                constraints: sketch
-                    .constraints
-                    .iter()
-                    .filter_map(|c| serde_json::to_value(c).ok())
-                    .collect(),
-                redundant: solved.redundant.clone(),
-                conflicting: solved.conflicting.clone(),
-                regions: regions::sketch_regions(sketch, solved),
-            })
+            Some(one_sketch_display(&feature.id.0, sketch, solved, frame))
         })
         .collect()
+}
+
+/// One solved sketch on its plane: what a part's and an assembly's sketches both draw.
+pub fn one_sketch_display(
+    id: &str,
+    sketch: &crate::model::sketch::Sketch,
+    solved: &crate::model::sketch::SolvedSketch,
+    frame: &crate::model::datum::Frame,
+) -> SketchDisplay {
+    let f32s = |v: [f64; 3]| v.map(|x| x as f32);
+    let entities = sketch
+        .entities
+        .iter()
+        .map(|entity| {
+            let kind = entity.geometry.kind_word();
+            let points = entity
+                .geometry
+                .points()
+                .into_iter()
+                .filter_map(|(role, _)| {
+                    solved
+                        .point(&entity.id, role)
+                        .map(|p| (role.word(), p.map(|x| x as f32)))
+                })
+                .collect();
+            let samples = match &entity.geometry {
+                SketchGeometry::Spline { points, closed } => {
+                    spline_samples(&entity.id, points.len(), *closed, solved)
+                }
+                SketchGeometry::Ellipse { start, .. } => solved
+                    .ellipse_segment(&entity.id, start.is_some())
+                    .map(|s| {
+                        s.polyline(96)
+                            .into_iter()
+                            .map(|p| p.map(|x| x as f32))
+                            .collect()
+                    })
+                    .unwrap_or_default(),
+                _ => Vec::new(),
+            };
+            SketchEntityDisplay {
+                id: entity.id.0.clone(),
+                kind: kind.into(),
+                construction: entity.construction,
+                points,
+                samples,
+                radius: solved.radii.get(&entity.id).map(|r| *r as f32),
+                ellipse: solved
+                    .ellipses
+                    .get(&entity.id)
+                    .map(|e| [e.major as f32, e.minor as f32, e.angle as f32]),
+                outlines: match &entity.geometry {
+                    SketchGeometry::Text { text, .. } => {
+                        text_rings(&solved.text_loops(&entity.id, text))
+                    }
+                    _ => Vec::new(),
+                },
+                text: match &entity.geometry {
+                    SketchGeometry::Text { text, .. } => Some(text.clone()),
+                    _ => None,
+                },
+                dof: solved.entity_dof.get(&entity.id).copied(),
+            }
+        })
+        .collect();
+    SketchDisplay {
+        id: id.to_owned(),
+        frame: FrameDisplay {
+            origin: f32s(frame.origin),
+            x: f32s(frame.x),
+            y: f32s(frame.y),
+            z: f32s(frame.z),
+        },
+        status: serde_json::to_value(solved.status)
+            .ok()
+            .and_then(|v| v.as_str().map(str::to_string))
+            .unwrap_or_default(),
+        dof: solved.dof,
+        entities,
+        constraints: sketch
+            .constraints
+            .iter()
+            .filter_map(|c| serde_json::to_value(c).ok())
+            .collect(),
+        redundant: solved.redundant.clone(),
+        conflicting: solved.conflicting.clone(),
+        regions: regions::sketch_regions(sketch, solved),
+    }
 }
 
 /// The part display as JSON, for the Desktop.
@@ -888,4 +1123,27 @@ pub fn part_display_json(display: &PartDisplay) -> String {
 /// The assembly display as JSON, for the Desktop.
 pub fn assembly_display_json(display: &AssemblyDisplay) -> String {
     serde_json::to_string(display).expect("display serializes")
+}
+
+#[cfg(test)]
+mod origin_plane_tests {
+    use super::*;
+
+    #[test]
+    fn origin_planes_carry_the_language_frames_by_the_outline_ids() {
+        let planes = origin_plane_display();
+        let ids: Vec<_> = planes.iter().map(|p| p.id.as_str()).collect();
+        assert_eq!(ids, ["origin:top", "origin:front", "origin:right"]);
+        // Front is the zx plane: x along +Z, y along +X, normal +Y.
+        assert_eq!(planes[1].frame.x, [0.0, 0.0, 1.0]);
+        assert_eq!(planes[1].frame.y, [1.0, 0.0, 0.0]);
+        assert_eq!(planes[1].frame.z, [0.0, 1.0, 0.0]);
+        // The display JSON carries them as `origin_planes`.
+        let json = serde_json::to_value(PartDisplay {
+            origin_planes: planes,
+            ..Default::default()
+        })
+        .unwrap();
+        assert_eq!(json["origin_planes"][2]["name"], "Right");
+    }
 }

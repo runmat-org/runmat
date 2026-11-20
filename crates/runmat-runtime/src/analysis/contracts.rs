@@ -8,7 +8,6 @@ use runmat_analysis_fea::execution::{SequenceIdentity, SolverResultIdentity, Sta
 use runmat_analysis_fea::{
     AnalysisRunIdentity, ComputeBackend, ExecutionBackend, FeaProgressEvent, FeaRunResult,
 };
-use runmat_analysis_language::output_operation_extension;
 use runmat_execution::Digest;
 use runmat_geometry_core::GeometryAsset;
 use runmat_meshing_core::MeshingRequestSettings;
@@ -28,9 +27,23 @@ pub use frequency_results::{
     AcousticFrequencyEntryEvidence, AcousticFrequencyResultsData, StructuralFrequencyResultsData,
 };
 mod nonlinear_run_options;
+mod render_topology;
 pub use nonlinear_run_options::AnalysisNonlinearRunOptions;
+pub use render_topology::{
+    AnalysisRenderMesh, AnalysisRenderRegion, AnalysisRenderTopology, AnalysisRenderTopologySource,
+    AnalysisRenderTriangleRange, AnalysisStudyRegion,
+};
+mod execution_choices;
+pub use execution_choices::*;
+mod authoring_catalog;
+pub use authoring_catalog::{
+    analysis_authoring_workflow, analysis_language_reference_paths, analysis_output_operation_ids,
+    analysis_procedure_ids,
+};
 mod field_units;
 use field_units::infer_field_unit;
+mod study_step_run;
+pub use study_step_run::{AnalysisStudyStepRunData, RenderTopologyPresence};
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct AnalysisValidateResult {
@@ -96,12 +109,6 @@ pub enum QualityReasonCode {
     TransientResidualExceeded,
     TransientStabilityExceeded,
     TransientStepFailure,
-    ThermoMechanicalConstitutiveSpreadHigh,
-    ThermoMechanicalAssignmentHeterogeneityHigh,
-    ThermoMechanicalGradientInstability,
-    ThermoMechanicalFieldCoverageLow,
-    ElectroThermalTransientStress,
-    ElectroThermalNonlinearStress,
     ElectromagneticSolveQualityLow,
     ElectromagneticConductivitySpreadHigh,
     ElectromagneticMaterialHeterogeneityHigh,
@@ -130,7 +137,6 @@ pub enum QualityReasonCode {
     ContactNonlinearStress,
     NonlinearResidualExceeded,
     NonlinearIncrementFailure,
-    ThermoMechanicalNonlinearStress,
     ThermalResidualExceeded,
     ThermalConstitutiveSpreadHigh,
     AccuracyEvidenceIndeterminate,
@@ -585,52 +591,6 @@ pub struct StaticSolvePlacement {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct AnalysisRenderTopology {
-    pub schema_version: String,
-    pub source: AnalysisRenderTopologySource,
-    #[serde(default)]
-    pub volume_element_count: usize,
-    pub meshes: Vec<AnalysisRenderMesh>,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum AnalysisRenderTopologySource {
-    SolverPrep,
-    AnalysisMesh,
-}
-
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct AnalysisRenderMesh {
-    pub mesh_id: String,
-    pub vertices: Vec<[f64; 3]>,
-    pub triangles: Vec<[u32; 3]>,
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub regions: Vec<AnalysisRenderRegion>,
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub vertex_volume_node_indices: Vec<Option<usize>>,
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub triangle_volume_element_indices: Vec<Option<usize>>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct AnalysisRenderRegion {
-    pub region_id: String,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub label: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub tag: Option<String>,
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub triangle_ranges: Vec<AnalysisRenderTriangleRange>,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-pub struct AnalysisRenderTriangleRange {
-    pub start: u32,
-    pub count: u32,
-}
-
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct AnalysisRunResult {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -861,43 +821,6 @@ impl AnalysisRuntimeCapabilities {
     }
 }
 
-pub fn analysis_authoring_workflow() -> Vec<String> {
-    vec![
-        "edit <study>.fea with workspace file tools".to_string(),
-        "runmat check <study>.fea [--study <id> | --sweep <id>]".to_string(),
-        "runmat plan <study>.fea [--study <id> | --sweep <id>] --json".to_string(),
-        "runmat run <study>.fea [--study <id> | --sweep <id>] [--cluster <profile>]".to_string(),
-    ]
-}
-
-pub fn analysis_procedure_ids() -> Vec<String> {
-    AnalysisProcedure::ALL
-        .into_iter()
-        .map(|procedure| {
-            serde_json::to_value(procedure)
-                .expect("analysis procedure must serialize")
-                .as_str()
-                .expect("analysis procedure must serialize as a string")
-                .to_string()
-        })
-        .collect()
-}
-
-pub fn analysis_output_operation_ids() -> Vec<String> {
-    output_operation_extension()
-        .operations
-        .into_iter()
-        .map(|operation| operation.identity.to_string())
-        .collect()
-}
-
-pub fn analysis_language_reference_paths() -> Vec<String> {
-    runmat_analysis_language::reference::FEA_LANGUAGE_REFERENCE_IDS
-        .iter()
-        .map(|id| (*id).to_owned())
-        .collect()
-}
-
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AnalysisDocumentCheckResult {
@@ -939,6 +862,9 @@ pub struct AnalysisFieldBinding {
     pub step_id: ProcedureStepId,
     pub run_id: String,
     pub descriptor: AnalysisFieldDescriptor,
+    /// The `render_topology` of the run's step record; absent for a record published before it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub render_topology: Option<RenderTopologyPresence>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
@@ -1224,7 +1150,10 @@ impl AnalysisFieldDescriptor {
             class_name,
             kind,
             dtype: "double".to_string(),
-            unit: infer_field_unit(&field.field_id).map(str::to_string),
+            unit: layout
+                .normalized_unit()
+                .or_else(|| infer_field_unit(&field.field_id))
+                .map(str::to_string),
             location,
             shape: field.shape.clone(),
             element_count: value_count,
@@ -1287,6 +1216,7 @@ impl AnalysisFieldDescriptor {
             }
             _ => runmat_analysis_core::FieldOrdinal::Single,
         };
+        let layout = layout.with_ordinal(ordinal);
         let size_bytes = value_count
             .checked_mul(storage_width)
             .and_then(|count| count.checked_mul(std::mem::size_of::<f64>()))
@@ -1297,7 +1227,7 @@ impl AnalysisFieldDescriptor {
             numeric_representation: Some(entry.definition.numeric_representation()),
             family: infer_field_family(entry.definition.field_id()).to_string(),
             statistic: layout.statistic,
-            layout: layout.with_ordinal(ordinal),
+            layout: layout.clone(),
             topology_id: None,
             element_kind: None,
             class_name: "fea.Field".to_string(),
@@ -1308,7 +1238,10 @@ impl AnalysisFieldDescriptor {
                 "double"
             }
             .to_string(),
-            unit: infer_field_unit(entry.definition.field_id()).map(str::to_string),
+            unit: layout
+                .normalized_unit()
+                .or_else(|| infer_field_unit(entry.definition.field_id()))
+                .map(str::to_string),
             location,
             shape,
             element_count: value_count,
@@ -1351,7 +1284,6 @@ fn infer_field_topology_id(
         return Some("analysis_mesh");
     }
     if normalized.starts_with("thermal.")
-        || normalized.starts_with("electro_thermal.")
         || normalized.starts_with("em.")
         || normalized.starts_with("acoustic.")
         || normalized.starts_with("cfd.")
@@ -1430,21 +1362,6 @@ pub struct AnalysisResultsSummary {
     pub nonlinear_iteration_spike_count: Option<usize>,
     pub nonlinear_convergence_stall_count: Option<usize>,
     pub nonlinear_backtrack_burst_count: Option<usize>,
-    pub thermo_coupling_enabled: Option<bool>,
-    pub thermo_coupling_fingerprint: Option<u64>,
-    pub thermo_constitutive_temperature_factor: Option<f64>,
-    pub thermo_effective_modulus_scale: Option<f64>,
-    pub thermo_constitutive_material_spread_ratio: Option<f64>,
-    pub thermo_assignment_heterogeneity_index: Option<f64>,
-    pub thermo_region_delta_count: Option<f64>,
-    pub thermo_spatial_coverage_ratio: Option<f64>,
-    pub thermo_nonlinear_severity: Option<f64>,
-    pub electro_thermal_coupling_enabled: Option<bool>,
-    pub electro_thermal_coupling_fingerprint: Option<u64>,
-    pub electro_joule_heating_scale: Option<f64>,
-    pub electro_conductivity_spread_ratio: Option<f64>,
-    pub electro_transient_severity: Option<f64>,
-    pub electro_nonlinear_severity: Option<f64>,
     pub plastic_nonlinear_severity: Option<f64>,
     pub plastic_nonlinear_severity_mean: Option<f64>,
     pub plastic_load_realization_ratio: Option<f64>,
@@ -1874,26 +1791,6 @@ pub struct AnalysisStudyPlanStepData {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct AnalysisStudyStepRunData {
-    pub ordinal: usize,
-    pub procedure_step: ProcedureStep,
-    pub execution: AnalysisExecutionStep,
-    pub identity: AnalysisRunIdentity,
-    pub run_operation: String,
-    pub run_op_version: String,
-    pub run_id: String,
-    pub run_status: RunStatus,
-    pub numerically_acceptable: bool,
-    pub solver_convergence: QualityGate,
-    pub result_quality: QualityGate,
-    #[serde(default)]
-    pub quality_reasons: Vec<QualityReason>,
-    pub provenance: RunProvenance,
-    pub numerical_result: AnalysisStudyStepNumericalResultData,
-    pub evidence_artifact_path: String,
-}
-
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "kind", content = "data", rename_all = "snake_case")]
 pub enum AnalysisStudyStepNumericalResultData {
     Standard,
@@ -1954,6 +1851,9 @@ pub struct AnalysisStudyRunData {
     pub solver_mesh_artifact_path: Option<String>,
     #[serde(default)]
     pub meshing_evidence_artifact_path: Option<String>,
+    /// The solid regions the model assigns materials to (each solved body), by region name.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub regions: Vec<AnalysisStudyRegion>,
     pub study_fingerprint: String,
     pub operation_sequence: Vec<String>,
     pub run_status: RunStatus,
@@ -2078,13 +1978,6 @@ pub struct AnalysisTrendKindSummary {
     pub failed_increment_rate: Option<f64>,
     pub mean_spike_count: Option<f64>,
     pub mean_stall_count: Option<f64>,
-    pub thermo_coupling_enabled_rate: Option<f64>,
-    pub thermo_nonlinear_warn_rate: Option<f64>,
-    pub thermo_spread_breach_rate: Option<f64>,
-    pub thermo_heterogeneity_breach_rate: Option<f64>,
-    pub electro_thermal_coupling_enabled_rate: Option<f64>,
-    pub electro_transient_warn_rate: Option<f64>,
-    pub electro_nonlinear_warn_rate: Option<f64>,
     pub plastic_nonlinear_warn_rate: Option<f64>,
     pub contact_nonlinear_warn_rate: Option<f64>,
     pub thermal_stability_warn_rate: Option<f64>,
@@ -2219,10 +2112,6 @@ pub struct TransientResultsData {
     pub energy_balance_residual_snapshots: Vec<AnalysisField>,
     pub relative_energy_balance_error_snapshots: Vec<AnalysisField>,
     pub dynamic_balance_snapshots: Vec<runmat_analysis_fea::StructuralDynamicBalanceSnapshot>,
-    #[serde(default)]
-    pub electro_thermal_temperature_snapshots: Vec<AnalysisField>,
-    #[serde(default)]
-    pub electro_thermal_thermal_residual_snapshots: Vec<AnalysisField>,
     pub residual_norms: Vec<f64>,
     pub integration_method: TransientIntegrationMethod,
 }
@@ -2286,14 +2175,6 @@ impl TransientResultsData {
             ),
             ("von Mises", self.von_mises_snapshots.len()),
             ("reaction moment", self.reaction_moment_snapshots.len()),
-            (
-                "electro-thermal temperature",
-                self.electro_thermal_temperature_snapshots.len(),
-            ),
-            (
-                "electro-thermal residual",
-                self.electro_thermal_thermal_residual_snapshots.len(),
-            ),
         ];
         if let Some((name, actual)) = optional
             .into_iter()
@@ -2336,22 +2217,6 @@ pub struct NonlinearResultsData {
     pub load_factor_snapshots: Vec<AnalysisField>,
     #[serde(default)]
     pub residual_norm_snapshots: Vec<AnalysisField>,
-    #[serde(default)]
-    pub thermo_mechanical_temperature_snapshots: Vec<AnalysisField>,
-    #[serde(default)]
-    pub thermo_mechanical_thermal_strain_snapshots: Vec<AnalysisField>,
-    #[serde(default)]
-    pub thermo_mechanical_thermal_stress_snapshots: Vec<AnalysisField>,
-    #[serde(default)]
-    pub thermo_mechanical_displacement_snapshots: Vec<AnalysisField>,
-    #[serde(default)]
-    pub thermo_mechanical_von_mises_snapshots: Vec<AnalysisField>,
-    #[serde(default)]
-    pub thermo_mechanical_coupling_residual_snapshots: Vec<AnalysisField>,
-    #[serde(default)]
-    pub electro_thermal_temperature_snapshots: Vec<AnalysisField>,
-    #[serde(default)]
-    pub electro_thermal_thermal_residual_snapshots: Vec<AnalysisField>,
     pub residual_norms: Vec<f64>,
     #[serde(default)]
     pub increment_norms: Vec<f64>,
@@ -2417,6 +2282,7 @@ pub(crate) fn format_quality_policy(mode: QualityPolicy) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use runmat_analysis_language::output_operation_extension;
 
     #[test]
     fn agent_authoring_facts_come_from_closed_runtime_catalogs() {
@@ -2573,56 +2439,4 @@ mod tests {
             .expect_err("orphan execution entries must fail")
             .contains("absent from sequence"));
     }
-}
-
-/// Placement choices for a checked, prepared source revision. A missing time
-/// estimate stays absent; a deadline is never presented as predicted duration.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum AnalysisExecutionMode {
-    SingleCore,
-    MultiCore,
-}
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum AnalysisExecutionReadiness {
-    Ready,
-    DesktopRequired,
-    Unavailable,
-}
-/// Recent successful timings of this exact study and allocation on this runtime.
-/// Bounds describe observed variability; they are not a cross-machine promise.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub struct AnalysisExecutionDuration {
-    #[serde(with = "runmat_types::wire_integer")]
-    pub lower_millis: u64,
-    #[serde(with = "runmat_types::wire_integer")]
-    pub upper_millis: u64,
-    #[serde(with = "runmat_types::wire_integer")]
-    pub sample_count: u64,
-}
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub struct AnalysisExecutionCandidate {
-    pub mode: AnalysisExecutionMode,
-    pub cores: Option<u32>,
-    #[serde(default)]
-    #[serde(with = "runmat_types::wire_integer::option")]
-    pub memory_bytes: Option<u64>,
-    #[serde(default)]
-    #[serde(with = "runmat_types::wire_integer::option")]
-    pub estimated_millis: Option<u64>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub duration_evidence: Option<AnalysisExecutionDuration>,
-    pub readiness: AnalysisExecutionReadiness,
-    pub reason: Option<String>,
-}
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub struct AnalysisExecutionChoices {
-    pub schema_version: u16,
-    pub plan_id: String,
-    pub revision: [u8; 32],
-    pub candidates: Vec<AnalysisExecutionCandidate>,
 }

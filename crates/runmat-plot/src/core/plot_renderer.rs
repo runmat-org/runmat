@@ -61,6 +61,8 @@ type PerAxesViewBounds = Vec<Option<ViewBounds2D>>;
 mod figure_camera_fit;
 #[path = "plot_renderer/world_helpers.rs"]
 mod world_helpers;
+#[path = "plot_renderer/foreign_buffers.rs"]
+mod foreign_buffers;
 #[path = "plot_renderer/grid_2d.rs"]
 mod grid_2d;
 #[path = "plot_renderer/y_direction.rs"]
@@ -102,6 +104,15 @@ pub(crate) struct GeometryScreenAnnotation {
     pub vector_extent: Option<[[f32; 2]; 2]>,
 }
 
+/// A measured dimension's value placed on screen at the middle of its line.
+#[cfg(feature = "egui-overlay")]
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) struct GeometryScreenDimension {
+    pub position: [f32; 2],
+    pub color: [f32; 4],
+    pub label: String,
+}
+
 #[derive(Clone, Debug, PartialEq)]
 struct AxesViewContract {
     rows: usize,
@@ -111,6 +122,10 @@ struct AxesViewContract {
 
 #[derive(Clone, Debug, PartialEq)]
 struct AxesViewContractEntry {
+    live: bool,
+    grid_cell: Option<crate::plots::AxesGridCell>,
+    position: Option<[f64; 4]>,
+    normalized_units: bool,
     y_direction: crate::plots::figure::YDirection,
     has_3d_content: bool,
     axes_kind: AxesKind,
@@ -189,7 +204,7 @@ pub struct PlotRenderer {
     pub(crate) last_figure: Option<crate::plots::Figure>,
     /// Current chunked geometry scene key, when the renderer is driven by CAD/FEA scene data.
     last_geometry_scene_key: Option<GeometrySceneCacheKey>,
-    last_geometry_scene: Option<GeometryScene>,
+    last_geometry_scene: Option<Arc<GeometryScene>>,
     geometry_overlay: Option<GeometrySceneOverlay>,
     geometry_presentation: GeometryScenePresentation,
     presence: crate::collaboration::PresenceFrame,
@@ -220,6 +235,7 @@ pub struct PlotRenderer {
     axes_applied_view_revisions: Vec<Option<u64>>,
     /// Per-node GPU buffer cache for stable interactive redraws.
     scene_buffer_cache: RefCell<HashMap<u64, CachedSceneBuffers>>,
+    foreign_buffers: foreign_buffers::ForeignBufferCopies,
 }
 
 /// Configuration for plot rendering
@@ -332,10 +348,7 @@ impl PlotRenderer {
         Option<runmat_accelerate_api::WgpuBufferOwner>,
     )> {
         let mut cache = self.scene_buffer_cache.borrow_mut();
-        let vertex_signature = (
-            render_data.vertices.as_ptr() as usize,
-            render_data.vertices.len(),
-        );
+        let vertex_signature = foreign_buffers::vertex_signature(render_data);
         let index_signature = render_data
             .indices
             .as_ref()
@@ -349,11 +362,8 @@ impl PlotRenderer {
             }
         }
 
-        let vertex_buffer = self.wgpu_renderer.vertex_buffer_from_sources(
-            emission,
-            render_data.gpu_vertices.as_ref(),
-            &render_data.vertices,
-        )?;
+        let vertex_buffer = self.vertex_buffer_for(emission, render_data)?;
+        let _ = self.gpu_indirect_args(emission, render_data); // copied here, not in a pass
         let index_buffer = render_data.indices.as_ref().map(|indices| {
             runmat_accelerate_api::WgpuBufferOwner::new(
                 self.wgpu_renderer.create_index_buffer(emission, indices),
@@ -371,14 +381,6 @@ impl PlotRenderer {
         );
 
         Some((vertex_buffer, index_buffer))
-    }
-
-    fn gpu_indirect_args(render_data: &crate::core::RenderData) -> Option<(&wgpu::Buffer, u64)> {
-        render_data
-            .gpu_vertices
-            .as_ref()
-            .and_then(|buf| buf.indirect.as_ref())
-            .map(|indirect| (indirect.args.as_ref(), indirect.offset))
     }
 
     /// Create a new plot renderer
@@ -436,6 +438,7 @@ impl PlotRenderer {
             axes_2d_camera_user_controlled: vec![false],
             axes_applied_view_revisions: vec![None],
             scene_buffer_cache: RefCell::new(HashMap::new()),
+            foreign_buffers: Default::default(),
         })
     }
 
@@ -460,7 +463,7 @@ impl PlotRenderer {
 
     fn axes_view_contract_for_figure(figure: &Figure) -> AxesViewContract {
         let (rows, cols) = figure.axes_grid();
-        let axes_count = rows.max(1) * cols.max(1);
+        let axes_count = figure.axes_count();
         let mut has_3d_content = vec![false; axes_count];
         for (plot, axes_index) in figure
             .plots()
@@ -474,6 +477,13 @@ impl PlotRenderer {
             .map(|axes_index| {
                 let meta = figure.axes_metadata(axes_index);
                 AxesViewContractEntry {
+                    live: figure.axes_is_live(axes_index),
+                    grid_cell: figure.axes_grid_cell(axes_index),
+                    position: meta
+                        .filter(|metadata| metadata.position_explicit)
+                        .map(|metadata| metadata.position),
+                    normalized_units: meta
+                        .is_some_and(|metadata| metadata.units.eq_ignore_ascii_case("normalized")),
                     y_direction: meta.map(|m| m.y_direction).unwrap_or_default(),
                     has_3d_content: has_3d_content[axes_index],
                     axes_kind: meta.map(|m| m.axes_kind).unwrap_or(AxesKind::Cartesian),

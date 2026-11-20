@@ -262,6 +262,57 @@ impl ImportedExactCad {
             .filter(|admission| !admission.admitted)
     }
 
+    /// Every authored name by role ("vertex", "edge", "face", "solid"), sorted, one entry per
+    /// named entity: a name two entities carry appears twice, so the check can count what
+    /// `select name` resolves to. The check lists these names; `select name` and
+    /// [`Self::display_names`] read the same `entity_names` table.
+    pub fn authored_names_by_role(&self) -> BTreeMap<String, Vec<String>> {
+        use runmat_geometry_core::PersistentEntityKind;
+        let mut by_role = BTreeMap::<String, Vec<String>>::new();
+        for (id, names) in &self.entity_names {
+            let role = match id.kind {
+                PersistentEntityKind::Vertex => "vertex",
+                PersistentEntityKind::Edge => "edge",
+                PersistentEntityKind::Face => "face",
+                PersistentEntityKind::Solid => "solid",
+                _ => continue,
+            };
+            by_role
+                .entry(role.to_string())
+                .or_default()
+                .extend(names.iter().cloned());
+        }
+        for names in by_role.values_mut() {
+            names.sort();
+        }
+        by_role
+    }
+
+    /// The name a display shows for each named face and solid: its first authored name in
+    /// `entity_names`, keyed by analysis selection ID. A display that tessellates a
+    /// representation without names (a materialized kernel B-rep) names faces and bodies from
+    /// here, so the picker shows a name the check lists and `select name` resolves.
+    pub fn display_names(&self) -> Result<BTreeMap<String, String>, GeometryImportError> {
+        use runmat_geometry_core::PersistentEntityKind;
+        let mut display = BTreeMap::new();
+        for (id, names) in &self.entity_names {
+            if !matches!(
+                id.kind,
+                PersistentEntityKind::Face | PersistentEntityKind::Solid
+            ) {
+                continue;
+            }
+            let Some(name) = names.iter().find(|name| !name.trim().is_empty()) else {
+                continue;
+            };
+            let key = id
+                .analysis_selection_id()
+                .map_err(|error| GeometryImportError::InvalidGeometry(error.to_string()))?;
+            display.insert(key, name.clone());
+        }
+        Ok(display)
+    }
+
     /// Entities of one region role whose authored names include `name` (exact, case-sensitive).
     /// A `cell` is selected through the name of its solid. Naming nothing is an error that lists
     /// the names the source does carry for that role, so a misspelled selector fails clearly.

@@ -6,13 +6,21 @@
       "route": "/docs/design-language/commands",
       "title": "Design commands",
       "summary": "Design commands and their required fields for proposing edits to parts, assemblies, drawings, circuits and boards.",
-      "keywords": ["design commands", "design_propose_edit", "MCAD", "ECAD"],
+      "keywords": [
+        "design commands",
+        "design_propose_edit",
+        "MCAD",
+        "ECAD"
+      ],
       "group": "Design language",
       "order": 20,
       "narrative": "docs/design/commands.md",
       "examples": [],
       "related_topics": [
-        {"title": "The design language", "href": "/docs/design-language"}
+        {
+          "title": "The design language",
+          "href": "/docs/design-language"
+        }
       ]
     },
     {
@@ -235,7 +243,7 @@
       "id": "language-tools",
       "route": "/docs/design-language/agent-and-cli",
       "title": "Agent tools and the command line",
-      "summary": "The design tools the RunMat agent, MCP clients and scripts call over parts, assemblies, drawings, circuits and boards, and the runmat-design command line for checks and exports.",
+      "summary": "The design tools the RunMat agent, MCP clients and scripts call over parts, assemblies, drawings, circuits and boards, and the runmat command line for checks and exports.",
       "keywords": [
         "agent tools",
         "MCP",
@@ -785,6 +793,131 @@
       ]
     },
     {
+      "id": "mcad-assembly-sketches",
+      "route": "/docs/mcad/assembly/sketches",
+      "title": "Sketches in an assembly",
+      "summary": "Reference for sketches in a RunMat assembly. Sketch on an assembly origin plane or on a placed component's face, with the same tools, relations and dimensions as a part sketch, and keep the sketch on the face when the component moves.",
+      "keywords": [
+        "assembly sketch",
+        "in-context sketch",
+        "layout sketch",
+        "sketch on a component face",
+        "top-down design",
+        "sketch in an assembly"
+      ],
+      "group": "MCAD reference",
+      "order": 6,
+      "narrative": "docs/design/mcad/assembly/sketches.md",
+      "examples": [],
+      "related_topics": [
+        {
+          "title": "Sketches",
+          "href": "/docs/mcad/part/sketches"
+        },
+        {
+          "title": "Occurrences and mates",
+          "href": "/docs/mcad/assembly/mates"
+        },
+        {
+          "title": "MCAD file reference",
+          "href": "/docs/mcad/files"
+        }
+      ]
+    },
+    {
+      "id": "mcad-assembly-features",
+      "route": "/docs/mcad/assembly/features",
+      "title": "Assembly features",
+      "summary": "Reference for assembly features in RunMat. Cut through several components, drill matching holes across parts, or add a weld bead, from a sketch in the assembly, without changing the part files.",
+      "keywords": [
+        "assembly feature",
+        "assembly cut",
+        "hole across parts",
+        "match drilling",
+        "weld bead",
+        "assembly-level machining"
+      ],
+      "group": "MCAD reference",
+      "order": 6,
+      "narrative": "docs/design/mcad/assembly/features.md",
+      "examples": [],
+      "related_topics": [
+        {
+          "title": "Sketches in an assembly",
+          "href": "/docs/mcad/assembly/sketches"
+        },
+        {
+          "title": "Occurrences and mates",
+          "href": "/docs/mcad/assembly/mates"
+        }
+      ]
+    },
+    {
+      "id": "mcad-exploded",
+      "route": "/docs/mcad/assembly/exploded-views",
+      "title": "Exploded views",
+      "summary": "Reference for exploded views in a RunMat assembly. Ordered translate, rotate and radial steps, steps that move a whole pattern or mirror, spacing, base views, sub-assembly views and explode lines.",
+      "keywords": [
+        "exploded view",
+        "explode steps",
+        "assembly instructions",
+        "radial explode",
+        "explode lines",
+        "trail lines",
+        "pattern explode",
+        "mirror explode",
+        "service view"
+      ],
+      "group": "MCAD reference",
+      "order": 7,
+      "narrative": "docs/design/mcad/assembly/exploded-views.md",
+      "examples": [],
+      "related_topics": [
+        {
+          "title": "Patterns, mirrors and fasteners",
+          "href": "/docs/mcad/assembly/patterns-and-mirrors"
+        },
+        {
+          "title": "Drawing views and annotations",
+          "href": "/docs/mcad/drawing/views-and-annotations"
+        },
+        {
+          "title": "MCAD file reference",
+          "href": "/docs/mcad/files"
+        }
+      ]
+    },
+    {
+      "id": "mcad-motion",
+      "route": "/docs/mcad/assembly/motion",
+      "title": "Motion studies",
+      "summary": "Reference for motion studies in a RunMat assembly. Drive a revolute, slider, cylindrical, distance or angle mate through a range over time, play the solved motion, plot speed and acceleration, and check the motion for collisions.",
+      "keywords": [
+        "motion study",
+        "animation",
+        "mechanism",
+        "drive a mate",
+        "kinematics",
+        "collision detection",
+        "speed plot",
+        "acceleration"
+      ],
+      "group": "MCAD reference",
+      "order": 7,
+      "narrative": "docs/design/mcad/assembly/motion.md",
+      "examples": [],
+      "related_topics": [
+        {
+          "title": "Occurrences and mates",
+          "href": "/docs/mcad/assembly/mates"
+        },
+        {
+          "title": "Exploded views",
+          "href": "/docs/mcad/assembly/exploded-views"
+        }
+      ]
+    },
+    {
       "id": "mcad-drawings",
       "route": "/docs/mcad/drawing/views-and-annotations",
       "title": "Drawing views and annotations",
@@ -806,7 +939,7 @@
         "third angle projection"
       ],
       "group": "MCAD reference",
-      "order": 6,
+      "order": 8,
       "narrative": "docs/design/mcad/drawing/views-and-annotations.md",
       "examples": [],
       "related_topics": [
@@ -843,7 +976,7 @@
         "draft analysis"
       ],
       "group": "MCAD reference",
-      "order": 7,
+      "order": 9,
       "narrative": "docs/design/mcad/evaluate.md",
       "examples": [],
       "related_topics": [
@@ -882,7 +1015,7 @@
         "CAD interoperability"
       ],
       "group": "MCAD reference",
-      "order": 8,
+      "order": 10,
       "narrative": "docs/design/mcad/import-export.md",
       "examples": [],
       "related_topics": [
@@ -922,7 +1055,7 @@
         "what-if"
       ],
       "group": "MCAD reference",
-      "order": 9,
+      "order": 11,
       "narrative": "docs/design/mcad/scripting.md",
       "examples": [],
       "related_topics": [

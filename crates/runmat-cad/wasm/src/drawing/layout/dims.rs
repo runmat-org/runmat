@@ -87,14 +87,20 @@ pub fn plan(ctx: &mut Ctx<'_>, views: &[ViewPlan]) -> Plans {
         .flatten()
     {
         let kind = &a["kind"];
-        let style = kind["style"].as_str().unwrap_or("");
+        // A plan's grids measure as a chain between neighbouring grid lines.
+        let grids = kind["annotation"] == "grids";
+        let style = if grids {
+            "chain"
+        } else {
+            kind["style"].as_str().unwrap_or("")
+        };
         let id = a["id"].as_str().unwrap_or("").to_owned();
         let side_on = style == "diameter"
             && views
                 .iter()
                 .find(|v| a["view"].as_str() == Some(v.name.as_str()))
                 .is_some_and(|v| side_on_diameter(data, &id, v).is_some());
-        if kind["annotation"] != "dimension"
+        if !(kind["annotation"] == "dimension" || grids)
             || !(side_on || matches!(style, "linear" | "ordinate" | "baseline" | "chain"))
         {
             continue;
@@ -112,7 +118,28 @@ pub fn plan(ctx: &mut Ctx<'_>, views: &[ViewPlan]) -> Plans {
             continue;
         };
         let v = &views[vi];
-        let refs = kind["references"].as_array().cloned().unwrap_or_default();
+        // What each point is, for telling repeats apart: its reference, on its occurrence when
+        // the dimension names one (a grid: its datum on the occurrence).
+        let refs: Vec<Value> = if grids {
+            kind["datums"]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .map(|d| Value::String(format!("{}#{d}", kind["occurrence"])))
+                .collect()
+        } else {
+            let on = kind["occurrences"].as_array();
+            kind["references"]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .enumerate()
+                .map(|(i, r)| match on.and_then(|o| o.get(i)) {
+                    Some(o) => Value::String(format!("{o}#{r}")),
+                    None => r.clone(),
+                })
+                .collect()
+        };
         let n = refs.len();
         let pairs: Vec<(usize, usize)> = match style {
             "linear" | "ordinate" if n == 2 => vec![(0, 1)],
@@ -157,7 +184,15 @@ pub fn plan(ctx: &mut Ctx<'_>, views: &[ViewPlan]) -> Plans {
                 refs[j.min(n - 1)].to_string(),
             ];
             key_refs.sort();
-            let key = format!("{model}|{}|{}|{:.3}", key_refs[0], key_refs[1], measurement);
+            // A plan's grids repeat on every plan they're drawn on: their row is keyed by view.
+            let key = if grids {
+                format!(
+                    "{model}|{vi}|{}|{}|{:.3}",
+                    key_refs[0], key_refs[1], measurement
+                )
+            } else {
+                format!("{model}|{}|{}|{:.3}", key_refs[0], key_refs[1], measurement)
+            };
             let label = texts
                 .get(k)
                 .or(texts.first())
@@ -286,6 +321,25 @@ pub fn plan(ctx: &mut Ctx<'_>, views: &[ViewPlan]) -> Plans {
                 st.first + ord_band + 1.5
             } else {
                 0.0
+            };
+            // Grid bubbles stand beyond the rows on the side their grids measure along.
+            let bubbles = data["document"]["annotations"]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .any(|a| {
+                    a["kind"]["annotation"] == "grids"
+                        && a["view"].as_str() == Some(v.name.as_str())
+                        && dims.iter().any(|d| {
+                            d.view == vi
+                                && d.axis == axis
+                                && a["id"].as_str() == Some(d.id.as_str())
+                        })
+                });
+            let need = if bubbles {
+                need.max(st.first) + super::plan_marks::bubble_room(&st)
+            } else {
+                need
             };
             room[si] = room[si].max(need);
             offsets.insert((vi, si), offs);
@@ -550,15 +604,25 @@ pub fn draw(ctx: &mut Ctx<'_>, views: &[ViewPlan], plans: Plans) {
                         .unwrap_or(st.first + d.row as f64 * st.step)
             }
         };
-        let (prims, text_at) = st.linear_dimension(&id, a, b, d.axis, at, &d.text);
+        // The figure at its usual spot unless that puts it over the view's lines (a dimension
+        // placed across the view): then at the nearest spot along its line that is clear of
+        // them, or past an arrow (ISO 129-1, ASME Y14.5: a dimension's figure is not crossed by
+        // a line of the drawing).
+        let draw_at =
+            |spot: Option<f64>| st.linear_dimension_with(&id, a, b, d.axis, at, &d.text, spot);
+        let (mut prims, mut text_at) = draw_at(None);
+        if figure_box(&prims).is_some_and(|f| over_lines(&f, views)) {
+            for spot in st.figure_spots(a, b, d.axis, &d.text) {
+                let (p, t) = draw_at(Some(spot));
+                if figure_box(&p).is_some_and(|f| !over_lines(&f, views)) {
+                    (prims, text_at) = (p, t);
+                    break;
+                }
+            }
+        }
         // Another dimension's extension or dimension line breaks around this figure, as at an
         // ordinate figure (a figure set outside short extension lines can land on one).
-        if let Some(b) = prims
-            .iter()
-            .rev()
-            .find(|p| p.style == "dimtext")
-            .and_then(text_box)
-        {
+        if let Some(b) = figure_box(&prims) {
             figures.push((id.clone(), b));
         }
         ctx.occ.add_prims(&prims, &id);
@@ -584,6 +648,42 @@ pub fn draw(ctx: &mut Ctx<'_>, views: &[ViewPlan], plans: Plans) {
         });
     }
     break_lines_at_figures(&mut ctx.out.primitives, &figures);
+}
+
+/// A dimension's figure box (its `dimtext`).
+fn figure_box(prims: &[Prim]) -> Option<BoxR> {
+    prims
+        .iter()
+        .rev()
+        .find(|p| p.style == "dimtext")
+        .and_then(text_box)
+}
+
+/// Whether a figure box lies over any view's drawn lines (visible, tangent, and hidden where
+/// the view draws them), on the sheet.
+pub fn over_lines(f: &BoxR, views: &[ViewPlan]) -> bool {
+    // The figure with a 0.75 mm margin, so no line runs close enough to read as touching it.
+    let g = BoxR::new(f.x0 - 0.75, f.y0 - 0.75, f.x1 + 0.75, f.y1 + 0.75);
+    views.iter().any(|v| {
+        let b = v.geom_box();
+        if b.x1 < g.x0 || b.x0 > g.x1 || b.y1 < g.y0 || b.y0 > g.y1 {
+            return false;
+        }
+        let hidden: &[Vec<f64>] = if v.show_hidden { &v.hidden } else { &[] };
+        v.edges.iter().chain(&v.tangent).chain(hidden).any(|e| {
+            let pts: Vec<Xy> = e
+                .chunks_exact(2)
+                .map(|p| v.to_sheet([p[0], p[1]]))
+                .collect();
+            // Across a line, or inside a hole it crosses none of the lines of.
+            pts.windows(2)
+                .any(|w| clip_segment(w[0], w[1], &g).is_some())
+                || crate::analyze::drawing_check::in_small_loop(
+                    &pts.concat(),
+                    &[f.x0, f.y0, f.x1, f.y1],
+                )
+        })
+    })
 }
 
 /// Every other dimension's straight line that runs through an ordinate figure is broken around

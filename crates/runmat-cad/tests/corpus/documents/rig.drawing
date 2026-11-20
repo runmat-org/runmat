@@ -60,5 +60,5 @@ drawing rig {
     annotation b1 = balloon(occurrence = [{ name = bolts }, { name = b1 }], table = bom, view = front)
     annotation n1 = note(text = "PART {part_number} REV {revision}", view = top)
 
-    table bom = bom(view = front, include_fasteners, sheet = "1", at = [0, 0])
+    table bom = bom(view = front, include_fasteners, sheet = "1")
 }

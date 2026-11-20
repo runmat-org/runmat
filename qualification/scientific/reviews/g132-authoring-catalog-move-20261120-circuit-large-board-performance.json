@@ -1,0 +1,49 @@
+{
+ "schema_version": 1,
+ "measured_inputs": {
+  "sha256": "82e3f3ef00d70b90678b39c575d9e94442cc2cbae2cbcd0077890c46639851fc",
+  "files": 26448,
+  "encoding": "git-mode-type-blob-path-tuples-v1"
+ },
+ "accepted_inputs": {
+  "sha256": "3e8870de46a03715aacaa8ef0b57a056df50e263427bc1e52ccce5cd5932db3d",
+  "files": 26449,
+  "encoding": "git-mode-type-blob-path-tuples-v1"
+ },
+ "cohorts": [
+  "circuit-large-board-performance"
+ ],
+ "qualification_evidence": [
+  {
+   "path": "qualification/scientific/evidence/g132-authoring-catalog-move-20261120.json",
+   "sha256": "34313309c1c6b7a3a13d1ab7c32312333032e969c3a7513f0b3e354bda7a97c2"
+  }
+ ],
+ "changed_inputs": [
+  {
+   "path": "crates/runmat-runtime/src/analysis/contracts.rs",
+   "before": [
+    "100644",
+    "blob",
+    "f99e02184b32823806a2f0e11aeb6b8b4ca486e0"
+   ],
+   "after": [
+    "100644",
+    "blob",
+    "10e570bb116477b0c6688da54d17485fc4621ffe"
+   ],
+   "reason": "G132 24074bbb35: pure move of analysis_authoring_workflow, analysis_procedure_ids, analysis_output_operation_ids, analysis_language_reference_paths into contracts/authoring_catalog.rs, re-exported at the same path; no behaviour change; debt ceiling file lowered 2467\u21922442; FEA OK 2026-11-20. contracts.rs loses the four functions and gains the mod line, the pub use re-export and one test import."
+  },
+  {
+   "path": "crates/runmat-runtime/src/analysis/contracts/authoring_catalog.rs",
+   "before": null,
+   "after": [
+    "100644",
+    "blob",
+    "a2d70d16630570e1584cda5e01bfa30206803f4f"
+   ],
+   "reason": "G132 24074bbb35: pure move of analysis_authoring_workflow, analysis_procedure_ids, analysis_output_operation_ids, analysis_language_reference_paths into contracts/authoring_catalog.rs, re-exported at the same path; no behaviour change; debt ceiling file lowered 2467\u21922442; FEA OK 2026-11-20. New module: every line is a removed contracts.rs line, plus its doc comment and its AnalysisProcedure import."
+  }
+ ],
+ "reason": "Conserves the fresh 0.7.2 scientific measurements on dac88251ba across G132 24074bbb35: pure move of analysis_authoring_workflow, analysis_procedure_ids, analysis_output_operation_ids, analysis_language_reference_paths into contracts/authoring_catalog.rs, re-exported at the same path; no behaviour change; debt ceiling file lowered 2467\u21922442; FEA OK 2026-11-20. Every line removed from contracts.rs is in the new module; the only other lines are the mod line, the re-export, the module doc comment, its import and one test import. scripts/development/fea-module-size-debt.json is not a scientific input. Solver arithmetic, model inputs, dependencies, features and thresholds are unchanged. This review is not a rerun of the scientific or performance measurements."
+}

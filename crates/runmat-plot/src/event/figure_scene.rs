@@ -53,7 +53,7 @@ impl FigureSnapshot {
 }
 
 impl FigureScene {
-    pub const SCHEMA_VERSION: u32 = 7;
+    pub const SCHEMA_VERSION: u32 = 8;
 
     pub fn capture(figure: &Figure) -> Self {
         if let Some(scene) = figure.geometry_source() {
@@ -257,6 +257,9 @@ impl FigureScene {
         figure.background_color = rgba_to_vec4(self.metadata.background_rgba);
 
         for plot in self.plots {
+            if !figure.axes_is_live(plot.axes_index() as usize) {
+                return Err("figure scene plot references an unavailable axes".into());
+            }
             plot.apply_to_figure(&mut figure)?;
         }
 
@@ -321,6 +324,25 @@ impl FigureScene {
         if self.schema_version < 5 && !self.layout.axes_grid_cells.is_empty() {
             return Err("axes grid-cell identity requires figure scene schema version 5".into());
         }
+        if self.schema_version < 8
+            && self
+                .layout
+                .axes_grid_cells
+                .iter()
+                .flatten()
+                .any(|cell| cell.row_span != 1 || cell.column_span != 1)
+        {
+            return Err("subplot spans require figure scene schema version 8".into());
+        }
+        if self.schema_version < 8
+            && self
+                .metadata
+                .axes_metadata
+                .as_ref()
+                .is_some_and(|axes| axes.iter().any(|axes| axes.retired))
+        {
+            return Err("retired axes require figure scene schema version 8".into());
+        }
         Ok(())
     }
 }
@@ -366,6 +388,7 @@ pub(super) fn append_geometry_scene_chunks(
         instances,
         lod_pixels,
         packed,
+        owner_node_ids,
         visible,
     } = plot
     else {
@@ -439,7 +462,8 @@ pub(super) fn append_geometry_scene_chunks(
         .with_mesh_id(mesh_id_for_chunk.clone())
         .with_label(label.clone().unwrap_or_else(|| mesh_id_for_chunk.clone()))
         .with_regions(region_metadata)
-        .with_instances(instances.clone(), lod_pixels),
+        .with_instances(instances.clone(), lod_pixels)
+        .with_owner_node_ids(owner_node_ids.clone()),
     );
 
     if let Some(edge_render_data) = mesh.edge_render_data() {
@@ -453,7 +477,8 @@ pub(super) fn append_geometry_scene_chunks(
                 "{} edges",
                 label.clone().unwrap_or_else(|| mesh_id_for_chunk.clone())
             ))
-            .with_instances(instances.clone(), lod_pixels),
+            .with_instances(instances.clone(), lod_pixels)
+            .with_owner_node_ids(owner_node_ids.clone()),
         );
     }
 
@@ -518,6 +543,7 @@ pub(super) fn scene_chunk_to_mesh_plot(
         instances: chunk.instances.clone(),
         lod_pixels: chunk.lod_pixels,
         packed: None,
+        owner_node_ids: chunk.owner_node_ids.clone(),
         visible: chunk.visible,
     })
 }

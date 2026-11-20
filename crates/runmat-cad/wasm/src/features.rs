@@ -207,16 +207,48 @@ pub fn profile_features(
         let kind = match command {
             "part.extrude" => extrude(values, picks, profile)?,
             "part.revolve" => revolve(values, picks, profile)?,
-            _ => json!({
-                "feature": "sweep",
-                "profile": profile,
-                "path": self::profile(values, "path", picks)?,
-                "mode": mode(values, picks)?,
-            }),
+            _ => sweep(values, picks, profile)?,
         };
         out.push((stem, kind));
     }
     Ok(Some(out))
+}
+
+/// An option the panel offers that the part model doesn't keep yet: refused by name, so a
+/// feature is never written without it.
+fn not_yet(what: &str) -> EditFailure {
+    model(format!("{what} isn't in the part model yet"))
+}
+
+fn sweep(values: &Values, picks: &Picks, profile: Value) -> Result<Value, EditFailure> {
+    let follow_path = match text(values, "orientation", "follow_path") {
+        "keep_normal" => false,
+        "follow_path_first_guide" => {
+            return Err(not_yet("a sweep oriented by its first guide curve"))
+        }
+        _ => true,
+    };
+    if !picks_of(values, "guides").is_empty() {
+        return Err(not_yet("a sweep with guide curves"));
+    }
+    if text(values, "twist", "none") != "none" {
+        return Err(not_yet("a twisted sweep"));
+    }
+    if text(values, "start_tangency", "none") != "none"
+        || text(values, "end_tangency", "none") != "none"
+    {
+        return Err(not_yet("a sweep's start or end tangency"));
+    }
+    if flag(values, "thin") {
+        return Err(not_yet("a thin sweep"));
+    }
+    Ok(json!({
+        "feature": "sweep",
+        "profile": profile,
+        "path": self::profile(values, "path", picks)?,
+        "mode": mode(values, picks)?,
+        "follow_path": follow_path,
+    }))
 }
 
 fn revolve(values: &Values, picks: &Picks, profile: Value) -> Result<Value, EditFailure> {
@@ -336,13 +368,58 @@ fn chamfer_form(values: &Values) -> Result<Value, EditFailure> {
     })
 }
 
+/// A fillet's face set: its own field, else `None` (the combined Edges and faces pick).
+fn face_set(values: &Values, picks: &Picks, id: &str) -> Result<Option<Vec<Value>>, EditFailure> {
+    let set = picks_of(values, id);
+    if set.is_empty() {
+        Ok(None)
+    } else {
+        picks.references(&set).map(Some)
+    }
+}
+
 fn fillet(values: &Values, picks: &Picks) -> Result<Value, EditFailure> {
-    let all = some(values, "edges", "the edges or faces to round")?;
     let profile = match text(values, "profile", "circular") {
         "conic" => json!({ "profile": "conic", "rho": { "form": "number", "value": 0.5 } }),
         "curvature" => json!({ "profile": "curvature" }),
         _ => json!({ "profile": "circular" }),
     };
+    // Face fillet and full round take face sets, each its own field.
+    match text(values, "type", "constant") {
+        "face" => {
+            if let (Some(first), Some(second)) = (
+                face_set(values, picks, "face_set1")?,
+                face_set(values, picks, "face_set2")?,
+            ) {
+                return Ok(
+                    json!({ "feature": "face_fillet", "first": first, "second": second, "radius": value(values, "radius", "mm")?, "profile": profile }),
+                );
+            }
+            if picks_of(values, "edges").is_empty() {
+                return Err(model(
+                    "a face fillet takes two face sets: pick Face set 1 and Face set 2",
+                ));
+            }
+        }
+        "full_round" => {
+            if let (Some(first), Some(center), Some(second)) = (
+                face_set(values, picks, "side_set1")?,
+                face_set(values, picks, "center_set")?,
+                face_set(values, picks, "side_set2")?,
+            ) {
+                return Ok(
+                    json!({ "feature": "full_round", "first": first, "center": center, "second": second }),
+                );
+            }
+            if picks_of(values, "edges").is_empty() {
+                return Err(model(
+                    "a full round takes three face sets: one side, the center, the other side",
+                ));
+            }
+        }
+        _ => {}
+    }
+    let all = some(values, "edges", "the edges or faces to round")?;
     match text(values, "type", "constant") {
         "face" | "full_round" => {
             let faces = picks.references(&all)?;
@@ -472,14 +549,14 @@ fn hole(values: &Values, picks: &Picks) -> Result<Value, EditFailure> {
 fn pattern(values: &Values, picks: &Picks) -> Result<Value, EditFailure> {
     let layout = match text(values, "layout", "linear") {
         "linear" => {
-            let first = picks.axis(&one(values, "direction", "the pattern's direction")?)?;
+            let first = picks.direction(&one(values, "direction", "the pattern's direction")?)?;
             if flag(values, "second_direction") {
                 json!({
                     "layout": "grid",
                     "first": first,
                     "first_spacing": value(values, "spacing", "mm")?,
                     "first_count": number(values, "instances")?,
-                    "second": picks.axis(&one(values, "direction2", "the second direction")?)?,
+                    "second": picks.direction(&one(values, "direction2", "the second direction")?)?,
                     "second_spacing": value(values, "spacing2", "mm")?,
                     "second_count": number(values, "instances2")?,
                 })
@@ -554,6 +631,20 @@ pub fn feature_kind(
             if profiles.len() < 2 {
                 return Err(model("a loft takes two or more profiles"));
             }
+            if !picks_of(values, "centerline").is_empty() {
+                return Err(not_yet("a loft along a centerline"));
+            }
+            if text(values, "start_tangency", "none") != "none"
+                || text(values, "end_tangency", "none") != "none"
+            {
+                return Err(not_yet("a loft's start or end tangency"));
+            }
+            if flag(values, "closed") {
+                return Err(not_yet("a closed loft"));
+            }
+            if flag(values, "thin") {
+                return Err(not_yet("a thin loft"));
+            }
             (
                 "loft",
                 json!({ "feature": "loft", "profiles": profiles, "guides": picks.references(&picks_of(values, "guides"))?, "mode": mode(values, picks)? }),
@@ -604,7 +695,13 @@ pub fn feature_kind(
                 }
                 _ => json!({ "draft": "neutral_plane" }),
             };
-            let neutral = match picks_of(values, "neutral").first() {
+            let parting = text(values, "type", "neutral_plane") != "neutral_plane";
+            // A parting-line or step draft pulls along the Direction of pull's normal.
+            let neutral_pick = parting
+                .then(|| picks_of(values, "pull").into_iter().next())
+                .flatten()
+                .or_else(|| picks_of(values, "neutral").into_iter().next());
+            let neutral = match neutral_pick.as_ref() {
                 Some(n) => picks.plane(n)?,
                 None if text(values, "type", "neutral_plane") != "neutral_plane" => {
                     json!({ "on": "datum", "datum": { "datum": "origin_plane", "plane": "xy" } })
@@ -715,6 +812,8 @@ pub fn feature_kind(
                 "bend_radius": value(values, "radius", "mm")?,
                 "rule": match text(values, "bend_rule", "k_factor") {
                     "k_factor" => json!({ "rule": "k_factor", "k": number(values, "k").unwrap_or(json!({ "form": "number", "value": 0.44 })) }),
+                    "allowance" => json!({ "rule": "allowance", "value": value(values, "allowance", "mm")? }),
+                    "deduction" => json!({ "rule": "deduction", "value": value(values, "deduction", "mm")? }),
                     other => return Err(model(format!("a {} rule is set up in the source editor (it needs its table)", other.replace('_', " ")))),
                 },
             });
@@ -855,6 +954,8 @@ mod layouts;
 mod picked_tests;
 #[cfg(test)]
 mod layout_tests;
+#[cfg(test)]
+mod panel_inputs_tests;
 
 #[cfg(test)]
 mod tests {

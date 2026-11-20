@@ -9,12 +9,14 @@ use crate::core::{
 };
 use glam::{Mat4, Vec2, Vec3, Vec4};
 use serde::{Deserialize, Deserializer, Serialize};
-use std::collections::{BTreeSet, HashMap, HashSet};
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 
 mod annotations;
 mod edge_stroke;
 #[cfg(test)]
 mod highlight_tests;
+#[cfg(test)]
+mod dimension_tests;
 mod instances;
 mod paint;
 mod pick;
@@ -29,6 +31,7 @@ pub use pick::{
     GeometryScenePickResult,
 };
 
+pub use edge_stroke::VIEW_EDGE_WIDTH_PX;
 pub use instances::GeometrySceneInstance;
 #[cfg(test)]
 use paint::GEOMETRY_HOVER_EDGE_COLOR;
@@ -36,6 +39,8 @@ use paint::{RegionPaint, HOVER_PAINT, SELECTED_PAINT};
 
 const SECTION_DISTANCE_EPSILON: f32 = 1.0e-6;
 const GEOMETRY_SELECTED_REGION_COLOR: [f32; 4] = [0.98, 0.45, 0.12, 1.0];
+/// A measured dimension's color when the host gives none: the selection color.
+pub const GEOMETRY_DIMENSION_COLOR: [f32; 4] = GEOMETRY_SELECTED_REGION_COLOR;
 const GEOMETRY_HOVER_REGION_COLOR: [f32; 4] = [0.43, 0.78, 1.0, 1.0];
 const GEOMETRY_MATERIAL_REGION_COLOR: [f32; 4] = [0.38, 0.58, 0.96, 0.92];
 const GEOMETRY_BOUNDARY_REGION_COLOR: [f32; 4] = [0.22, 0.82, 0.52, 0.96];
@@ -167,6 +172,10 @@ impl GeometryScene {
         &self,
         presentation: &GeometryScenePresentation,
     ) -> Vec<SceneNode> {
+        // A section caps each body across all its chunks: a CAD import puts each face in its own
+        // chunk, and a chunk on its own is an open surface with nothing to fill.
+        let mut cap_sources: BTreeMap<Option<String>, (Material, Vec<[Vertex; 3]>)> =
+            BTreeMap::new();
         let mut nodes: Vec<SceneNode> = self
             .chunks
             .iter()
@@ -197,7 +206,17 @@ impl GeometryScene {
                     parent: None,
                     children: Vec::new(),
                     render_data: Some(edge_stroke::widen(
-                        chunk.render_data_with_presentation(presentation),
+                        {
+                            let (render_data, cap_source) = chunk.presented(presentation, false);
+                            if let Some(source) = cap_source.filter(|_| chunk.visible) {
+                                cap_sources
+                                    .entry(chunk.mesh_id.clone())
+                                    .or_insert_with(|| (source.material.clone(), Vec::new()))
+                                    .1
+                                    .extend(triangles_of(&source));
+                            }
+                            render_data
+                        },
                         presentation.edge_width_px,
                     )),
                     bounds: chunk.bounds,
@@ -207,8 +226,10 @@ impl GeometryScene {
                 }
             })
             .collect();
+        nodes.extend(self.section_cap_nodes(presentation, &cap_sources));
         nodes.extend(self.annotation_nodes(presentation));
         nodes.extend(self.topology_selection_nodes(presentation));
+        nodes.extend(self.dimension_nodes(presentation));
         nodes
     }
 
@@ -256,6 +277,10 @@ pub struct GeometryScenePresentation {
     pub region_highlights: Vec<GeometrySceneRegionHighlight>,
     #[serde(default)]
     pub region_annotations: Vec<GeometrySceneRegionAnnotation>,
+    /// Measured dimensions drawn in the model: a line between two scene points with its value
+    /// at the middle (Measure's distances). They draw over the model, as study symbols do.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub dimensions: Vec<GeometrySceneDimension>,
     #[serde(default)]
     pub display_mode: GeometrySceneDisplayMode,
     #[serde(default = "default_edge_overlay_enabled")]
@@ -306,6 +331,7 @@ impl Default for GeometryScenePresentation {
             region_colors: Vec::new(),
             region_highlights: Vec::new(),
             region_annotations: Vec::new(),
+            dimensions: Vec::new(),
             display_mode: GeometrySceneDisplayMode::Shaded,
             edge_overlay_enabled: true,
             show_grid: None,
@@ -383,6 +409,20 @@ impl GeometryScenePresentation {
 
     pub(crate) fn active_section(&self) -> Option<&GeometrySceneSection> {
         self.section.as_ref().and_then(Option::as_ref)
+    }
+
+    /// Whether the active section keeps `point`: on the kept side of its plane, or, with a
+    /// second plane (a corner cutaway), of either plane. With no section every point is kept.
+    pub(crate) fn section_keeps(&self, point: Vec3) -> bool {
+        let Some(section) = self.active_section() else {
+            return true;
+        };
+        let keeps = |plane: &GeometrySceneSectionPlane| {
+            section_plane(plane)
+                .map(|(normal, origin)| (point - origin).dot(normal) >= 0.0)
+                .unwrap_or(true)
+        };
+        keeps(&section.plane) || section.second_plane.as_ref().is_some_and(keeps)
     }
 }
 
@@ -506,6 +546,25 @@ pub struct GeometrySceneRegionAnnotation {
     pub size: Option<f32>,
 }
 
+/// A dimension in the model: the line from `from` to `to` (scene coordinates) with dots at its
+/// ends, and `label` (the measured value) at its middle.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GeometrySceneDimension {
+    pub from: [f32; 3],
+    pub to: [f32; 3],
+    pub label: String,
+    /// Line, dot and label-border color; unset draws the selection color.
+    #[serde(default)]
+    pub color: Option<[f32; 4]>,
+    /// Extension lines, each `[point on the measured item, dimension-line end]`: they carry a
+    /// dimension line that stands off its item back to the item's outline. Drawn thinner than
+    /// the dimension line, with a small gap at the item and a short run past the line's end
+    /// (ISO 129-1).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub extension_lines: Vec<[[f32; 3]; 2]>,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum GeometrySceneAnnotationKind {
@@ -603,9 +662,42 @@ pub struct GeometrySceneScalarLegend {
     /// the range.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub limit: Option<f64>,
-    /// A line under the range, such as how far the result is from that limit.
+    /// A line under the range: the result against the study's acceptance limit, such as
+    /// "Peak 17.7 MPa · limit 184 MPa · factor 10.4"
+    /// ([`crate::legend_text::assessment_line`]).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub note: Option<String>,
+    /// Where `minimum` and `maximum` come from: the field's extremes (`data`, omitted) or a fixed
+    /// range the study sets (`study`). A fixed range colours values outside it with the end
+    /// colours.
+    #[serde(default, skip_serializing_if = "ScalarRangeSource::is_data")]
+    pub range_source: ScalarRangeSource,
+    /// The field's true lowest value, in `unit`, when it lies below a fixed range.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub below: Option<f64>,
+    /// The field's true highest value, in `unit`, when it lies above a fixed range.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub above: Option<f64>,
+    /// Significant digits of the legend's numbers, when the study sets them.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub precision: Option<u8>,
+}
+
+/// Where a scalar legend's range comes from.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ScalarRangeSource {
+    /// The field's extremes.
+    #[default]
+    Data,
+    /// A fixed range set by the study's `display` statement.
+    Study,
+}
+
+impl ScalarRangeSource {
+    pub fn is_data(&self) -> bool {
+        *self == Self::Data
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -976,6 +1068,17 @@ impl GeometrySceneChunk {
         &self,
         presentation: &GeometryScenePresentation,
     ) -> RenderData {
+        self.presented(presentation, true).0
+    }
+
+    /// The chunk as `presentation` draws it. With `cap_here` a section caps the chunk's own
+    /// faces; without, the cut stays open and the faces a cap is cut from (in the cap's colors)
+    /// come back for the scene, which caps each body across all its chunks at once.
+    fn presented(
+        &self,
+        presentation: &GeometryScenePresentation,
+        cap_here: bool,
+    ) -> (RenderData, Option<RenderData>) {
         let mut render_data = self.render_data.clone();
         if presentation.rewrites_geometry_vertices() {
             // Presentation overlays rewrite CPU-side vertices/indices. A stale
@@ -1035,6 +1138,15 @@ impl GeometrySceneChunk {
                 RegionPaint::Face(region.color),
             );
         }
+        // A section cap takes the body's (or its material's) color, so it is cut from the faces
+        // as they are before highlights, hover, selection and setup tints paint them. Only a
+        // chunk of surface triangles bounds the solid: a feature-edge chunk beside it holds line
+        // segments, which read three vertices at a time would add false faces to the cut.
+        let mut cap_source = presentation
+            .active_section()
+            .filter(|section| section.cap)
+            .filter(|_| render_data.pipeline_type == PipelineType::Triangles && !is_edge_chunk)
+            .map(|_| self.cap_colors(render_data.clone()));
         for highlight in &presentation.region_highlights {
             self.apply_region_color(
                 &mut render_data,
@@ -1083,9 +1195,36 @@ impl GeometrySceneChunk {
         if !presentation.hidden_region_ids.is_empty() {
             render_data =
                 self.render_data_without_regions(render_data, &presentation.hidden_region_ids);
+            cap_source = cap_source.map(|source| {
+                self.render_data_without_regions(source, &presentation.hidden_region_ids)
+            });
         }
         if let Some(section) = presentation.active_section() {
-            render_data = self.render_data_with_section(render_data, section);
+            if cap_here {
+                render_data =
+                    self.render_data_with_section(render_data, cap_source.as_ref(), section);
+                cap_source = None;
+            } else {
+                let open = GeometrySceneSection {
+                    cap: false,
+                    ..section.clone()
+                };
+                render_data = self.render_data_with_section(render_data, None, &open);
+            }
+        }
+        (render_data, cap_source)
+    }
+
+    /// The faces a section cap is cut from, in the body's color. A chunk whose material is
+    /// white takes its whole color from its vertices, as a result field's does; its cap is the
+    /// default body grey, never the field's colors.
+    fn cap_colors(&self, mut render_data: RenderData) -> RenderData {
+        let albedo = render_data.material.albedo;
+        if albedo.x >= 1.0 && albedo.y >= 1.0 && albedo.z >= 1.0 {
+            let body = cad_default_material().albedo;
+            for vertex in &mut render_data.vertices {
+                vertex.color = [body.x, body.y, body.z, vertex.color[3]];
+            }
         }
         render_data
     }
@@ -1126,13 +1265,14 @@ impl GeometrySceneChunk {
     fn render_data_with_section(
         &self,
         render_data: RenderData,
+        cap_source: Option<&RenderData>,
         section: &GeometrySceneSection,
     ) -> RenderData {
         let Some(plane) = section_plane(&section.plane) else {
             return render_data;
         };
         let second = section.second_plane.as_ref().and_then(section_plane);
-        section_cut::cut(render_data, plane, second, section.cap)
+        section_cut::cut(render_data, cap_source, plane, second, section.cap)
     }
 
     fn is_edge_chunk(&self) -> bool {

@@ -346,3 +346,223 @@ pub(super) fn fallback_is_admitted_against_the_ceiling() {
         other => panic!("expected a static solve ceiling error, got {other:?}"),
     }
 }
+
+/// The count-based estimate a check makes before meshing reproduces the mesh-based multigrid
+/// plan: the same node count, stiffness pattern and scratch from Euler counts alone, and the
+/// plan's memory within a tenth, or within the model's fixed reservations the count model
+/// leaves out (constraints, observations, excitation and the state-profile catalog: about
+/// 6 MB on this model, which do not grow with the mesh).
+pub(super) fn counted_estimate_matches_the_mesh_plan() {
+    use crate::planning::resource::{
+        build_static_resource_plan_selecting, estimate_static_solid_from_counts, FeaResourceDemand,
+        LocalExecutionPlan, StaticResourcePreflight, StaticSolvePath, StaticSolveSelection,
+    };
+    let model = fixture_model(FixtureId::CantileverLinearStatic);
+    for order in [ElementOrder::Tet4, ElementOrder::Tet10] {
+        let divisions = 8_u64;
+        let mesh = structured_cantilever(divisions as usize, order);
+        let constraints =
+            crate::constraints::CanonicalStructuralConstraintPlan::compile(&model, &mesh).unwrap();
+        let fields = crate::post::fields::structural_static_observable_field_definitions().unwrap();
+        let observations = crate::results::observation::resolve_structural_observation_plan(
+            &model.sequence.steps[0],
+            &model,
+            Some(&mesh),
+            &constraints,
+            &fields,
+            crate::results::observation::ObservationLimits::default(),
+        )
+        .unwrap();
+        let plan = build_static_resource_plan_selecting(
+            StaticResourcePreflight {
+                compilation: None,
+                prepared_inputs: None,
+                model: &model,
+                step: &model.sequence.steps[0],
+                backend: ComputeBackend::Cpu,
+                preconditioner: SpdPreconditionerKind::Auto,
+                observation_execution:
+                    crate::results::observation::ObservationExecutionPolicy::serial(),
+                mesh: Some(&mesh),
+                constraints: &constraints,
+                observations: &observations,
+                accelerator_requests: &[],
+                local_execution: LocalExecutionPlan::serial(),
+            },
+            StaticSolveSelection::Recorded(StaticSolvePath::ElasticRigidityMultigrid),
+        )
+        .unwrap();
+        let FeaResourceDemand::StructuralLinearPipeline(demand) = &plan.input.demand else {
+            panic!("a static solid plans the structural linear pipeline");
+        };
+        let counts = runmat_meshing_core::SolidMeshCounts {
+            vertices: (divisions + 1).pow(3),
+            tetrahedra: mesh.topology.volume_elements.len() as u64,
+            boundary_facets: mesh.topology.boundary_faces.len() as u64,
+            order,
+        };
+        let counted = estimate_static_solid_from_counts(counts).unwrap();
+        assert_eq!(counted.nodes, mesh.topology.nodes.len() as u64, "{order:?}");
+        assert_eq!(
+            counted.stiffness_nonzeros, demand.operator.sparse.operator_nonzeros[0].0,
+            "{order:?}"
+        );
+        let planned = plan.request.memory_bytes;
+        let modelled = counted.memory_bytes - counted.mesh_bytes;
+        eprintln!(
+            "counted {order:?}: plan memory {planned} B scratch {} B; counted {modelled} B (+ mesh {} B) scratch {} B",
+            plan.request.scratch_bytes, counted.mesh_bytes, counted.scratch_bytes
+        );
+        assert!(
+            modelled.abs_diff(planned) <= (planned / 10).max(8 << 20),
+            "{order:?}: counted {modelled} B vs plan {planned} B"
+        );
+        assert_eq!(
+            counted.scratch_bytes, plan.request.scratch_bytes,
+            "{order:?}"
+        );
+    }
+}
+
+/// The multigrid plan's resident memory covers the measured peak heap of the elastic rigidity
+/// solve. The allocation counter is per thread; the default static options solve serially.
+pub(super) fn multigrid_plan_covers_the_measured_solve() {
+    use crate::planning::resource::{
+        build_static_resource_plan_selecting, LocalExecutionPlan, StaticResourcePreflight,
+        StaticSolvePath, StaticSolveSelection,
+    };
+    use crate::topology::measure_test_allocations as measured;
+    let model = fixture_model(FixtureId::CantileverLinearStatic);
+    for (order, divisions) in [(ElementOrder::Tet4, 12), (ElementOrder::Tet10, 8)] {
+        let mesh = structured_cantilever(divisions, order);
+        let constraints =
+            crate::constraints::CanonicalStructuralConstraintPlan::compile(&model, &mesh).unwrap();
+        let fields = crate::post::fields::structural_static_observable_field_definitions().unwrap();
+        let observations = crate::results::observation::resolve_structural_observation_plan(
+            &model.sequence.steps[0],
+            &model,
+            Some(&mesh),
+            &constraints,
+            &fields,
+            crate::results::observation::ObservationLimits::default(),
+        )
+        .unwrap();
+        let plan = build_static_resource_plan_selecting(
+            StaticResourcePreflight {
+                compilation: None,
+                prepared_inputs: None,
+                model: &model,
+                step: &model.sequence.steps[0],
+                backend: ComputeBackend::Cpu,
+                preconditioner: SpdPreconditionerKind::Amg,
+                observation_execution:
+                    crate::results::observation::ObservationExecutionPolicy::serial(),
+                mesh: Some(&mesh),
+                constraints: &constraints,
+                observations: &observations,
+                accelerator_requests: &[],
+                local_execution: LocalExecutionPlan::serial(),
+            },
+            StaticSolveSelection::Recorded(StaticSolvePath::ElasticRigidityMultigrid),
+        )
+        .unwrap();
+        let (_, _, peak) = measured(|| solve(&model, &mesh, SpdPreconditionerKind::Amg));
+        let planned = plan.request.memory_bytes;
+        eprintln!(
+            "multigrid static {order:?} {divisions}: nodes {} measured peak {peak} B, planned {planned} B, ratio {:.2}; breakdown {:?}",
+            mesh.topology.nodes.len(),
+            planned as f64 / peak as f64,
+            plan.breakdown
+        );
+        assert!(
+            peak as u64 <= planned,
+            "{order:?}: peak {peak} above {planned}"
+        );
+        // Measured 2026-11-19: 1.45x (Tet4) and 1.29x (Tet10). Every charged store (stiffness,
+        // consistent mass and damping patterns, contribution stream, hierarchy, proof
+        // inventory, recovery) is held; the plan has no slack to remove at this size. The
+        // coarse grid's dense factor allocates only its own n² values: a BLAS packing buffer
+        // sized from the host cache (132 MiB on a 33 MiB-L3 host) once tripled the peak.
+        assert!(
+            planned <= 2 * peak as u64,
+            "{order:?}: plan {planned} exceeds twice the measured peak {peak}"
+        );
+    }
+}
+
+/// The proving factorization's plan covers the measured peak heap of the factor solve: the
+/// assembled stiffness, the solver's identity-constrained copy, the ordering graph and the
+/// Cholesky factor with its scratch. The allocation counter is per thread; the default static
+/// options solve serially.
+pub(super) fn factor_plan_covers_the_measured_solve() {
+    use crate::planning::resource::{
+        build_static_resource_plan_selecting, LocalExecutionPlan, StaticResourcePreflight,
+        StaticSolvePath, StaticSolveSelection,
+    };
+    use crate::topology::measure_test_allocations as measured;
+    let model = fixture_model(FixtureId::CantileverLinearStatic);
+    // Tet4 cantilevers of 8 to 12 divisions are left out: their exact Cholesky fill exceeds
+    // the envelope planned on the superset pattern, so the solve refuses before numeric
+    // factorization (fail closed) and there is no factor peak to measure.
+    for divisions in [7, 8] {
+        let order = ElementOrder::Tet10;
+        let mesh = structured_cantilever(divisions, order);
+        let constraints =
+            crate::constraints::CanonicalStructuralConstraintPlan::compile(&model, &mesh).unwrap();
+        let fields = crate::post::fields::structural_static_observable_field_definitions().unwrap();
+        let observations = crate::results::observation::resolve_structural_observation_plan(
+            &model.sequence.steps[0],
+            &model,
+            Some(&mesh),
+            &constraints,
+            &fields,
+            crate::results::observation::ObservationLimits::default(),
+        )
+        .unwrap();
+        let plan = build_static_resource_plan_selecting(
+            StaticResourcePreflight {
+                compilation: None,
+                prepared_inputs: None,
+                model: &model,
+                step: &model.sequence.steps[0],
+                backend: ComputeBackend::Cpu,
+                preconditioner: SpdPreconditionerKind::Auto,
+                observation_execution:
+                    crate::results::observation::ObservationExecutionPolicy::serial(),
+                mesh: Some(&mesh),
+                constraints: &constraints,
+                observations: &observations,
+                accelerator_requests: &[],
+                local_execution: LocalExecutionPlan::serial(),
+            },
+            StaticSolveSelection::Recorded(StaticSolvePath::ProvingFactorization),
+        )
+        .unwrap();
+        let (run, _, peak) = measured(|| solve(&model, &mesh, SpdPreconditionerKind::Auto));
+        assert_eq!(
+            run.structural_static_convergence
+                .as_ref()
+                .unwrap()
+                .operator_proof,
+            StaticOperatorProof::SparseCholesky
+        );
+        let planned = plan.request.memory_bytes;
+        eprintln!(
+            "factor static {order:?} {divisions}: nodes {} measured peak {peak} B, planned {planned} B, ratio {:.2}; breakdown {:?}",
+            mesh.topology.nodes.len(),
+            planned as f64 / peak as f64,
+            plan.breakdown
+        );
+        assert!(
+            peak as u64 <= planned,
+            "{order:?}: peak {peak} above {planned}"
+        );
+        // Measured 2026-11-15: 1.75x (7 divisions) and 1.65x (8). The plan also holds the
+        // factor envelope's 25% headroom, the mass and damping patterns a static solve does not
+        // assemble, and fixed reservations that dominate at this size.
+        assert!(
+            planned <= 2 * peak as u64,
+            "{order:?}: plan {planned} exceeds twice the measured peak {peak}"
+        );
+    }
+}

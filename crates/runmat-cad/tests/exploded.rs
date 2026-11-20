@@ -11,7 +11,7 @@ use runmat_cad::ids::{FilePath, PublishName};
 use runmat_cad::model::datum::Frame;
 use runmat_cad::refs::lock::{LockSection, SeededMinter};
 use runmat_cad::refs::InstanceKey;
-use runmat_cad::units::StubUnits;
+use runmat_cad::units::Units;
 use runmat_cad::value::{NoDynamicValues, ValueExpr};
 
 fn mm(v: f64) -> ValueExpr {
@@ -82,6 +82,8 @@ fn translate(id: &str, occ: Vec<RelPath>, v: [f64; 3], d: f64) -> ExplodeStep {
     ExplodeStep {
         id: id.into(),
         occurrences: occ,
+        patterns: Vec::new(),
+        mirrors: Vec::new(),
         motion: ExplodeMotion::Translate {
             direction: ExplodeDirection::Vector { vector: v },
             distance: mm(d),
@@ -172,6 +174,8 @@ fn gearbox() -> (MemorySource, AssemblyDocument) {
     service.steps.push(ExplodeStep {
         id: "bolts_out".into(),
         occurrences: vec![bolt("h1"), bolt("h2"), bolt("h3")],
+        patterns: Vec::new(),
+        mirrors: Vec::new(),
         motion: ExplodeMotion::Translate {
             direction: ExplodeDirection::OccurrenceAxis {
                 occurrence: bolt("h1"),
@@ -185,6 +189,8 @@ fn gearbox() -> (MemorySource, AssemblyDocument) {
     service.steps.push(ExplodeStep {
         id: "shaft_out".into(),
         occurrences: vec![RelPath::new(&["shaft"])],
+        patterns: Vec::new(),
+        mirrors: Vec::new(),
         motion: ExplodeMotion::Radial {
             center: RadialCenter::Axis {
                 point: [mm(0.0), mm(0.0), mm(0.0)],
@@ -196,6 +202,8 @@ fn gearbox() -> (MemorySource, AssemblyDocument) {
     service.steps.push(ExplodeStep {
         id: "gear_turn".into(),
         occurrences: vec![RelPath::new(&["shaft", "gear"])],
+        patterns: Vec::new(),
+        mirrors: Vec::new(),
         motion: ExplodeMotion::Rotate {
             axis: ExplodeAxis::OccurrenceAxis {
                 occurrence: RelPath::new(&["shaft", "gear"]),
@@ -238,7 +246,7 @@ fn gearbox() -> (MemorySource, AssemblyDocument) {
 fn resolve_with(src: &MemorySource, lock: Option<&LockSection>) -> ResolvedAssembly {
     let ctx = ResolveContext {
         source: src,
-        units: &StubUnits,
+        units: &Units,
         dynamic: &NoDynamicValues,
         lock,
         catalog: None,
@@ -264,7 +272,7 @@ fn explode(
         tree,
         view,
         &ExplodeContext {
-            units: &StubUnits,
+            units: &Units,
             dynamic: &NoDynamicValues,
             lock,
             source: Some(src),
@@ -487,6 +495,8 @@ fn e04_occurrence_problems_in_the_resolved_configuration() {
     v.steps.push(ExplodeStep {
         id: "s2".into(),
         occurrences: vec![RelPath::new(&["housing"])],
+        patterns: Vec::new(),
+        mirrors: Vec::new(),
         motion: ExplodeMotion::Radial {
             center: RadialCenter::Point {
                 point: [mm(100.0), mm(100.0), mm(50.0)],
@@ -497,6 +507,8 @@ fn e04_occurrence_problems_in_the_resolved_configuration() {
     v.steps.push(ExplodeStep {
         id: "s3".into(),
         occurrences: vec![RelPath::new(&["cover"])],
+        patterns: Vec::new(),
+        mirrors: Vec::new(),
         motion: ExplodeMotion::Translate {
             direction: ExplodeDirection::Vector {
                 vector: [1.0, 0.0, 0.0],
@@ -558,9 +570,9 @@ fn e04_occurrence_problems_in_the_resolved_configuration() {
             "`housing` sits on the centre of radial step `s2`; it has no direction to move in and stays",
         ),
         (
-            DiagCode::ValueFailed,
+            DiagCode::ValueUnit,
             Severity::Error,
-            "`steps.s3.distance`: unit mismatch: expected L, found angle^1",
+            "distance needs a unit of length such as m; deg measures angle",
         ),
         (
             DiagCode::ExplodeBadJog,

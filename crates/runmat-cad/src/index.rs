@@ -22,8 +22,14 @@ use crate::units::Dimension;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 
+mod file_state;
+mod reference_facts;
+
+pub use file_state::{part_file_state, FileState};
+pub use reference_facts::{reference_facts, EntityFacts};
+
 /// Bumped on any change to the projection's shape.
-pub const INDEX_FORMAT_VERSION: u32 = 2;
+pub const INDEX_FORMAT_VERSION: u32 = 3;
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct PartIndex {
@@ -33,6 +39,9 @@ pub struct PartIndex {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub configuration: Option<String>,
     pub final_key: CacheKey,
+    /// What kind of part this is ([`part_file_state`]): the guides, the overview's next steps
+    /// and the Desktop's suggestions all read it from here.
+    pub file_state: FileState,
     pub inputs: Vec<InputRow>,
     /// The part's `let` values as evaluated, each with the `.m` function it calls, if any.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -46,8 +55,27 @@ pub struct PartIndex {
     /// PMI items by name with their resolved entities (absent when the part has none).
     #[serde(default, skip_serializing_if = "PmiIndex::is_empty")]
     pub pmi: PmiIndex,
+    /// The 3D annotations as the Outline lists them and Properties edits them.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub annotations: Vec<AnnotationRow>,
     pub diagnostics: Vec<Diagnostic>,
     pub stats: ResolutionStats,
+}
+
+/// A 3D annotation's Outline row: the Annotate command that makes it, a label and detail to
+/// show, its annotation view, and its definition as that command's field values (what
+/// Properties shows and edits; each change re-applies the command in place).
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct AnnotationRow {
+    pub id: String,
+    pub command: String,
+    pub label: String,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub detail: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub view: Option<String>,
+    pub values: serde_json::Map<String, serde_json::Value>,
+    pub ok: bool,
 }
 
 /// The resolved PMI of a part: datum labels, tolerance and size names → entity names.
@@ -70,8 +98,16 @@ pub struct InputRow {
     pub kind: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub si: Option<f64>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        with = "crate::units::wire::option"
+    )]
     pub dimension: Option<Dimension>,
+    /// The value as editors show it: in the unit the author wrote (`0.25 in`), or for a
+    /// computed value in its kind's display unit (`6.35 mm`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub display: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub error: Option<String>,
 }
@@ -83,8 +119,16 @@ pub struct LetRow {
     pub name: LetName,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub si: Option<f64>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        with = "crate::units::wire::option"
+    )]
     pub dimension: Option<Dimension>,
+    /// The value as editors show it: in the unit the author wrote (`0.25 in`), or for a
+    /// computed value in its kind's display unit (`6.35 mm`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub display: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub error: Option<String>,
     /// The `.m` function the value calls (`camRadius`, `cams.lift`), the outermost when it calls several.
@@ -149,6 +193,15 @@ pub struct PartRow {
     /// The part's display color, sRGB hex, when it sets one.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub color: Option<String>,
+    /// The density its mass properties use, kg/m³: its `density` property, else its material's.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub density: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub density_source: Option<crate::model::materials::DensitySource>,
+    /// Why its density, and so its mass, is unknown, naming the material it looked for. No
+    /// density is assumed.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub density_unknown: Option<String>,
     pub properties: Vec<Property>,
     pub body: Vec<Vec<EntityName>>,
     pub ok: bool,
@@ -273,6 +326,7 @@ pub fn build_index(
                 kind: i.kind.0.clone(),
                 si: q.map(|q| q.si),
                 dimension: q.map(|q| q.dimension),
+                display: q.map(|q| crate::value::display_value(&i.default, q)),
                 error: result
                     .values
                     .failed
@@ -291,6 +345,7 @@ pub fn build_index(
                 name: l.name.clone(),
                 si: q.map(|q| q.si),
                 dimension: q.map(|q| q.dimension),
+                display: q.map(|q| crate::value::display_value(&l.value, q)),
                 error: result
                     .values
                     .failed
@@ -337,6 +392,7 @@ pub fn build_index(
         .iter()
         .map(|p| {
             let (body, ok) = item_entities(result.parts.get(&p.name));
+            let density = crate::model::materials::part_density(p);
             PartRow {
                 name: p.name.clone(),
                 uuid: uuid(ItemPath::part(&doc.path, &p.name)),
@@ -348,6 +404,9 @@ pub fn build_index(
                         .unwrap_or_else(|| crate::drawing::bom_table::material_name(m.as_str()))
                 }),
                 color: p.color.clone(),
+                density: density.as_ref().ok().map(|d| d.0),
+                density_source: density.as_ref().ok().map(|d| d.1),
+                density_unknown: density.err(),
                 properties: p.properties.clone(),
                 body,
                 ok,
@@ -391,6 +450,7 @@ pub fn build_index(
         header: doc.header.clone(),
         configuration: result.configuration.as_ref().map(|c| c.0.clone()),
         final_key: result.final_key.clone(),
+        file_state: part_file_state(doc),
         inputs,
         lets,
         features,
@@ -404,6 +464,7 @@ pub fn build_index(
             tolerances: result.pmi.tolerances.clone(),
             sizes: result.pmi.sizes.clone(),
         },
+        annotations: Vec::new(),
         diagnostics: result.diagnostics.diagnostics.clone(),
         stats: result.stats.clone(),
     }

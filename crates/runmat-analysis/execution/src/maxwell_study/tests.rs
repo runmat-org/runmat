@@ -68,6 +68,7 @@ fn preparation(order: ElementOrder) -> MaxwellStudyPreparation {
     let mesh = canonical_tetrahedron_solver_mesh(order);
     let model = workload().model;
     let compiled = CompiledAnalysisStudy {
+        displays: Vec::new(),
         module_path: "tests/maxwell.fea".into(),
         study_id: "maxwell".into(),
         study_inputs: Vec::new(),

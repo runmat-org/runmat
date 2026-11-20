@@ -359,8 +359,6 @@ pub struct FeaTransientRunResult {
     pub energy_balance_residual_snapshots: Vec<AnalysisField>,
     pub relative_energy_balance_error_snapshots: Vec<AnalysisField>,
     pub dynamic_balance_snapshots: Vec<StructuralDynamicBalanceSnapshot>,
-    pub electro_thermal_temperature_snapshots: Vec<AnalysisField>,
-    pub electro_thermal_thermal_residual_snapshots: Vec<AnalysisField>,
     pub residual_norms: Vec<f64>,
 }
 
@@ -421,14 +419,6 @@ pub struct FeaNonlinearRunResult {
     pub contact_gap_snapshots: Vec<AnalysisField>,
     pub load_factor_snapshots: Vec<AnalysisField>,
     pub residual_norm_snapshots: Vec<AnalysisField>,
-    pub thermo_mechanical_temperature_snapshots: Vec<AnalysisField>,
-    pub thermo_mechanical_thermal_strain_snapshots: Vec<AnalysisField>,
-    pub thermo_mechanical_thermal_stress_snapshots: Vec<AnalysisField>,
-    pub thermo_mechanical_displacement_snapshots: Vec<AnalysisField>,
-    pub thermo_mechanical_von_mises_snapshots: Vec<AnalysisField>,
-    pub thermo_mechanical_coupling_residual_snapshots: Vec<AnalysisField>,
-    pub electro_thermal_temperature_snapshots: Vec<AnalysisField>,
-    pub electro_thermal_thermal_residual_snapshots: Vec<AnalysisField>,
     pub residual_norms: Vec<f64>,
     pub increment_norms: Vec<f64>,
     pub iteration_counts: Vec<usize>,

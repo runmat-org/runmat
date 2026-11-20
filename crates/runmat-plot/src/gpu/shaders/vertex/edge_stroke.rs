@@ -198,27 +198,37 @@ const PROBE_FRAGMENT: &str = r#"
     let center = input.clip_position.xy + (center_ndc - frag_ndc) * vec2<f32>(0.5, -0.5) * viewport;
     let across = normalize(vec2<f32>(input.across.x, -input.across.y) + vec2<f32>(1.0e-12, 0.0));
     let line_depth = input.center_clip.z / input.center_clip.w;
+    let m25 = depth_at(center - 2.5 * across);
     let m15 = depth_at(center - 1.5 * across);
     let m05 = depth_at(center - 0.5 * across);
     let p05 = depth_at(center + 0.5 * across);
     let p15 = depth_at(center + 1.5 * across);
+    let p25 = depth_at(center + 2.5 * across);
     // The surface at the line's center, three ways: the mean of the two near samples, and each
     // side's rate carried on to the center. Over one smooth surface all three agree. Beside a
     // valley crease the mean comes nearer than the crease, but each side's extrapolation meets
     // the crease itself; on a convex surface the mean falls behind the surface; across a
     // silhouette the background side extrapolates far. The line is hidden only when all three
-    // put the surface in front of it, so an edge's own faces never hide it.
+    // put the surface in front of it, so an edge's own faces never hide it. Each side's rate is
+    // read 1.5 to 2.5 px out: a sample within a pixel of the line blends the pixels on both sides
+    // of a crease, and at a valley (a boss's base on its plate) that blend lies in front of the
+    // crease, so an extrapolation from it hid the edge in dots.
     let mean = 0.5 * (m05 + p05);
-    let from_left = m05 + 0.5 * (m05 - m15);
-    let from_right = p05 + 0.5 * (p05 - p15);
+    let from_left = m15 + 1.5 * (m15 - m25);
+    let from_right = p15 + 1.5 * (p15 - p25);
     if mean NEARER line_depth && from_left NEARER line_depth && from_right NEARER line_depth {
         discard;
     }
-    // One smooth surface across the line (its depth changes at a steady rate) in front of it.
+    // One smooth surface across the line (its depth changes at a steady rate) in front of it by
+    // more than its bend can explain. Where a concave fillet meets a wall the faces are tangent,
+    // so the rates agree, but the fillet curves toward the viewer and pulls the mean in front of
+    // the edge by a fraction of the rate's change; the margin keeps that edge drawn.
     let left = m05 - m15;
     let right = p15 - p05;
-    let smooth_surface = abs(left - right) <= 0.5 * max(abs(left), abs(right)) + 1.0e-7;
-    if smooth_surface && mean NEARER line_depth {
+    let bend = abs(left - right);
+    let smooth_surface = bend <= 0.5 * max(abs(left), abs(right)) + 1.0e-7;
+    let behind = select(mean + bend, mean - bend, (mean + bend) NEARER mean);
+    if smooth_surface && behind NEARER line_depth {
         discard;
     }
 "#;

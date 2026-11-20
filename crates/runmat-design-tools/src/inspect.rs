@@ -41,9 +41,10 @@ pub struct InspectInput {
     /// whose references mention it.
     #[serde(default)]
     pub filter: Option<String>,
-    /// Density for mass properties, kg/m³. Without it a part's mass uses 7850 (steel) and an
-    /// assembly's uses each part's own material, as the Evaluate tab does; with it, every body
-    /// takes this density.
+    /// Density for mass properties, kg/m³; with it, every body takes this density. Without it
+    /// each part uses its own `density` property or material, as the Evaluate tab does. No
+    /// density is assumed: a part with neither has its mass, centre of mass and inertia
+    /// reported as unknown, with the reason (naming the material it looked for) in `notes`.
     #[serde(default)]
     pub density: Option<f64>,
     /// Input values for this run, by input name (`{"thickness": "3.5 mm"}`): the part or
@@ -244,6 +245,7 @@ fn mm3(p: [f64; 3]) -> [f64; 3] {
 fn mass_value(m: &runmat_cad::evaluate::MassProperties, density: f64) -> Value {
     json!({
         "density": density,
+        "density_source": "input",
         "volume_mm3": round(m.volume * 1e9, 3),
         "mass_kg": round(m.volume * density, 6),
         "centroid_mm": mm3(m.centroid),
@@ -361,7 +363,18 @@ fn part(s: &mut Sections, path: &str, text: &str) -> Result<(), ToolError> {
         .collect();
     s.add("bodies", bodies, &["names"]);
     if s.wants("mass") {
-        let density = s.input.density.unwrap_or(7850.0);
+        // The density given, else the part's own (its `density` property or material); never a
+        // default.
+        let density = match s.input.density {
+            Some(d) => Ok((d, None)),
+            None => part
+                .document
+                .parts
+                .first()
+                .ok_or_else(|| "it has no output".to_owned())
+                .and_then(runmat_cad::model::materials::part_density)
+                .map(|(d, source)| (d, Some(source))),
+        };
         let handles: Vec<_> = part.result.state.bodies.iter().map(|b| &b.handle).collect();
         let mass = if handles.is_empty() {
             Value::Null
@@ -371,18 +384,50 @@ fn part(s: &mut Sections, path: &str, text: &str) -> Result<(), ToolError> {
                 .analyze(&AnalysisRequest::MassProperties { density: 1.0 }, &handles)
             {
                 Ok(AnalysisResult::MassProperties(m)) => {
-                    let mut value = mass_value(&m, density);
-                    // The body's own frame: its principal axes (the first is a long body's long
-                    // axis) and its extent, both in the part's coordinates.
-                    value["principal_axes"] = frame::principal_axes(m.inertia, density * 1e6);
-                    value["extent_mm"] = frame::extent_mm(
+                    let extent = frame::extent_mm(
                         part.display
                             .bodies
                             .iter()
                             .filter(|b| !b.flat_pattern)
                             .flat_map(|b| b.faces.iter().map(|f| f.positions.as_slice())),
                     );
-                    value
+                    match &density {
+                        Ok((density, source)) => {
+                            let mut value = mass_value(&m, *density);
+                            if let Some(source) = source {
+                                value["density_source"] = json!(source);
+                            }
+                            // The body's own frame: its principal axes (the first is a long
+                            // body's long axis) and its extent, both in the part's coordinates.
+                            value["principal_axes"] =
+                                frame::principal_axes(m.inertia, density * 1e6);
+                            value["extent_mm"] = extent;
+                            value
+                        }
+                        Err(reason) => {
+                            s.out
+                                .notes
+                                .push(format!("mass: {path}: mass unknown: {reason}"));
+                            // The geometry stays measured: volume, its centroid, the principal
+                            // axes' directions and the extent. Mass, centre of mass and the
+                            // moments of inertia need a density, so they are unknown.
+                            let mut axes = frame::principal_axes(m.inertia, 1.0);
+                            for axis in axes.as_array_mut().into_iter().flatten() {
+                                axis["moment_kg_mm2"] = Value::Null;
+                            }
+                            json!({
+                                "density": null,
+                                "volume_mm3": round(m.volume * 1e9, 3),
+                                "volume_centroid_mm": mm3(m.centroid),
+                                "mass_kg": null,
+                                "centroid_mm": null,
+                                "inertia_kg_mm2": null,
+                                "principal_axes": axes,
+                                "extent_mm": extent,
+                                "unknown": reason,
+                            })
+                        }
+                    }
                 }
                 Ok(_) => Value::Null,
                 Err(e) => {
@@ -485,9 +530,8 @@ fn assembly(s: &mut Sections, path: &str, text: &str, files: &Files) -> Result<(
             Value::Null
         });
         s.value("mass", value);
-    } else if s.wants("mass") {
+    } else if let Some(density) = s.input.density.filter(|_| s.wants("mass")) {
         // The assembly's mass: each occurrence's part mass at the given density.
-        let density = s.input.density.unwrap_or(7850.0);
         let mut total = 0.0;
         let mut weighted = [0.0; 3];
         let mut counted = 0;
@@ -539,17 +583,14 @@ fn assembly(s: &mut Sections, path: &str, text: &str, files: &Files) -> Result<(
                 counted += 1;
             }
         }
-        let centroid = if total > 0.0 {
-            weighted.map(|v| v / total)
-        } else {
-            [0.0; 3]
-        };
+        // No part measured: there is no centre of mass to report.
+        let centroid = (total > 0.0).then(|| mm3(weighted.map(|v| v / total)));
         s.value(
             "mass",
             json!({
                 "density": density,
                 "mass_kg": round(total, 6),
-                "centroid_mm": mm3(centroid),
+                "centroid_mm": centroid,
                 "parts_counted": counted,
             }),
         );
@@ -573,6 +614,7 @@ fn evaluated_with(
     let request = runmat_cad_wasm::analyze::AnalyzeRequest {
         command: command.to_owned(),
         values,
+        selection: Vec::new(),
     };
     let a = runmat_cad_wasm::analyze::analyze(path, text, files, &request)?;
     Ok(json!({ "summary": a.summary, "result": a.data, "problems": a.problems }))

@@ -117,6 +117,18 @@ impl AnalysisFieldLayout {
         self
     }
 
+    /// The unit this layout fixes whatever its quantity measures, or `None` when the
+    /// quantity's own unit applies. A field with a `Mode` ordinal is one mode's eigenvector
+    /// shape. Its scale is a normalization: structural modes are scaled to a one-kilogram
+    /// reference generalized mass and the generalized coordinate carries the length. Its
+    /// values are therefore dimensionless, with unit `"1"`.
+    pub fn normalized_unit(&self) -> Option<&'static str> {
+        match self.ordinal {
+            FieldOrdinal::Mode(_) => Some("1"),
+            FieldOrdinal::Single | FieldOrdinal::Step(_) => None,
+        }
+    }
+
     pub fn with_ordinal(mut self, ordinal: FieldOrdinal) -> Self {
         self.ordinal = ordinal;
         self

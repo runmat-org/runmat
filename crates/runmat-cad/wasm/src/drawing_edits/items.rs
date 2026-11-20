@@ -33,28 +33,92 @@ fn items(selection: &[String]) -> Vec<Item<'_>> {
         .collect()
 }
 
-fn at_mut<'d>(d: &'d mut Drawing<'_>, item: Item<'_>) -> Result<&'d mut [f64; 2], EditFailure> {
-    let doc = &mut d.document;
+/// Where `item` sits on the sheet when it was placed by hand; `None` when the sheet places it
+/// itself. A view or annotation at [0, 0] is unplaced; a table says so with `at` unset.
+fn at_of(d: &Drawing<'_>, item: Item<'_>) -> Result<Option<[f64; 2]>, EditFailure> {
+    let doc = &d.document;
+    let hand = |a: [f64; 2]| (a != [0.0, 0.0]).then_some(a);
     match item {
         Item::View(n) => doc
             .views
-            .iter_mut()
+            .iter()
             .find(|v| v.name == n)
-            .map(|v| &mut v.at)
+            .map(|v| hand(v.at))
             .ok_or_else(|| model(format!("the drawing has no view `{n}`"))),
+        Item::Annotation(n) => doc
+            .annotations
+            .iter()
+            .find(|a| a.id == n)
+            .map(|a| hand(a.at))
+            .ok_or_else(|| model(format!("the drawing has no annotation `{n}`"))),
+        Item::Table(n) => doc
+            .tables
+            .iter()
+            .find(|t| t.name == n)
+            .map(|t| t.at)
+            .ok_or_else(|| model(format!("the drawing has no table `{n}`"))),
+    }
+}
+
+/// Places `item` by hand at `p`.
+fn set_at(d: &mut Drawing<'_>, item: Item<'_>, p: [f64; 2]) -> Result<(), EditFailure> {
+    let doc = &mut d.document;
+    match item {
+        Item::View(n) => doc.views.iter_mut().find(|v| v.name == n).map(|v| v.at = p),
         Item::Annotation(n) => doc
             .annotations
             .iter_mut()
             .find(|a| a.id == n)
-            .map(|a| &mut a.at)
-            .ok_or_else(|| model(format!("the drawing has no annotation `{n}`"))),
+            .map(|a| a.at = p),
         Item::Table(n) => doc
             .tables
             .iter_mut()
             .find(|t| t.name == n)
-            .map(|t| &mut t.at)
-            .ok_or_else(|| model(format!("the drawing has no table `{n}`"))),
+            .map(|t| t.at = Some(p)),
     }
+    .ok_or_else(|| model(format!("the drawing has no `{}`", name(item))))
+}
+
+/// Gives each selected item the sheet placed itself the place the layout put it, so a move or
+/// an align starts from where it is drawn.
+fn place_unplaced(
+    d: &mut Drawing<'_>,
+    selected: &[Item<'_>],
+    path: &str,
+    text_: &str,
+    files: &Files,
+) -> Result<(), EditFailure> {
+    let mut unplaced = Vec::new();
+    for item in selected {
+        if at_of(d, *item)?.is_none() {
+            unplaced.push(*item);
+        }
+    }
+    if unplaced.is_empty() {
+        return Ok(());
+    }
+    let laid: Value = serde_json::from_str(&crate::drawing::compile_json(path, text_, files))
+        .unwrap_or(Value::Null);
+    let laid_at = |item: Item<'_>| -> Option<[f64; 2]> {
+        let key = match item {
+            Item::View(n) => format!("view:{n}"),
+            Item::Annotation(n) => format!("annotation:{n}"),
+            Item::Table(n) => format!("table:{n}"),
+        };
+        laid["projection"]["data"]["layouts"]
+            .as_object()?
+            .values()
+            .find_map(|l| {
+                let p = l["placed"][&key].as_array()?;
+                Some([p.first()?.as_f64()?, p.get(1)?.as_f64()?])
+            })
+    };
+    for item in unplaced {
+        if let Some(p) = laid_at(item) {
+            set_at(d, item, p)?;
+        }
+    }
+    Ok(())
 }
 
 fn name(item: Item<'_>) -> &str {
@@ -170,41 +234,12 @@ pub fn edit(
             "drawing.delete" => delete(&mut d, &selected)?,
             "drawing.move" => {
                 let to = points(values, "to")?.into_iter().next();
-                // An item the sheet placed itself (`at` unset) moves from where the layout put it.
-                let unplaced = selected
-                    .iter()
-                    .any(|i| at_mut(&mut d, *i).is_ok_and(|a| *a == [0.0, 0.0]));
-                let laid: Value = if unplaced {
-                    serde_json::from_str(&crate::drawing::compile_json(path, text_, files))
-                        .unwrap_or(Value::Null)
-                } else {
-                    Value::Null
-                };
-                let laid_at = |item: Item<'_>| -> Option<[f64; 2]> {
-                    let key = match item {
-                        Item::View(n) => format!("view:{n}"),
-                        Item::Annotation(n) => format!("annotation:{n}"),
-                        Item::Table(n) => format!("table:{n}"),
-                    };
-                    laid["projection"]["data"]["layouts"]
-                        .as_object()?
-                        .values()
-                        .find_map(|l| {
-                            let p = l["placed"][&key].as_array()?;
-                            Some([p.first()?.as_f64()?, p.get(1)?.as_f64()?])
-                        })
-                };
-                for item in &selected {
-                    let at = *at_mut(&mut d, *item)?;
-                    if at == [0.0, 0.0] {
-                        if let Some(p) = laid_at(*item) {
-                            *at_mut(&mut d, *item)? = p;
-                        }
-                    }
-                }
+                // An item the sheet placed itself moves from where the layout put it; one with no
+                // place in the layout either takes the place it is moved to.
+                place_unplaced(&mut d, &selected, path, text_, files)?;
                 let delta = match to {
                     Some(to) => {
-                        let first = *at_mut(&mut d, selected[0])?;
+                        let first = at_of(&d, selected[0])?.unwrap_or([0.0, 0.0]);
                         [to[0] - first[0], to[1] - first[1]]
                     }
                     None => [number(values, "dx", 0.0), number(values, "dy", 0.0)],
@@ -213,17 +248,9 @@ pub fn edit(
                     return Err(model("pick where to move it, or give a distance"));
                 }
                 for item in &selected {
-                    let at = at_mut(&mut d, *item)?;
-                    // An annotation with no place in the layout either takes the place it is moved to.
-                    let base =
-                        if *at == [0.0, 0.0] && matches!(item, Item::Annotation(_)) && to.is_some()
-                        {
-                            [0.0, 0.0]
-                        } else {
-                            *at
-                        };
+                    let base = at_of(&d, *item)?.unwrap_or([0.0, 0.0]);
                     let moved = [base[0] + delta[0], base[1] + delta[1]];
-                    *at = moved.map(|v| (v * 10.0).round() / 10.0);
+                    set_at(&mut d, *item, moved.map(|v| (v * 10.0).round() / 10.0))?;
                 }
                 format!(
                     "Moved {}",
@@ -240,9 +267,12 @@ pub fn edit(
                 }
                 let horizontal = text(values, "align", "horizontal") == "horizontal";
                 let k = if horizontal { 1 } else { 0 };
-                let first = *at_mut(&mut d, selected[0])?;
+                place_unplaced(&mut d, &selected, path, text_, files)?;
+                let first = at_of(&d, selected[0])?.unwrap_or([0.0, 0.0]);
                 for item in &selected[1..] {
-                    at_mut(&mut d, *item)?[k] = first[k];
+                    let mut at = at_of(&d, *item)?.unwrap_or([0.0, 0.0]);
+                    at[k] = first[k];
+                    set_at(&mut d, *item, at)?;
                 }
                 format!(
                     "Aligned {} {}",

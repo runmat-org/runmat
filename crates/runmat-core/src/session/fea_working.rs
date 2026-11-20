@@ -39,29 +39,50 @@ impl RunMatSession {
             |handoff| handoff.project.workspace_root.clone(),
         );
         let mut directories = vec![root.clone()];
+        let mut listed = std::collections::BTreeSet::new();
         let mut files = BTreeMap::new();
         let mut budget = 0usize;
         let mut visited = 0usize;
         while let Some(directory) = directories.pop() {
+            // A directory reached twice means the listing cycles; stop at the first repeat.
+            if !listed.insert(directory.clone()) {
+                return Err(listing_error(format!(
+                    "the folder {} was listed twice",
+                    directory.display()
+                )));
+            }
             for entry in provider
                 .read_dir(&directory)
                 .await
                 .map_err(|error| error.to_string())?
             {
-                visited += 1;
-                if visited > MAX_FILES {
-                    return Err("working-source inventory exceeds 10000 entries".into());
-                }
                 let path = entry.path();
-                let relative = path
-                    .strip_prefix(&root)
-                    .map_err(|_| "provider returned an entry outside the project")?;
+                // Every entry a listing returns must be a direct child of the listed folder.
+                if path.parent() != Some(directory.as_path()) {
+                    return Err(listing_error(format!(
+                        "listing {} returned {} ({:?}), which is not directly inside it",
+                        directory.display(),
+                        path.display(),
+                        entry.file_type()
+                    )));
+                }
                 if matches!(
                     entry.file_name().to_str(),
                     Some(".artifacts" | ".git" | "node_modules" | "target")
                 ) {
                     continue;
                 }
+                visited += 1;
+                if visited > MAX_FILES {
+                    return Err(format!(
+                        "This project has more than {MAX_FILES} files and folders to search for \
+the study's sources. Move unrelated files out of the project, or open the study from a \
+smaller project."
+                    ));
+                }
+                let relative = path
+                    .strip_prefix(&root)
+                    .map_err(|_| "provider returned an entry outside the project")?;
                 if entry.is_dir() {
                     directories.push(path.to_path_buf());
                     continue;
@@ -168,6 +189,7 @@ impl RunMatSession {
                 Err(error) => return Err(error.to_string()),
             }
         }
+        capture_design_closures(&root, &mut files, geometry_bytes).await?;
         let mut dependencies = Vec::new();
         if let Some(handoff) = &self.project_handoff {
             for (source, path) in &handoff.project.access_paths {
@@ -217,6 +239,50 @@ impl RunMatSession {
     }
 }
 
+/// A referenced part or assembly regenerates from the capture alone, so the capture holds every
+/// file the design reads (other parts, the folders an assembly names, imported STEP files), read
+/// through the provider's async API. Files outside the project stay out; the check then reports
+/// the design's missing dependency.
+async fn capture_design_closures(
+    root: &std::path::Path,
+    files: &mut BTreeMap<LogicalSourcePath, FeaWorkspaceFile>,
+    mut geometry_bytes: usize,
+) -> Result<(), String> {
+    use runmat_runtime::geometry::design_source;
+    let designs = files
+        .keys()
+        .filter(|path| design_source::is_design_geometry(path.as_str()))
+        .cloned()
+        .collect::<Vec<_>>();
+    for design in designs {
+        let physical = runmat_runtime::analysis::physical_source_path(root, &design)
+            .map_err(|error| error.to_string())?;
+        let Ok(closure) = design_source::design_closure_files(&physical).await else {
+            continue;
+        };
+        for (path, text) in closure {
+            let Ok(relative) = std::path::Path::new(&path).strip_prefix(root) else {
+                continue;
+            };
+            let Ok(logical) = LogicalSourcePath::new(relative.to_string_lossy().into_owned())
+            else {
+                continue;
+            };
+            if files.contains_key(&logical) {
+                continue;
+            }
+            geometry_bytes = geometry_bytes
+                .checked_add(text.len())
+                .ok_or("geometry capture size overflow")?;
+            if geometry_bytes > MAX_GEOMETRY_BYTES {
+                return Err("referenced geometry exceeds the 64 MiB source-check budget".into());
+            }
+            files.insert(logical.clone(), captured(logical, text.into_bytes()));
+        }
+    }
+    Ok(())
+}
+
 fn captured(path: LogicalSourcePath, bytes: Vec<u8>) -> FeaWorkspaceFile {
     let digest = runmat_package::ContentDigest::sha256(&bytes);
     FeaWorkspaceFile {
@@ -224,4 +290,13 @@ fn captured(path: LogicalSourcePath, bytes: Vec<u8>) -> FeaWorkspaceFile {
         version: digest.to_string(),
         bytes,
     }
+}
+
+/// A project listing that does not nest is a filesystem defect, not a large project: say so and
+/// name the paths, so the producing provider can be found.
+fn listing_error(detail: String) -> String {
+    format!(
+        "The study's sources couldn't be gathered because the project's file listing is \
+inconsistent: {detail}."
+    )
 }

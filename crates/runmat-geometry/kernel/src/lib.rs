@@ -21,6 +21,7 @@ pub mod names;
 pub mod op;
 pub mod queries;
 pub mod sections;
+pub mod stroke;
 
 pub use analysis::GeometryAnalyzer;
 pub use display::{BodyMesh, FaceMesh, TessellationOptions, Tessellator};

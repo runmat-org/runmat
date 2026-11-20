@@ -155,6 +155,7 @@ void append_occurrence(
   for (const std::string& segment : path) {
     occurrence.path_segments.push_back(segment);
   }
+  occurrence.occurrence_name = exact_label_name(occurrence_label);
   occurrence.definition_index = definition_index;
   append_transform(occurrence.transform, local_location.Transformation());
   const std::uint64_t occurrence_index = occurrence.occurrence_index;

@@ -51,6 +51,7 @@ impl ProjectionPlan {
             let metadata = source
                 .axes_metadata
                 .get(source_axes)
+                .filter(|metadata| !metadata.retired)
                 .ok_or(FigurePersistenceProjectionError::AxesOutOfBounds { axes: source_axes })?;
             let accumulated = axes.entry(source_axes).or_default();
             match &selected.kind {

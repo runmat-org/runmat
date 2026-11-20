@@ -2466,6 +2466,26 @@
       ]
     },
     {
+      "id": "geometry.source.mcad",
+      "title": "RunMat MCAD parts and assemblies as study geometry (`file = \"x.part\"` / `\"x.assembly\"`)",
+      "kind": "geometry",
+      "area": "geometry",
+      "status": "release",
+      "acceptance": "A study naming a .part or .assembly checks, meshes and solves from one regeneration of the design on OCCT, with the design's face regions and output bodies as names; results match the exported-STEP route; a dependency edit changes the geometry identity and an unchanged design reuses its mesh.",
+      "owner": "q-mcad-source",
+      "gaps": [
+        "G36"
+      ],
+      "witness": [
+        "runmat check runmat-examples/aerospace/camera-drone/simulation/arm_landing.fea",
+        "cargo test -p runmat-runtime --features occt-native --lib geometry::design_source"
+      ],
+      "requirements": [],
+      "docs": [
+        "geometry.md"
+      ]
+    },
+    {
       "id": "language.include.parameterized",
       "title": "Including a parameterized model with its inputs bound by name",
       "kind": "language",
@@ -2810,15 +2830,15 @@
       "title": "The siemens (`S`, `mS`, `kS`) as a unit symbol, so conductivity is written `S/m`",
       "kind": "language",
       "area": "language",
-      "status": "pending",
+      "status": "release",
+      "landed_in": "0.7.2",
       "acceptance": "`runmat-types` accepts `S` as electrical conductance; `conductivity = 5.8e7 S/m` checks and equals `5.8e7 A/V/m`.",
       "owner": "q-check-parity",
       "gaps": [
         "DOC-Q2-1"
       ],
       "witness": [
-        "q-docs-2 claims, runmat-qdocs1-60daf3650d (runmat-build-mac:~/runs/q-docs-2/out/check-probe-siemens.fea.log): error[fea.semantic.invalid_unit]: unknown unit `S`",
-        "runmat check claims/probe-siemens.fea"
+        "runmat-analysis-language test pending_constructs::siemens_per_metre_checks_and_equals_ampere_per_volt_metre: `input sigma : electrical_conductivity = 5.8e7 S/m` checks clean, and `5.8e7 S/m` parses to the same quantity as `5.8e7 A/V/m` (G79, runmat-types accepts `S` since b32ba70b6b)"
       ],
       "requirements": [],
       "docs": [
@@ -3147,7 +3167,7 @@
       "analysis": "Steady",
       "capability": "thermal.static",
       "title": "Radiating bar",
-      "problem": "A 1 m steel bar ($k$ = 45 W/m/K) takes 1000 W/m² on one end and radiates from the other ($\\varepsilon$ = 0.8, 300 K surroundings). The public example is [radiating-bar.fea](../examples/radiating-bar.fea); the test runs the same bar on Tet4 and Tet10 meshes.",
+      "problem": "A 1 m steel bar ($k$ = 45 W/m/K) takes 1000 W/m² on one end and radiates from the other ($\\varepsilon$ = 0.8, 300 K surroundings). The same bar is the study file `docs/simulation/examples/radiating-bar.fea`; the test runs the same bar on Tet4 and Tet10 meshes.",
       "reference": "Gray-surface radiation at the radiating end, $q = \\varepsilon\\sigma_{SB}(T^4 - T_\\infty^4)$, and conduction $qL/k$ across the bar.",
       "quantity": "Temperatures at both ends and along the bar; applied and radiated power.",
       "tolerance": "Nodal temperature within relative 1e-8 of the closed form; applied power equals radiated power.",
@@ -3580,7 +3600,7 @@
       "analysis": "Static",
       "capability": "thermomechanical.static",
       "title": "Thermal stress in a clamped bar",
-      "problem": "The 1 m steel bar of [thermal-stress-static.fea](../examples/thermal-stress-static.fea), clamped at both ends and held at 373.15 K, 80 K above its reference temperature; Tet10 at 50 mm.",
+      "problem": "The 1 m steel bar of the [thermal stress guide](../guides/thermal-stress.md) example, clamped at both ends and held at 373.15 K, 80 K above its reference temperature; Tet10 at 50 mm.",
       "reference": "A fully restrained one-dimensional bar: axial stress $E\\alpha\\Delta T$ = 192 MPa and clamp reaction $EA\\alpha\\Delta T$ = 1920 kN.",
       "quantity": "Nodal von Mises stress at the center of the bar; axial reaction on a clamped face.",
       "tolerance": "None set; the receipts record each value. The clamps also restrain lateral expansion, which raises the stress above the one-dimensional value.",
@@ -20335,7 +20355,8 @@
       ],
       "acceptance": "Thermal studies chain into preload, prestressed modal, harmonic and buckling studies from one `.fea` file, with the thermomechanical references the page quotes.",
       "owners": [
-        "crates/runmat-analysis/fea/src/physics/coupling/thermo_mechanical.rs"
+        "crates/runmat-analysis/core/src/study/sequence.rs",
+        "crates/runmat-analysis/fea/src/pipeline/thermo_mechanical.rs"
       ],
       "obligations": [
         {
@@ -20881,7 +20902,7 @@
       ],
       "acceptance": "Electrothermal studies run from a `.fea` study with temperature-dependent conductivity iterated to convergence, transient heating, and harmonic AC loss chained into a transient heat analysis.",
       "owners": [
-        "crates/runmat-analysis/fea/src/physics/coupling/electro_thermal.rs"
+        "crates/runmat-analysis/fea/src/execution/electrothermal/coupled.rs"
       ],
       "obligations": [
         {

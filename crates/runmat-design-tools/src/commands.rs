@@ -1,7 +1,7 @@
 //! The command registry: for every catalog command, the surfaces that run it and the handler
 //! that runs it there. The Desktop (through the CAD host's `run`, `edit`, `analyze` and `export`
 //! calls), the agent's design tools (`design.propose_edit` with a `command`) and the CLI
-//! (`runmat-design run`) all dispatch through [`run`], so a command behaves the same everywhere.
+//! (`runmat design run`) all dispatch through [`run`], so a command behaves the same everywhere.
 //!
 //! - [`route`]`(id, editor)` → the command's [`Route`]: its surfaces and its [`Handler`].
 //! - [`run`]`(path, text, files, request)` → one answer, tagged by `kind`:
@@ -36,7 +36,7 @@ pub enum Surface {
     Desktop,
     /// The agent's design tools (in-app and MCP).
     Agent,
-    /// `runmat-design run`.
+    /// `runmat design run`.
     Cli,
 }
 
@@ -162,7 +162,7 @@ fn handler_of(command: &CommandDescriptor, editor: EditorKind) -> Handler {
     match command.edit.op {
         _ if editor == EditorKind::Fea => Handler::Shell,
         // Sketch on a picked plane or face writes the new sketch feature, then the Desktop opens it.
-        EditOp::EnterMode if id == "part.sketch" => Handler::Edit,
+        EditOp::EnterMode if id == "part.sketch" || id == "assembly.sketch" => Handler::Edit,
         EditOp::View
         | EditOp::EnterMode
         | EditOp::ExitMode
@@ -343,7 +343,8 @@ fn analyze(path: &str, text: &str, files: &Files, request: &RunRequest) -> Value
         .find(|(id, _)| *id == request.command)
         .map(|(_, to)| *to)
         .unwrap_or(&request.command);
-    let body = json!({ "command": command, "values": request.values });
+    let body =
+        json!({ "command": command, "values": request.values, "selection": request.selection });
     let out: Value = serde_json::from_str(&runmat_cad_wasm::analyze::analyze_json(
         path,
         text,

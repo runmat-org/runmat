@@ -86,6 +86,8 @@ fn rows(c: &mut Catalog) {
                 e("circuit.single-layer"),
             ],
         ),
+        // The grid on the board's 3D tab, as in the part and assembly editors.
+        c_item("view.grid"),
         c_item("view.measure"),
     ];
     for (editor, default_tab) in [

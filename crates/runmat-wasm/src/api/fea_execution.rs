@@ -15,10 +15,12 @@ use std::path::Path;
 use wasm_bindgen::{prelude::*, JsCast};
 
 mod plan;
+mod platform;
 pub(super) use plan::browser_fea_plan;
+use platform::admit;
+pub(super) use platform::{free_heap_bytes, instance_budget_bytes};
+use runmat_core::{BrowserResourceLimit, BrowserResourceTerm};
 
-const BROWSER_MEMORY_BYTES: u64 = 1 << 30;
-const ARTIFACT_BYTES: u64 = 128 << 20;
 const PUBLICATION_HOST_REASON: &str = "Result storage is unavailable in this browser workspace.";
 
 // Capability metadata does not open or materialize storage while showing choices.
@@ -40,8 +42,6 @@ extern "C" {
         memory_bytes: f64,
         delegation: JsValue,
     ) -> Result<JsValue, JsValue>;
-    #[wasm_bindgen(catch,js_name=__runmatOcctResidentBytes)]
-    fn exact_resident_bytes() -> Result<f64, JsValue>;
 }
 impl FeaGeometryExecutionHost for BrowserGeometryHost<'_> {
     async fn ensure_preparation_capacity(
@@ -107,18 +107,6 @@ fn preparation_error_from_js(error: JsValue) -> runmat_core::FeaStudyPreparation
         }
     }
     js_value_to_string(error).into()
-}
-fn resident_bytes() -> u64 {
-    let memory = wasm_bindgen::memory().unchecked_into::<js_sys::WebAssembly::Memory>();
-    let rust = js_sys::Reflect::get(&memory.buffer(), &JsValue::from_str("byteLength"))
-        .ok()
-        .and_then(|x| x.as_f64())
-        .unwrap_or(BROWSER_MEMORY_BYTES as f64);
-    let exact = exact_resident_bytes().unwrap_or(BROWSER_MEMORY_BYTES as f64);
-    if !rust.is_finite() || !exact.is_finite() || rust < 0.0 || exact < 0.0 {
-        return BROWSER_MEMORY_BYTES;
-    }
-    (rust as u64).saturating_add(exact as u64)
 }
 #[wasm_bindgen]
 impl RunMatWasm {
@@ -317,12 +305,30 @@ impl RunMatWasm {
         })
         .await
     }
+    /// Runs a checked study as one `fea.study` trace span with a step span per phase (see
+    /// `runmat_analysis_fea::progress::trace`).
     pub(super) async fn run_fea_source_in_scope(
         &self,
         path: String,
         plan_id: String,
         filesystem: &CapturedFilesystem,
     ) -> Result<JsValue, JsValue> {
+        use tracing::Instrument;
+        let study = runmat_analysis_fea::progress::trace::study_span(&path);
+        self.run_fea_source_in_study_span(path, plan_id, filesystem, &study)
+            .instrument(study.clone())
+            .await
+    }
+
+    async fn run_fea_source_in_study_span(
+        &self,
+        path: String,
+        plan_id: String,
+        filesystem: &CapturedFilesystem,
+        study_span: &tracing::Span,
+    ) -> Result<JsValue, JsValue> {
+        use runmat_analysis_fea::progress::trace::{self, StudyStep};
+        use tracing::Instrument;
         let mut session = self.take_session()?;
         let cancellation = runmat_execution::cancellation::CancellationSource::new();
         let _interrupt =
@@ -337,13 +343,14 @@ impl RunMatWasm {
         }
         let _progress = runmat_analysis_fea::replace_fea_progress_context(
             runmat_analysis_fea::FeaProgressContext {
-                handler: Some(std::sync::Arc::new(forward_progress)),
+                handler: Some(browser_progress_handler()),
                 cancellation: runmat_analysis_fea::FeaCancellationToken::from_token(
                     cancellation.token(),
                 ),
                 ..Default::default()
             },
         );
+        let check_step = StudyStep::Check.span();
         let fresh = super::session::await_wasm_preparation(&cancellation, async {
             filesystem
                 .read
@@ -352,7 +359,16 @@ impl RunMatWasm {
                 .map_err(|error| js_error(&error.to_string()))?
                 .map_err(|e| js_error(&e))
         })
+        .instrument(check_step.clone())
         .await?;
+        let errors = fresh
+            .diagnostics()
+            .filter(|diagnostic| {
+                diagnostic.severity == runmat_analysis_language::FeaDiagnosticSeverity::Error
+            })
+            .count();
+        trace::finish(&check_step, &trace::check_result(errors));
+        drop(check_step);
         ensure_not_cancelled(&cancellation)?;
         let checked = fresh.check_result();
         {
@@ -374,12 +390,22 @@ impl RunMatWasm {
             .take()
             .ok_or_else(|| js_error("The selected execution options are no longer available."))?;
         // Await the installed host before the first mesh/solve effect.
+        // The check-time operations estimate travels with the lease request: the host records
+        // it, and admission refuses before any work when it exceeds the allowance left.
+        let estimate = fresh
+            .fea_execution_preflight()
+            .ok()
+            .and_then(|preflight| preflight.estimate)
+            .and_then(|estimate| estimate.operations(instance_budget_bytes()))
+            .and_then(|operations| operations.total().ok());
         let request = FeaRunRequest::local(
             FeaRunKind::MeshAndSolve,
             1000,
             checked_study_identity(&fresh)?,
         )
-        .map_err(super::fea_lease::denied_to_js)?;
+        .map_err(super::fea_lease::denied_to_js)?
+        .with_estimate(estimate);
+        trace::record_run_id(study_span, &request.run_id);
         let context = super::fea_async_host::start(
             self.fea_admission.clone(),
             self.active_fea_lease.clone(),
@@ -397,48 +423,69 @@ impl RunMatWasm {
             ensure_not_cancelled(&cancellation)?;
             context.check().await?;
             let result = filesystem.run(async {
-            // First mesh only after explicit Run. The existing preparation and
-            // exact resource planner remain the sole allocation authority.
-            if resident_bytes().saturating_add((512 + 128 + 64) << 20) > BROWSER_MEMORY_BYTES {
-                return Err(js_error("Not enough browser memory to prepare this simulation. Continue in the desktop app."));
-            }
-            let study = fresh.prepare_serial_fea_study(&BrowserGeometryHost { context: &context }, &format!("browser-fea:{plan_id}"))
+            // First mesh only after explicit Run. The planner chooses the solve path
+            // within the budget of the owned numerical worker (a fresh instance of
+            // this module) less the request text it reads; the gate below admits
+            // exactly the plan it produced.
+            let budget = instance_budget_bytes();
+            let study = fresh.prepare_serial_fea_study(&BrowserGeometryHost { context: &context }, &format!("browser-fea:{plan_id}"), Some(budget))
                 .await.map_err(|error| crate::wire::json_contract_to_js(&error.diagnostic()).unwrap_or_else(|_| js_error(&error.to_string())))?;
             ensure_not_cancelled(&cancellation)?;
-            let available_memory = BROWSER_MEMORY_BYTES.saturating_sub(resident_bytes()).saturating_sub(ARTIFACT_BYTES).saturating_sub(64 << 20);
-            let transfer_bytes = (serde_json::to_vec(&study).map_err(|e| js_error(&e.to_string()))?.len() as u64).saturating_mul(4);
-            if study.resource_plan.request.memory_bytes.max(transfer_bytes) > available_memory || study.resource_plan.request.scratch_bytes > 256 << 20 {
-                return Err(js_error("The prepared simulation exceeds browser memory. Continue in the desktop app."));
-            }
+            let request_bytes = study.request_bytes().map_err(|e| js_error(&e))?;
+            admit(BrowserResourceLimit::check(
+                BrowserResourceTerm::PreparedRequest,
+                request_bytes,
+                free_heap_bytes(),
+            ))?;
+            admit(runmat_core::admit_browser_solve(&study.resource_plan, request_bytes, budget))?;
             let request =
                 serde_json::to_string(&study).map_err(|e| js_error(&e.to_string()))?;
-            let response = execute_prepared(
-                &request,
-                available_memory as f64,
-                context.worker_context(&request, super::fea_run_context::WorkerWorkClass::Numerical).await?,
-            )
+            // The owned numerical worker solves; its own trace holds the solver detail.
+            let solve_step = StudyStep::Solve.span();
+            let steps = study.compiled.model.sequence.steps.len();
+            let response = async {
+                execute_prepared(
+                    &request,
+                    budget as f64,
+                    context.worker_context(&request, super::fea_run_context::WorkerWorkClass::Numerical).await?,
+                )
+                .await
+            }
+            .instrument(solve_step.clone())
             .await?;
+            trace::finish(&solve_step, &trace::steps_result(steps));
+            drop(solve_step);
+            drop(request);
             context.retire_finished().await?;
+            // The result is JSON text: one UTF-16 unit per byte outside non-ASCII names.
+            let result_units = response
+                .dyn_ref::<js_sys::JsString>()
+                .map(|text| u64::from(text.length()))
+                .ok_or_else(|| js_error("Invalid numerical execution response."))?;
+            admit(BrowserResourceLimit::check(
+                BrowserResourceTerm::NumericalResult,
+                result_units,
+                free_heap_bytes(),
+            ))?;
             let json = response
             .as_string()
             .ok_or_else(|| js_error("Invalid numerical execution response."))?;
             context.check().await?;
             ensure_not_cancelled(&cancellation)?;
-            if json.len() > 128 << 20 {
-                return Err(js_error(
-                    "The numerical result exceeds the browser allowance.",
-                ));
-            }
             let numerical: runmat_runtime::analysis::StructuralStudySequenceNumericalResult =
                 serde_json::from_str(&json).map_err(|e| js_error(&e.to_string()))?;
-            let result = runmat_runtime::analysis::StructuralStudyResult::new(
+            let recover_step = StudyStep::Recover.span();
+            let outputs = study.compiled.outputs.len();
+            let result = recover_step.in_scope(|| runmat_runtime::analysis::StructuralStudyResult::new(
                 study.compiled,
                 study.mesh,
                 study.evidence,
                 study.workloads,
                 runmat_runtime::analysis::StructuralStudyNumericalResult::LinearSequence(numerical),
-            )
+            ))
             .map_err(|e| js_error(&e))?;
+            trace::finish(&recover_step, &trace::outputs_result(outputs));
+            drop(recover_step);
             // Frozen source inputs have finished their job. Result I/O uses the
             // original provider and its canonical workspace transaction authority.
             Ok::<_, JsValue>(result)
@@ -502,6 +549,12 @@ fn checked_study_identity(
     .map_err(|error| js_error(&error.to_string()))
 }
 
+/// Rate-limited forwarding to the page. A browser host draws heartbeats from its own timer.
+fn browser_progress_handler() -> runmat_analysis_fea::progress::FeaProgressHandler {
+    runmat_analysis_fea::progress::ProgressRelay::new(std::sync::Arc::new(forward_progress))
+        .handler()
+}
+
 fn forward_progress(event: runmat_analysis_fea::FeaProgressEvent) {
     if let Ok(callback) =
         js_sys::Reflect::get(&js_sys::global(), &JsValue::from_str("__runmatFeaProgress"))
@@ -537,6 +590,9 @@ pub async fn execute_prepared_fea_study(
         )
         .await?,
     );
+    // The parsed study and its admission digest hold what the solve needs; release
+    // the request text before the solve allocates its workspace.
+    drop(json);
     let capacity = super::fea_async_host::BrowserNumericalCapacity::new(&context);
     let checked = context
         .scope()
@@ -581,25 +637,27 @@ pub async fn execute_prepared_fea_study(
     let context = std::rc::Rc::try_unwrap(context)
         .map_err(|_| js_error("Owned worker admission remained active after execution."))?;
     let settled = context.settle(outcome).await;
-    super::fea_lease::merge_js_lease_error(result, settled.err())
+    let result = super::fea_lease::merge_js_lease_error(result, settled.err());
+    if let Err(error) = &result {
+        super::fea_lease::log_worker_failure("executePreparedFeaStudy", error);
+    }
+    result
 }
 
+/// A numerical worker accepts its parent's allowance only within its own budget,
+/// and only a request that fits that allowance.
 pub(super) fn validate_numerical_input(json_len: usize, memory_bytes: f64) -> Result<(), JsValue> {
-    if json_len > 128 << 20
-        || !memory_bytes.is_finite()
-        || memory_bytes < 1.0
-        || memory_bytes > BROWSER_MEMORY_BYTES as f64
+    if !memory_bytes.is_finite()
+        || !(1.0..=9_007_199_254_740_991.0).contains(&memory_bytes)
         || memory_bytes.fract() != 0.0
     {
         return Err(js_error("Invalid browser numerical execution allowance."));
     }
-    let available_memory = memory_bytes as u64;
-    if (json_len as u64).saturating_mul(4) > available_memory {
-        return Err(js_error(
-            "Preparing this simulation requires a larger execution budget. Use the desktop app.",
-        ));
-    }
-    Ok(())
+    admit(runmat_core::admit_worker_request(
+        json_len as u64,
+        memory_bytes as u64,
+        instance_budget_bytes(),
+    ))
 }
 
 async fn execute_prepared_fea_study_local(
@@ -608,7 +666,7 @@ async fn execute_prepared_fea_study_local(
     capacity: &dyn runmat_analysis_execution::AsyncCapacityOwner,
 ) -> Result<String, JsValue> {
     let progress = runmat_analysis_fea::FeaProgressContext {
-        handler: Some(std::sync::Arc::new(forward_progress)),
+        handler: Some(browser_progress_handler()),
         cancellation: runmat_runtime::interrupt::current_interrupt()
             .map(runmat_analysis_fea::FeaCancellationToken::from_token)
             .unwrap_or_default(),
@@ -620,7 +678,8 @@ async fn execute_prepared_fea_study_local(
         let mut resources = runmat_execution::resource::ResourceInventory {
             cpu_millicores: 1000,
             memory_bytes: available_memory,
-            scratch_bytes: 256 << 20,
+            // Scratch shares the admitted budget, as native placement grants it.
+            scratch_bytes: available_memory,
             accelerators: Vec::new(),
             capabilities: runmat_analysis_execution::analysis_worker_capabilities(
                 std::iter::empty(),
@@ -637,12 +696,9 @@ async fn execute_prepared_fea_study_local(
         let mut host =
             SerialAnalysisHost::new(inventory, resources, Digest::sha256(b"owned-browser-fea"))
                 .map_err(|e| js_error(&e.to_string()))?;
+        // Run outputs derive from the same admitted budget (native placement's law).
         let mut store = runmat_execution_artifact::cache::MemoryObjectStore::new(
-            runmat_execution_artifact::object::ObjectInventoryLimits {
-                max_objects: 100_000,
-                max_object_bytes: 64 << 20,
-                max_total_bytes: ARTIFACT_BYTES,
-            },
+            runmat_execution_artifact::object::ObjectInventoryLimits::admitted(available_memory),
         )
         .map_err(|e| js_error(&e.to_string()))?;
         let result = study

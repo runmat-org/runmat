@@ -507,18 +507,20 @@ fn structural_static_step_documentation_example_runs_and_publishes_fields() {
     // located where they are measured and narrow faces size only along their length, so the
     // 1 x 2 x 3 m boxes mesh closer to the 1.5 m target than the (584, 2330, 776) of 9bb447a159.
     // Each box is 1 m thick in x, below the target, so its two 2 x 3 m x faces are the sides of a
-    // 1 m wall: one layer across, 1 m over each face and 0.5 m edge sources across it. Before
-    // e7484361c9 a face with a reversed use (left_support, sense .F.) had its material sides
-    // inside out, the x faces did not oppose, and the boxes meshed to (238, 582, 464) with peak
-    // displacement 6.1 % low. This mesh gives 9.766e-10 m, within 3.3 % of a 0.2 m reference
-    // mesh (9,104 nodes, 1.0094e-9 m).
+    // 1 m wall: one layer across, sqrt(2) x 1 m = 1.41 m over each face (the diagonal of a cell
+    // as wide as the wall is thick) and 0.5 m edge sources across it. Sizing the faces at the
+    // 1 m thickness itself left no cell able to span the wall and meshed to (360, 1278, 528),
+    // 9.766e-10 m peak displacement. Before e7484361c9 a face with a reversed use
+    // (left_support, sense .F.) had its material sides inside out, the x faces did not oppose,
+    // and the boxes meshed to (238, 582, 464) with peak displacement 6.1 % low. This mesh gives
+    // 9.709e-10 m, within 3.8 % of a 0.2 m reference mesh (9,104 nodes, 1.0094e-9 m).
     assert_eq!(
         (
             mesh.topology.nodes.len(),
             mesh.topology.volume_elements.len(),
             mesh.topology.boundary_faces.len()
         ),
-        (360, 1278, 528)
+        (343, 1251, 498)
     );
 
     let model: AnalysisModel =
@@ -1189,7 +1191,7 @@ fn fea_check_prints_located_diagnostics_like_m_files() {
     assert_eq!(
         String::from_utf8_lossy(&strip_ansi(&output.stdout)),
         concat!(
-            "error[fea.semantic.model]: traction must be force per area, found N\n",
+            "error[fea.semantic.model]: traction needs a unit of force per area such as Pa; N measures force\n",
             " --> cantilever.fea:28:48\n",
             "   |\n",
             "28 | traction on geometry.beam.region.tip = [0, 0, -100000] N\n",
@@ -1552,11 +1554,15 @@ study bar_resistance {{
     assert_eq!(declared["status"], "valid", "{declared}");
     let undeclared = check_variant(&temp, "conduction-node-density.fea", &study("node"));
     assert_eq!(undeclared["status"], "invalid", "{undeclared}");
+    // Lowering refuses the node location before admission runs, and names where the step
+    // does publish the quantity (00e06f0d82: one admission rule with published locations).
     let diagnostics = undeclared["diagnostics"].to_string();
     assert!(
-        diagnostics.contains("fea.admission.observation")
-            && diagnostics.contains("end_current_density")
-            && diagnostics.contains("no declaration matches quantity, location, and value shape"),
+        diagnostics.contains("fea.semantic.output.field_location")
+            && diagnostics.contains(
+                "step `conduction` doesn't publish `electric_current_density` at this location"
+            )
+            && diagnostics.contains("`element`"),
         "{diagnostics}"
     );
 }

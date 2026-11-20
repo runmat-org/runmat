@@ -32,7 +32,6 @@ fn removed_root_and_binding_cannot_resurrect_a_cached_child_as_a_standalone_run(
 #[test]
 fn captured_filesystem_provider_cannot_be_redirected_by_an_ambient_override() {
     let _guard = tests::analysis_test_guard();
-    let _provider_guard = runmat_filesystem::provider_override_lock();
     reset_artifact_store_for_tests();
     let run = run();
     let root = tempfile::tempdir().unwrap();

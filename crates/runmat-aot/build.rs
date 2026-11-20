@@ -20,6 +20,15 @@ fn main() {
             "pub static PAYLOAD: Option<&[u8]> = None;\npub static MANIFEST: Option<&str> = None;\n"
                 .to_string()
         }
+        (None, Some(manifest)) => {
+            // A light CLI carries the expected manifest, including the exact
+            // payload digest, without retaining the compile-time archive.
+            let manifest = PathBuf::from(manifest);
+            println!("cargo:rerun-if-changed={}", manifest.display());
+            fs::copy(&manifest, out_dir.join("runtime-archive.json"))
+                .expect("copy external AOT runtime manifest");
+            "pub static PAYLOAD: Option<&[u8]> = None;\npub static MANIFEST: Option<&str> = Some(include_str!(concat!(env!(\"OUT_DIR\"), \"/runtime-archive.json\")));\n".to_string()
+        }
         (Some(archive), Some(manifest)) => {
             let archive = PathBuf::from(archive);
             let manifest = PathBuf::from(manifest);
@@ -31,9 +40,9 @@ fn main() {
                 .expect("copy embedded AOT runtime manifest");
             "pub static PAYLOAD: Option<&[u8]> = Some(include_bytes!(concat!(env!(\"OUT_DIR\"), \"/runtime-archive.payload\")));\npub static MANIFEST: Option<&str> = Some(include_str!(concat!(env!(\"OUT_DIR\"), \"/runtime-archive.json\")));\n".to_string()
         }
-        _ => panic!(
-            "RUNMAT_AOT_RUNTIME_ARCHIVE and RUNMAT_AOT_RUNTIME_MANIFEST must be set together"
-        ),
+        (Some(_), None) => {
+            panic!("RUNMAT_AOT_RUNTIME_ARCHIVE requires RUNMAT_AOT_RUNTIME_MANIFEST")
+        }
     };
     fs::write(out_dir.join("embedded.rs"), generated).expect("write embedded AOT source");
 }

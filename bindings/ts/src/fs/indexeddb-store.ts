@@ -1,4 +1,4 @@
-import { dirname, normalizePath } from "./path.js";
+import { dirname, normalizeAbsolute } from "./path.js";
 import { MemoryVolume, type VolumeSnapshotEntry } from "./memory.js";
 import type { BrowserWorkspaceReceipt } from "./browser-workspace.js";
 
@@ -31,7 +31,7 @@ export class IndexedDbVolumeStore {
           if (entry) {
             loaded.set(path, entry);
             if (listChildren && entry.kind === "dir") {
-              for (const child of entry.children ?? []) fetch(normalizePath(`${path}/${child}`), false);
+              for (const child of entry.children ?? []) fetch(normalizeAbsolute(`${path}/${child}`), false);
             }
           }
           if (--pending === 0) {
@@ -47,7 +47,7 @@ export class IndexedDbVolumeStore {
         const volume = new MemoryVolume({ now: this.now });
         try { value = operation(volume); } catch (error) { failure = error; tx.abort(); }
       } else for (const path of paths) {
-        const normalized = normalizePath(path);
+        const normalized = normalizeAbsolute(path);
         fetch(normalized, children);
         if (normalized !== "/") {
           let parent = dirname(normalized);

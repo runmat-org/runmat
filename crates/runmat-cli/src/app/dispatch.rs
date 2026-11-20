@@ -173,10 +173,14 @@ async fn execute_command(
             })
             .await
         }
+        Commands::Aot {
+            command: crate::cli::AotCommand::Install { from },
+        } => crate::commands::aot::install(from, cli.offline || cli.frozen).await,
         Commands::Compile {
             file,
             output,
             optimization,
+            install_aot_runtime,
             policy,
             explain_link,
             link_plan_json,
@@ -193,6 +197,7 @@ async fn execute_command(
                         file,
                         output,
                         optimization,
+                        install_aot_runtime,
                         policy,
                         explain_link,
                         link_plan_json,
@@ -220,6 +225,8 @@ async fn execute_command(
             deny,
             search_paths,
             no_simulate,
+            interference,
+            design_root,
         } => {
             boxed_command(|| {
                 check::execute_check(
@@ -233,10 +240,21 @@ async fn execute_command(
                         deny,
                         search_paths,
                         no_simulate,
+                        interference,
+                        design_root,
                     },
                 )
             })
             .await
+        }
+        Commands::Design { args } => {
+            let code =
+                runmat_design_tools::cli::Io::std(|io| runmat_design_tools::cli::design(&args, io));
+            if code == std::process::ExitCode::SUCCESS {
+                Ok(())
+            } else {
+                Err(crate::AlreadyReportedCliError.into())
+            }
         }
         Commands::Plan { file, root, json } => {
             boxed_command(|| fea::plan(file, root, json, cli, config)).await

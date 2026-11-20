@@ -91,74 +91,6 @@ pub fn analysis_trends_op(
         } else {
             None
         };
-        let thermo_coupling_enabled_rate = {
-            let values = entries
-                .iter()
-                .filter_map(|run| {
-                    diagnostic_metric_bool(&run.run.diagnostics, "FEA_TM_COUPLING", "enabled")
-                })
-                .collect::<Vec<_>>();
-            if values.is_empty() {
-                None
-            } else {
-                Some(values.iter().filter(|value| **value).count() as f64 / values.len() as f64)
-            }
-        };
-        let thermo_nonlinear_warn_rate = if identity.procedure() == AnalysisProcedure::Nonlinear {
-            diagnostic_warning_rate(&entries, "FEA_TM_NONLINEAR")
-        } else {
-            None
-        };
-        let thermo_spread_breach_rate = {
-            let values = entries
-                .iter()
-                .filter_map(|run| {
-                    diagnostic_metric(
-                        &run.run.diagnostics,
-                        "FEA_TM_COUPLING",
-                        "constitutive_material_spread_ratio",
-                    )
-                })
-                .collect::<Vec<_>>();
-            breach_rate_greater_than(&values, THERMO_SPREAD_THRESHOLD_BALANCED)
-        };
-        let thermo_heterogeneity_breach_rate = {
-            let values = entries
-                .iter()
-                .filter_map(|run| {
-                    diagnostic_metric(
-                        &run.run.diagnostics,
-                        "FEA_TM_COUPLING",
-                        "assignment_heterogeneity_index",
-                    )
-                })
-                .collect::<Vec<_>>();
-            breach_rate_greater_than(&values, THERMO_HETEROGENEITY_THRESHOLD_BALANCED)
-        };
-        let electro_thermal_coupling_enabled_rate = {
-            let values = entries
-                .iter()
-                .filter_map(|run| {
-                    diagnostic_metric_bool(&run.run.diagnostics, "FEA_ET_COUPLING", "enabled")
-                })
-                .collect::<Vec<_>>();
-            if values.is_empty() {
-                None
-            } else {
-                Some(values.iter().filter(|value| **value).count() as f64 / values.len() as f64)
-            }
-        };
-        let electro_transient_warn_rate =
-            if identity.procedure() == AnalysisProcedure::TransientResponse {
-                diagnostic_warning_rate(&entries, "FEA_ET_TRANSIENT")
-            } else {
-                None
-            };
-        let electro_nonlinear_warn_rate = if identity.procedure() == AnalysisProcedure::Nonlinear {
-            diagnostic_warning_rate(&entries, "FEA_ET_NONLINEAR")
-        } else {
-            None
-        };
         let plastic_nonlinear_warn_rate = if identity.procedure() == AnalysisProcedure::Nonlinear {
             diagnostic_warning_rate(&entries, "FEA_PLASTIC_NONLINEAR")
         } else {
@@ -542,13 +474,6 @@ pub fn analysis_trends_op(
             failed_increment_rate,
             mean_spike_count,
             mean_stall_count,
-            thermo_coupling_enabled_rate,
-            thermo_nonlinear_warn_rate,
-            thermo_spread_breach_rate,
-            thermo_heterogeneity_breach_rate,
-            electro_thermal_coupling_enabled_rate,
-            electro_transient_warn_rate,
-            electro_nonlinear_warn_rate,
             plastic_nonlinear_warn_rate,
             contact_nonlinear_warn_rate,
             thermal_stability_warn_rate,

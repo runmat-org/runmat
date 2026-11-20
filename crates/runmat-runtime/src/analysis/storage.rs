@@ -51,7 +51,9 @@ pub use observations::{
 use frequency::PersistedStructuralFrequencyArtifact;
 use frequency_sample::PersistedAcousticFrequencyArtifact;
 
-pub(super) const ARTIFACT_SCHEMA_VERSION: &str = "analysis_run_artifact/2026-09-002";
+/// Format of a stored run record. `record_format` says when it must change; its test pins the
+/// persisted shape this version names.
+pub(super) const ARTIFACT_SCHEMA_VERSION: &str = "analysis_run_artifact/2026-11-002";
 const FIELD_IDENTITY_PREFIX: &[u8] = b"runmat-analysis-field/v1\0";
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -257,15 +259,14 @@ fn decode_persisted_artifact(
                 .map(Box::new)
                 .map(PersistedAnalysisArtifact::AcousticFrequency)
         }
-        other => Err(format!(
-            "unsupported analysis run artifact schema `{other}`"
-        )),
+        other => Err(record_format::stored_by_another_version(other)),
     }
 }
 
 mod field_reader;
 use field_reader::{field_page_from_artifact, materialize_run, persisted_field_inventory};
 mod preparation;
+pub(in crate::analysis) mod record_format;
 use preparation::{prepare_run_artifact, prepare_run_artifact_with_admission};
 
 fn same_persisted_content(left: &PersistedRunArtifact, right: &PersistedRunArtifact) -> bool {
@@ -377,9 +378,8 @@ fn validate_persisted_run(
     expected_run_id: &str,
 ) -> Result<(), String> {
     if persisted.schema_version != ARTIFACT_SCHEMA_VERSION {
-        return Err(format!(
-            "unsupported analysis run artifact schema `{}`",
-            persisted.schema_version
+        return Err(record_format::stored_by_another_version(
+            &persisted.schema_version,
         ));
     }
     let run_value = persisted.run_projection()?;

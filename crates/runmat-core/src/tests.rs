@@ -5896,11 +5896,12 @@ end
 
 #[test]
 fn execute_path_request_supports_multilevel_super_constructor_chain_for_handle_classes() {
+    // Lock order: the provider override first, then the GC test context (as every core test).
+    let _guard = cwd_lock();
     let handle = std::thread::Builder::new()
         .stack_size(32 * 1024 * 1024)
         .spawn(move || {
             runmat_gc::gc_test_context(|| {
-                let _guard = cwd_lock();
                 let tmp = tempfile::TempDir::new().expect("tempdir");
                 std::fs::write(
                     tmp.path().join("A.m"),

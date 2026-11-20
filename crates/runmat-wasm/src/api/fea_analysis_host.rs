@@ -24,6 +24,31 @@ extern "C" {
         delegation: JsValue,
     ) -> Result<JsValue, JsValue>;
 }
+/// A step refusal keeps its typed browser limit; other failures are host errors.
+enum StepFailure {
+    Limit(runmat_core::BrowserResourceLimit),
+    Js(JsValue),
+}
+impl From<JsValue> for StepFailure {
+    fn from(error: JsValue) -> Self {
+        Self::Js(error)
+    }
+}
+fn step_worker_failure(error: JsValue, context: &OperationContext) -> OperationErrorEnvelope {
+    operation_error(
+        "fea.run_study",
+        "fea.run_study/v1",
+        context,
+        OperationErrorSpec {
+            error_code: "RM.FEA.RUN_STUDY.STEP_WORKER_FAILED",
+            error_type: OperationErrorType::Internal,
+            retryable: false,
+            severity: OperationErrorSeverity::Error,
+        },
+        crate::wire::errors::js_value_to_string(error),
+        std::collections::BTreeMap::new(),
+    )
+}
 impl AnalysisStudyStepExecutor for BrowserAnalysisService {
     fn allocated_cpu_millicores(&self) -> u64 {
         1000
@@ -35,6 +60,8 @@ impl AnalysisStudyStepExecutor for BrowserAnalysisService {
         Box::pin(async move {
             let context = request.context.clone();
             let work = async {
+                // The owned step worker is a fresh instance of this module.
+                let budget = super::fea_execution::instance_budget_bytes();
                 let active = self.active.borrow().clone().ok_or_else(|| {
                     super::fea_lease::denied_to_js(fea_run_admission::FeaRunDenied::SignInRequired)
                 })?;
@@ -56,7 +83,8 @@ impl AnalysisStudyStepExecutor for BrowserAnalysisService {
                 };
                 let json = serde_json::to_string(&payload)
                     .map_err(|error| crate::wire::errors::js_error(&error.to_string()))?;
-                super::fea_execution::validate_numerical_input(json.len(), (1u64 << 30) as f64)?;
+                runmat_core::admit_worker_request(json.len() as u64, budget, budget)
+                    .map_err(StepFailure::Limit)?;
                 let delegation = active
                     .worker_context(
                         &host,
@@ -64,25 +92,50 @@ impl AnalysisStudyStepExecutor for BrowserAnalysisService {
                         super::fea_run_context::WorkerWorkClass::Numerical,
                     )
                     .await?;
-                let value = execute_step(&json, (1u64 << 30) as f64, delegation).await?;
+                let value = execute_step(&json, budget as f64, delegation).await?;
+                drop(json);
                 active.retire_finished(&host).await?;
                 active
                     .control
                     .check()
                     .map_err(super::fea_lease::denied_to_js)?;
+                use wasm_bindgen::JsCast;
+                let units = value
+                    .dyn_ref::<js_sys::JsString>()
+                    .map(|text| u64::from(text.length()))
+                    .ok_or_else(|| {
+                        crate::wire::errors::js_error("Invalid owned study-step response.")
+                    })?;
+                // JSON text: one UTF-16 unit per byte outside non-ASCII names.
+                runmat_core::BrowserResourceLimit::check(
+                    runmat_core::BrowserResourceTerm::NumericalResult,
+                    units,
+                    super::fea_execution::free_heap_bytes(),
+                )
+                .map_err(StepFailure::Limit)?;
                 let json = value.as_string().ok_or_else(|| {
                     crate::wire::errors::js_error("Invalid owned study-step response.")
                 })?;
-                super::fea_execution::validate_numerical_input(json.len(), (1u64 << 30) as f64)?;
                 serde_json::from_str::<Result<AnalysisStudyStepResult, OperationErrorEnvelope>>(
                     &json,
                 )
-                .map_err(|error| crate::wire::errors::js_error(&error.to_string()))
+                .map_err(|error| StepFailure::Js(crate::wire::errors::js_error(&error.to_string())))
             }
             .await;
-            let result = work.map_err(|error| {
-                let denied = super::fea_lease::denial_from_js(error);
-                denied.into_operation_error("fea.run_study", "fea.run_study/v1", &context)
+            let result = work.map_err(|failure| match failure {
+                StepFailure::Limit(limit) => {
+                    limit.operation_error("fea.run_study", "fea.run_study/v1", &context)
+                }
+                StepFailure::Js(error) if super::fea_lease::is_denial(&error) => {
+                    super::fea_lease::denial_from_js(error).into_operation_error(
+                        "fea.run_study",
+                        "fea.run_study/v1",
+                        &context,
+                    )
+                }
+                // A worker failure that is not an admission refusal keeps its own message;
+                // relabelling it as a denial would hide the step's error behind accounting.
+                StepFailure::Js(error) => step_worker_failure(error, &context),
             })??;
             analysis_validate_study_step_transfer(&result)?;
             Ok(result)

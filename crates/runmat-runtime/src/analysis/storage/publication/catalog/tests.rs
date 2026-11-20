@@ -30,6 +30,7 @@ fn builder(root: &std::path::Path, definition: Digest, maximum: u64) -> Analysis
 
 #[test]
 fn original_binary_object_survives_writer_drop_and_exact_retry_without_numeric_expansion() {
+    let _filesystem = runmat_filesystem::provider_override_lock();
     let directory = tempfile::tempdir().unwrap();
     let definition = Digest::sha256(b"binary-catalog-publication");
     let bytes = (0..65_536)
@@ -74,6 +75,7 @@ fn original_binary_object_survives_writer_drop_and_exact_retry_without_numeric_e
 
 #[test]
 fn binary_publication_rejects_foreign_scope_substitution_length_and_buffer_exhaustion() {
+    let _filesystem = runmat_filesystem::provider_override_lock();
     let directory = tempfile::tempdir().unwrap();
     let definition = Digest::sha256(b"binary-catalog-rejection");
     let bytes = vec![7; 1024];
@@ -108,6 +110,7 @@ fn binary_publication_rejects_foreign_scope_substitution_length_and_buffer_exhau
 /// byte less is refused before anything is written.
 #[test]
 fn state_persistence_allowance_is_the_immutable_batch_law_at_exactly_its_bound() {
+    let _filesystem = runmat_filesystem::provider_override_lock();
     use crate::analysis::structural_study::publication::evidence::immutable_batch_workspace;
     let bytes = vec![3_u8; 4096];
     let len = bytes.len() as u64;
@@ -155,6 +158,7 @@ fn state_persistence_allowance_is_the_immutable_batch_law_at_exactly_its_bound()
 /// is only its transport is still leased the buffer plus its comparison.
 #[test]
 fn profiled_source_admission_funds_the_immutable_batch_law() {
+    let _filesystem = runmat_filesystem::provider_override_lock();
     use crate::analysis::structural_study::publication::evidence::immutable_batch_workspace;
     let directory = tempfile::tempdir().unwrap();
     let definition = Digest::sha256(b"profiled-source-persistence");

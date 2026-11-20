@@ -45,6 +45,7 @@ pub(super) async fn run() {
         energy.evidence = RequiredAccuracyEvidence::ConservationBalance;
         step.accuracy.criteria.push(energy);
         let compiled = CompiledAnalysisStudy {
+            displays: Vec::new(),
             module_path: "conformance/electrothermal.fea".into(),
             study_id: "one_way_heat".into(),
             study_inputs: vec![],
@@ -109,6 +110,7 @@ pub(super) async fn run() {
                 required_capabilities: Default::default(),
             },
             ThermalStudyExecutionPolicy {
+                publication_memory_bytes: u64::MAX,
                 resources,
                 retry: runmat_execution::task::RetryPolicy::IdempotentInfrastructure,
                 deadline_unix_millis: None,

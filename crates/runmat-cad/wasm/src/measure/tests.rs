@@ -193,6 +193,18 @@ fn face_to_face_parallel_gives_minimum_and_normal_distance() {
         100.0,
     );
     assert_eq!(a.dimensions[0].label, "100.000 mm");
+    // The line runs along X between the two end faces, both ends on them.
+    let (from, to) = (a.dimensions[0].from, a.dimensions[0].to);
+    let ends = [from[0].min(to[0]), from[0].max(to[0])];
+    close(ends[0] * 1e3, 0.0);
+    close(ends[1] * 1e3, 100.0);
+    for i in 1..3 {
+        close(from[i] * 1e3, to[i] * 1e3);
+        assert!(
+            (0.0..=10.0 * MM).contains(&from[i]),
+            "{from:?} is off the faces"
+        );
+    }
 }
 
 #[test]
@@ -443,6 +455,27 @@ fn entities_across_components_follow_their_placement() {
     let boss_bottom = format!("occurrence:{boss}/{}", face(&sd, [0.0, 0.0, 0.0]));
     let a = rig("distance", &[block_top.clone(), boss_bottom.clone()]);
     close(value(&a, "Normal distance"), 20.0);
+    // The block's top (z = 10 mm, x ≤ 100 mm) and the boss's bottom (z = 30 mm, round about
+    // x = 150 mm) don't overlap seen along Z. The dimension line stands straight up at the
+    // boss's nearest point (x = 140 mm), as long as its label; an extension line in the block's
+    // top plane runs back to the block's edge at x = 100 mm.
+    let dim = &a.dimensions[0];
+    let (from, to) = (dim.from, dim.to);
+    close(from[2] * 1e3, 10.0);
+    close(to[2] * 1e3, 30.0);
+    within(from[0] * 1e3, 140.0, 0.05);
+    within(to[0] * 1e3, 140.0, 0.05);
+    close(from[0] * 1e3, to[0] * 1e3);
+    close(from[1] * 1e3, to[1] * 1e3);
+    close(norm(sub(to, from)) * 1e3, 20.0);
+    assert_eq!(dim.extension_lines.len(), 1, "{dim:?}");
+    let [on, end] = dim.extension_lines[0];
+    assert_eq!(end, from);
+    within(on[0] * 1e3, 100.0, 1e-4);
+    close(on[1] * 1e3, from[1] * 1e3);
+    close(on[2] * 1e3, 10.0);
+    let out = serde_json::to_value(dim).unwrap();
+    assert!(out["extensionLines"].is_array(), "{out}");
     let rim = format!("occurrence:{boss}/{}", circle_edge(&sd, 8.0 * MM));
     let r = rig("radius", std::slice::from_ref(&rim));
     close(value(&r, "Radius"), 10.0);
@@ -520,4 +553,54 @@ fn reference_picks_resolve_like_topology_picks() {
         &[format!("face:{}:{}", d.bodies[0].index, named.index)],
     );
     assert_eq!(by_reference.rows, by_index.rows);
+}
+
+/// Two bosses side by side, 40 mm apart, both 8 mm tall.
+const TWINS: &str = "runmat 0.7\nstd 1\n\npart twins {\n    sketch s1 on origin.xy {\n        a = circle(center = [0 mm, 0 mm], radius = 10 mm)\n        b = circle(center = [40 mm, 0 mm], radius = 10 mm)\n    }\n    feature body = extrude(profile = sketch.s1, distance = 8 mm)\n}\n";
+
+#[test]
+fn coplanar_circles_draw_their_axis_distance_not_a_zero_normal_distance() {
+    let d = match crate::runtime::regenerate_part_in(
+        "/p/twins.part",
+        TWINS,
+        None,
+        &TessellationOptions::default(),
+    ) {
+        Ok(part) => part.display,
+        Err(d) => panic!(
+            "doesn't regenerate: {:?}",
+            d.iter().map(|d| d.message.clone()).collect::<Vec<_>>()
+        ),
+    };
+    // The two top rims, at z = 8 mm.
+    let mut rims = Vec::new();
+    for b in &d.bodies {
+        for e in &b.edges {
+            if e.points.len() > 9
+                && e.points
+                    .chunks_exact(3)
+                    .all(|p| (p[2] as f64 - 8.0 * MM).abs() < 1e-6)
+            {
+                rims.push(format!("edge:{}:{}", b.index, e.index));
+            }
+        }
+    }
+    assert_eq!(rims.len(), 2, "{rims:?}");
+    let a = run("/p/twins.part", TWINS, "distance", &rims).unwrap();
+    close(value(&a, "Minimum distance"), 20.0);
+    close(value(&a, "Normal distance"), 0.0);
+    close(value(&a, "Axis distance"), 40.0);
+    assert_eq!(
+        a.rows
+            .iter()
+            .filter(|r| r.cells[0] == "Axis distance")
+            .count(),
+        1
+    );
+    assert_eq!(a.dimensions.len(), 1);
+    assert_eq!(a.dimensions[0].label, "40.000 mm");
+    close(
+        norm(sub(a.dimensions[0].to, a.dimensions[0].from)) * 1e3,
+        40.0,
+    );
 }

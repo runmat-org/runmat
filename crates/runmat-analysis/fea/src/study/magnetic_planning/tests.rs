@@ -7,6 +7,7 @@ fn compiled() -> CompiledAnalysisStudy {
     let model = authored_model(1.0);
     let properties = crate::properties::compile_property_map(&model, None).unwrap();
     CompiledAnalysisStudy {
+        displays: Vec::new(),
         module_path: "tests/magnetic.fea".into(),
         study_id: "magnetic".into(),
         study_inputs: vec![],

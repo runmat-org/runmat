@@ -1,6 +1,6 @@
 //! `design.simulate` on the daq showcase with a `simulation` section for its analog channel.
 
-use runmat_design_tools::{call, catalog, Files};
+use runmat_design_tools::{call, Files, TOOL_NAMES};
 use serde_json::json;
 
 const DAQ: &str = include_str!("../../runmat-circuit/tests/projects/daq/daq.circuit");
@@ -46,8 +46,8 @@ fn files() -> Files {
 }
 
 #[test]
-fn the_catalog_lists_design_simulate() {
-    assert!(catalog().iter().any(|t| t.name == "design.simulate"));
+fn the_tools_include_design_simulate() {
+    assert!(TOOL_NAMES.contains(&"design.simulate"));
 }
 
 #[test]

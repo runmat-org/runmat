@@ -28,9 +28,20 @@ pub fn closed_profile(picks: &Picks, id: &str) -> bool {
     let mut ends: Vec<&PointExpr> = Vec::new();
     for entity in sketch.entities.iter().filter(|e| !e.construction) {
         match &entity.geometry {
-            SketchGeometry::Circle { .. } | SketchGeometry::Spline { closed: true, .. } => {
+            SketchGeometry::Circle { .. }
+            | SketchGeometry::Spline { closed: true, .. }
+            | SketchGeometry::Ellipse { start: None, .. } => return true,
+            SketchGeometry::Ellipse {
+                start: Some(start),
+                end: Some(end),
+                ..
+            } => ends.extend([start, end]),
+            SketchGeometry::Ellipse { .. } => {}
+            // Lettering is closed outlines.
+            SketchGeometry::Text { text, .. } if text.chars().any(|c| !c.is_whitespace()) => {
                 return true
             }
+            SketchGeometry::Text { .. } => {}
             SketchGeometry::Line { start, end } | SketchGeometry::Arc { start, end, .. } => {
                 ends.extend([start, end])
             }

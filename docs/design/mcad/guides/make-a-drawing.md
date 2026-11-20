@@ -76,9 +76,18 @@ drawing motor_plate {
     annotation flat = gdt(tolerance = seat_flat, view = side)
     annotation datum_a = datum_symbol(label = A, view = side)
     annotation seat = surface_finish(on = feature.body.face.start, view = side)
-    annotation n1 = note(text = "BREAK ALL SHARP EDGES. PART {part_number}.", view = iso)
+    annotation bore_note = note(text = "PRESS FIT FOR THE MOTOR'S PILOT", leader = feature.bore.face.wall(c), width = 40 mm, view = front)
 
     table holes = hole(view = front, origin = feature.body.face.side(outline.left), sheet = "1", at = [300, 260])
+    table notes = notes(
+        rows = [
+            "MATERIAL: {material}.",
+            "BREAK ALL SHARP EDGES 0.2 TO 0.5 MM; DEBURR ALL HOLES BOTH SIDES.",
+            "UNTOLERANCED DIMENSIONS: ISO 2768-mK.",
+            "MARK {part_number} ON THE UNDERSIDE."
+        ],
+        sheet = "1"
+    )
 }
 ```
 
@@ -92,6 +101,27 @@ The title block's projection symbol shows the sheet's `third_angle` projection. 
 
 Moving a view on the canvas writes its new `at`. Views of an assembly add `exclude` to leave occurrences out and `exploded` to show an exploded state. See [Drawing views and annotations](/docs/mcad/drawing/views-and-annotations#views).
 
+### A drawing in its own folder
+
+A drawing can sit in a subfolder, such as `drawings/`, and reach the part one level up. Its `model` names the part's file (`from = "../motor_plate.part"`) or the part's folder (`from = ".."`). Both views below show the same part:
+
+```drawing file=drawings/motor_plate_shop.drawing
+runmat 0.7
+std 1
+
+drawing motor_plate_shop {
+    format a3 = {
+        size = { size = iso, name = A3 },
+        title_block = [{ label = "Sheet", source = { source = sheet_number } }]
+    }
+    sheet "1" = { format = a3, scale = [2, 1], projection = third_angle }
+    view front = standard(orientation = top, sheet = "1", model = { part = motor_plate, from = "../motor_plate.part" }, at = [120, 180], display = hidden_lines)
+    view iso = standard(orientation = isometric, sheet = "1", model = { part = motor_plate, from = ".." }, at = [320, 80], scale = [1, 1], display = shaded)
+}
+```
+
+With the file form, `part =` is optional: `model = { from = "../motor_plate.part" }` shows the part that file declares. A path that names no design file or folder is an error that suggests the nearest one, and a `part` the file doesn't declare is an error that lists the parts it holds.
+
 ## 4. Dimensions and annotations
 
 A dimension names the faces it measures, and its value is measured from the model. `pmi = bore` makes the bore's diameter show the tolerance written in the part. The hole callout reads the M3 clearance size from the hole feature, and the flatness frame reads `seat_flat`. Change the tolerance in the part and every drawing that shows it changes.
@@ -99,6 +129,12 @@ A dimension names the faces it measures, and its value is measured from the mode
 In the Desktop, Projected view takes a view picked on the sheet and places the new view where you click; it stays aligned with its parent. Smart dimension takes the edges you pick in a view and places the dimension where you click. Here a side view joins the hinge mount's front view, and the clevis height is dimensioned:
 
 <!-- design:clip:mcad/drawing -->
+
+### Notes
+
+Put the sheet's notes (material, finish, edge breaks, general tolerances) in the general notes, `table notes = notes(rows = [...])`, with one note per row. The sheet draws them as a numbered list under "NOTES:" above the title block, and each note wraps in the title block's width with its lines indented under its number. A `{property}` field such as `{material}` fills in from the part. Avoid writing sheet notes as long single `note` annotations.
+
+A `note` annotation is for text tied to one place, often with a `leader` to a face. It wraps to its `width` when given one, otherwise to the room it has, and `\n` starts a new line. When a note has no room where its `at` puts it, the sheet moves it to the nearest free spot and the check warns on it, so set `at` to a free spot or give the note a `width`.
 
 A reference that stops resolving after an edit, such as a dimension to a face that was removed, is an error on that annotation, with the face it lost.
 
@@ -109,8 +145,8 @@ The Auto-drawing command lays out a drawing for a part or an assembly in one ste
 ## 6. Export
 
 ```sh
-runmat-design export motor_plate.drawing --format pdf --out drawings
-runmat-design export motor_plate.drawing --format dxf --out drawings
+runmat design export motor_plate.drawing --format pdf --out drawings
+runmat design export motor_plate.drawing --format dxf --out drawings
 ```
 
 PDF, DXF and DWG write one file per sheet; `--sheet 1` writes one sheet, and `--all-configurations` writes every sheet once per configuration of the part.

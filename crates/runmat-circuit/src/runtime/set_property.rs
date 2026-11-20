@@ -5,6 +5,9 @@
 //!   variant are its `component` statement in the `.circuit` ([`diff_circuit`]). A new
 //!   designator renames the statement, records the old name in `renamed_from` (so Update board
 //!   renames the footprint) and follows into the sheet's connections.
+//! - A component's other params (`param.mass`, `param.voltage`) are its `component`
+//!   statement's params, written as typed (`mass = 0.35 g`). A param the component takes from
+//!   its library part is written on the component, where it overrides the part's.
 //! - A component's X, Y, rotation, side and lock are its footprint in the `.circuit.layout`:
 //!   Move by the difference, Flip, Lock.
 //! - A net's class is its `net` statement in the `.circuit`.
@@ -13,15 +16,18 @@
 //!   the layout ([`board_edit::edit_board`]).
 //!
 //! The Desktop sends the field's id and its new value (`values = { <field>: <value> }`) with the
-//! item's Outline id as the selection. Lengths are millimetres as numbers, or text with a unit
-//! (`0.25 mm`, `10 mil`); angles are degrees as numbers or text (`90 deg`).
+//! item's Outline id as the selection. Lengths are millimetres as numbers, or a value with a
+//! unit (`0.25 mm`, `10 mil`, as text or as the value field's `{ kind = "value", … }`); angles
+//! are degrees as numbers or values (`90 deg`). A value typed with a unit is written as typed
+//! (`width = 12 mil`), the way MCAD fields keep a literal; a bare number is written in mm.
 
 use super::edit::{failure, EditError, EditOutput, EditRequest};
 use super::*;
-use crate::geom::{Coord, NM_PER_MIL, NM_PER_MM};
+use crate::geom::{Coord, NM_PER_MM};
 use crate::ir::{ComponentDecl, Endpoint, Fitting, PartRef};
 use crate::layer_set::CopperIndex;
 use crate::layout::{copper_name, PadConnect};
+use crate::syntax::board::authored::{edit_board_written, Step, Written};
 
 pub(super) fn run(project: &Project, request: &EditRequest) -> Result<EditOutput, EditError> {
     let [id] = request.selection.as_slice() else {
@@ -35,6 +41,9 @@ pub(super) fn run(project: &Project, request: &EditRequest) -> Result<EditOutput
         }
         ("component", "x" | "y" | "rotation" | "side" | "locked") => {
             footprint_field(project, name, field, value)
+        }
+        ("component", param) if param.starts_with(PARAM) => {
+            component_param(project, name, &param[PARAM.len()..], value)
         }
         ("net", "class") => net_class(project, name, value),
         ("net", "name") => net_name(project, name, value),
@@ -64,7 +73,7 @@ fn one_value(values: &serde_json::Map<String, Value>) -> Result<(&str, &Value), 
  * Values
  * --------------------------------------------------------------------------------------------- */
 
-fn text(value: &Value) -> Option<String> {
+pub(super) fn text(value: &Value) -> Option<String> {
     match value {
         Value::String(s) => Some(s.trim().to_owned()).filter(|s| !s.is_empty()),
         Value::Number(n) => Some(n.to_string()),
@@ -100,34 +109,77 @@ fn number_and_unit(value: &Value) -> Option<(f64, Option<String>)> {
                 .ok()
                 .map(|v| (v, (!unit.is_empty()).then(|| unit.to_owned())))
         }
+        // The Desktop's value field: `{ kind = "value", value = { form, value, unit }, text }`.
+        Value::Object(edit) if edit.get("kind").and_then(Value::as_str) == Some("value") => {
+            let expr = edit.get("value")?;
+            let v = expr.get("value")?.as_f64()?;
+            match expr.get("form")?.as_str()? {
+                "quantity" => Some((v, Some(expr.get("unit")?.as_str()?.to_owned()))),
+                "number" => Some((v, None)),
+                _ => None,
+            }
+        }
         _ => None,
     }
 }
 
-/// A length in board units (nm): millimetres when no unit is written.
+/// The text to write for a value typed with a unit (`0.3 in`, `12 mil`, `90 deg`), as typed;
+/// `None` for a bare number, which the printer writes in the field's unit.
+fn typed(value: &Value) -> Option<String> {
+    let (v, unit) = number_and_unit(value)?;
+    let unit = unit?;
+    match value {
+        Value::String(s) => Some(s.trim().to_owned()),
+        Value::Object(edit) => Some(
+            edit.get("text")
+                .and_then(Value::as_str)
+                .map(str::trim)
+                .filter(|t| !t.is_empty() && !t.starts_with('='))
+                .map_or_else(|| format!("{v} {unit}"), str::to_owned),
+        ),
+        _ => None,
+    }
+}
+
+/// A length in board units (nm): millimetres when no unit is written; any length unit the unit
+/// registry knows otherwise (`10 mil`, `0.1 in`, `25 um`).
 pub(super) fn length(field: &str, value: &Value) -> Result<Coord, EditError> {
     let bad = || EditError::new(format!("{field} takes a length such as 0.25 mm"));
     let (v, unit) = number_and_unit(value).ok_or_else(bad)?;
-    let per = match unit.as_deref() {
-        None | Some("mm") => NM_PER_MM as f64,
-        Some("um" | "µm") => NM_PER_MM as f64 / 1000.0,
-        Some("mil" | "mils") => NM_PER_MIL as f64,
-        Some("in") => NM_PER_MIL as f64 * 1000.0,
-        Some("cm") => NM_PER_MM as f64 * 10.0,
-        Some(_) => return Err(bad()),
+    let nm = match unit.as_deref() {
+        None => v * NM_PER_MM as f64,
+        Some(unit) => {
+            registry_value(v, unit, runmat_types::PhysicalDimension::LENGTH, 0).ok_or_else(bad)?
+                * 1e9
+        }
     };
-    Ok((v * per).round() as Coord)
+    Ok(nm.round() as Coord)
 }
 
-/// An angle in degrees: degrees when no unit is written.
+/// An angle in degrees: degrees when no unit is written; any angle unit the registry knows.
 pub(super) fn angle(field: &str, value: &Value) -> Result<f64, EditError> {
     let bad = || EditError::new(format!("{field} takes an angle such as 90 deg"));
     let (v, unit) = number_and_unit(value).ok_or_else(bad)?;
     match unit.as_deref() {
         None | Some("deg" | "°") => Ok(v),
-        Some("rad") => Ok(v.to_degrees()),
-        Some(_) => Err(bad()),
+        Some(unit) => registry_value(v, unit, runmat_types::PhysicalDimension::DIMENSIONLESS, 1)
+            .map(f64::to_degrees)
+            .ok_or_else(bad),
     }
+}
+
+/// `v` written in `unit`, in SI, when the registry's `unit` measures `dimension` (with the angle
+/// power, 1 for an angle).
+fn registry_value(
+    v: f64,
+    unit: &str,
+    dimension: runmat_types::PhysicalDimension,
+    angle_power: i8,
+) -> Option<f64> {
+    let unit = runmat_types::physical::parse_unit_expression(unit).ok()?;
+    (unit.dimension() == dimension && unit.angle_power() == angle_power)
+        .then(|| unit.to_canonical(v).ok())
+        .flatten()
 }
 
 fn boolean(field: &str, value: &Value) -> Result<bool, EditError> {
@@ -145,26 +197,97 @@ fn count(field: &str, value: &Value) -> Result<i32, EditError> {
         .ok_or_else(|| EditError::new(format!("{field} takes a whole number")))
 }
 
-/// The component's value as the circuit language reads it (`100 nF ± 10 %`, `4.7 kohm`),
-/// through the language's own reader: a one-component circuit holding the text.
+/// The component's value as the circuit language reads it (`100 nF ± 10 %`, `4.7 kohm`).
 fn read_value(text: &str) -> Result<crate::ir::Param, EditError> {
+    read_param("value", text).ok_or_else(|| {
+        EditError::new(format!(
+            "`{text}` isn't a value the circuit reads; write a quantity such as 100 nF ± 10 %"
+        ))
+    })
+}
+
+/// The param `name = text` as the circuit language reads it on a component, through the
+/// language's own reader (a one-component circuit holding it), so a param's name decides its
+/// units the way the file's do: `mass = 0.35 g` is grams.
+fn read_param(name: &str, text: &str) -> Option<crate::ir::Param> {
     let source = format!(
-        "runmat 0.7\nstd 1\n\ncircuit probe {{\n    root = main\n    sheet main {{\n        component X1 = {{ part = \"P\", value = {text} }}\n    }}\n}}\n"
+        "runmat 0.7\nstd 1\n\ncircuit probe {{\n    root = main\n    sheet main {{\n        component X1 = {{ part = \"P\", {name} = {text} }}\n    }}\n}}\n"
     );
     let parsed = parse_circuit("/value.circuit", &source);
-    parsed
-        .design
-        .and_then(|d| {
-            d.sheets
-                .get("main")
-                .and_then(|s| s.components.first())
-                .and_then(|c| c.params.get("value").cloned())
-        })
-        .ok_or_else(|| {
-            EditError::new(format!(
-                "`{text}` isn't a value the circuit reads; write a quantity such as 100 nF ± 10 %"
-            ))
-        })
+    if !parsed.diagnostics.is_empty() {
+        return None;
+    }
+    parsed.design.and_then(|d| {
+        d.sheets
+            .get("main")
+            .and_then(|s| s.components.first())
+            .and_then(|c| c.params.get(name).cloned())
+    })
+}
+
+/// The field-id prefix of a component param in Properties (`param.mass`).
+const PARAM: &str = "param.";
+
+/// Sets one param of a component: a quantity as typed (`0.35 g`), text as a string, on or off
+/// for a switch. The kind follows the param's current value.
+fn component_param(
+    project: &Project,
+    designator: &str,
+    param: &str,
+    value: &Value,
+) -> Result<EditOutput, EditError> {
+    use crate::ir::ParamValue;
+    if param == "value" {
+        return Err(EditError::new("set the value in its own field"));
+    }
+    if param.is_empty() || !param.chars().all(|c| c.is_ascii_alphanumeric() || c == '_') {
+        return Err(EditError::new(format!("`{param}` isn't a param name")));
+    }
+    let current = project
+        .netlist
+        .components
+        .iter()
+        .find(|c| c.designator == designator)
+        .and_then(|c| c.params.get(param))
+        .ok_or_else(|| EditError::new(format!("{designator} has no param {param}")))?;
+    let label = param.replace('_', " ");
+    let typed = required(&label, value)?;
+    let source = match &current.value {
+        ParamValue::Text(_) => serde_json::to_string(&typed).expect("a string serializes"),
+        ParamValue::Bool(_) => boolean(&label, value)?.to_string(),
+        ParamValue::Quantity { .. } => typed.clone(),
+    };
+    let read = read_param(param, &source)
+        .ok_or_else(|| EditError::new(format!("`{typed}` isn't a value {label} takes")))?;
+    if std::mem::discriminant(&read.value) != std::mem::discriminant(&current.value) {
+        return Err(EditError::new(format!(
+            "{label} takes a value like {}",
+            crate::index::param_display(current)
+        )));
+    }
+    if let (ParamValue::Quantity { nominal: new, .. }, ParamValue::Quantity { nominal: old, .. }) =
+        (&read.value, &current.value)
+    {
+        if new.dim != old.dim {
+            return Err(EditError::new(format!(
+                "`{typed}` isn't a value {label} takes; it is written like {}",
+                current
+                    .written
+                    .clone()
+                    .unwrap_or_else(|| crate::index::param_display(current))
+            )));
+        }
+    }
+    let (sheet, local) = own_component(project, designator)?;
+    let mut own = project.own.clone();
+    let def = own.sheets.get_mut(&sheet).expect("found by own_component");
+    let component = def
+        .components
+        .iter_mut()
+        .find(|c| c.name == local)
+        .expect("found by own_component");
+    component.params.insert(param.to_owned(), read);
+    circuit_change(project, &own, format!("{designator} {label} {typed}"))
 }
 
 /* ------------------------------------------------------------------------------------------------
@@ -172,7 +295,10 @@ fn read_value(text: &str) -> Result<crate::ir::Param, EditError> {
  * --------------------------------------------------------------------------------------------- */
 
 /// The file's own sheet and the local name of the component with this designator.
-fn own_component(project: &Project, designator: &str) -> Result<(String, String), EditError> {
+pub(super) fn own_component(
+    project: &Project,
+    designator: &str,
+) -> Result<(String, String), EditError> {
     let local = project
         .netlist
         .components
@@ -411,7 +537,7 @@ fn net_name(project: &Project, net: &str, value: &Value) -> Result<EditOutput, E
 }
 
 /// The `.circuit` rewritten for `own`, the file's own design after the edit.
-fn circuit_change(
+pub(super) fn circuit_change(
     project: &Project,
     own: &Design,
     summary: String,
@@ -423,6 +549,7 @@ fn circuit_change(
         own,
     )?;
     Ok(EditOutput {
+        report: None,
         summary,
         files: vec![file_change(
             &project.circuit_path,
@@ -434,6 +561,7 @@ fn circuit_change(
 
 fn nothing(item: &str) -> EditOutput {
     EditOutput {
+        report: None,
         summary: format!("{item} already has that value"),
         files: Vec::new(),
     }
@@ -507,8 +635,25 @@ fn footprint_field(
         }
         _ => unreachable!("dispatched above"),
     };
-    let change = board_edit::board_command(&layout.path, &layout.text, &edit).map_err(failure)?;
+    let at: &[Step] = match field {
+        "x" => &[Step::Key("at"), Step::Index(0)],
+        "y" => &[Step::Key("at"), Step::Index(1)],
+        "rotation" => &[Step::Key("rotation")],
+        _ => &[],
+    };
+    let literal = typed(value).filter(|_| !at.is_empty());
+    let written = literal.as_deref().map(|text| Written {
+        item: footprint.id,
+        at,
+        text,
+    });
+    let parsed = parse_board(&layout.path, &layout.text);
+    let (change, ()) = edit_board_written(&layout.path, &layout.text, &parsed, written, |b| {
+        board_edit::apply_board_edit(b, &parsed.sites, &edit)
+    })
+    .map_err(failure)?;
     Ok(EditOutput {
+        report: None,
         summary: format!("{} on {designator}", edit.command()),
         files: vec![file_change(&layout.path, &layout.text, change)],
     })
@@ -536,11 +681,25 @@ fn board_item_field(
         .parse()
         .map_err(|_| EditError::new(format!("`{kind}:{id}` is not a board item")))?;
     let item = ItemId(n);
-    let (change, summary) = board_edit::edit_board(&layout.path, &layout.text, |b| {
+    // The printed key: a via's diameter is its `size`.
+    let key = match (kind, field) {
+        ("via", "diameter") => "size",
+        _ => field,
+    };
+    let at = [Step::Key(key)];
+    let literal = typed(value);
+    let written = literal.as_deref().map(|text| Written {
+        item,
+        at: &at,
+        text,
+    });
+    let parsed = parse_board(&layout.path, &layout.text);
+    let (change, summary) = edit_board_written(&layout.path, &layout.text, &parsed, written, |b| {
         set_board_item(b, kind, item, field, value).map_err(|e| e.message)
     })
     .map_err(failure)?;
     Ok(EditOutput {
+        report: None,
         summary,
         files: if change.edits.is_empty() {
             Vec::new()

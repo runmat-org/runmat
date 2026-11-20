@@ -384,3 +384,27 @@ study response {
         .iter()
         .any(|diagnostic| diagnostic.message.contains("von Mises stress to nodes")));
 }
+
+/// The checker applies the same admission Simulation setup's `outputs` choices read
+/// (`step_field_admission`): a location the step's physics doesn't publish the quantity at is
+/// refused with a coded diagnostic that names the locations it does publish.
+#[test]
+fn a_field_at_a_location_its_step_does_not_publish_is_refused_naming_the_published_ones() {
+    let start = HARMONIC_STUDY.find("    analysis harmonic").unwrap();
+    let source = format!(
+        "{}    analysis load {{ structural static {{}} }}\n    output moved = analysis.load.field.cell.displacement\n}}\n",
+        &HARMONIC_STUDY[..start]
+    );
+    let program = check(&source);
+    assert!(!program.is_valid());
+    let refusal = program
+        .diagnostics
+        .iter()
+        .find(|diagnostic| diagnostic.code == FIELD_LOCATION_CODE)
+        .unwrap_or_else(|| panic!("{:#?}", program.diagnostics));
+    assert!(refusal.message.contains("`node`"), "{}", refusal.message);
+    assert!(refusal.location.is_some());
+    // At the location the step publishes, the same output checks.
+    let program = check(&source.replace("field.cell.displacement", "field.node.displacement"));
+    assert!(program.is_valid(), "{:#?}", program.diagnostics);
+}

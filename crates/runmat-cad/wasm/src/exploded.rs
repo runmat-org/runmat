@@ -4,13 +4,17 @@
 //!
 //! ```json
 //! [{ "name": "service", "base": null,
-//!    "steps": [{ "id": "lift_top", "motion": "translate", "occurrences": ["body_top"] }],
+//!    "steps": [{ "id": "lift_top", "motion": "translate", "occurrences": ["body_top"],
+//!                "patterns": ["clips"], "mirrors": ["wing/rivets_port"] }],
 //!    "lines": [{ "id": "l1", "occurrence": "battery", "points": [[x, y, z], …] }],
 //!    "occurrences": [{ "uuid": "…", "path": "body_top", "transform": [r00 … r22, tx, ty, tz] }],
 //!    "diagnostics": ["…"] }]
 //! ```
 //!
-//! `occurrences` lists every moved occurrence (and its subtree) with its exploded world
+//! A step's `patterns` and `mirrors` name whole patterns and mirrors (the declaring assembly's
+//! path, then the name); both are empty when the step lists occurrences only.
+//!
+//! The view's `occurrences` lists every moved occurrence (and its subtree) with its exploded world
 //! transform in the display's layout: the rotation row by row, then the translation, in metres.
 //! Line points are in metres too. The canvas swaps each listed occurrence's transform for the
 //! exploded one while the view is shown.
@@ -21,7 +25,7 @@ use runmat_cad::assembly::explode::{
 use runmat_cad::assembly::resolve::ResolvedAssembly;
 use runmat_cad::assembly::source::{DesignSource, MemorySource};
 use runmat_cad::regen::kernel::Transform;
-use runmat_cad::units::StubUnits;
+use runmat_cad::units::Units;
 use runmat_cad::value::NoDynamicValues;
 use serde_json::{json, Value};
 
@@ -42,7 +46,7 @@ pub fn exploded_views(resolved: &ResolvedAssembly, source: &MemorySource) -> Val
         return json!([]);
     };
     let ctx = ExplodeContext {
-        units: &StubUnits,
+        units: &Units,
         dynamic: &NoDynamicValues,
         lock: None,
         source: Some(source),
@@ -66,6 +70,8 @@ pub fn exploded_views(resolved: &ResolvedAssembly, source: &MemorySource) -> Val
                         "id": s.id,
                         "motion": motion,
                         "occurrences": s.occurrences.iter().map(|o| o.to_string()).collect::<Vec<_>>(),
+                        "patterns": s.patterns.iter().map(|o| o.to_string()).collect::<Vec<_>>(),
+                        "mirrors": s.mirrors.iter().map(|o| o.to_string()).collect::<Vec<_>>(),
                     })
                 })
                 .collect();

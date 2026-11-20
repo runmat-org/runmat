@@ -40,6 +40,21 @@ pub fn krylov_workspace_bytes(method: KrylovMethod, n: usize, scalar_bytes: usiz
     (entries as u64) * scalar_bytes as u64
 }
 
+/// Memory the fill-reducing ordering of an `n`-row pattern with `nnz` stored entries allocates
+/// ([`crate::direct::symmetric_ordering`]). The symmetric adjacency is built from both directed
+/// copies of every entry (16 B per entry) and deduplicated into the graph's neighbor lists (8 B)
+/// with 4-byte edge weights; supervariable compression and nested dissection then work on a
+/// quotient no larger than that graph (12 B). Per row it holds about eight index words.
+///
+/// The process allocator keeps these freed blocks resident through a numeric factorization that
+/// follows, so a factorization's admission charges them beside the factor. Measured 2026-11-15 on
+/// a tet10 stiffness (658,635 rows, 53.3 M entries): 32 B per entry stayed resident.
+pub fn ordering_scratch_bytes(n: usize, nnz: usize) -> u64 {
+    (nnz as u64)
+        .saturating_mul(40)
+        .saturating_add((n as u64).saturating_add(1).saturating_mul(64))
+}
+
 /// Upper estimate of a smoothed-aggregation hierarchy: operator complexity ≤ 1.6 for scalar
 /// problems and ≤ 2.2 with rigid-body modes, plus prolongators of comparable size and level
 /// vectors. Includes the copy of the fine operator kept by the hierarchy.

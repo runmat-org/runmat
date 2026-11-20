@@ -518,7 +518,7 @@ pub fn layout(nl: &Netlist) -> SchematicIndex {
     if !sheets.iter().any(|(p, _)| p.depth() == 0) {
         sheets.insert(0, (NamePath::root(), nl.design.clone()));
     }
-    sheets.sort();
+    sheets.sort_by(|(a, x), (b, y)| a.natural_cmp(b).then_with(|| x.cmp(y)));
     let mut by_sheet: BTreeMap<&NamePath, Vec<usize>> = BTreeMap::new();
     for (c, s) in comp_sheet.iter().enumerate() {
         by_sheet.entry(s).or_default().push(c);
@@ -529,10 +529,13 @@ pub fn layout(nl: &Netlist) -> SchematicIndex {
         out.sheets
             .extend(page(nl, path, sheet_name, &sheets, &members, &net_sheets));
     }
-    // The hierarchy's order: by path text, an instance's pages together; then each title
-    // block's page count.
-    out.sheets
-        .sort_by(|a, b| (&a.path, a.page).cmp(&(&b.path, b.page)));
+    // The hierarchy's order (natural, so `c2` before `c10`), an instance's pages together; then
+    // each title block's page count.
+    out.sheets.sort_by(|a, b| {
+        NamePath::parse(&a.path)
+            .natural_cmp(&NamePath::parse(&b.path))
+            .then(a.page.cmp(&b.page))
+    });
     let count = out.sheets.len();
     for (k, s) in out.sheets.iter_mut().enumerate() {
         s.title_block

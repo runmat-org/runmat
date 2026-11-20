@@ -1,0 +1,483 @@
+//! Sketches in an assembly: started on an origin plane or a component's face, drawn with the
+//! part's sketch tools, and following the component when it moves.
+use super::tests::{compile, files, run, top, RIG};
+use crate::edit::edit_json;
+use serde_json::{json, Value};
+
+fn sketch(text: &str, plane: &str) -> String {
+    run(
+        text,
+        json!({ "command": "assembly.sketch", "values": { "plane": [plane] } }),
+    )
+}
+
+fn tool(text: &str, command: &str, values: Value) -> String {
+    run(text, json!({ "command": command, "values": values }))
+}
+
+fn frame_origin(display: &Value, id: &str) -> [f64; 3] {
+    let s = display["sketches"]
+        .as_array()
+        .unwrap_or_else(|| panic!("no sketches: {display}"))
+        .iter()
+        .find(|s| s["id"] == id)
+        .unwrap_or_else(|| panic!("no sketch {id}"));
+    let o = &s["frame"]["origin"];
+    [0, 1, 2].map(|i| o[i].as_f64().unwrap())
+}
+
+#[test]
+fn a_sketch_on_an_origin_plane_takes_lines_and_rectangles() {
+    let text = sketch(RIG, "origin:top");
+    assert!(text.contains("sketch sketch1 on origin.xy {"), "{text}");
+    let text = tool(
+        &text,
+        "sketch.line",
+        json!({ "sketch": "sketch1", "start": { "x": 0, "y": 0 }, "end": { "x": 40, "y": 0 } }),
+    );
+    let text = tool(
+        &text,
+        "sketch.rectangle",
+        json!({ "sketch": "sketch1", "type": "corner", "first": { "x": 5, "y": 5 }, "second": { "x": 15, "y": 12 } }),
+    );
+    assert!(
+        text.contains("l1 = line(start = [0 mm, 0 mm], end = [40 mm, 0 mm])"),
+        "{text}"
+    );
+    let c = compile(&text);
+    let drawn = &c.display["sketches"][0];
+    assert_eq!(drawn["id"], "sketch1");
+    assert_eq!(drawn["entities"].as_array().unwrap().len(), 5, "{drawn}");
+    let row = &c.index["sketches"][0];
+    assert_eq!(row["id"], "sketch1");
+    assert_eq!(row["plane"], "origin.xy");
+    // Its entities, which a mate picks as layout geometry.
+    assert_eq!(row["entities"][0], json!({ "id": "l1", "kind": "line" }));
+    assert_eq!(row["entities"].as_array().unwrap().len(), 5);
+}
+
+#[test]
+fn a_sketch_on_a_component_face_follows_the_component() {
+    let c = compile(RIG);
+    let text = sketch(RIG, &c.face("block", top));
+    assert!(
+        text.contains("sketch sketch1 on plane.block_c1 {"),
+        "{text}"
+    );
+    let text = tool(
+        &text,
+        "sketch.line",
+        json!({ "sketch": "sketch1", "start": { "x": 0, "y": 0 }, "end": { "x": 10, "y": 0 } }),
+    );
+    // The block sits at z = 40 mm and is 15 mm tall: its top is at 55 mm.
+    let before = frame_origin(&compile(&text).display, "sketch1");
+    assert!((before[2] - 0.055).abs() < 1e-6, "{before:?}");
+    let moved = text.replace("[30 mm, 10 mm, 40 mm]", "[30 mm, 10 mm, 70 mm]");
+    assert_ne!(moved, text);
+    let after = frame_origin(&compile(&moved).display, "sketch1");
+    assert!((after[2] - 0.085).abs() < 1e-6, "{after:?}");
+    assert!((after[0] - before[0]).abs() < 1e-9 && (after[1] - before[1]).abs() < 1e-9);
+}
+
+#[test]
+fn sketch_tools_need_an_open_sketch_of_the_assembly() {
+    let out: Value = serde_json::from_str(&edit_json(
+        "/p/rig.assembly",
+        RIG,
+        &files(),
+        &json!({ "command": "sketch.line", "values": { "sketch": "nope", "start": { "x": 0, "y": 0 }, "end": { "x": 1, "y": 0 } } }).to_string(),
+    ))
+    .unwrap();
+    assert_eq!(out["ok"], false);
+    assert!(
+        out["message"]
+            .as_str()
+            .unwrap()
+            .contains("no sketch `nope`"),
+        "{out}"
+    );
+}
+
+#[test]
+fn an_assembly_sketch_whose_connector_is_gone_says_so() {
+    let c = compile(RIG);
+    let text = sketch(RIG, &c.face("block", top));
+    let broken = text.replace(
+        "sketch sketch1 on plane.block_c1",
+        "sketch sketch1 on plane.missing",
+    );
+    let (index, _, problems) =
+        crate::runtime::compile_assembly("/p/rig.assembly", &broken, &files()).unwrap();
+    assert!(
+        problems
+            .iter()
+            .any(|d| d.message.contains("connector `missing`")),
+        "{problems:?}"
+    );
+    assert_eq!(index["sketches"][0]["status"], "failed");
+}
+
+#[test]
+fn a_selected_sketch_suppresses_and_deletes() {
+    let text = sketch(RIG, "origin.xy");
+    let suppressed = run(
+        &text,
+        json!({ "command": "assembly.suppress", "selection": ["feature:sketch1"] }),
+    );
+    assert!(suppressed.contains("suppressed = true"), "{suppressed}");
+    assert_eq!(
+        compile(&suppressed).index["sketches"][0]["status"],
+        "suppressed"
+    );
+    let deleted = run(
+        &text,
+        json!({ "command": "assembly.delete", "selection": ["feature:sketch1"] }),
+    );
+    assert!(!deleted.contains("sketch sketch1"), "{deleted}");
+}
+
+#[test]
+fn delete_on_picked_sketch_curves_removes_them_and_their_relations() {
+    let text = sketch(RIG, "origin.xy");
+    let text = tool(
+        &text,
+        "sketch.rectangle",
+        json!({ "sketch": "sketch1", "type": "corner", "first": { "x": 0, "y": 0 }, "second": { "x": 20, "y": 10 } }),
+    );
+    let deleted = run(
+        &text,
+        json!({ "command": "assembly.delete", "selection": ["sketch.sketch1.l1"] }),
+    );
+    assert!(!deleted.contains("l1 = line("), "{deleted}");
+    assert!(
+        !deleted.contains("(l1)") && !deleted.contains("l1."),
+        "{deleted}"
+    );
+    assert!(deleted.contains("l2 = line("), "{deleted}");
+    let c = compile(&deleted);
+    assert_eq!(
+        c.index["sketches"][0]["entities"].as_array().unwrap().len(),
+        3
+    );
+}
+
+#[test]
+fn an_assembly_sketch_reads_and_prints_in_the_part_sketch_form() {
+    let text = sketch(RIG, "origin.zx");
+    let text = tool(
+        &text,
+        "sketch.circle",
+        json!({ "sketch": "sketch1", "type": "center", "center": { "x": 10, "y": 5 }, "radius": 4 }),
+    );
+    let scope = crate::runtime::module_scope("/p/rig.assembly", &text, &files());
+    let parsed = runmat_cad::syntax::parse_assembly_in("/p/rig.assembly", &text, &scope);
+    let document = parsed.document.expect("parses");
+    assert_eq!(document.features.len(), 1);
+    let printed = runmat_cad::syntax::print_assembly(&document, &parsed.uses).unwrap();
+    assert!(
+        printed.contains("sketch sketch1 on origin.zx {"),
+        "{printed}"
+    );
+    let again = runmat_cad::syntax::parse_assembly_in("/p/rig.assembly", &printed, &scope);
+    assert_eq!(again.document.unwrap(), document);
+}
+
+fn round_face(f: &super::frames::Frame) -> bool {
+    f.kind == super::frames::FrameKind::Axis
+}
+
+#[test]
+fn a_sketch_circle_on_an_origin_plane_places_a_pin_and_moves_it_when_edited() {
+    let text = sketch(RIG, "origin:top");
+    let text = tool(
+        &text,
+        "sketch.circle",
+        json!({ "sketch": "sketch1", "type": "center", "center": { "x": 70, "y": 40 }, "radius": 5 }),
+    );
+    let c = compile(&text);
+    let text = run(
+        &text,
+        json!({ "command": "assembly.mate", "values": { "type": "concentric", "first": [c.face("pin", round_face)], "second": ["sketch.sketch1.c1"] } }),
+    );
+    assert!(
+        text.contains("anchor = sketch") && text.contains("entity = c1"),
+        "{text}"
+    );
+    let t = compile(&text).transform("pin");
+    assert!(
+        (t[9] - 0.070).abs() < 1e-6 && (t[10] - 0.040).abs() < 1e-6,
+        "{t:?}"
+    );
+    // The layout drives the mate: move the circle and the pin follows.
+    let moved = text.replace("center = [70 mm, 40 mm]", "center = [20 mm, 40 mm]");
+    assert_ne!(moved, text);
+    let t = compile(&moved).transform("pin");
+    assert!(
+        (t[9] - 0.020).abs() < 1e-6 && (t[10] - 0.040).abs() < 1e-6,
+        "{t:?}"
+    );
+}
+
+#[test]
+fn a_sketch_on_the_moving_component_cant_place_its_mates() {
+    let c = compile(RIG);
+    let text = sketch(RIG, &c.face("block", top));
+    let text = tool(
+        &text,
+        "sketch.point",
+        json!({ "sketch": "sketch1", "at": { "x": 5, "y": 5 } }),
+    );
+    let c = compile(&text);
+    let out: Value = serde_json::from_str(&edit_json(
+        "/p/rig.assembly",
+        &text,
+        &files(),
+        &json!({ "command": "assembly.mate", "values": { "type": "coincident", "first": ["sketch.sketch1.p1"], "second": [c.face("block", |f| f.kind == super::frames::FrameKind::Plane && f.z[2] < -0.99)] } }).to_string(),
+    ))
+    .unwrap();
+    assert_eq!(out["ok"], false, "{out}");
+    let message = out["message"].as_str().unwrap();
+    assert!(message.contains("can't follow its own sketch"), "{message}");
+}
+
+#[test]
+fn an_assembly_sketch_gives_its_closed_profile_to_assembly_features() {
+    let text = sketch(RIG, "origin:top");
+    let text = tool(
+        &text,
+        "sketch.rectangle",
+        json!({ "sketch": "sketch1", "type": "corner", "first": { "x": 5, "y": 5 }, "second": { "x": 15, "y": 12 } }),
+    );
+    let r = crate::runtime::resolve_assembly("/p/rig.assembly", &text, &files())
+        .unwrap_or_else(|d| panic!("{d:?}"));
+    let s = r.resolved.sketch("sketch1").expect("the sketch solved");
+    let loops = s.profile().expect("a profile");
+    assert_eq!(loops.len(), 1);
+    assert_eq!(loops[0].len(), 4);
+    assert!(r.resolved.sketch("nope").is_none());
+}
+
+/// The x and y of entity `id`'s point `role` in the drawn sketch `sketch`, in millimetres.
+fn drawn_point(display: &Value, sketch: &str, id: &str, role: &str) -> [f64; 2] {
+    let s = display["sketches"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|s| s["id"] == sketch)
+        .unwrap_or_else(|| panic!("no sketch {sketch}: {display}"));
+    let e = s["entities"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|e| e["id"] == id)
+        .unwrap_or_else(|| panic!("no {id}: {s}"));
+    let p = &e["points"][role];
+    let p = [p[0].as_f64().unwrap(), p[1].as_f64().unwrap()];
+    // The display may carry metres; read millimetres either way.
+    if p[0].abs() < 1.0 && p[1].abs() < 1.0 {
+        [p[0] * 1000.0, p[1] * 1000.0]
+    } else {
+        p
+    }
+}
+
+#[test]
+fn a_converted_edge_is_fixed_where_the_component_is_and_follows_it() {
+    let text = RIG.replace(
+        "    use part pin as pin2 {",
+        "    sketch layout on origin.xy {\n        c9 = circle(center = [0 mm, 0 mm], radius = 1 mm, from = published(occurrence = pin, name = rim))\n        l1 = line(start = [0 mm, 0 mm], end = [10 mm, 0 mm])\n    }\n    use part pin as pin2 {",
+    );
+    let c = compile(&text);
+    let at = drawn_point(&c.display, "layout", "c9", "center");
+    assert!(
+        (at[0] - 60.0).abs() < 1e-3 && (at[1] - 30.0).abs() < 1e-3,
+        "{at:?}"
+    );
+    let moved = text.replace("[60 mm, 30 mm, 25 mm]", "[15 mm, 35 mm, 25 mm]");
+    let at = drawn_point(&compile(&moved).display, "layout", "c9", "center");
+    assert!(
+        (at[0] - 15.0).abs() < 1e-3 && (at[1] - 35.0).abs() < 1e-3,
+        "{at:?}"
+    );
+    // It prints back as written.
+    let scope = crate::runtime::module_scope("/p/rig.assembly", &text, &files());
+    let parsed = runmat_cad::syntax::parse_assembly_in("/p/rig.assembly", &text, &scope);
+    let printed =
+        runmat_cad::syntax::print_assembly(&parsed.document.unwrap(), &parsed.uses).unwrap();
+    assert!(
+        printed.contains("from = published(occurrence = pin, name = rim)"),
+        "{printed}"
+    );
+}
+
+#[test]
+fn delete_on_a_picked_point_entity_removes_it_and_refuses_a_curve_end() {
+    let text = sketch(RIG, "origin.xy");
+    let text = tool(
+        &text,
+        "sketch.point",
+        json!({ "sketch": "sketch1", "at": { "x": 5, "y": 5 } }),
+    );
+    let text = tool(
+        &text,
+        "sketch.line",
+        json!({ "sketch": "sketch1", "start": { "x": 0, "y": 0 }, "end": { "x": 9, "y": 0 } }),
+    );
+    let deleted = run(
+        &text,
+        json!({ "command": "assembly.delete", "selection": ["sketch.sketch1.p1.at"] }),
+    );
+    assert!(!deleted.contains("p1 = point("), "{deleted}");
+    let out: Value = serde_json::from_str(&edit_json(
+        "/p/rig.assembly",
+        &text,
+        &files(),
+        &json!({ "command": "assembly.delete", "selection": ["sketch.sketch1.l1.end"] })
+            .to_string(),
+    ))
+    .unwrap();
+    assert_eq!(out["ok"], false, "{out}");
+}
+
+#[test]
+fn use_edges_projects_a_component_edge_that_follows_the_component() {
+    let text = sketch(RIG, "origin:top");
+    let c = compile(&text);
+    // The pin's top rim (part z = 30 mm), a circle of 5 mm about its axis.
+    let rim = c.edge("pin", |f| {
+        f.radius.is_some_and(|r| (r - 0.005).abs() < 1e-6) && f.origin[2] > 0.02
+    });
+    let text = tool(
+        &text,
+        "sketch.use-edges",
+        json!({ "sketch": "sketch1", "type": "project", "items": [rim] }),
+    );
+    assert!(
+        text.contains("c1 = circle(center = [60 mm, 30 mm], radius = 5 mm, from = published(occurrence = pin, name = mate_edge1))"),
+        "{text}"
+    );
+    // The pin's part publishes the edge it came from.
+    let pin = files()["/p/pin.part"].clone();
+    assert!(
+        pin.contains("publish mate_edge1 = entities(\n        kind = edge,"),
+        "{pin}"
+    );
+    // It follows the pin.
+    let moved = text.replace("[60 mm, 30 mm, 25 mm]", "[20 mm, 45 mm, 25 mm]");
+    let at = drawn_point(&compile(&moved).display, "sketch1", "c1", "center");
+    assert!(
+        (at[0] - 20.0).abs() < 1e-3 && (at[1] - 45.0).abs() < 1e-3,
+        "{at:?}"
+    );
+    // The other ways to use edges say they aren't built yet, by name.
+    let out: Value = serde_json::from_str(&edit_json(
+        "/p/rig.assembly",
+        &text,
+        &files(),
+        &json!({ "command": "sketch.use-edges", "values": { "sketch": "sketch1", "type": "silhouette", "items": [rim] } }).to_string(),
+    ))
+    .unwrap();
+    assert_eq!(out["ok"], false, "{out}");
+    assert!(
+        out["message"]
+            .as_str()
+            .unwrap_or_default()
+            .contains("silhouette"),
+        "{out}"
+    );
+}
+
+#[test]
+fn offset_of_a_component_edge_keeps_its_distance_when_the_component_moves() {
+    let text = sketch(RIG, "origin:top");
+    let c = compile(&text);
+    // The block's top edge along x at its front (block at [30, 10, 40] mm, 20 x 20 x 15 mm).
+    let front = c.edge("block", |f| {
+        f.radius.is_none() && f.z[0].abs() > 0.99 && f.origin[2] > 0.01 && f.origin[1].abs() < 1e-6
+    });
+    let text = tool(
+        &text,
+        "sketch.offset",
+        json!({ "sketch": "sketch1", "entities": [front], "distance": 5 }),
+    );
+    // The edge as construction, and its copy related to it.
+    assert!(
+        text.contains("construction, from = published(occurrence = block, name = mate_edge1)"),
+        "{text}"
+    );
+    assert!(text.contains("parallel(l1, l2)"), "{text}");
+    assert!(text.contains("distance(l2.start, l1) = 5 mm"), "{text}");
+    let y = |text: &str| drawn_point(&compile(text).display, "sketch1", "l2", "start")[1];
+    let before = y(&text);
+    assert!((before - 10.0).abs() > 4.99, "{before}");
+    let moved = text.replace("[30 mm, 10 mm, 40 mm]", "[30 mm, 25 mm, 40 mm]");
+    let after = y(&moved);
+    assert!((after - before - 15.0).abs() < 1e-3, "{before} → {after}");
+}
+
+#[test]
+fn check_sketch_finds_an_assembly_sketchs_open_ends_and_passes_a_closed_one() {
+    let text = sketch(RIG, "origin:top");
+    let open = tool(
+        &text,
+        "sketch.line",
+        json!({ "sketch": "sketch1", "start": { "x": 0, "y": 0 }, "end": { "x": 40, "y": 0 } }),
+    );
+    let check = |text: &str, values: Value, selection: Value| -> Value {
+        serde_json::from_str(&crate::analyze::analyze_json(
+            "/p/rig.assembly",
+            text,
+            &files(),
+            &json!({ "command": "sketch.check", "values": values, "selection": selection })
+                .to_string(),
+        ))
+        .unwrap()
+    };
+    let out = check(&open, json!({ "sketch": "sketch1" }), json!([]));
+    assert_eq!(out["ok"], true, "{out}");
+    assert_eq!(out["title"], "Check sketch");
+    let ends: Vec<&Value> = out["rows"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|r| r["cells"][0] == "Open end")
+        .collect();
+    assert_eq!(ends.len(), 2, "{out}");
+    assert_eq!(ends[0]["items"][0], "sketch.sketch1.l1");
+    assert_eq!(ends[0]["severity"], "error");
+    // A rectangle is ready; the sketch is found from the Outline's selection too.
+    let closed = tool(
+        &text,
+        "sketch.rectangle",
+        json!({ "sketch": "sketch1", "type": "corner", "first": { "x": 5, "y": 5 }, "second": { "x": 15, "y": 12 } }),
+    );
+    let out = check(&closed, json!({}), json!(["feature:sketch1"]));
+    assert_eq!(out["ok"], true, "{out}");
+    assert_eq!(
+        out["summary"], "Sketch sketch1 · 4 curves · 1 closed loop · ready for extrude",
+        "{out}"
+    );
+    assert!(out["rows"].as_array().unwrap().is_empty(), "{out}");
+}
+
+/// An assembly sketch's point fields take the origin and a clicked point too, placed on the
+/// sketch's plane.
+#[test]
+fn an_assembly_sketch_point_field_takes_the_origin_and_a_clicked_point() {
+    let text = sketch(RIG, "origin:top");
+    let text = tool(
+        &text,
+        "sketch.circle",
+        json!({ "sketch": "sketch1", "type": "center", "center": ["origin:point"], "radius": 4 }),
+    );
+    assert!(
+        text.contains("circle(center = [0 mm, 0 mm], radius = 4 mm)"),
+        "{text}"
+    );
+    let text = tool(
+        &text,
+        "sketch.point",
+        json!({ "sketch": "sketch1", "at": ["point(12 mm, -3 mm, 0 mm)"] }),
+    );
+    assert!(text.contains("point(at = [12 mm, -3 mm])"), "{text}");
+}

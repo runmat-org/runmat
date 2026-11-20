@@ -743,6 +743,20 @@ impl Session {
                 ),
                 diagnostics,
             })?;
+        let starts = self.board.is_none() && request.command == super::STARTS_BOARD;
+        let layout_path = self
+            .schematic
+            .as_ref()
+            .map(|s| layout_path_for(&s.circuit_path));
+        // The starter is given once: a starter that reads to no board refuses below, as before.
+        if let (true, Some(layout_path)) = (starts, layout_path.filter(|p| !files.contains_key(p)))
+        {
+            let s = self.schematic.as_ref().expect("synced");
+            let name = s.project.own.name.clone();
+            return super::with_starter_layout(files, &layout_path, &name, |files| {
+                self.edit(path, text, files, request)
+            });
+        }
         let Some(state) = self.board.as_mut() else {
             let s = self.schematic.as_ref().expect("synced");
             return Err(EditError::new(format!(
@@ -764,6 +778,7 @@ impl Session {
             let change = board_command_parsed(&state.path, &state.text, &state.parsed, &edit)
                 .map_err(failure)?;
             Ok(EditOutput {
+                report: None,
                 summary: format!("{} on {}", edit.command(), state.path),
                 files: vec![file_change(&state.path, &state.text, change)],
             })

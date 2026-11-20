@@ -27,8 +27,8 @@ pub use native_otel::{
     shutdown_otel_result, ExportStats,
 };
 
-#[cfg(not(target_arch = "wasm32"))]
-use tracing_subscriber::reload;
+mod level;
+pub use level::{LogLevelFilter, SharedLogLevel, TraceFeedFilter, TRACE_FEED_FLOOR};
 
 #[cfg(all(
     not(target_arch = "wasm32"),
@@ -91,11 +91,9 @@ static TRACE_HOOK: OnceCell<TraceHook> = OnceCell::new();
 #[cfg(not(any(feature = "otlp", feature = "browser-otlp")))]
 static FALLBACK_TRACE_ID: OnceCell<String> = OnceCell::new();
 static EVENT_ID_COUNTER: AtomicUsize = AtomicUsize::new(1);
-#[cfg(not(target_arch = "wasm32"))]
 type LogFilterReloader = Box<dyn Fn(&str) -> Result<(), String> + Send + Sync>;
 
 /// Reloads the filter of the subscriber that is actually installed process-wide.
-#[cfg(not(target_arch = "wasm32"))]
 static LOG_FILTER_RELOADER: OnceCell<LogFilterReloader> = OnceCell::new();
 
 pub struct LoggingGuard {
@@ -134,7 +132,6 @@ impl Drop for LoggingGuard {
 
 /// Lets a host that owns the global subscriber serve `update_log_filter`.
 /// The first registration wins.
-#[cfg(not(target_arch = "wasm32"))]
 pub fn set_log_filter_reloader<F>(reloader: F)
 where
     F: Fn(&str) -> Result<(), String> + Send + Sync + 'static,
@@ -142,13 +139,25 @@ where
     let _ = LOG_FILTER_RELOADER.set(Box::new(reloader));
 }
 
-/// The layer that forwards events to the runtime log and trace hooks, for hosts
-/// that build their own subscriber instead of calling [`init_logging`].
-pub fn runtime_bridge_layer<S>(enable_traces: bool, pid: i64) -> impl Layer<S>
+/// The layer that forwards events to the runtime log hook, for hosts that build
+/// their own subscriber instead of calling [`init_logging`]. Put it under
+/// [`SharedLogLevel::log_filter`] as a per-layer filter.
+pub fn runtime_log_bridge_layer<S>() -> impl Layer<S>
 where
     S: Subscriber + for<'a> tracing_subscriber::registry::LookupSpan<'a>,
 {
-    LogBridgeLayer.and_then(enable_traces.then_some(TraceBridgeLayer { pid }))
+    LogBridgeLayer
+}
+
+/// The layer that forwards spans and events to the runtime trace hook. It records
+/// what `level` allows and always INFO and above, so a quiet log level keeps a run's
+/// spans and "debug" or "trace" adds the detailed ones. Hosts add it beside their log
+/// layers, outside the log feed's filter, with the same [`SharedLogLevel`].
+pub fn runtime_trace_bridge_layer<S>(pid: i64, level: &SharedLogLevel) -> impl Layer<S>
+where
+    S: Subscriber + for<'a> tracing_subscriber::registry::LookupSpan<'a>,
+{
+    TraceBridgeLayer { pid }.with_filter(level.trace_filter())
 }
 
 #[derive(Clone, Default)]
@@ -238,82 +247,60 @@ fn init_logging_impl(
         .unwrap_or_else(|_| EnvFilter::new(fallback_filter));
 
     let build_subscriber = || {
-        let bridge_layer = LogBridgeLayer;
-        let trace_layer = if opts.enable_traces {
-            Some(TraceBridgeLayer { pid: opts.pid })
-        } else {
-            None
-        };
-
         #[cfg(not(target_arch = "wasm32"))]
-        {
-            let (filter_layer, filter_handle) = reload::Layer::new(env_filter.clone());
-            let subscriber = tracing_subscriber::registry()
-                .with(filter_layer)
-                .with(file_sink.as_ref().map(|sink| {
-                    tracing_subscriber::fmt::layer()
-                        .with_ansi(false)
-                        .with_writer(sink.clone())
-                        .log_internal_errors(false)
-                        .with_span_events(
-                            tracing_subscriber::fmt::format::FmtSpan::NEW
-                                | tracing_subscriber::fmt::format::FmtSpan::CLOSE,
-                        )
-                }))
-                .with(bridge_layer)
-                .with(trace_layer.clone());
-            (subscriber, Some(filter_handle))
-        }
-
+        let file_layer = file_sink.as_ref().map(|sink| {
+            tracing_subscriber::fmt::layer()
+                .with_ansi(false)
+                .with_writer(sink.clone())
+                .log_internal_errors(false)
+                .with_span_events(
+                    tracing_subscriber::fmt::format::FmtSpan::NEW
+                        | tracing_subscriber::fmt::format::FmtSpan::CLOSE,
+                )
+        });
         #[cfg(target_arch = "wasm32")]
-        {
-            let subscriber = tracing_subscriber::registry()
-                .with(env_filter.clone())
-                .with(bridge_layer)
-                .with(trace_layer.clone());
-            (subscriber, None::<()>)
-        }
+        let file_layer: Option<tracing_subscriber::layer::Identity> = None;
+
+        #[cfg(all(feature = "otlp", not(target_arch = "wasm32")))]
+        let collector_layer = opts.enable_otlp.then(otel_layer).flatten();
+        #[cfg(all(feature = "browser-otlp", target_arch = "wasm32"))]
+        let collector_layer = opts
+            .enable_otlp
+            .then(browser_otel::browser_otel_layer)
+            .flatten();
+        #[cfg(not(any(
+            all(feature = "otlp", not(target_arch = "wasm32")),
+            all(feature = "browser-otlp", target_arch = "wasm32")
+        )))]
+        let collector_layer: Option<tracing_subscriber::layer::Identity> = None;
+
+        // The log level (default filter, RUST_LOG/RUNMAT_LOG, update_log_filter) selects
+        // the log feed, the file and the collector export. The trace feed takes the same
+        // level with an INFO floor, so a quiet log level never empties a run's spans.
+        let level = SharedLogLevel::new(env_filter.clone());
+        let log_layers = runtime_log_bridge_layer()
+            .and_then(file_layer)
+            .and_then(collector_layer)
+            .with_filter(level.log_filter());
+        let trace_layer = opts
+            .enable_traces
+            .then(|| runtime_trace_bridge_layer(opts.pid, &level));
+        let subscriber = tracing_subscriber::registry()
+            .with(log_layers)
+            .with(trace_layer);
+        (subscriber, level)
     };
 
-    let (subscriber, filter_handle) = build_subscriber();
-
-    #[cfg(all(feature = "otlp", not(target_arch = "wasm32")))]
-    let subscriber = { subscriber.with(opts.enable_otlp.then(otel_layer).flatten()) };
-    #[cfg(all(feature = "browser-otlp", target_arch = "wasm32"))]
-    let subscriber = subscriber.with(
-        opts.enable_otlp
-            .then(browser_otel::browser_otel_layer)
-            .flatten(),
-    );
+    let (subscriber, level) = build_subscriber();
 
     let guard = match tracing::subscriber::set_global_default(subscriber) {
         Ok(()) => {
-            // Only the installed subscriber's handle is live; a dropped one reports
-            // "subscriber no longer exists" on every reload.
-            #[cfg(not(target_arch = "wasm32"))]
-            if let Some(handle) = filter_handle {
-                set_log_filter_reloader(move |spec| {
-                    let filter = EnvFilter::try_new(spec).map_err(|err| err.to_string())?;
-                    handle.reload(filter).map_err(|err| err.to_string())
-                });
-            }
-            #[cfg(target_arch = "wasm32")]
-            let _ = filter_handle;
+            // Only the installed subscriber's level is live.
+            set_log_filter_reloader(move |spec| level.set(spec));
             None
         }
         Err(_) if global_only => return Err("Another tracing subscriber is already installed; configured file logging was not activated".into()),
-        Err(_) => {
-            let subscriber = build_subscriber().0;
-            #[cfg(all(feature = "otlp", not(target_arch = "wasm32")))]
-            let subscriber = subscriber.with(opts.enable_otlp.then(otel_layer).flatten());
-            #[cfg(all(feature = "browser-otlp", target_arch = "wasm32"))]
-            let subscriber = subscriber.with(
-                opts.enable_otlp
-                    .then(browser_otel::browser_otel_layer)
-                    .flatten(),
-            );
-            Some(tracing::subscriber::set_default(subscriber))
-        }
+        Err(_) => Some(tracing::subscriber::set_default(build_subscriber().0)),
     };
 
     Ok(LoggingGuard {
@@ -337,17 +324,11 @@ pub fn shutdown_otel() {
 #[cfg(any(not(feature = "otlp"), target_arch = "wasm32"))]
 pub fn shutdown_otel() {}
 
-#[cfg(not(target_arch = "wasm32"))]
 pub fn update_log_filter(spec: &str) -> Result<(), String> {
     let reload = LOG_FILTER_RELOADER
         .get()
         .ok_or_else(|| "log filter handle not initialised".to_string())?;
     reload(spec)
-}
-
-#[cfg(target_arch = "wasm32")]
-pub fn update_log_filter(_spec: &str) -> Result<(), String> {
-    Err("runtime log filtering is not yet supported in wasm builds".to_string())
 }
 
 pub fn with_signal_trace<T>(trace_id: Option<&str>, name: &str, f: impl FnOnce() -> T) -> T {
@@ -436,6 +417,22 @@ fn now_timestamp_micros() -> i64 {
     chrono::Utc::now().timestamp_micros()
 }
 
+/// What an event without a message is called in the log and trace feeds. An event macro without a
+/// `name:` is named `event <source file>:<line>`, which holds the build machine's path; such an
+/// event is called by its target instead. A name the macro set is kept.
+fn event_label(meta: &tracing::Metadata<'_>) -> String {
+    let name = meta.name();
+    let generated = match (meta.file(), meta.line()) {
+        (Some(file), Some(line)) => name == format!("event {file}:{line}"),
+        _ => false,
+    };
+    if generated {
+        meta.target().to_string()
+    } else {
+        name.to_string()
+    }
+}
+
 impl<S> Layer<S> for LogBridgeLayer
 where
     S: Subscriber + for<'a> tracing_subscriber::registry::LookupSpan<'a>,
@@ -465,7 +462,7 @@ where
             target: event.metadata().target().to_string(),
             message: visitor
                 .message
-                .unwrap_or_else(|| event.metadata().name().to_string()),
+                .unwrap_or_else(|| event_label(event.metadata())),
             trace_id,
             span_id,
             fields: visitor
@@ -539,11 +536,7 @@ impl<S> Layer<S> for TraceBridgeLayer
 where
     S: Subscriber + for<'a> tracing_subscriber::registry::LookupSpan<'a>,
 {
-    fn on_event(
-        &self,
-        event: &tracing::Event<'_>,
-        _ctx: tracing_subscriber::layer::Context<'_, S>,
-    ) {
+    fn on_event(&self, event: &tracing::Event<'_>, ctx: tracing_subscriber::layer::Context<'_, S>) {
         // Only emit trace events if a hook is set
         let hook = match TRACE_HOOK.get() {
             Some(h) => h,
@@ -554,7 +547,7 @@ where
         let ts = now_timestamp_micros();
 
         let trace_id = current_trace_id();
-        let parent_span_id = current_span_id();
+        let parent_span_id = ctx.event_span(event).and_then(|span| feed_span_id(&span));
         let span_id = Some(next_event_span_id());
 
         let mut visitor = JsonVisitor::default();
@@ -568,7 +561,7 @@ where
             .map(JsonValue::Object);
 
         let ev = TraceEvent {
-            name: visitor.message.unwrap_or_else(|| meta.name().to_string()),
+            name: visitor.message.unwrap_or_else(|| event_label(meta)),
             cat: meta.target().to_string(),
             ph: "i".to_string(), // instant event
             ts,
@@ -584,64 +577,112 @@ where
         hook(&[ev]);
     }
 
-    fn on_enter(&self, id: &tracing::span::Id, ctx: tracing_subscriber::layer::Context<'_, S>) {
-        if TRACE_HOOK.get().is_none() {
+    // A span begins when it is created and ends when it closes. Async spans are
+    // entered and exited at every poll, so enter/exit would split one span into
+    // many pairs.
+    fn on_new_span(
+        &self,
+        attrs: &tracing::span::Attributes<'_>,
+        id: &tracing::span::Id,
+        ctx: tracing_subscriber::layer::Context<'_, S>,
+    ) {
+        let Some(hook) = TRACE_HOOK.get() else {
             return;
-        }
+        };
+        let Some(span) = ctx.span(id) else {
+            return;
+        };
+        let mut visitor = JsonVisitor::default();
+        attrs.record(&mut visitor);
+        let feed = FeedSpan {
+            id: format!("s-{}", FEED_SPAN_COUNTER.fetch_add(1, Ordering::Relaxed)),
+            parent: span.parent().and_then(|parent| feed_span_id(&parent)),
+            fields: visitor,
+        };
+        hook(&[feed.event(span.metadata(), "B", self.pid)]);
+        span.extensions_mut().insert(feed);
+    }
+
+    fn on_record(
+        &self,
+        id: &tracing::span::Id,
+        values: &tracing::span::Record<'_>,
+        ctx: tracing_subscriber::layer::Context<'_, S>,
+    ) {
         if let Some(span) = ctx.span(id) {
-            emit_span_event(span, "B", self.pid);
+            if let Some(feed) = span.extensions_mut().get_mut::<FeedSpan>() {
+                values.record(&mut feed.fields);
+            }
         }
     }
 
-    fn on_exit(&self, id: &tracing::span::Id, ctx: tracing_subscriber::layer::Context<'_, S>) {
-        if TRACE_HOOK.get().is_none() {
+    fn on_close(&self, id: tracing::span::Id, ctx: tracing_subscriber::layer::Context<'_, S>) {
+        let Some(hook) = TRACE_HOOK.get() else {
             return;
-        }
-        if let Some(span) = ctx.span(id) {
-            emit_span_event(span, "E", self.pid);
+        };
+        let Some(span) = ctx.span(&id) else {
+            return;
+        };
+        let event = span
+            .extensions()
+            .get::<FeedSpan>()
+            .map(|feed| feed.event(span.metadata(), "E", self.pid));
+        if let Some(event) = event {
+            hook(&[event]);
         }
     }
 }
 
-fn emit_span_event<S>(span: tracing_subscriber::registry::SpanRef<'_, S>, phase: &str, pid: i64)
+/// The trace feed's identity for one span. The registry reuses a span's id once
+/// the span closes, so the feed numbers spans itself; otherwise a later span
+/// would join an earlier, unrelated one.
+struct FeedSpan {
+    id: String,
+    parent: Option<String>,
+    fields: JsonVisitor,
+}
+
+static FEED_SPAN_COUNTER: AtomicUsize = AtomicUsize::new(1);
+
+impl FeedSpan {
+    fn event(&self, meta: &tracing::Metadata<'_>, phase: &str, pid: i64) -> TraceEvent {
+        let mut args = self
+            .fields
+            .fields
+            .as_ref()
+            .and_then(|v| v.as_object())
+            .cloned()
+            .unwrap_or_default();
+        if let Some(message) = &self.fields.message {
+            args.insert("message".to_owned(), JsonValue::String(message.clone()));
+        }
+        TraceEvent {
+            name: meta.name().to_string(),
+            cat: meta.target().to_string(),
+            ph: phase.to_string(),
+            ts: now_timestamp_micros(),
+            dur: None,
+            pid: Some(pid),
+            tid: None,
+            trace_id: current_trace_id(),
+            span_id: Some(self.id.clone()),
+            parent_span_id: self.parent.clone(),
+            args: (!args.is_empty()).then_some(JsonValue::Object(args)),
+        }
+    }
+}
+
+fn feed_span_id<S>(span: &tracing_subscriber::registry::SpanRef<'_, S>) -> Option<String>
 where
     S: Subscriber + for<'a> tracing_subscriber::registry::LookupSpan<'a>,
 {
-    let hook = match TRACE_HOOK.get() {
-        Some(h) => h,
-        None => return,
-    };
-    let meta = span.metadata();
-    let ts = now_timestamp_micros();
-
-    let trace_id = current_trace_id();
-    let span_id = Some(span.id().clone().into_u64().to_string());
-    let parent_span_id = span
-        .parent()
-        .map(|parent| parent.id().clone().into_u64().to_string());
-
-    let ev = TraceEvent {
-        name: meta.name().to_string(),
-        cat: meta.target().to_string(),
-        ph: phase.to_string(),
-        ts,
-        dur: None,
-        pid: Some(pid),
-        tid: None,
-        trace_id,
-        span_id,
-        parent_span_id,
-        args: None,
-    };
-    hook(&[ev]);
+    span.extensions()
+        .get::<FeedSpan>()
+        .map(|feed| feed.id.clone())
 }
 
 fn current_trace_id() -> Option<String> {
     current_trace_span_ids().0
-}
-
-fn current_span_id() -> Option<String> {
-    current_trace_span_ids().1
 }
 
 #[cfg(any(feature = "otlp", feature = "browser-otlp"))]

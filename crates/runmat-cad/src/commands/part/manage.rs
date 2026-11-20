@@ -37,8 +37,8 @@ pub(super) fn manage() -> Vec<CommandDescriptor> {
             "settings",
             P,
         )
-        .desc("Units, drafting standard and default tolerances.")
-        .kw(&["units", "standard", "tolerance"])
+        .desc("Units and decimals for readouts, the drafting standard and the general tolerance.")
+        .kw(&["units", "standard", "tolerance", "decimals", "iso 2768"])
         .inputs(vec![
             choice(
                 "units",
@@ -49,28 +49,32 @@ pub(super) fn manage() -> Vec<CommandDescriptor> {
                     ("ips", "Inch, pound, second"),
                 ],
             ),
+            count("decimals", "Decimals", 2, 0)
+                .help("Decimal places in mass properties and Measure readouts"),
             choice(
                 "standard",
-                "Standard",
-                &[
-                    ("iso", "ISO"),
-                    ("ansi", "ANSI"),
-                    ("din", "DIN"),
-                    ("jis", "JIS"),
-                ],
-            ),
+                "Drafting standard",
+                &[("iso", "ISO"), ("asme", "ASME Y14.5")],
+            )
+            .help("The standard the part's 3D annotations follow"),
             choice(
-                "tolerance_class",
+                "tolerance",
                 "General tolerance",
                 &[
-                    ("m", "ISO 2768-m"),
-                    ("f", "ISO 2768-f"),
-                    ("c", "ISO 2768-c"),
+                    ("none", "None"),
+                    ("fine", "ISO 2768-f (fine)"),
+                    ("medium", "ISO 2768-m (medium)"),
+                    ("coarse", "ISO 2768-c (coarse)"),
+                    ("very_coarse", "ISO 2768-v (very coarse)"),
                 ],
-            ),
-            count("decimals", "Decimals", 2, 0),
+            )
+            .help("For dimensions written without a tolerance; Measure lists it beside a distance"),
         ])
         .edit(edit(EditOp::Set, Section::Settings).item("document")),
+        cmd("manage.release", "Release", "release", P)
+            .desc("Save this part as its next released revision, for assemblies to pin to.")
+            .kw(&["revision", "release", "freeze", "version"])
+            .edit(edit(EditOp::Set, Section::Settings).item("release")),
         cmd("manage.find-references", "Find references", "references", P)
             .desc("List the assemblies, drawings and studies that use this part.")
             .kw(&["where used", "where-used"])
@@ -81,10 +85,31 @@ pub(super) fn manage() -> Vec<CommandDescriptor> {
             "replace",
             P,
         )
-        .desc("Point a reference at another file or entity.")
+        .desc("Point the features that use a face, edge, body, plane or sketch at another one.")
+        .kw(&[
+            "re-reference",
+            "redirect",
+            "swap reference",
+            "edit reference",
+        ])
         .inputs(vec![
-            pick("reference", "Reference", &[K::Feature, K::Input]),
-            text("with", "Replace with", Some("other.part")),
+            pick(
+                "reference",
+                "Reference",
+                &[K::Face, K::Edge, K::Vertex, K::Body, K::Plane, K::Sketch],
+            )
+            .help("What the features use now; the summary lists every feature that uses it"),
+            pick(
+                "with",
+                "Replace with",
+                &[K::Face, K::Edge, K::Vertex, K::Body, K::Plane, K::Sketch],
+            ),
+            radio(
+                "scope",
+                "Replace",
+                &[("all", "Every use"), ("one", "In one feature")],
+            ),
+            pick("feature", "Feature", &[K::Feature, K::Sketch]).shown("scope", &["one"]),
         ])
         .edit(edit(EditOp::Edit, Section::Features).item("reference")),
         cmd("manage.freeze-bar", "Freeze bar", "freeze", P)
@@ -183,11 +208,18 @@ pub(super) fn manage() -> Vec<CommandDescriptor> {
             "recognize",
             P,
         )
-        .desc("Turn an imported body into editable features.")
-        .kw(&["feature recognition", "convert"])
+        .desc("Turn an imported body into a sketch, extrude, cuts, holes, rounds and chamfers.")
+        .kw(&[
+            "feature recognition",
+            "convert",
+            "step to features",
+            "defeature",
+        ])
         .inputs(vec![
-            pick("body", "Body", &[K::Body]),
-            flag("interactive", "Pick features one at a time", false),
+            pick("body", "Body", &[K::Body])
+                .help("A body a STEP import made; it is converted whole or left as it is"),
+            length("tolerance", "Match tolerance", 0.01)
+                .help("How far the rebuilt faces may lie from the imported ones"),
         ])
         .when(bodies_exist())
         .edit(edit(EditOp::Edit, Section::Features).item("recognize")),
@@ -214,11 +246,13 @@ pub(super) fn manage() -> Vec<CommandDescriptor> {
 pub(super) fn tree_actions() -> Vec<CommandDescriptor> {
     let f = &[K::Feature, K::Sketch];
     vec![
+        // The canvas runs it: Properties opens on the feature with its inputs editable, and
+        // each change there is a `part.set-property` edit.
         cmd("part.edit-feature", "Edit feature", "edit", P)
             .desc("Open the feature's inputs in Properties.")
             .when(selected_one(f))
             .on(f)
-            .edit(edit(EditOp::Edit, Section::Features)),
+            .edit(view_action("edit_feature")),
         cmd("part.edit-sketch", "Edit sketch", "sketch", P)
             .desc("Open the sketch for editing.")
             .when(selected_one(&[K::Sketch, K::Feature]))
@@ -288,20 +322,28 @@ pub(super) fn tree_actions() -> Vec<CommandDescriptor> {
             .when(selected(&[
                 K::Feature,
                 K::Sketch,
+                K::SketchEntity,
+                K::SketchPoint,
                 K::Region,
+                K::Representation,
                 K::Input,
                 K::Plane,
                 K::MateConnector,
                 K::Annotation,
+                K::View,
             ]))
             .on(&[
                 K::Feature,
                 K::Sketch,
+                K::SketchEntity,
+                K::SketchPoint,
                 K::Region,
+                K::Representation,
                 K::Input,
                 K::Plane,
                 K::MateConnector,
                 K::Annotation,
+                K::View,
             ])
             .edit(edit(EditOp::Remove, Section::Features)),
     ]

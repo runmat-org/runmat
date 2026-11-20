@@ -3,7 +3,7 @@
 //! Follows `research/12-values-and-resolution.md` design A in outline: a value is static (a
 //! quantity literal, a reference to an input or let, an expression, a tolerance) or dynamic (a
 //! pure function call evaluated through [`DynamicValueEvaluator`]). Units go through the
-//! [`UnitAuthority`] seam.
+//! [`Units`](crate::units::Units) authority (`runmat-types::physical`).
 //!
 //! The owner questions in report 12 §6 are bookmarked; each default is one field of
 //! [`VALUE_CHOICES`], so a different answer is a one-line change that every consumer
@@ -12,7 +12,7 @@
 use crate::ids::{FilePath, InputName, LetName, PublishName};
 use crate::refs::publish::XrefProblem;
 use crate::refs::reference::XrefContext;
-use crate::units::{Dimension, QuantityKindId, UnitAuthority};
+use crate::units::{Dimension, QuantityKindId, Units};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::cell::RefCell;
@@ -164,7 +164,25 @@ impl<'de> Deserialize<'de> for ValueExpr {
         if let Some(number) = value.as_f64().filter(|_| value.is_number()) {
             return Ok(ValueExpr::Number { value: number });
         }
+        // A bare word where a value belongs (`distance = thickness`) lowers as a plain string;
+        // say what to write instead of the deserializer's "expected internally tagged enum".
+        if let Some(word) = value.as_str() {
+            return Err(serde::de::Error::custom(bare_word_message(word)));
+        }
         ValueExprForm::deserialize(value).map_err(serde::de::Error::custom)
+    }
+}
+
+/// What a bare word where a value belongs should have been: an input (`input.<name>`) or a let
+/// (`let.<name>`), or a quantity with its unit.
+fn bare_word_message(word: &str) -> String {
+    let is_name = !word.is_empty()
+        && word.chars().all(|c| c.is_ascii_alphanumeric() || c == '_')
+        && !word.starts_with(|c: char| c.is_ascii_digit());
+    if is_name {
+        format!("`{word}` is not a value here: write `input.{word}` for an input or `let.{word}` for a let")
+    } else {
+        format!("`{word}` is not a value here: write a number with its unit (`5 mm`), `input.<name>` or `let.<name>`")
     }
 }
 
@@ -343,6 +361,7 @@ impl ValueExpr {
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Quantity {
     pub si: f64,
+    #[serde(with = "crate::units::wire")]
     pub dimension: Dimension,
 }
 
@@ -389,6 +408,105 @@ pub struct LetDecl {
     pub value: ValueExpr,
 }
 
+/// How a mismatched value was written: with a unit, as a plain number, or as an expression.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case", tag = "written")]
+pub enum Written {
+    Unit { unit: String },
+    Number,
+    Computed,
+}
+
+impl Written {
+    /// The unit `expr` was written in, when one literal carries it.
+    pub fn of(expr: &ValueExpr) -> Written {
+        match expr {
+            ValueExpr::Quantity { unit, .. } | ValueExpr::Coerce { unit, .. } => {
+                Written::Unit { unit: unit.clone() }
+            }
+            ValueExpr::Number { .. } => Written::Number,
+            ValueExpr::Neg { operand } => Written::of(operand),
+            ValueExpr::Toleranced { nominal, .. } => Written::of(nominal),
+            _ => Written::Computed,
+        }
+    }
+}
+
+/// The shared wrong-unit message for a value at `subject` (`the value` when unknown).
+pub fn unit_mismatch_text(
+    subject: Option<&str>,
+    expected: Dimension,
+    found: Dimension,
+    written: &Written,
+) -> runmat_types::physical::UnitMismatchMessage {
+    use runmat_types::physical::{unit_mismatch_message, FoundUnit};
+    let found = match written {
+        Written::Unit { unit } => FoundUnit::Authored(unit, found),
+        Written::Number if found.is_dimensionless() => FoundUnit::Missing,
+        _ => FoundUnit::Computed(found),
+    };
+    unit_mismatch_message(subject.unwrap_or("the value"), expected, found)
+}
+
+/// What a dimension measures (`length`), for messages that name a kind.
+pub fn kind_name(dimension: Dimension) -> &'static str {
+    runmat_types::physical::unit_kind(dimension.dimension(), dimension.angle_power())
+        .map(|row| row.kind)
+        .unwrap_or("physical quantity")
+}
+
+/// A dimension's coherent SI unit (`m`), or empty for a plain number or one outside the table.
+pub fn si_symbol(dimension: Dimension) -> &'static str {
+    runmat_types::physical::unit_kind(dimension.dimension(), dimension.angle_power())
+        .map(|row| row.si_example)
+        .filter(|unit| *unit != "1")
+        .unwrap_or("")
+}
+
+/// A value as editors show it (hover, Properties, Outline): `written`'s own text when it is a
+/// unit literal that evaluated to `q` (`0.25 in` stays `0.25 in`), else `q` in its kind's
+/// display unit ([`runmat_types::physical::display_quantity`]). Conversion is for checking and
+/// computing only.
+pub fn display_value(written: &ValueExpr, q: &Quantity) -> String {
+    written_literal(written, q)
+        .unwrap_or_else(|| runmat_types::physical::display_quantity(q.si, q.dimension))
+}
+
+/// `written`'s own text when it is a literal that evaluated to `q` (`0.25 in`, a plain `3` for
+/// a count), else `None`: the value was computed.
+pub fn written_literal(written: &ValueExpr, q: &Quantity) -> Option<String> {
+    use runmat_types::physical::quantity_text;
+    let literal = match written {
+        ValueExpr::Toleranced { nominal, .. } => nominal.as_ref(),
+        other => other,
+    };
+    match literal {
+        ValueExpr::Quantity { value, unit } => {
+            let matches = crate::units::Units
+                .unit(unit)
+                .and_then(|u| u.to_canonical(*value).ok())
+                .is_some_and(|si| si.to_bits() == q.si.to_bits());
+            matches.then(|| quantity_text(*value, unit))
+        }
+        ValueExpr::Number { value } if q.dimension.is_dimensionless() && *value == q.si => {
+            Some(quantity_text(*value, ""))
+        }
+        _ => None,
+    }
+}
+
+impl ValueError {
+    /// Names the field a unit mismatch fills, when the evaluator left it open.
+    pub fn with_subject(mut self, name: &str) -> Self {
+        if let ValueError::UnitMismatch { subject, .. } = &mut self {
+            if subject.is_none() {
+                *subject = Some(name.to_owned());
+            }
+        }
+        self
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, Error, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case", tag = "error")]
 pub enum ValueError {
@@ -400,8 +518,22 @@ pub enum ValueError {
     UnresolvedInput { name: String },
     #[error("unresolved value `{name}`")]
     UnresolvedLet { name: String },
-    #[error("unit mismatch: expected {expected}, found {found}")]
-    UnitMismatch { expected: String, found: String },
+    /// A value whose unit measures something other than what its place needs. The message is
+    /// the shared one ([`runmat_types::physical::unit_mismatch_message`]).
+    #[error("{}", unit_mismatch_text(.subject.as_deref(), *.expected, *.found, .written).message)]
+    UnitMismatch {
+        /// The field or name the value fills (`distance`, `thickness`); the diagnostic's site
+        /// supplies it when the evaluator doesn't know it.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        subject: Option<String>,
+        #[serde(with = "crate::units::wire")]
+        expected: Dimension,
+        #[serde(with = "crate::units::wire")]
+        found: Dimension,
+        written: Written,
+    },
+    #[error("a value's units multiply past the supported exponents")]
+    DimensionOverflow,
     #[error("`{name}` = {value} is outside its declared range")]
     OutOfRange { name: String, value: String },
     #[error("dynamic value `{function}` failed: {message}")]
@@ -514,7 +646,10 @@ pub fn dynamic_cache_key(
     for (n, q) in args {
         part(n.as_bytes());
         part(&q.si.to_bits().to_be_bytes());
-        part(&serde_json::to_vec(&q.dimension).expect("dimension serialises"));
+        part(
+            &serde_json::to_vec(&crate::units::wire::to_wire(q.dimension))
+                .expect("dimension serialises"),
+        );
     }
     for (path, digest) in &contract.reads {
         part(path.as_bytes());
@@ -674,11 +809,60 @@ pub struct ValueEnv {
 }
 
 pub struct Evaluator<'a> {
-    pub units: &'a dyn UnitAuthority,
+    pub units: &'a Units,
     pub dynamic: &'a dyn DynamicValueEvaluator,
 }
 
 impl<'a> Evaluator<'a> {
+    /// [`Evaluator::eval`] for a value checked against its kind: a literal's unit is read
+    /// expecting that kind, so a mass input's `0.35 g` is grams. Sums and negations pass the
+    /// kind to their operands; anything else evaluates as usual.
+    pub fn eval_expecting(
+        &self,
+        expr: &ValueExpr,
+        env: &ValueEnv,
+        expected: crate::units::Dimension,
+    ) -> Result<Quantity, ValueError> {
+        match expr {
+            ValueExpr::Quantity { value, unit } => {
+                let Some(info) = self.units.unit_expecting(unit, expected) else {
+                    return self.eval(expr, env);
+                };
+                let si = info
+                    .to_canonical(*value)
+                    .map_err(|_| ValueError::UnknownUnit { unit: unit.clone() })?;
+                Ok(Quantity::new(si, crate::units::dimension_of(&info)))
+            }
+            ValueExpr::Neg { operand } => {
+                let v = self.eval_expecting(operand, env, expected)?;
+                Ok(Quantity::new(-v.si, v.dimension))
+            }
+            ValueExpr::Binary {
+                op: op @ (BinaryOp::Add | BinaryOp::Sub),
+                lhs,
+                rhs,
+            } => {
+                let (a, b) = (
+                    self.eval_expecting(lhs, env, expected)?,
+                    self.eval_expecting(rhs, env, expected)?,
+                );
+                if a.dimension != b.dimension {
+                    // The usual reading reports the mismatch.
+                    return self.eval(expr, env);
+                }
+                Ok(Quantity::new(
+                    if *op == BinaryOp::Add {
+                        a.si + b.si
+                    } else {
+                        a.si - b.si
+                    },
+                    a.dimension,
+                ))
+            }
+            _ => self.eval(expr, env),
+        }
+    }
+
     pub fn eval(&self, expr: &ValueExpr, env: &ValueEnv) -> Result<Quantity, ValueError> {
         match expr {
             ValueExpr::Quantity { value, unit } => {
@@ -686,7 +870,10 @@ impl<'a> Evaluator<'a> {
                     .units
                     .unit(unit)
                     .ok_or_else(|| ValueError::UnknownUnit { unit: unit.clone() })?;
-                Ok(Quantity::new(value * info.scale, info.dimension))
+                let si = info
+                    .to_canonical(*value)
+                    .map_err(|_| ValueError::UnknownUnit { unit: unit.clone() })?;
+                Ok(Quantity::new(si, crate::units::dimension_of(&info)))
             }
             ValueExpr::Number { value } => Ok(Quantity::dimensionless(*value)),
             ValueExpr::Input { name } => {
@@ -716,8 +903,17 @@ impl<'a> Evaluator<'a> {
                     BinaryOp::Add | BinaryOp::Sub => {
                         if a.dimension != b.dimension {
                             return Err(ValueError::UnitMismatch {
-                                expected: a.dimension.to_string(),
-                                found: b.dimension.to_string(),
+                                subject: Some(
+                                    if *op == BinaryOp::Add {
+                                        "the added value"
+                                    } else {
+                                        "the subtracted value"
+                                    }
+                                    .to_owned(),
+                                ),
+                                expected: a.dimension,
+                                found: b.dimension,
+                                written: Written::of(rhs),
                             });
                         }
                         let si = if *op == BinaryOp::Add {
@@ -729,11 +925,16 @@ impl<'a> Evaluator<'a> {
                     }
                     BinaryOp::Mul => Ok(Quantity::new(
                         a.si * b.si,
-                        a.dimension.multiply(b.dimension),
+                        a.dimension
+                            .multiply(b.dimension)
+                            .ok_or(ValueError::DimensionOverflow)?,
                     )),
-                    BinaryOp::Div => {
-                        Ok(Quantity::new(a.si / b.si, a.dimension.divide(b.dimension)))
-                    }
+                    BinaryOp::Div => Ok(Quantity::new(
+                        a.si / b.si,
+                        a.dimension
+                            .divide(b.dimension)
+                            .ok_or(ValueError::DimensionOverflow)?,
+                    )),
                 }
             }
             ValueExpr::Toleranced {
@@ -746,8 +947,10 @@ impl<'a> Evaluator<'a> {
                     let b = self.eval(bound, env)?;
                     if b.dimension != n.dimension && !b.dimension.is_dimensionless() {
                         return Err(ValueError::UnitMismatch {
-                            expected: n.dimension.to_string(),
-                            found: b.dimension.to_string(),
+                            subject: Some("the tolerance".to_owned()),
+                            expected: n.dimension,
+                            found: b.dimension,
+                            written: Written::of(bound),
                         });
                     }
                 }
@@ -817,14 +1020,18 @@ impl<'a> Evaluator<'a> {
                     .unit(unit)
                     .ok_or_else(|| ValueError::UnknownUnit { unit: unit.clone() })?;
                 let q = self.eval(expr, env)?;
+                let dimension = crate::units::dimension_of(&info);
                 if q.dimension.is_dimensionless() {
-                    Ok(Quantity::new(q.si * info.scale, info.dimension))
-                } else if q.dimension == info.dimension {
+                    let si = info
+                        .to_canonical(q.si)
+                        .map_err(|_| ValueError::UnknownUnit { unit: unit.clone() })?;
+                    Ok(Quantity::new(si, dimension))
+                } else if q.dimension == dimension {
                     Ok(q)
                 } else {
                     Err(ValueError::CoerceDimensioned {
                         unit: unit.clone(),
-                        found: q.dimension.to_string(),
+                        found: kind_name(q.dimension).to_owned(),
                     })
                 }
             }
@@ -868,7 +1075,7 @@ impl<'a> Evaluator<'a> {
             if let Ok(DynamicOutput::Double { .. }) = self.dynamic.evaluate_output(call, &args) {
                 return Some(ValueError::UnitlessResult {
                     function: call.function.clone(),
-                    expected: expected.to_string(),
+                    expected: kind_name(expected).to_owned(),
                     si: si.to_owned(),
                 });
             }
@@ -883,14 +1090,16 @@ impl<'a> Evaluator<'a> {
         env: &ValueEnv,
         expected: Dimension,
     ) -> Result<f64, ValueError> {
-        let q = self.eval(expr, env)?;
+        let q = self.eval_expecting(expr, env, expected)?;
         if q.dimension != expected {
-            if let Some(e) = self.unitless(expr, env, expected, &expected.to_string()) {
+            if let Some(e) = self.unitless(expr, env, expected, si_symbol(expected)) {
                 return Err(e);
             }
             return Err(ValueError::UnitMismatch {
-                expected: expected.to_string(),
-                found: q.dimension.to_string(),
+                subject: None,
+                expected,
+                found: q.dimension,
+                written: Written::of(expr),
             });
         }
         Ok(q.si)
@@ -971,16 +1180,22 @@ impl<'a> Evaluator<'a> {
             if env.failed.contains_key(&format!("let.{}", name)) {
                 return;
             }
-            match ev.eval(&decl.value, env) {
+            let evaluated = match decl.kind.as_ref().and_then(|kind| ev.units.kind(kind)) {
+                Some(expected) => ev.eval_expecting(&decl.value, env, expected),
+                None => ev.eval(&decl.value, env),
+            };
+            match evaluated {
                 Ok(q) => {
                     if let Some(kind) = &decl.kind {
                         match ev.units.kind(kind) {
-                            Some(info) if info.dimension != q.dimension => {
+                            Some(expected) if expected != q.dimension => {
                                 env.failed.insert(
                                     format!("let.{}", name),
                                     ValueError::UnitMismatch {
-                                        expected: info.dimension.to_string(),
-                                        found: q.dimension.to_string(),
+                                        subject: Some(name.0.clone()),
+                                        expected,
+                                        found: q.dimension,
+                                        written: Written::of(&decl.value),
                                     },
                                 );
                                 return;
@@ -1017,20 +1232,22 @@ impl<'a> Evaluator<'a> {
         expr: &ValueExpr,
         env: &ValueEnv,
     ) -> Result<Quantity, ValueError> {
-        let info = self
+        let expected = self
             .units
             .kind(&decl.kind)
             .ok_or_else(|| ValueError::UnknownKind {
                 kind: decl.kind.0.clone(),
             })?;
-        let q = self.eval(expr, env)?;
-        if q.dimension != info.dimension {
-            if let Some(e) = self.unitless(expr, env, info.dimension, &info.si_symbol) {
+        let q = self.eval_expecting(expr, env, expected)?;
+        if q.dimension != expected {
+            if let Some(e) = self.unitless(expr, env, expected, si_symbol(expected)) {
                 return Err(e);
             }
             return Err(ValueError::UnitMismatch {
-                expected: format!("{} ({})", info.id, info.si_symbol),
-                found: q.dimension.to_string(),
+                subject: Some(decl.name.0.clone()),
+                expected,
+                found: q.dimension,
+                written: Written::of(expr),
             });
         }
         for (bound, is_min) in [(&decl.minimum, true), (&decl.maximum, false)] {
@@ -1039,7 +1256,9 @@ impl<'a> Evaluator<'a> {
                 if (is_min && q.si < b.si) || (!is_min && q.si > b.si) {
                     return Err(ValueError::OutOfRange {
                         name: decl.name.0.clone(),
-                        value: format!("{} {}", q.si, info.si_symbol),
+                        value: format!("{} {}", q.si, si_symbol(expected))
+                            .trim_end()
+                            .to_owned(),
                     });
                 }
             }
@@ -1141,6 +1360,16 @@ fn value_form(expr: &ValueExpr) -> &'static str {
 #[cfg(test)]
 mod value_expr_example_tests {
     use super::*;
+
+    /// `distance = thickness` (an input written without `input.`) names the fix.
+    #[test]
+    fn a_bare_word_says_to_write_input_or_let() {
+        let err = serde_json::from_value::<ValueExpr>(serde_json::json!("thickness")).unwrap_err();
+        assert_eq!(
+            err.to_string(),
+            "`thickness` is not a value here: write `input.thickness` for an input or `let.thickness` for a let"
+        );
+    }
 
     /// Writes or checks the Desktop's copy. Set `RUNMAT_VALUE_EXPR_OUT` to the Desktop's
     /// `src/generated/value-expr-examples.json` to write it.

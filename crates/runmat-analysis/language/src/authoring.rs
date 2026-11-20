@@ -16,6 +16,15 @@ pub enum FeaContextualWord {
     Maximum,
     Evidence,
     EvidenceValue(AssessmentEvidenceRequirement),
+    /// `display <output> { unit; range; precision; hide; context; deformation }`: how a study
+    /// shows a field output.
+    Display,
+    Unit,
+    Range,
+    Precision,
+    Hide,
+    Context,
+    Deformation,
 }
 
 impl FeaContextualWord {
@@ -26,6 +35,13 @@ impl FeaContextualWord {
         Self::Evidence,
         Self::EvidenceValue(AssessmentEvidenceRequirement::AuthoredSamples),
         Self::EvidenceValue(AssessmentEvidenceRequirement::CertifiedBound),
+        Self::Display,
+        Self::Unit,
+        Self::Range,
+        Self::Precision,
+        Self::Hide,
+        Self::Context,
+        Self::Deformation,
     ];
 
     pub const fn as_source(self) -> &'static str {
@@ -38,6 +54,13 @@ impl FeaContextualWord {
                 "authored_samples"
             }
             Self::EvidenceValue(AssessmentEvidenceRequirement::CertifiedBound) => "certified_bound",
+            Self::Display => "display",
+            Self::Unit => "unit",
+            Self::Range => "range",
+            Self::Precision => "precision",
+            Self::Hide => "hide",
+            Self::Context => "context",
+            Self::Deformation => "deformation",
         }
     }
 
@@ -50,8 +73,16 @@ impl FeaContextualWord {
 
     pub const fn role(self) -> FeaAuthoringWordRole {
         match self {
-            Self::Assessment => FeaAuthoringWordRole::Block,
-            Self::Minimum | Self::Maximum | Self::Evidence => FeaAuthoringWordRole::Property,
+            Self::Assessment | Self::Display => FeaAuthoringWordRole::Block,
+            Self::Minimum
+            | Self::Maximum
+            | Self::Evidence
+            | Self::Unit
+            | Self::Range
+            | Self::Precision
+            | Self::Hide
+            | Self::Context
+            | Self::Deformation => FeaAuthoringWordRole::Property,
             Self::EvidenceValue(_) => FeaAuthoringWordRole::EnumValue,
         }
     }

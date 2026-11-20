@@ -39,6 +39,7 @@ fn structural_study_compilation_requires_capable_solid_material_before_planning(
     ));
 
     let substituted = CompiledAnalysisStudy {
+        displays: Vec::new(),
         module_path: "tests/structural.fea".into(),
         study_id: "structural".into(),
         study_inputs: Vec::new(),
@@ -107,6 +108,7 @@ fn thermal_study_compilation_rejects_uncapable_and_substituted_properties() {
     ));
 
     let substituted = CompiledAnalysisStudy {
+        displays: Vec::new(),
         module_path: "tests/thermal.fea".into(),
         study_id: "thermal".into(),
         study_inputs: Vec::new(),
@@ -169,6 +171,7 @@ fn thermomechanical_study_requires_the_union_of_solid_capabilities() {
         )
     ));
     let substituted = CompiledAnalysisStudy {
+        displays: Vec::new(),
         module_path: "tests/thermomechanical.fea".into(),
         study_id: "thermomechanical".into(),
         study_inputs: Vec::new(),
@@ -205,6 +208,7 @@ fn thermomechanical_study_requires_the_union_of_solid_capabilities() {
 
 fn imported_study(document: &runmat_geometry_core::GeometryDocument) -> RealizedStudy {
     RealizedStudy {
+        displays: Vec::new(),
         assessments: Vec::new(),
         module_path: "project/main.fea".into(),
         study_id: "static".into(),
@@ -215,6 +219,7 @@ fn imported_study(document: &runmat_geometry_core::GeometryDocument) -> Realized
             },
             source: GeometryDefinitionSource::Imported(Box::new(ImportedGeometryDefinition {
                 preview_extent_m: None,
+                preview_measure: None,
                 unit_evidence: document.source.unit_evidence.clone(),
                 logical_path: "project/part.brep".into(),
                 format: document.source.format,

@@ -260,6 +260,7 @@ fn finish(
     )];
     files_out.extend(lock_change(&next, &lock, true));
     Ok(EditOutput {
+        report: None,
         summary,
         files: files_out,
     })

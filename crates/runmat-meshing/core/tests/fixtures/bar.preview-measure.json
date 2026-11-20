@@ -1,0 +1,24 @@
+{
+  "volume_m3": 0.00002,
+  "area_m2": 0.0064,
+  "patches": [
+    {
+      "area_m2": 0.004,
+      "radius_m": null,
+      "thickness_m": 0.01,
+      "gap_m": null
+    },
+    {
+      "area_m2": 0.002,
+      "radius_m": null,
+      "thickness_m": 0.02,
+      "gap_m": null
+    },
+    {
+      "area_m2": 0.0004,
+      "radius_m": null,
+      "thickness_m": 0.10000000000000002,
+      "gap_m": null
+    }
+  ]
+}

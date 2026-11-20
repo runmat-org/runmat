@@ -28,6 +28,9 @@ pub(super) fn map_volume_error(error: DelaunayVolumeMeshError) -> Box<MeshingFai
         }
         DelaunayVolumeMeshErrorKind::Cancelled => MeshingFailureCategory::Cancelled,
         DelaunayVolumeMeshErrorKind::ResourceLimit => resource_category(error.stage),
+        DelaunayVolumeMeshErrorKind::MemoryBudgetExceeded { .. } => {
+            MeshingFailureCategory::MemoryBudgetExceeded
+        }
     };
     let remediation = if accounting_error.is_some() {
         "resolve numerical operation admission and retry the volume mesh"
@@ -36,6 +39,48 @@ pub(super) fn map_volume_error(error: DelaunayVolumeMeshError) -> Box<MeshingFai
     };
     let mut failure = volume_failure(category, remediation, &error.to_string());
     failure.accounting_error = accounting_error;
+    failure
+}
+
+/// Maps a construction failure; a memory refusal reports the stage's whole requirement against
+/// the run's memory ceiling: everything its charges held when the ceiling refused one of them,
+/// plus that charge's increase.
+pub(super) fn map_construction_error(
+    error: DelaunayVolumeMeshError,
+    held_before_construction: u64,
+    control: &crate::MeshingGeometryEvaluationControl<'_>,
+) -> Box<MeshingFailure> {
+    match error.kind {
+        DelaunayVolumeMeshErrorKind::MemoryBudgetExceeded { required_bytes } => memory_refusal(
+            control
+                .refused_allocation_bytes()
+                .max(held_before_construction.saturating_add(required_bytes)),
+            control.maximum_allocation_bytes(),
+            &error.to_string(),
+        ),
+        _ => map_volume_error(error),
+    }
+}
+
+pub(super) fn memory_refusal(
+    required_bytes: u64,
+    maximum_bytes: u64,
+    detail: &str,
+) -> Box<MeshingFailure> {
+    let mut failure = crate::budget::failure(
+        MeshingStageKind::Tetrahedralization,
+        MeshingFailureCategory::MemoryBudgetExceeded,
+        "increase the memory budget or reduce model complexity",
+        Some(("memory_bytes", required_bytes, maximum_bytes)),
+    );
+    failure.achieved_values.push(MeshingDiagnosticEntry {
+        name: "volume_failure".into(),
+        value: MeshingDiagnosticValue::Text(crate::diagnostic::bounded_diagnostic_text(
+            detail,
+            "volume stage failure",
+        )),
+        unit: None,
+    });
     failure
 }
 

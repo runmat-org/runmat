@@ -197,7 +197,24 @@ impl RunMatSession {
                 .requests(functions.clone(), profiles.clone())?
                 .geometry
             {
-                if let Some(bytes) = candidate.read(&geometry.logical_path) {
+                if runmat_runtime::geometry::design_source::is_design_geometry(
+                    geometry.logical_path.as_str(),
+                ) {
+                    // A part or assembly evaluates from the capture alone.
+                    let path = runmat_runtime::analysis::physical_source_path(
+                        candidate.source_root(),
+                        &geometry.logical_path,
+                    )
+                    .map_err(|error| error.to_string())?;
+                    match runmat_runtime::geometry::design_source::captured_design_geometry(
+                        &path, &captured,
+                    )
+                    .await
+                    {
+                        Ok(bytes) => prepared.add_geometry(geometry.logical_path, bytes)?,
+                        Err(error) => prepared.add_geometry_failure(geometry.logical_path, error),
+                    }
+                } else if let Some(bytes) = candidate.read(&geometry.logical_path) {
                     prepared.add_geometry(geometry.logical_path, bytes.to_vec())?;
                 }
             }

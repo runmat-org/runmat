@@ -152,6 +152,69 @@ fn triad(origin: V3, x: V3, y: V3, z: V3, length: f64) -> Vec<Vec<f32>> {
     ]
 }
 
+/// The top assembly's mate connectors as triads (`connector:<name>`), sized to the assembly's
+/// bounds as a part's frames are to the part's.
+pub fn connector_displays(
+    resolved: &crate::assembly::resolve::ResolvedAssembly,
+    bounds: Option<&Bounds>,
+) -> Vec<ReferenceDisplay> {
+    let box_ = sizing(bounds);
+    let length = box_.size * box_.triad;
+    resolved
+        .connectors
+        .iter()
+        .filter_map(|c| {
+            let w = c.world?;
+            let col = |k: usize| [w.rotation[0][k], w.rotation[1][k], w.rotation[2][k]];
+            Some(ReferenceDisplay {
+                id: format!("connector:{}", c.name),
+                kind: "connector".into(),
+                lines: triad(w.translation, col(0), col(1), col(2), length),
+            })
+        })
+        .collect()
+}
+
+/// The top assembly's envelopes, each as the twelve edges of its box (id `envelope:<name>`, kind
+/// `curve`), in world coordinates.
+pub fn envelope_displays(
+    resolved: &crate::assembly::resolve::ResolvedAssembly,
+) -> Vec<ReferenceDisplay> {
+    resolved
+        .envelopes
+        .iter()
+        .filter(|e| e.declared_by == 0)
+        .map(|e| {
+            let (a, b) = (e.world.min, e.world.max);
+            let c = |x: bool, y: bool, z: bool| -> V3 {
+                [
+                    if x { b[0] } else { a[0] },
+                    if y { b[1] } else { a[1] },
+                    if z { b[2] } else { a[2] },
+                ]
+            };
+            let ring = |z: bool| {
+                line(&[
+                    c(false, false, z),
+                    c(true, false, z),
+                    c(true, true, z),
+                    c(false, true, z),
+                    c(false, false, z),
+                ])
+            };
+            let mut lines = vec![ring(false), ring(true)];
+            for (x, y) in [(false, false), (true, false), (true, true), (false, true)] {
+                lines.push(line(&[c(x, y, false), c(x, y, true)]));
+            }
+            ReferenceDisplay {
+                id: format!("envelope:{}", e.name),
+                kind: "curve".into(),
+                lines,
+            }
+        })
+        .collect()
+}
+
 fn datum_lines(value: &DatumValue, box_: &Sizing) -> Vec<Vec<f32>> {
     let (centre, size) = (box_.centre, box_.size);
     match value {

@@ -40,51 +40,34 @@ impl Dimension {
         base: [0; 8],
         angle: 0,
     };
-    pub const LENGTH: Dimension = Dimension::base_unit(0);
-    pub const MASS: Dimension = Dimension::base_unit(1);
-    pub const TIME: Dimension = Dimension::base_unit(2);
-    pub const CURRENT: Dimension = Dimension::base_unit(3);
-    pub const TEMPERATURE: Dimension = Dimension::base_unit(4);
-    pub const ANGLE: Dimension = Dimension {
-        base: [0; 8],
-        angle: 1,
-    };
-    pub const AREA: Dimension = Dimension {
-        base: [2, 0, 0, 0, 0, 0, 0, 0],
-        angle: 0,
-    };
 
-    const fn base_unit(index: usize) -> Dimension {
-        let mut base = [0i8; 8];
-        base[index] = 1;
-        Dimension { base, angle: 0 }
+    /// The unit authority's dimension, without a semantic kind.
+    pub fn to_physical(self) -> runmat_types::physical::DynamicDimension {
+        runmat_types::physical::DynamicDimension::try_with_angle(
+            runmat_types::PhysicalDimension::new(self.base),
+            self.angle,
+            None,
+        )
+        .expect("a kind-free dimension is always valid")
     }
+}
 
-    pub fn multiply(self, other: Dimension) -> Dimension {
-        self.combine(other, 1)
-    }
-
-    pub fn divide(self, other: Dimension) -> Dimension {
-        self.combine(other, -1)
-    }
-
-    pub fn power(self, exponent: i8) -> Dimension {
-        let mut base = self.base;
-        base.iter_mut().for_each(|b| *b *= exponent);
+/// The wire form of the unit authority's dimension.
+impl From<runmat_types::physical::DynamicDimension> for Dimension {
+    fn from(dimension: runmat_types::physical::DynamicDimension) -> Self {
+        let d = dimension.dimension();
         Dimension {
-            base,
-            angle: self.angle * exponent,
-        }
-    }
-
-    fn combine(self, other: Dimension, sign: i8) -> Dimension {
-        let mut base = self.base;
-        for (b, o) in base.iter_mut().zip(other.base) {
-            *b += sign * o;
-        }
-        Dimension {
-            base,
-            angle: self.angle + sign * other.angle,
+            base: [
+                d.length,
+                d.mass,
+                d.time,
+                d.current,
+                d.temperature,
+                d.amount,
+                d.luminous_intensity,
+                d.information,
+            ],
+            angle: dimension.angle_power(),
         }
     }
 }
@@ -167,12 +150,32 @@ pub enum SelectKind {
     Curve,
     Region,
     Input,
+    /// An analysis representation of a part (`representation:<name>`).
+    Representation,
     // Assembly.
     Occurrence,
     Mate,
     Part,
     Hole,
     ExplodeStep,
+    /// A saved exploded view (`exploded:<name>`).
+    ExplodedView,
+    /// A name the assembly publishes (`publish:<name>`).
+    Publish,
+    /// A configuration of the file (`configuration:<name>`).
+    Configuration,
+    /// A display state of the assembly (`display_state:<name>`).
+    DisplayState,
+    /// A space the assembly reserves (`envelope:<name>`).
+    Envelope,
+    /// A contact region between two components' faces (`contact:<name>`).
+    Contact,
+    /// An option or effectivity axis of the assembly's options (`option:<name>`).
+    ProductOption,
+    /// A motion study of the assembly (`motion:<name>`).
+    MotionStudy,
+    /// A named mate position of the assembly (`position:<name>`).
+    MatePosition,
     // Drawing.
     Sheet,
     View,
@@ -224,11 +227,21 @@ impl SelectKind {
             Curve => "curve",
             Region => "region",
             Input => "input",
+            Representation => "representation",
             Occurrence => "component",
             Mate => "mate",
             Part => "part",
             Hole => "hole",
             ExplodeStep => "explode step",
+            ExplodedView => "exploded view",
+            Publish => "published item",
+            Configuration => "configuration",
+            DisplayState => "display state",
+            Envelope => "envelope",
+            Contact => "contact region",
+            ProductOption => "option",
+            MotionStudy => "motion study",
+            MatePosition => "mate position",
             Sheet => "sheet",
             View => "view",
             Annotation => "annotation",
@@ -276,6 +289,11 @@ pub struct ChoiceOption {
 pub enum Suggest {
     /// The circuit's global nets (power and ground rails), with their pin counts.
     Rails,
+    /// Structural profiles: the standard sizes and the project's custom profiles
+    /// (`library/profiles/`).
+    Profiles,
+    /// Library features and parts in the project's `library/` folder.
+    Library,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]

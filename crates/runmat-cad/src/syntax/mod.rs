@@ -34,12 +34,14 @@
 //!
 //! [`Site`]: crate::diagnostics::Site
 
+pub mod arguments;
 pub mod configuration_edit;
 pub mod edit;
 pub mod forms;
 pub mod occurrence;
 pub mod projection;
 pub mod refs;
+pub mod rename;
 pub mod sketch;
 pub mod value;
 
@@ -120,6 +122,10 @@ pub const PART: DocumentGrammar = DocumentGrammar {
             ..named("region", "regions", "region")
         },
         Collection {
+            type_field: Some("kind"),
+            ..named("representation", "representations", "representation")
+        },
+        Collection {
             tagged: Some(Tagged {
                 field: "target",
                 tag: "publishes",
@@ -149,6 +155,20 @@ pub const PART: DocumentGrammar = DocumentGrammar {
         named("size", "sizes", "size"),
         named("location", "locations", "location"),
         named("finish", "finishes", "finish"),
+        named("treatment", "treatments", "treatment"),
+        // 3D annotations, the drawing's statement form placed in the model:
+        // `annotation gdt1 = gdt(tolerance = position1, view = front_pmi, at = [0, 0, 12])`.
+        Collection {
+            id: Some("id"),
+            tagged: Some(Tagged {
+                field: "kind",
+                tag: "annotation",
+                extras: &["view", "at"],
+            }),
+            ..named("annotation", "annotations", "annotation")
+        },
+        // Annotation views: `view front_pmi = { from = [0, -1, 0], up = [0, 0, 1] }`.
+        named("view", "views", "view"),
     ],
     links: Some(LINKS),
 };
@@ -171,6 +191,16 @@ pub const ASSEMBLY: DocumentGrammar = DocumentGrammar {
         },
         named("connector", "connectors", "connector"),
         named("mate", "mates", "mate"),
+        // `sketch s1 on origin.xy { … }`: the part's feature form, sketches only.
+        Collection {
+            id: Some("id"),
+            tagged: Some(Tagged {
+                field: "kind",
+                tag: "feature",
+                extras: &["suppressed", "frozen"],
+            }),
+            ..named("feature", "features", "feature")
+        },
         // `pattern ribs = linear(seeds = [rib], direction = [1, 0, 0], spacing = 50 mm, count = 4)`
         Collection {
             tagged: Some(Tagged {
@@ -180,13 +210,30 @@ pub const ASSEMBLY: DocumentGrammar = DocumentGrammar {
             }),
             ..named("pattern", "patterns", "pattern")
         },
+        // Assembly features, after the sketches they read:
+        // `operation slot = cut(profile = sketch.s1, extent = through_all, components = [plate])`.
+        Collection {
+            tagged: Some(Tagged {
+                field: "op",
+                tag: "operation",
+                extras: &["components", "suppressed"],
+            }),
+            ..named("operation", "operations", "operation")
+        },
         named("mirror", "mirrors", "mirror"),
         named("fasteners", "fasteners", "fasteners"),
         named("envelope", "envelopes", "envelope"),
+        // `contact c1 = { a = { occurrence = [{ name = lower }], face = top }, b = …, bonded = true }`
+        named("contact", "contacts", "contact"),
         named("publish", "publishes", "publish"),
         named("configuration", "configurations", "configuration"),
+        named("display_state", "display_states", "display_state"),
         named("property", "properties", "property"),
         named("exploded", "exploded", "exploded"),
+        // `motion open_close = { duration = 4 s, drives = [{ mate = hinge, from = 0 deg, to = 90 deg }] }`
+        named("motion", "motions", "motion"),
+        // `position open = { values = [{ mate = hinge, value = 90 deg }] }`
+        named("position", "positions", "position"),
         // `view hero = { from = [-0.62, 0.7, -0.36], up = [0, 0, 1], default = true }`
         named("view", "views", "view"),
     ],
@@ -209,7 +256,16 @@ pub const DRAWING: DocumentGrammar = DocumentGrammar {
                 field: "kind",
                 tag: "view",
                 extras: &[
-                    "sheet", "model", "at", "scale", "display", "exclude", "exploded",
+                    "sheet",
+                    "model",
+                    "at",
+                    "scale",
+                    "display",
+                    "exclude",
+                    "exploded",
+                    "title",
+                    "centerlines",
+                    "tangent_edges",
                 ],
             }),
             ..named("view", "views", "view")

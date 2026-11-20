@@ -192,3 +192,199 @@ fn hidden_regions_draw_nothing_and_picks_pass_through_them() {
         "a hidden body is not picked"
     );
 }
+
+/// The cap's vertex colors: the cap faces away from the kept side (normal -x for a +x plane).
+fn cap_colors(render_data: &RenderData) -> Vec<[f32; 4]> {
+    render_data
+        .vertices
+        .iter()
+        .filter(|v| v.normal[0] < -0.9)
+        .map(|v| v.color)
+        .collect()
+}
+
+#[test]
+fn a_cap_takes_the_body_color_not_a_setup_tint() {
+    let section = Some(GeometrySceneSection {
+        plane: plane([1.0, 0.0, 0.0]),
+        second_plane: None,
+        cap: true,
+    });
+    let plain = cube().render_data_with_presentation(&GeometryScenePresentation {
+        section: Some(section.clone()),
+        ..Default::default()
+    });
+    // A load tint on the -y face, which the cut crosses.
+    let tinted = cube().render_data_with_presentation(&GeometryScenePresentation {
+        section: Some(section),
+        region_highlights: vec![GeometrySceneRegionHighlight {
+            region_id: "face_2".to_string(),
+            color: Some([0.9, 0.1, 0.5, 1.0]),
+            role: None,
+            label: None,
+        }],
+        ..Default::default()
+    });
+    assert!(!cap_colors(&plain).is_empty());
+    assert_eq!(cap_colors(&tinted), cap_colors(&plain));
+}
+
+#[test]
+fn a_cap_over_a_result_field_is_body_grey() {
+    // A result field: white material, the field's colors on the vertices.
+    let mut field = cube();
+    field.material.albedo = Vec4::ONE;
+    field.render_data.material.albedo = Vec4::ONE;
+    for v in &mut field.render_data.vertices {
+        v.color = [0.95, 0.15, 0.1, 1.0];
+    }
+    let render_data = field.render_data_with_presentation(&GeometryScenePresentation {
+        section: Some(Some(GeometrySceneSection {
+            plane: plane([1.0, 0.0, 0.0]),
+            second_plane: None,
+            cap: true,
+        })),
+        ..Default::default()
+    });
+    // The body grey, leaned toward the cut tint as every cap is.
+    let body = cad_default_material().albedo;
+    let expected = body.lerp(
+        Vec4::from_array(super::section_cap::SECTION_CAP_TINT),
+        super::section_cap::SECTION_CAP_TINT_SHARE,
+    );
+    let caps = cap_colors(&render_data);
+    assert!(!caps.is_empty());
+    for [r, g, b, _] in caps {
+        assert!(
+            (Vec3::new(r, g, b) - expected.truncate()).length() < 1e-4,
+            "a cap keeps no field color: {r} {g} {b}"
+        );
+    }
+}
+
+/// The cube as a CAD import draws it: each face its own chunk of one mesh (body), with that
+/// face's feature edges in a line chunk beside it.
+fn cube_by_face() -> GeometryScene {
+    let whole = cube();
+    let indices = whole.indices.clone().unwrap();
+    let chunks = (0..6usize)
+        .flat_map(|face| {
+            let mut chunk = GeometrySceneChunk::indexed_triangles(
+                format!("mesh_1:chunk_{face}"),
+                whole.vertices.clone(),
+                indices[face * 6..face * 6 + 6].to_vec(),
+                cad_default_material(),
+            )
+            .with_mesh_id("mesh_1")
+            .with_regions(vec![GeometrySceneRegion::new(
+                format!("face_{face}"),
+                None,
+                None,
+                vec![GeometrySceneTriangleRange::new(0, 2)],
+            )]);
+            chunk.chunk_id = format!("mesh_1:chunk_{face}");
+            let edges = chunk.wireframe_edges([0.1, 0.1, 0.1, 1.0]);
+            std::iter::once(chunk).chain(edges)
+        })
+        .collect::<Vec<_>>();
+    // The edge chunks belong to the same body: a cap reads only its surface triangles.
+    assert_eq!(chunks.len(), 12);
+    assert!(chunks
+        .iter()
+        .all(|chunk| chunk.mesh_id.as_deref() == Some("mesh_1")));
+    GeometryScene::new("cube-by-face", 1, chunks)
+}
+
+fn cap_nodes(presentation: &GeometryScenePresentation) -> Vec<RenderData> {
+    cube_by_face()
+        .nodes_with_presentation(presentation)
+        .into_iter()
+        .filter(|node| node.name == "Section cap")
+        .filter_map(|node| node.render_data)
+        .collect()
+}
+
+#[test]
+fn a_body_drawn_one_face_per_chunk_is_capped_across_its_chunks_in_the_body_color() {
+    let section = |cap| {
+        Some(Some(GeometrySceneSection {
+            plane: plane([0.0, 0.0, -1.0]),
+            second_plane: None,
+            cap,
+        }))
+    };
+    let plain = GeometryScenePresentation {
+        section: section(true),
+        ..Default::default()
+    };
+    let caps = cap_nodes(&plain);
+    assert_eq!(caps.len(), 1, "one cap for the one body");
+    // The whole 2 x 2 cut face, facing the removed side (+z).
+    assert!((area(&caps[0]) - 4.0).abs() < 1.0e-3, "{}", area(&caps[0]));
+    assert!(caps[0].vertices.iter().all(|v| v.normal[2] > 0.9));
+    // A load tint on a face the cut crosses (-y) leaves the cap in the body color.
+    let tinted = GeometryScenePresentation {
+        section: section(true),
+        region_highlights: vec![GeometrySceneRegionHighlight {
+            region_id: "face_2".to_string(),
+            color: Some([0.9, 0.1, 0.5, 1.0]),
+            role: None,
+            label: None,
+        }],
+        ..Default::default()
+    };
+    let colors = |caps: &[RenderData]| caps[0].vertices.iter().map(|v| v.color).collect::<Vec<_>>();
+    assert_eq!(colors(&cap_nodes(&tinted)), colors(&caps));
+    // Open, or with no section, there is no cap.
+    assert!(cap_nodes(&GeometryScenePresentation {
+        section: section(false),
+        ..Default::default()
+    })
+    .is_empty());
+    assert!(cap_nodes(&GeometryScenePresentation::default()).is_empty());
+}
+
+#[test]
+fn a_section_views_kept_symbols_hide_behind_material_and_removed_ones_go() {
+    // Supports on the cube's bottom face (kept, below a cut at z = 0.5) and top face (removed).
+    let support = |region: &str| GeometrySceneRegionAnnotation {
+        region_id: region.into(),
+        color: None,
+        kind: GeometrySceneAnnotationKind::FixedSupport,
+        label: None,
+        direction: None,
+        size: None,
+    };
+    let scene = GeometryScene::new("cube", 1, vec![cube()]);
+    let symbols = |section: Option<GeometrySceneSection>, regions: &[&str]| {
+        scene
+            .nodes_with_presentation(&GeometryScenePresentation {
+                region_annotations: regions.iter().map(|r| support(r)).collect(),
+                section: Some(section),
+                ..Default::default()
+            })
+            .into_iter()
+            .find(|node| node.name == "FEA study symbols")
+            .and_then(|node| node.render_data)
+    };
+    let top_cut = GeometrySceneSection {
+        plane: GeometrySceneSectionPlane {
+            normal: [0.0, 0.0, -1.0],
+            origin: Some([0.0, 0.0, 0.5]),
+            offset: None,
+            label: None,
+        },
+        second_plane: None,
+        cap: true,
+    };
+    // Unsectioned, a support draws over the model so one on a far face still shows.
+    let whole = symbols(None, &["face_4"]).unwrap();
+    assert_eq!(whole.pipeline_type, PipelineType::AnnotationStroke);
+    // Sectioned, the kept one is depth-tested like the faces, so material in front hides it.
+    let kept = symbols(Some(top_cut.clone()), &["face_4"]).unwrap();
+    assert_eq!(kept.pipeline_type, PipelineType::AnnotationStrokeDepth);
+    assert_eq!(kept.vertices.len(), whole.vertices.len());
+    assert!(!PipelineType::AnnotationStrokeDepth.is_depth_free_overlay());
+    // The one on the removed top face goes with it.
+    assert!(symbols(Some(top_cut), &["face_5"]).is_none());
+}

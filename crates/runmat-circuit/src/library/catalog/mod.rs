@@ -15,7 +15,6 @@ use super::{
 };
 use crate::ids::Uuid;
 use crate::ir::{Param, Tolerance};
-use runmat_rules::{parse_quantity, BuiltinUnits};
 mod record;
 
 pub use record::{PartHit, PartOffer, PartPin, PartRecord, PartSpice};
@@ -284,7 +283,7 @@ pub fn add_to_pool_in(
     let package = pool.add_package(package);
     let mut params = BTreeMap::new();
     for (k, v) in &part.params {
-        let param = match parse_quantity(v, &BuiltinUnits) {
+        let param = match crate::units::param_quantity(k, v) {
             Ok(q) => Param::quantity(q, Tolerance::Exact),
             Err(_) => Param::text(v.clone()),
         };

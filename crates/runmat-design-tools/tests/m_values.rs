@@ -140,21 +140,22 @@ fn the_circuit_checks_run_a_components_m_value_natively() {
     }
 }
 
-/// `runmat-design check` on a circuit whose component value calls `.m` code: the call runs,
+/// `runmat check` on a circuit whose component value calls `.m` code: the call runs,
 /// so the check goes on past the compile (ERC and design review run) with no value waiting.
 #[test]
-fn runmat_design_check_runs_a_circuits_m_values() {
+fn runmat_check_runs_a_circuits_m_values() {
     let dir = std::env::temp_dir().join(format!("runmat-design-circuit-m-{}", std::process::id()));
     std::fs::create_dir_all(&dir).unwrap();
     for (path, text) in circuit_files() {
         std::fs::write(dir.join(path.trim_start_matches("/p/")), text).unwrap();
     }
-    let out = std::process::Command::new(env!("CARGO_BIN_EXE_runmat-design"))
-        .args(["check", "--json", "--no-simulate"])
-        .arg(dir.join("io.circuit"))
-        .output()
-        .unwrap();
-    let report = String::from_utf8_lossy(&out.stdout);
+    let (_, out, _) = runmat_cli(&[
+        "check".into(),
+        "--json".into(),
+        "--no-simulate".into(),
+        dir.join("io.circuit").to_string_lossy().into_owned(),
+    ]);
+    let report = String::from_utf8_lossy(&out);
     assert!(
         !report.contains(runmat_circuit::runtime::values::PENDING_VALUES),
         "{report}"
@@ -213,4 +214,23 @@ fn the_rc_filter_corner_lands_where_its_m_function_sized_the_resistor() {
     let corner = f3db["value"].as_f64().unwrap_or_else(|| panic!("{out}"));
     assert!((corner - 160.0).abs() < 0.2, "corner {corner} Hz");
     assert_eq!(f3db["pass"], json!(true));
+}
+
+/// Runs `runmat check …` or `runmat design …` in-process: whether it succeeded, its stdout and
+/// its stderr.
+fn runmat_cli(args: &[String]) -> (bool, Vec<u8>, Vec<u8>) {
+    use runmat_design_tools::cli::{check, design, Io};
+    let (mut out, mut err) = (Vec::new(), Vec::new());
+    let code = {
+        let mut io = Io {
+            out: &mut out,
+            err: &mut err,
+        };
+        if args.first().map(String::as_str) == Some("check") {
+            check(&args[1..], &mut io)
+        } else {
+            design(args, &mut io)
+        }
+    };
+    (code == std::process::ExitCode::SUCCESS, out, err)
 }

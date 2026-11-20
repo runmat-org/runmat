@@ -67,7 +67,7 @@ exchange with a prescribed ambient, not enclosure/view-factor or participating-m
 The canonical thermal procedure currently **rejects** this boundary explicitly: nonlinear
 steady/transient closure, resource admission, whole-solve heat accounting and execution/restart
 qualification are not yet implemented. Authorability and local face evidence do not admit a solve.
-See [radiation qualification](../qualification/thermal-radiation.md).
+The [radiating bar check](../validation/thermal.md#radiating-bar) compares a radiating end with the gray-surface closed form.
 
 ## How do I apply volumetric heat generation?
 

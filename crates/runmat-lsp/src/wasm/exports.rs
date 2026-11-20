@@ -1,6 +1,5 @@
 use lsp_types::{
-    CompletionList, Diagnostic, DocumentSymbol, Position, SemanticTokens, SymbolInformation,
-    TextEdit, Url,
+    CompletionList, Diagnostic, DocumentSymbol, Position, SemanticTokens, TextEdit, Url,
 };
 use runmat_thread_local::runmat_thread_local;
 use serde::Serialize;
@@ -21,8 +20,15 @@ use crate::core::analysis::{
 use crate::core::design::{
     design_dependencies, design_dialect, DesignDocumentAnalysis, DesignFiles, DesignValues,
 };
-use crate::core::fea::{is_fea_uri, resolve_project_facts, FeaDocumentAnalysis};
+use crate::core::fea::{analyze_fea_source, is_fea_uri, FeaDocumentAnalysis};
 use crate::core::workspace::workspace_symbols_with_project_async;
+
+mod source_workspace;
+#[cfg(target_arch = "wasm32")]
+mod study_geometry;
+use source_workspace::SourceWorkspace;
+#[cfg(test)]
+mod source_workspace_tests;
 
 #[derive(Default)]
 struct DocStore {
@@ -72,6 +78,12 @@ runmat_thread_local! {
     static DESIGN_VALUES: RefCell<DesignValues> = RefCell::new(DesignValues::new());
 }
 
+runmat_thread_local! {
+    /// What each part's feature references resolve to, by file path, as the Desktop's CAD host
+    /// regenerated them on the exact kernel and supplied them with `setDesignEntities`.
+    static DESIGN_ENTITIES: RefCell<BTreeMap<String, serde_json::Value>> = RefCell::new(BTreeMap::new());
+}
+
 /// The most call results the server keeps. Keys carry the sources' text, so edits leave old
 /// results behind; past this many, the oldest-keyed go first.
 const DESIGN_VALUES_LIMIT: usize = 4096;
@@ -80,7 +92,42 @@ runmat_thread_local! {
     static WORKSPACE_REVISION: Cell<u64> = Cell::new(0);
 }
 
+runmat_thread_local! {
+    /// The folders a `.fea` study's relative paths may reach, as the host supplied them with
+    /// `setWorkspaceRoots`. Empty means the enclosing project's folder, else the filesystem
+    /// root, as in the runtime check.
+    static WORKSPACE_ROOTS: RefCell<Vec<PathBuf>> = const { RefCell::new(Vec::new()) };
+}
+
 static BUILTIN_REGISTRY: Once = Once::new();
+
+/// Install the host's filesystem callbacks for project discovery and navigation.
+#[wasm_bindgen(js_name = "setFsProvider")]
+pub fn set_fs_provider(bindings: JsValue) -> Result<(), JsValue> {
+    let provider = runmat_filesystem::js::JsFsProvider::new(&bindings)?;
+    if !runmat_filesystem::FsProvider::supports_read(&provider) {
+        return Err(JsValue::from_str("LSP fsProvider requires readFile"));
+    }
+    runmat_filesystem::set_provider(std::sync::Arc::new(provider));
+    workspace_changed();
+    Ok(())
+}
+
+/// Notify the language server after workspace files are added, removed or renamed.
+#[wasm_bindgen(js_name = "workspaceChanged")]
+pub fn workspace_changed() {
+    WORKSPACE_REVISION.with(|revision| revision.set(revision.get().saturating_add(1)));
+    crate::core::project::ProjectContext::clear_installed_handoff();
+    invalidate_source_analyses();
+}
+
+fn invalidate_source_analyses() {
+    DOCS.with(|store| {
+        for entry in store.borrow_mut().docs.values_mut() {
+            entry.analysis = None;
+        }
+    });
+}
 
 fn to_js<T: Serialize>(value: &T) -> Result<JsValue, JsValue> {
     serde_wasm_bindgen::to_value(value).map_err(|e| JsValue::from_str(&e.to_string()))
@@ -97,15 +144,7 @@ fn ensure_builtins_registered() {
 
 fn source_name_from_uri(uri: &str) -> Option<String> {
     let parsed = Url::parse(uri).ok()?;
-    if parsed.scheme() != "file" {
-        return None;
-    }
-    let path = parsed.path();
-    if path.is_empty() {
-        None
-    } else {
-        Some(path.to_string())
-    }
+    wasm_file_path(&parsed)?.to_str().map(str::to_owned)
 }
 
 #[wasm_bindgen]
@@ -120,12 +159,17 @@ pub fn builtin_inventory_counts() -> JsValue {
 
 #[wasm_bindgen(js_name = "projectHandoff")]
 pub async fn project_handoff(source_path: String) -> Result<JsValue, JsValue> {
-    let frozen = runmat_package::discover_frozen_project_from_async(
-        Path::new(&source_path),
-        Default::default(),
-    )
-    .await
-    .map_err(|error| JsValue::from_str(&error.to_string()))?;
+    let workspace = SourceWorkspace::capture()?;
+    let Some(frozen) = workspace
+        .run(runmat_package::discover_frozen_project_from_async(
+            Path::new(&source_path),
+            Default::default(),
+        ))
+        .await?
+    else {
+        return Ok(JsValue::NULL);
+    };
+    let frozen = frozen.map_err(|error| JsValue::from_str(&error.to_string()))?;
     let Some(frozen) = frozen else {
         return Ok(JsValue::NULL);
     };
@@ -138,12 +182,17 @@ pub async fn project_handoff(source_path: String) -> Result<JsValue, JsValue> {
 
 #[wasm_bindgen(js_name = "projectRevision")]
 pub async fn project_revision(source_path: String) -> Result<JsValue, JsValue> {
-    let frozen = runmat_package::discover_frozen_project_from_async(
-        Path::new(&source_path),
-        Default::default(),
-    )
-    .await
-    .map_err(|error| JsValue::from_str(&error.to_string()))?;
+    let workspace = SourceWorkspace::capture()?;
+    let Some(frozen) = workspace
+        .run(runmat_package::discover_frozen_project_from_async(
+            Path::new(&source_path),
+            Default::default(),
+        ))
+        .await?
+    else {
+        return Ok(JsValue::NULL);
+    };
+    let frozen = frozen.map_err(|error| JsValue::from_str(&error.to_string()))?;
     let Some(frozen) = frozen else {
         return Ok(JsValue::NULL);
     };
@@ -170,12 +219,16 @@ pub fn install_project_handoff(value: JsValue) -> Result<JsValue, JsValue> {
         .map_err(|error| JsValue::from_str(&error.to_string()))?;
     let revision = crate::core::project::ProjectContext::install_handoff(handoff)
         .map_err(|error| JsValue::from_str(&error.to_string()))?;
+    WORKSPACE_REVISION.with(|workspace| workspace.set(workspace.get().saturating_add(1)));
+    invalidate_source_analyses();
     to_js(&revision)
 }
 
 #[wasm_bindgen(js_name = "clearProjectHandoff")]
 pub fn clear_project_handoff() {
     crate::core::project::ProjectContext::clear_installed_handoff();
+    WORKSPACE_REVISION.with(|workspace| workspace.set(workspace.get().saturating_add(1)));
+    invalidate_source_analyses();
 }
 
 /// Discover tests from the exact frozen run snapshot supplied by the browser
@@ -228,6 +281,8 @@ pub fn update_document_lexical(
         revision
     });
     WORKSPACE_REVISION.with(|workspace| workspace.set(workspace.get().saturating_add(1)));
+    invalidate_source_analyses();
+    crate::core::project::ProjectContext::clear_installed_handoff();
     let parsed_uri = Url::parse(&uri).ok();
     let is_fea = parsed_uri.as_ref().is_some_and(is_fea_uri);
     let design = parsed_uri.as_ref().and_then(design_dialect);
@@ -285,7 +340,16 @@ pub async fn analyze_document(uri: String, version: u64) -> Result<JsValue, JsVa
             &files,
             &values,
         )
-        .with_pending(&DESIGN_PENDING.with(|p| p.borrow().get(&uri).cloned().unwrap_or_default()));
+        .with_pending(&DESIGN_PENDING.with(|p| p.borrow().get(&uri).cloned().unwrap_or_default()))
+        .with_entities(
+            DESIGN_ENTITIES
+                .with(|e| {
+                    e.borrow()
+                        .get(parsed_uri.as_ref().expect("a parsed design uri").path())
+                        .cloned()
+                })
+                .as_ref(),
+        );
         let tokens = analysis.semantic_tokens();
         let committed = DOCS.with(|d| {
             let mut docs = d.borrow_mut();
@@ -305,7 +369,7 @@ pub async fn analyze_document(uri: String, version: u64) -> Result<JsValue, JsVa
         };
     }
     let (analysis, fea_analysis, fea_error, tokens) = if is_fea {
-        match analyze_fea_document(&uri, &entry) {
+        match analyze_fea_document(&uri, &entry).await {
             Ok(analysis) => {
                 let tokens = analysis
                     .semantic_tokens(&entry.text)
@@ -316,12 +380,17 @@ pub async fn analyze_document(uri: String, version: u64) -> Result<JsValue, JsVa
         }
     } else {
         let source_name = source_name_from_uri(&uri);
-        let analysis = analyze_document_with_compat_and_source_async(
-            &entry.text,
-            entry.compat,
-            source_name.as_deref(),
-        )
-        .await;
+        let workspace = SourceWorkspace::capture()?;
+        let Some(analysis) = workspace
+            .run(analyze_document_with_compat_and_source_async(
+                &entry.text,
+                entry.compat,
+                source_name.as_deref(),
+            ))
+            .await?
+        else {
+            return Ok(JsValue::NULL);
+        };
         let tokens = semantic_tokens_full(&entry.text, &analysis)
             .unwrap_or_else(|| entry.lexical_tokens.clone());
         (Some(analysis), None, None, tokens)
@@ -334,7 +403,7 @@ pub async fn analyze_document(uri: String, version: u64) -> Result<JsValue, JsVa
         if current.version != version || current.revision != entry.revision {
             return false;
         }
-        if is_fea && WORKSPACE_REVISION.with(Cell::get) != workspace_revision {
+        if WORKSPACE_REVISION.with(Cell::get) != workspace_revision {
             return false;
         }
         current.analysis = analysis;
@@ -394,6 +463,28 @@ pub fn set_design_values(values: JsValue) -> Result<JsValue, JsValue> {
     Ok(JsValue::NULL)
 }
 
+/// Supplies what a part's feature references resolve to, as the Desktop's CAD host regenerated
+/// it: `{ "/p/bracket.part": { "<feature>/<param>": [count, [facts…]] } }` (the shape of
+/// `runmat_cad::index::reference_facts`); a `null` forgets a file. Reference hovers read them,
+/// because this server regenerates on the test kernel, which doesn't match the viewport.
+#[wasm_bindgen(js_name = "setDesignEntities")]
+pub fn set_design_entities(entities: JsValue) -> Result<JsValue, JsValue> {
+    let entities: BTreeMap<String, serde_json::Value> = serde_wasm_bindgen::from_value(entities)
+        .map_err(|error| JsValue::from_str(&error.to_string()))?;
+    DESIGN_ENTITIES.with(|stored| {
+        let mut stored = stored.borrow_mut();
+        for (path, facts) in entities {
+            if facts.is_null() {
+                stored.remove(&path);
+            } else {
+                stored.insert(path, facts);
+            }
+        }
+    });
+    WORKSPACE_REVISION.with(|workspace| workspace.set(workspace.get().saturating_add(1)));
+    Ok(JsValue::NULL)
+}
+
 /// Supplies the texts of files design documents read (`{ "/p/io.circuit": "…" }`); a `null`
 /// text forgets a file. Open documents always win over these.
 #[wasm_bindgen(js_name = "setDesignFiles")]
@@ -437,92 +528,69 @@ pub fn set_design_pending(uri: String, paths: JsValue) -> Result<JsValue, JsValu
     Ok(JsValue::NULL)
 }
 
-fn analyze_fea_document(uri: &str, entry: &DocEntry) -> Result<FeaDocumentAnalysis, String> {
+/// Sets the workspace roots: the folders a `.fea` study's relative paths (`import … from`,
+/// `file =`) may reach. A study resolves within the deepest root that holds it, so with the
+/// project root set, `simulation/x.fea` may read `../part.part` but not a file above the project.
+/// `uris` is an array of `file://` folder URIs (the LSP `rootUri` and `workspaceFolders`); an
+/// empty array restores the default: the folder of the frozen project that holds the study, else
+/// the filesystem root `/`, which the runtime check also uses.
+/// The host checks open `.fea` documents again (`analyze_document`) after a change.
+#[wasm_bindgen(js_name = "setWorkspaceRoots")]
+pub fn set_workspace_roots(uris: JsValue) -> Result<JsValue, JsValue> {
+    let uris: Vec<String> = serde_wasm_bindgen::from_value(uris)
+        .map_err(|error| JsValue::from_str(&format!("invalid workspace roots: {error}")))?;
+    let roots = workspace_root_paths(&uris).map_err(|error| JsValue::from_str(&error))?;
+    WORKSPACE_ROOTS.with(|slot| slot.replace(roots));
+    WORKSPACE_REVISION.with(|workspace| workspace.set(workspace.get().saturating_add(1)));
+    Ok(JsValue::NULL)
+}
+
+fn workspace_root_paths(uris: &[String]) -> Result<Vec<PathBuf>, String> {
+    let mut roots = Vec::with_capacity(uris.len());
+    for uri in uris {
+        let path = Url::parse(uri)
+            .ok()
+            .and_then(|url| wasm_file_path(&url))
+            .ok_or_else(|| format!("workspace root `{uri}` is not a file URI"))?;
+        // `file:///project/` and `file:///project` name the same folder.
+        let path = path.components().collect::<PathBuf>();
+        if !roots.contains(&path) {
+            roots.push(path);
+        }
+    }
+    Ok(roots)
+}
+
+async fn analyze_fea_document(uri: &str, entry: &DocEntry) -> Result<FeaDocumentAnalysis, String> {
     let physical_path = Url::parse(uri)
         .ok()
         .and_then(|url| wasm_file_path(&url))
         .ok_or_else(|| "FEA language tooling requires a file-backed document".to_string())?;
-    let (overlays, source_overlays) = DOCS.with(|documents| {
-        let documents = documents.borrow();
-        let source_overlays: BTreeMap<PathBuf, String> = documents
+    let source_overlays = DOCS.with(|documents| {
+        documents
+            .borrow()
             .docs
             .iter()
             .filter_map(|(document_uri, document)| {
                 let path = wasm_file_path(&Url::parse(document_uri).ok()?)?;
                 Some((path, document.text.clone()))
             })
-            .collect::<BTreeMap<_, _>>();
-        let overlays = source_overlays
-            .iter()
-            .filter(|(path, _)| {
-                path.extension()
-                    .is_some_and(|extension| extension.eq_ignore_ascii_case("fea"))
-            })
-            .map(|(path, source)| (path.clone(), source.as_bytes().to_vec()))
-            .collect::<Vec<_>>();
-        (overlays, source_overlays)
+            .collect::<BTreeMap<_, _>>()
     });
-    let source_root = source_overlays.keys().fold(
-        physical_path
-            .parent()
-            .map(Path::to_path_buf)
-            .unwrap_or_else(|| PathBuf::from("/")),
-        |root, path| common_ancestor(&root, path),
-    );
-    let prepared = FeaDocumentAnalysis::prepare_with_overlays(
+    let roots = WORKSPACE_ROOTS.with(|slot| slot.borrow().clone());
+    analyze_fea_source(
         &entry.text,
         &physical_path,
-        &[source_root],
-        &overlays,
-    )?;
-    let requests = prepared.function_requests()?;
-    let facts = resolve_project_facts(
-        prepared.source_root(),
-        &requests,
-        &physical_path,
-        entry.compat,
+        &roots,
         &source_overlays,
-    )?;
-    prepared
-        .check(facts.functions, facts.profiles)
-        .map(|checked| FeaDocumentAnalysis::from_checked(checked, facts.function_sources))
-}
-
-fn common_ancestor(left: &Path, right: &Path) -> PathBuf {
-    left.ancestors()
-        .find(|candidate| right.starts_with(candidate))
-        .map(Path::to_path_buf)
-        .unwrap_or_else(|| PathBuf::from("/"))
+        entry.compat,
+    )
+    .await
 }
 
 fn wasm_file_path(uri: &Url) -> Option<PathBuf> {
-    if uri.scheme() != "file" {
-        return None;
-    }
-    let encoded = uri.path().as_bytes();
-    let mut decoded = Vec::with_capacity(encoded.len());
-    let mut index = 0;
-    while index < encoded.len() {
-        if encoded[index] == b'%' && index + 2 < encoded.len() {
-            let high = hex_value(encoded[index + 1])?;
-            let low = hex_value(encoded[index + 2])?;
-            decoded.push((high << 4) | low);
-            index += 3;
-        } else {
-            decoded.push(encoded[index]);
-            index += 1;
-        }
-    }
-    String::from_utf8(decoded).ok().map(PathBuf::from)
-}
-
-fn hex_value(value: u8) -> Option<u8> {
-    match value {
-        b'0'..=b'9' => Some(value - b'0'),
-        b'a'..=b'f' => Some(value - b'a' + 10),
-        b'A'..=b'F' => Some(value - b'A' + 10),
-        _ => None,
-    }
+    let path = crate::core::workspace::uri_to_path(uri)?;
+    runmat_filesystem::normalize_virtual_path(&path).ok()
 }
 
 #[wasm_bindgen]
@@ -531,6 +599,8 @@ pub fn close_document(uri: String) {
         d.borrow_mut().docs.remove(&uri);
     });
     WORKSPACE_REVISION.with(|workspace| workspace.set(workspace.get().saturating_add(1)));
+    invalidate_source_analyses();
+    crate::core::project::ProjectContext::clear_installed_handoff();
 }
 
 #[wasm_bindgen]
@@ -595,6 +665,41 @@ pub fn hover(_uri: String, _line: u32, _character: u32) -> Result<JsValue, JsVal
     }
 }
 
+/// Quick fixes for the diagnostics in a range: units of the expected kind for a wrong unit, in
+/// every design language and `.fea`.
+#[wasm_bindgen(js_name = "codeActions")]
+pub fn code_actions(
+    uri: String,
+    start_line: u32,
+    start_character: u32,
+    end_line: u32,
+    end_character: u32,
+) -> Result<JsValue, JsValue> {
+    ensure_builtins_registered();
+    let entry = DOCS.with(|d| d.borrow().docs.get(&uri).cloned());
+    let Some(doc) = entry else {
+        return to_js(&Vec::<lsp_types::CodeActionOrCommand>::new());
+    };
+    let range = lsp_types::Range::new(
+        Position::new(start_line, start_character),
+        Position::new(end_line, end_character),
+    );
+    let actions = if let Some(analysis) = doc.design_analysis.as_ref() {
+        analysis.code_actions(range)
+    } else if let (Some(analysis), Ok(url)) =
+        (doc.fea_analysis.as_ref(), lsp_types::Url::parse(&uri))
+    {
+        analysis.code_actions(&url, &doc.text, range)
+    } else {
+        Vec::new()
+    };
+    // As plain objects: an edit's `changes` is a map keyed by URI, which the default serializer
+    // writes as a JS Map that the editor can't read.
+    actions
+        .serialize(&serde_wasm_bindgen::Serializer::json_compatible())
+        .map_err(|e| JsValue::from_str(&e.to_string()))
+}
+
 #[wasm_bindgen(js_name = "quickInformation")]
 pub fn quick_information(uri: String, line: u32, character: u32) -> Result<JsValue, JsValue> {
     ensure_builtins_registered();
@@ -657,7 +762,15 @@ pub async fn definition(_uri: String, _line: u32, _character: u32) -> Result<JsV
     let Some(analysis) = doc.analysis.as_ref() else {
         return Ok(JsValue::NULL);
     };
-    let locations = definition_locations_at_async(&doc.text, analysis, &position, &uri).await;
+    let workspace = SourceWorkspace::capture()?;
+    let Some(locations) = workspace
+        .run(definition_locations_at_async(
+            &doc.text, analysis, &position, &uri,
+        ))
+        .await?
+    else {
+        return Ok(JsValue::NULL);
+    };
     to_js(&locations)
 }
 
@@ -679,7 +792,15 @@ pub async fn references(_uri: String, _line: u32, _character: u32) -> Result<JsV
     let Some(analysis) = doc.analysis.as_ref() else {
         return Ok(JsValue::NULL);
     };
-    let locations = references_locations_at_async(&doc.text, analysis, &position, &uri).await;
+    let workspace = SourceWorkspace::capture()?;
+    let Some(locations) = workspace
+        .run(references_locations_at_async(
+            &doc.text, analysis, &position, &uri,
+        ))
+        .await?
+    else {
+        return Ok(JsValue::NULL);
+    };
     to_js(&locations)
 }
 
@@ -691,8 +812,10 @@ pub fn signature_help(_uri: String, _line: u32, _character: u32) -> Result<JsVal
         return Ok(JsValue::NULL);
     };
     let position = Position::new(_line, _character);
-    if doc.design_analysis.is_some() {
-        return Ok(JsValue::NULL);
+    if let Some(analysis) = doc.design_analysis.as_ref() {
+        return analysis
+            .signature_help(&position)
+            .map_or(Ok(JsValue::NULL), |help| to_js(&help));
     }
     if let Some(analysis) = doc.fea_analysis.as_ref() {
         return analysis
@@ -786,8 +909,13 @@ pub async fn workspace_symbols_all() -> Result<JsValue, JsValue> {
         (docs, (fea_analyses, design_symbols))
     });
     let (fea_analyses, design_symbols) = fea_analyses;
-    let mut syms: Vec<SymbolInformation> =
-        workspace_symbols_with_project_async(&docs, compat, None).await;
+    let workspace = SourceWorkspace::capture()?;
+    let Some(mut syms) = workspace
+        .run(workspace_symbols_with_project_async(&docs, compat, None))
+        .await?
+    else {
+        return Ok(JsValue::NULL);
+    };
     syms.extend(
         fea_analyses
             .iter()
@@ -917,6 +1045,67 @@ mod tests {
 
     wasm_bindgen_test_configure!(run_in_browser);
 
+    const STEEL: &str = "material steel {\n    mass_density = 7850 kg/m^3\n    elastic {\n        youngs_modulus = 200 GPa\n        poisson_ratio = 0.3\n    }\n}\n";
+
+    /// Whether the open study's import was refused as escaping its source root.
+    fn import_refused(uri: &str) -> bool {
+        let diagnostics: Vec<Diagnostic> =
+            serde_wasm_bindgen::from_value(diagnostics(uri.to_string()).expect("diagnostics"))
+                .expect("deserialize diagnostics");
+        diagnostics.iter().any(|diagnostic| {
+            diagnostic.code
+                == Some(lsp_types::NumberOrString::String(
+                    "fea.module.invalid_path".to_string(),
+                ))
+                && diagnostic
+                    .message
+                    .contains("escapes the declared source root")
+        })
+    }
+
+    #[wasm_bindgen_test(async)]
+    async fn workspace_roots_bound_what_a_study_may_read() {
+        let provider = runmat_filesystem::MemoryFsProvider::new();
+        provider
+            .write_project_path("/cloud/project/materials.fea", STEEL.as_bytes())
+            .unwrap();
+        provider
+            .write_project_path("/cloud/outside.fea", STEEL.as_bytes())
+            .unwrap();
+        let _provider = runmat_filesystem::replace_provider(std::sync::Arc::new(provider));
+        set_workspace_roots(
+            serde_wasm_bindgen::to_value(&["file:///cloud/project/"]).expect("roots"),
+        )
+        .expect("set workspace roots");
+
+        let inside = "file:///cloud/project/simulation/inside.fea";
+        open_document(
+            inside.to_string(),
+            "import material steel from \"../materials.fea\"\n".to_string(),
+        )
+        .await;
+        let above = "file:///cloud/project/simulation/above.fea";
+        open_document(
+            above.to_string(),
+            "import material steel from \"../../outside.fea\"\n".to_string(),
+        )
+        .await;
+        assert!(!import_refused(inside));
+        assert!(import_refused(above));
+
+        // Without roots the study resolves from `/`, like the runtime check.
+        set_workspace_roots(serde_wasm_bindgen::to_value(&Vec::<String>::new()).expect("roots"))
+            .expect("clear workspace roots");
+        change_document(
+            above.to_string(),
+            "import material steel from \"../../outside.fea\"\n".to_string(),
+        )
+        .await;
+        assert!(!import_refused(above));
+        close_document(inside.to_string());
+        close_document(above.to_string());
+    }
+
     #[wasm_bindgen_test(async)]
     async fn wave_facts_match_the_native_program_point_product() {
         let uri = "file:///rm1068-wave.m".to_string();
@@ -1024,10 +1213,12 @@ mod tests {
                     function: runmat_types::ProgramFunctionId(1),
                     ordinal: 2,
                 },
-                owner: runmat_types::ParallelRegionId(runmat_types::RegionId {
-                    function: runmat_types::ProgramFunctionId(1),
-                    ordinal: 3,
-                }),
+                owner: runmat_types::DistributedOwner::Region(runmat_types::ParallelRegionId(
+                    runmat_types::RegionId {
+                        function: runmat_types::ProgramFunctionId(1),
+                        ordinal: 3,
+                    },
+                )),
                 scheme: Some(runmat_types::DistributionScheme::Replicated),
                 value: Box::new(unknown()),
                 materializable: true,
@@ -1043,9 +1234,18 @@ mod tests {
         ];
         let facts = kinds.into_iter().map(ValueFact::scalar).collect::<Vec<_>>();
 
+        // Compare the browser boundary with the shared wire contract. Struct
+        // position facts are analysis-local precision and intentionally omitted
+        // by serde (see runmat-types/tests/lattice_laws.rs). The native wire
+        // projection preserves every public kind without exporting that state.
+        let wire_facts: Vec<ValueFact> = serde_json::from_slice(
+            &serde_json::to_vec(&facts).expect("serialize native fact wire contract"),
+        )
+        .expect("deserialize native fact wire contract");
+
         let javascript = serde_wasm_bindgen::to_value(&facts).expect("serialize taxonomy");
         let round_trip: Vec<ValueFact> =
             serde_wasm_bindgen::from_value(javascript).expect("deserialize taxonomy");
-        assert_eq!(round_trip, facts);
+        assert_eq!(round_trip, wire_facts);
     }
 }

@@ -14,7 +14,10 @@
 //! centre-point arcs, straight slots (two lines and two arcs, tangent), points, offsets of lines
 //! and circles, trim and extend (`modify`), mirror, pattern, transform, split and the
 //! construction toggle (`repeat`), fillet and chamfer (`corners`), auto-constrain (`infer`), and
-//! the relations and dimensions the sketch model has. A tool the sketch model lacks (splines, ellipses, text) says so.
+//! the relations and dimensions the sketch model has, splines through points, ellipses and
+//! elliptical arcs, and text. A tool the sketch model lacks (parabolas, conics, control-point splines,
+//! text along a curve)
+//! says so.
 
 use super::{model, EditFailure, SourceChange};
 use runmat_cad::ids::SketchEntityId;
@@ -159,6 +162,7 @@ fn draw(
         id: SketchEntityId::new(id),
         geometry,
         construction,
+        projected: None,
     };
     let kind = values.get("type").and_then(Value::as_str).unwrap_or("");
     match command {
@@ -381,6 +385,37 @@ fn draw(
             ];
             Ok((entities, relations))
         }
+        "sketch.polygon" => polygon(values, &mut name),
+        "sketch.ellipse" => ellipse::draw(values, kind, &mut name),
+        "sketch.text" => text::draw(values, &mut name),
+        "sketch.spline" => {
+            if !kind.is_empty() && kind != "through_points" {
+                let what = match kind {
+                    "control_points" => "control-point splines",
+                    "equation" => "equation curves",
+                    _ => "style splines",
+                };
+                return Err(model(format!(
+                    "{what} aren't in the sketch model yet; draw a spline through points"
+                )));
+            }
+            let points = spline_points(values)?;
+            let closed = values
+                .get("closed")
+                .and_then(Value::as_bool)
+                .unwrap_or(false);
+            if points.len() < if closed { 3 } else { 2 } {
+                return Err(model(if closed {
+                    "a closed spline runs through at least three points"
+                } else {
+                    "a spline runs through at least two points"
+                }));
+            }
+            Ok((
+                vec![entity(&name("sp"), G::Spline { points, closed }, false)],
+                Vec::new(),
+            ))
+        }
         "sketch.offset" => {
             let d = values
                 .get("distance")
@@ -388,10 +423,11 @@ fn draw(
                 .ok_or_else(|| model("give the offset a distance"))?;
             let mut out = Vec::new();
             for pick in picks(values, "entities") {
-                let SketchTarget::Entity { entity: id } = target(&pick, "")? else {
+                // A curve pick, bare (`l1`) or full (`sketch.s1.l1`); point picks are skipped.
+                let rest = pick.rsplit('.').next().unwrap_or(&pick).to_owned();
+                if role(&rest).is_some() {
                     continue;
-                };
-                let rest = id.0.rsplit('.').next().unwrap_or(&id.0).to_owned();
+                }
                 let Some(source) = sketch.entities.iter().find(|e| e.id.0 == rest) else {
                     return Err(model(format!("the sketch has no curve `{rest}`")));
                 };
@@ -445,6 +481,111 @@ fn draw(
         }
         other => Err(super::unhandled(other)),
     }
+}
+
+/// A spline's points in order: each a point value (`{ x, y }`, or `{ x, y, of }` when it snapped
+/// to a sketch point) or a canvas pick of a sketch point (`sketch.<sketch>.l1.end`).
+fn spline_points(values: &Map<String, Value>) -> Result<Vec<PointExpr>, EditFailure> {
+    let items = match values.get("points") {
+        Some(Value::Array(items)) => items.clone(),
+        Some(v @ (Value::String(_) | Value::Object(_))) => vec![v.clone()],
+        _ => Vec::new(),
+    };
+    items
+        .iter()
+        .map(|item| match item {
+            Value::String(pick) => {
+                // `sketch.<sketch>.l1.end` from the canvas, or `l1.end`.
+                let rest = match pick.strip_prefix("sketch.") {
+                    Some(r) => r.split_once('.').map_or(r, |(_, r)| r),
+                    None => pick.as_str(),
+                };
+                match rest.rsplit_once('.') {
+                    Some((entity, word)) if role(word).is_some() => Ok(of(entity, role(word).expect("checked"))),
+                    _ => Err(model(format!(
+                        "`{pick}` isn't a sketch point; a spline runs through points of the open sketch"
+                    ))),
+                }
+            }
+            Value::Object(_) => {
+                let mut one = Map::new();
+                one.insert("point".into(), item.clone());
+                point(&one, "point")
+            }
+            _ => Err(model("a spline point is a picked sketch point or { x, y }")),
+        })
+        .collect()
+}
+
+/// A regular polygon: `sides` lines in a closed chain, each corner shared, all of equal length.
+/// Its corners sit on a circle of `radius` about `center` (inscribed), or its sides touch that
+/// circle (circumscribed); `rotation` (degrees) turns the first corner from the +x direction.
+fn polygon(
+    values: &Map<String, Value>,
+    name: &mut dyn FnMut(&str) -> String,
+) -> Result<(Vec<SketchEntity>, Vec<SketchConstraint>), EditFailure> {
+    let n = values.get("sides").and_then(num).unwrap_or(6.0).round();
+    if !(3.0..=64.0).contains(&n) {
+        return Err(model("a polygon has 3 to 64 sides"));
+    }
+    let n = n as usize;
+    let Some((cx, cy)) = xy(values, "center") else {
+        return Err(model("pick the polygon's centre on the sketch"));
+    };
+    let r = values
+        .get("radius")
+        .and_then(num)
+        .filter(|r| *r > 0.0)
+        .ok_or_else(|| model("give the polygon a radius"))?;
+    let step = std::f64::consts::TAU / n as f64;
+    // Circumscribed: the sides touch the circle, so the corners sit further out.
+    let corner_r = match values.get("fit").and_then(Value::as_str) {
+        Some("circumscribed") => r / (step / 2.0).cos(),
+        _ => r,
+    };
+    let turn = values
+        .get("rotation")
+        .and_then(num)
+        .unwrap_or(0.0)
+        .to_radians();
+    let ids: Vec<String> = (0..n).map(|_| name("l")).collect();
+    let corner = |k: usize| {
+        let a = turn + step * k as f64;
+        let round = |v: f64| (v * 1e6).round() / 1e6;
+        PointExpr::Coords {
+            x: mm(round(cx + corner_r * a.cos())),
+            y: mm(round(cy + corner_r * a.sin())),
+        }
+    };
+    let entities = (0..n)
+        .map(|k| {
+            let start = if k == 0 {
+                corner(0)
+            } else {
+                of(&ids[k - 1], PointRole::End)
+            };
+            let end = if k == n - 1 {
+                of(&ids[0], PointRole::Start)
+            } else {
+                corner(k + 1)
+            };
+            SketchEntity {
+                id: SketchEntityId::new(&ids[k]),
+                geometry: G::Line { start, end },
+                construction: false,
+                projected: None,
+            }
+        })
+        .collect();
+    let relations = (1..n)
+        .map(|k| {
+            constraint(K::Equal {
+                a: SketchTarget::entity(&ids[0]),
+                b: SketchTarget::entity(&ids[k]),
+            })
+        })
+        .collect();
+    Ok((entities, relations))
 }
 
 /// A point's position from the sketch's `solved { }` cache, in millimetres.
@@ -543,6 +684,7 @@ fn dimension(
         SketchTarget::Point { .. } => false,
     };
     let line = |g: &G| matches!(g, G::Line { .. });
+    let elliptic = |g: &G| matches!(g, G::Ellipse { .. });
     let circle = |g: &G| matches!(g, G::Circle { .. });
     let arc = |g: &G| matches!(g, G::Arc { .. });
     Ok(constraint(match targets.as_slice() {
@@ -559,6 +701,15 @@ fn dimension(
             curve: t.clone(),
             value: mm(value),
         },
+        // An ellipse's semi-axis: the major unless the form names the minor.
+        [t] if is(t, elliptic) => {
+            let curve = t.clone();
+            let value = mm(value);
+            match values.get("axis").and_then(Value::as_str) {
+                Some("minor") => K::MinorRadius { curve, value },
+                _ => K::MajorRadius { curve, value },
+            }
+        }
         [a, b]
             if is(a, line)
                 && is(b, line)
@@ -590,8 +741,14 @@ pub fn sketch_edit(
     if command == "part.sketch" {
         return Some(new_sketch(path, text, values, picks_of));
     }
+    if command == "part.edit-sketch-plane" {
+        return Some(edit_plane(path, text, values, picks_of));
+    }
     if !command.starts_with("sketch.") {
         return None;
+    }
+    if command == "sketch.use-edges" {
+        return Some(use_edges::use_edges(path, text, values));
     }
     let Some(id) = values
         .get("sketch")
@@ -600,47 +757,248 @@ pub fn sketch_edit(
     else {
         return Some(Err(model("open a sketch first")));
     };
+    // A point field given as a point of the model (a click on the plane, the origin, a vertex)
+    // lands on the sketch plane; the regenerated part is read only when one does.
+    let values = &match placed::placed_points(
+        values,
+        &id,
+        |pick| picks_of.vertex_point(pick),
+        || picks_of.sketch_frame(&id),
+    ) {
+        Ok(values) => values,
+        Err(e) => return Some(Err(e)),
+    };
+    if command == "sketch.offset" {
+        if let Some(result) = offset_edges::in_part(path, text, &id, values) {
+            return Some(result);
+        }
+    }
     let mut summary = String::new();
     let result = edit_part(text, path, |document| {
         let sketch = sketch_mut(document, &id)?;
-        match command {
-            "sketch.constraint" => {
-                let c = relation(values, &id)?;
-                summary = format!("Added a relation to {id}");
-                sketch.constraints.push(c);
-            }
-            "sketch.dimension" => {
-                let c = dimension(values, sketch, &id)?;
-                summary = format!("Dimensioned {id}");
-                sketch.constraints.push(c);
-            }
-            "sketch.trim" => summary = modify::trim(values, sketch, &id)?,
-            "sketch.extend" => summary = modify::extend(values, sketch, &id)?,
-            "sketch.construction" => summary = repeat::construction(values, sketch, &id)?,
-            "sketch.mirror" => summary = repeat::mirror(values, sketch, &id)?,
-            "sketch.pattern" => summary = repeat::pattern(values, sketch, &id)?,
-            "sketch.transform" => summary = repeat::transform(values, sketch, &id)?,
-            "sketch.split" => summary = repeat::split(values, sketch, &id)?,
-            "sketch.fillet" => summary = corners::fillet(values, sketch, &id)?,
-            "sketch.chamfer" => summary = corners::chamfer(values, sketch, &id)?,
-            "sketch.auto-constrain" => summary = infer::auto_constrain(values, sketch, &id)?,
-            _ => {
-                let (entities, relations) = draw(command, values, sketch)?;
-                summary = format!(
-                    "Added {} to {id}",
-                    entities
-                        .iter()
-                        .map(|e| e.id.0.as_str())
-                        .collect::<Vec<_>>()
-                        .join(", ")
-                );
-                sketch.entities.extend(entities);
-                sketch.constraints.extend(relations);
-            }
-        }
+        summary = apply(command, values, sketch, &id)?;
         Ok(())
     });
     Some(result.map(|change| (change, summary)))
+}
+
+/// One sketch tool on the open sketch `id`, answering the summary. Parts and assemblies both
+/// run their sketch tools through this one function.
+pub(crate) fn apply(
+    command: &str,
+    values: &Map<String, Value>,
+    sketch: &mut Sketch,
+    id: &str,
+) -> Result<String, EditFailure> {
+    let id = id.to_owned();
+    let values = &picked_points(values, sketch, &id);
+    Ok(match command {
+        "sketch.constraint" => {
+            let c = relation(values, &id)?;
+            sketch.constraints.push(c);
+            format!("Added a relation to {id}")
+        }
+        "sketch.dimension" => {
+            let c = dimension(values, sketch, &id)?;
+            sketch.constraints.push(c);
+            format!("Dimensioned {id}")
+        }
+        "sketch.trim" => modify::trim(values, sketch, &id)?,
+        "sketch.extend" => modify::extend(values, sketch, &id)?,
+        "sketch.construction" => repeat::construction(values, sketch, &id)?,
+        "sketch.mirror" => repeat::mirror(values, sketch, &id)?,
+        "sketch.pattern" => repeat::pattern(values, sketch, &id)?,
+        "sketch.transform" => repeat::transform(values, sketch, &id)?,
+        "sketch.split" => repeat::split(values, sketch, &id)?,
+        "sketch.fillet" => corners::fillet(values, sketch, &id)?,
+        "sketch.chamfer" => corners::chamfer(values, sketch, &id)?,
+        "sketch.auto-constrain" => infer::auto_constrain(values, sketch, &id)?,
+        _ => {
+            let (entities, relations) = draw(command, values, sketch)?;
+            let summary = format!(
+                "Added {} to {id}",
+                entities
+                    .iter()
+                    .map(|e| e.id.0.as_str())
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            );
+            sketch.entities.extend(entities);
+            sketch.constraints.extend(relations);
+            summary
+        }
+    })
+}
+
+/// The sketch entities among a selection, by sketch: canvas and Outline picks
+/// `sketch.<sketch>.<entity>` (a point pick `sketch.<sketch>.<entity>.<role>` names its entity).
+pub(crate) fn selected_entities(selection: &[String]) -> Vec<(String, String)> {
+    let mut out: Vec<(String, String)> = Vec::new();
+    for pick in selection {
+        let Some(rest) = pick.strip_prefix("sketch.") else {
+            continue;
+        };
+        let mut parts = rest.split('.');
+        if let (Some(sketch), Some(entity)) = (parts.next(), parts.next()) {
+            // A point pick names its entity; Delete checks it is a point entity.
+            let entity = match parts.next() {
+                Some(role) => format!("{entity}.{role}"),
+                None => entity.to_owned(),
+            };
+            let key = (sketch.to_owned(), entity);
+            if !out.contains(&key) {
+                out.push(key);
+            }
+        }
+    }
+    out
+}
+
+/// Deletes entities `ids` of `sketch`, as Delete does on picked curves and points: points other
+/// curves took from them are written out where they sit, and the relations and dimensions that
+/// name them go. Parts and assemblies both delete sketch entities through this one function.
+pub(crate) fn delete_entities(sketch: &mut Sketch, ids: &[String]) -> Result<String, EditFailure> {
+    for id in ids {
+        // A picked point deletes a point entity (`p1.at`); a curve goes by picking the curve.
+        let id = match id.split_once('.') {
+            Some((entity, _)) => {
+                let point = sketch
+                    .entities
+                    .iter()
+                    .any(|e| e.id.0 == entity && matches!(e.geometry, G::Point { .. }));
+                if !point {
+                    return Err(model(format!(
+                        "Delete takes whole curves: pick `{entity}` itself, not its point"
+                    )));
+                }
+                SketchEntityId::new(entity)
+            }
+            None => SketchEntityId::new(id),
+        };
+        if !sketch.entities.iter().any(|e| e.id == id) {
+            return Err(model(format!("the sketch has no `{id}`")));
+        }
+        modify::detach(sketch, &id);
+        modify::drop_constraints_on(sketch, &id);
+        sketch.entities.retain(|e| e.id != id);
+    }
+    Ok(format!("Deleted {}", ids.join(", ")))
+}
+
+/// A tool's values with the editor's selection as `values.selection` when the tool started from
+/// one and its form has no field for it (Construction toggles the selected curves).
+pub(crate) fn with_selection(
+    values: &Map<String, Value>,
+    selection: &[String],
+) -> Map<String, Value> {
+    let mut out = values.clone();
+    if !selection.is_empty() && !out.contains_key("selection") {
+        out.insert(
+            "selection".into(),
+            Value::Array(selection.iter().cloned().map(Value::String).collect()),
+        );
+    }
+    out
+}
+
+/// The point fields a sketch tool takes.
+const POINT_FIELDS: [&str; 7] = ["center", "at", "base", "start", "end", "first", "second"];
+
+/// The point fields a tool takes ([`POINT_FIELDS`]) given as a pick of a sketch point
+/// (`sketch.<sketch>.l1.end`, from the Outline or the view) rewritten as the point value the
+/// canvas sends, `{ x, y, of }`: the tool then sits on that point, where it is now.
+fn picked_points(values: &Map<String, Value>, sketch: &Sketch, id: &str) -> Map<String, Value> {
+    let mut out = values.clone();
+    for key in POINT_FIELDS {
+        let pick = match values.get(key) {
+            Some(Value::String(s)) => s.clone(),
+            Some(Value::Array(a)) if a.len() == 1 => match a[0].as_str() {
+                Some(s) => s.to_owned(),
+                None => continue,
+            },
+            _ => continue,
+        };
+        let Ok(SketchTarget::Point { entity, role }) = target(&pick, id) else {
+            continue;
+        };
+        let at = solved(sketch, &entity.0, role).or_else(|| {
+            modify::position(
+                sketch,
+                &PointExpr::Of {
+                    entity: entity.clone(),
+                    role,
+                },
+                0,
+            )
+        });
+        if let Some((x, y)) = at {
+            out.insert(
+                key.to_owned(),
+                serde_json::json!({ "x": x, "y": y, "of": format!("{}.{}", entity.0, role.word()) }),
+            );
+        }
+    }
+    out
+}
+
+/// `part.edit-sketch-plane`: the selected (or open) sketch moves to the picked plane or planar
+/// face. Its entities keep their sketch coordinates, so the drawing moves with the plane; a
+/// face of a feature after the sketch is refused, since the sketch can't read what follows it.
+fn edit_plane(
+    path: &str,
+    text: &str,
+    values: &Map<String, Value>,
+    picks_of: &crate::picks::Picks<'_>,
+) -> Result<(SourceChange, String), EditFailure> {
+    let id = values
+        .get("sketch")
+        .and_then(Value::as_str)
+        .map(str::to_owned)
+        .or_else(|| {
+            picks(values, "selection").into_iter().find_map(|p| {
+                let id = p
+                    .strip_prefix("sketch:")
+                    .or_else(|| p.strip_prefix("feature:"))?;
+                picks_of
+                    .document
+                    .features
+                    .iter()
+                    .any(|f| f.id.0 == id && matches!(f.kind, FeatureKind::Sketch(_)))
+                    .then(|| id.to_owned())
+            })
+        })
+        .ok_or_else(|| model("select the sketch to move"))?;
+    let pick = picks(values, "plane").into_iter().next().ok_or_else(|| {
+        model(format!(
+            "pick the plane or planar face to move {id} to. {}",
+            crate::picks::PLANE_PICK_FORMS
+        ))
+    })?;
+    let plane: PlaneRef = serde_json::from_value(picks_of.plane(&pick)?)
+        .map_err(|e| model(format!("the sketch plane: {e}")))?;
+    // A face the sketch's own feature or a later one made: the sketch can't sit on it.
+    let at = picks_of.document.features.iter().position(|f| f.id.0 == id);
+    if let (Some(at), PlaneRef::Face { face }) = (at, &plane) {
+        let text = runmat_cad::syntax::refs::print_reference(face).unwrap_or_default();
+        if let Some(later) = picks_of.document.features[at..]
+            .iter()
+            .find(|f| text.contains(&format!("feature.{}.", f.id.0)))
+        {
+            return Err(model(format!(
+                "`{pick}` is made by `{}`, which comes after {id}; pick a plane or a face made before it",
+                later.id
+            )));
+        }
+    }
+    let change = edit_part(text, path, |document| {
+        let sketch = sketch_mut(document, &id)?;
+        if sketch.plane == plane {
+            return Err(model(format!("{id} is already on that plane")));
+        }
+        sketch.plane = plane.clone();
+        Ok(())
+    })?;
+    Ok((change, format!("Moved {id} to {pick}")))
 }
 
 /// `part.sketch`: an empty sketch on the picked plane or planar face, after the last feature.
@@ -682,9 +1040,23 @@ fn new_sketch(
 }
 
 mod corners;
+mod ellipse;
 mod infer;
 mod modify;
+pub(crate) mod offset_edges;
+pub(crate) mod placed;
 mod repeat;
+mod text;
+mod use_edges;
 
 #[cfg(test)]
 mod tests;
+
+#[cfg(test)]
+mod ellipse_tests;
+
+#[cfg(test)]
+mod text_tests;
+
+#[cfg(test)]
+mod use_edges_tests;

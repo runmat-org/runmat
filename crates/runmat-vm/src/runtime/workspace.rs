@@ -74,8 +74,8 @@ pub(crate) fn frame_activation(
 }
 
 fn current_owner() -> WorkspaceOwner {
-    runmat_runtime::context::legacy::active()
-        .map(|runtime| WorkspaceOwner::Runtime(runtime.local_identity()))
+    runmat_runtime::context::legacy::active_local_identity()
+        .map(WorkspaceOwner::Runtime)
         .unwrap_or(WorkspaceOwner::Ambient)
 }
 

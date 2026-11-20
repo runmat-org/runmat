@@ -17,8 +17,10 @@
 //!   as a warning and the sheet draws its frame without geometry.
 
 pub mod auto;
+mod cuts;
 mod holes;
 pub mod layout;
+pub(crate) mod occurrences;
 pub mod progress;
 pub(crate) mod props;
 pub mod title;
@@ -40,8 +42,12 @@ use runmat_cad::refs::name::EntityName;
 use runmat_cad::refs::reference::Reference;
 use runmat_cad::syntax::parse_drawing_in;
 use serde_json::{json, Value};
+use std::collections::btree_map::Entry;
 use std::collections::{BTreeMap, BTreeSet};
 use std::rc::Rc;
+
+/// A grid line's plane as the sheet draws it: its anchor and the box it spans (mm).
+type GridPlane = ([f64; 3], [[f64; 3]; 2]);
 
 /// A part's PMI names: tolerances, sizes and locations (what a dimension's `pmi` may name), and datums.
 type PmiNames = (BTreeSet<String>, BTreeSet<String>, BTreeSet<String>);
@@ -71,6 +77,12 @@ pub struct CompiledModels {
     cut_lists: BTreeMap<String, Vec<(String, Vec<runmat_cad::model::weldment::CutListRow>)>>,
     /// The project root (the folder holding `runmat.toml`), which parts lists print files from.
     root: Option<String>,
+    /// Assembly occurrences the annotations name, their faces placed in the assembly, by
+    /// [`values::scoped_key`].
+    scoped: BTreeMap<String, Value>,
+    /// Occurrences grids read, by [`values::scoped_key`]: each datum their part publishes →
+    /// the datum feature it names.
+    published: BTreeMap<String, BTreeMap<String, String>>,
 }
 
 fn names_in(reference: &Value, out: &mut Vec<Value>) {
@@ -126,6 +138,49 @@ impl ModelReferences for CompiledModels {
         self.occurrences
             .get(model.file.as_str())
             .is_some_and(|o| o.contains(&path.to_string()))
+    }
+    fn resolve_in(
+        &self,
+        model: &ModelRef,
+        path: &RelPath,
+        reference: &Reference,
+    ) -> Result<Vec<Vec<EntityName>>, String> {
+        let file = model.file.as_str();
+        let Some(scoped) = self
+            .scoped
+            .get(&values::scoped_key(file, &path.to_string()))
+        else {
+            return Err(format!(
+                "can't be read: `{path}` has no faces in {file} (it draws as a box)"
+            ));
+        };
+        let mut names = Vec::new();
+        names_in(
+            &serde_json::to_value(reference).unwrap_or(Value::Null),
+            &mut names,
+        );
+        for name in names {
+            let text = serde_json::from_value::<EntityName>(name)
+                .ok()
+                .and_then(|n| {
+                    runmat_cad::syntax::refs::print_reference(&Reference::Name {
+                        kind: runmat_cad::refs::name::TopoKind::Face,
+                        name: n,
+                    })
+                });
+            if !text.is_some_and(|t| occurrences::has_face(scoped, &t)) {
+                return Err(format!("names a face the part of `{path}` doesn't have"));
+            }
+        }
+        if let Reference::Name { name, .. } = reference {
+            return Ok(vec![vec![name.clone()]]);
+        }
+        Ok(vec![Vec::new()])
+    }
+    fn published_datums(&self, model: &ModelRef, path: &RelPath) -> Option<BTreeSet<String>> {
+        self.published
+            .get(&values::scoped_key(model.file.as_str(), &path.to_string()))
+            .map(|p| p.keys().cloned().collect())
     }
     fn pmi(&self, model: &ModelRef) -> PmiNames {
         self.pmi
@@ -432,12 +487,65 @@ pub fn compile_json_in(
     // bytes, so no inline copy of an assembly's display (tens of megabytes) is held.
     let models_out = displays;
     let displays = &models_out;
+    // The occurrences the annotations name: their faces placed in the assembly, and the datums
+    // a grid's part publishes.
+    for a in &document.annotations {
+        let Some(view) = document.views.iter().find(|v| v.name == a.view) else {
+            continue;
+        };
+        let file = view.model.file.as_str();
+        let Some(display) = displays.get(file) else {
+            continue;
+        };
+        use runmat_cad::drawing::AnnotationKind as K;
+        let paths: Vec<&RelPath> = match &a.kind {
+            K::Dimension { occurrences, .. } => occurrences.iter().collect(),
+            K::Level {
+                occurrence,
+                on: Some(_),
+                ..
+            } if !occurrence.is_empty() => vec![occurrence],
+            K::Level {
+                occurrence,
+                datum: Some(_),
+                ..
+            }
+            | K::Grids { occurrence, .. } => {
+                let key = values::scoped_key(file, &occurrence.to_string());
+                models.published.entry(key).or_insert_with(|| {
+                    occurrences::file_of(display, &occurrence.to_string())
+                        .map(|part| {
+                            let assembly = resolve_path(path, file, files);
+                            published_datums(&resolve_path(&assembly, &part, files), files)
+                        })
+                        .unwrap_or_default()
+                });
+                Vec::new()
+            }
+            _ => Vec::new(),
+        };
+        for occurrence in paths {
+            let key = values::scoped_key(file, &occurrence.to_string());
+            if let Entry::Vacant(slot) = models.scoped.entry(key) {
+                if let Some(s) = occurrences::scoped(display, &occurrence.to_string()) {
+                    slot.insert(s);
+                }
+            }
+        }
+    }
     let index = build_drawing_index(
         &document,
         &models,
         &values::Values {
             displays,
             documents: &documents,
+            units: document
+                .formats
+                .iter()
+                .map(|f| f.units)
+                .find(|u| !u.is_mm())
+                .unwrap_or_default(),
+            scoped: &models.scoped,
         },
     );
     let mut data = serde_json::to_value(&index).unwrap_or(Value::Null);
@@ -446,10 +554,12 @@ pub fn compile_json_in(
     let mut hlr = serde_json::Map::new();
     // A view's lines: exact on the part's kernel when it projects, else from the display.
     // `hidden`: whether the view draws hidden lines (a view that doesn't keeps none).
+    // `tangent`: how the view draws tangent edges (`crate::hlr::tangent_edges`).
     let lines_of = |file: &str,
                     display: &Value,
                     axes: &crate::hlr::Axes,
-                    hidden: bool|
+                    hidden: bool,
+                    tangent: runmat_cad::drawing::TangentEdges|
      -> crate::hlr::ViewLines {
         exact
             .get(file)
@@ -461,7 +571,7 @@ pub fn compile_json_in(
                     .iter()
                     .map(|b| (&b.handle, runmat_cad::regen::kernel::Transform::IDENTITY))
                     .collect();
-                crate::hlr::exact::view_lines(part.kernel.as_ref(), &bodies, display, axes)
+                crate::hlr::exact::view_lines(part.kernel.as_ref(), &bodies, display, axes, tangent)
             })
             .unwrap_or_else(|| crate::hlr::view_lines_drawn(display, axes, hidden))
     };
@@ -496,6 +606,7 @@ pub fn compile_json_in(
             }
             let shows_hidden =
                 !matches!(view["display"].as_str(), Some("visible_lines" | "shaded"));
+            let tangent = crate::hlr::tangent_edges(&views, name);
             let project = || -> Value {
                 // The occurrences the view leaves out (`exclude`), and everything under them.
                 let excluded: Vec<String> = document
@@ -517,7 +628,11 @@ pub fn compile_json_in(
                     // A section through the plane the view names, seen across the parent's cutting
                     // line: the parent's right stays right and its depth becomes up.
                     Some("section") => {
-                        drawn_in = Some(section_axes(&parent_axes));
+                        drawn_in = Some(section_axes(
+                            &parent_axes,
+                            section_sides(&document, name).0,
+                            section_sides(&document, name).1,
+                        ));
                         section_entry(display, &document, name, &parent_axes, &views, parent)
                     }
                     // A detail: the parent's lines, clipped by the sheet to the circle around the
@@ -540,7 +655,13 @@ pub fn compile_json_in(
                                 if let Value::Object(o) = &mut cut {
                                     o.remove("cut");
                                 }
-                                (section_axes(&from_axes), cut)
+                                (
+                                    {
+                                        let (other, vertical) = section_sides(&document, parent);
+                                        section_axes(&from_axes, other, vertical)
+                                    },
+                                    cut,
+                                )
                             }
                             _ => (
                                 parent_axes,
@@ -549,6 +670,7 @@ pub fn compile_json_in(
                                     display,
                                     &parent_axes,
                                     shows_hidden,
+                                    tangent,
                                 ))
                                 .unwrap_or(Value::Null),
                             ),
@@ -610,9 +732,14 @@ pub fn compile_json_in(
                             .and_then(|r| view_picks::auxiliary_axes(display, &parent_axes, &r))
                             .unwrap_or(parent_axes);
                         drawn_in = Some(axes);
-                        let mut lines =
-                            serde_json::to_value(lines_of(file, display, &axes, shows_hidden))
-                                .unwrap_or(Value::Null);
+                        let mut lines = serde_json::to_value(lines_of(
+                            file,
+                            display,
+                            &axes,
+                            shows_hidden,
+                            tangent,
+                        ))
+                        .unwrap_or(Value::Null);
                         if let Value::Object(o) = &mut lines {
                             o.insert("picks".into(), view_picks::picks(display, &axes));
                         }
@@ -620,7 +747,8 @@ pub fn compile_json_in(
                     }
                     // A broken-out section: the parent's lines with the cut inside its boundary.
                     Some("broken_out") => {
-                        let parent_lines = lines_of(file, display, &parent_axes, shows_hidden);
+                        let parent_lines =
+                            lines_of(file, display, &parent_axes, shows_hidden, tangent);
                         let cut = document
                             .views
                             .iter()
@@ -652,9 +780,14 @@ pub fn compile_json_in(
                     _ => {
                         let axes = crate::hlr::axes(crate::hlr::orientation(&views, name, 0));
                         drawn_in = Some(axes);
-                        let mut lines =
-                            serde_json::to_value(lines_of(file, display, &axes, shows_hidden))
-                                .unwrap_or(Value::Null);
+                        let mut lines = serde_json::to_value(lines_of(
+                            file,
+                            display,
+                            &axes,
+                            shows_hidden,
+                            tangent,
+                        ))
+                        .unwrap_or(Value::Null);
                         // What a click on each line means (the face it shows edge-on, or the edge).
                         if let Value::Object(o) = &mut lines {
                             o.insert("picks".into(), view_picks::picks(display, &axes));
@@ -678,6 +811,11 @@ pub fn compile_json_in(
                 };
                 let scale = ratio(&view["scale"]).or(sheet_scale).unwrap_or(1.0);
                 crate::hlr::thin::thin(&mut entry, scale, shows_hidden);
+                // How it drew tangent edges, its own setting or its orientation's default, so the
+                // view's Properties show what the sheet draws.
+                if let Value::Object(o) = &mut entry {
+                    o.insert("tangent_edges".into(), tangent.word().into());
+                }
                 entry
             };
             let entry = match key {
@@ -705,6 +843,11 @@ pub fn compile_json_in(
     // the axis (mm, from the anchor), so a view that shows the cylinder side-on dimensions it
     // across its two outline lines.
     let mut cylinders = serde_json::Map::new();
+    // Door swings by annotation id (leaf and arc, mm in the assembly), and grids' planes.
+    let mut swings = serde_json::Map::new();
+    let mut grid_texts: BTreeMap<String, Vec<GridPlane>> = BTreeMap::new();
+    // Level marks on datums: their height (mm), which the compile prints as the mark's text.
+    let mut level_texts: BTreeMap<String, f64> = BTreeMap::new();
     for a in &document.annotations {
         let Some(view) = document.views.iter().find(|v| v.name == a.view) else {
             continue;
@@ -712,6 +855,100 @@ pub fn compile_json_in(
         let Some(display) = displays.get(view.model.file.as_str()) else {
             continue;
         };
+        let file = view.model.file.as_str();
+        let scoped = |path: &RelPath| {
+            models
+                .scoped
+                .get(&values::scoped_key(file, &path.to_string()))
+        };
+        match &a.kind {
+            // A level mark starts at its face's height.
+            runmat_cad::drawing::AnnotationKind::Level {
+                on,
+                datum,
+                occurrence,
+                ..
+            } => {
+                let at = if occurrence.is_empty() {
+                    Some(display)
+                } else {
+                    scoped(occurrence)
+                };
+                let point = match (on, datum) {
+                    (Some(on), _) => at.and_then(|d| point_of(d, on)),
+                    (None, Some(datum)) => {
+                        let feature = models
+                            .published
+                            .get(&values::scoped_key(file, &occurrence.to_string()))
+                            .and_then(|p| p.get(datum))
+                            .cloned()
+                            .unwrap_or_else(|| datum.clone());
+                        let plane = occurrences::datum_planes(
+                            display,
+                            &occurrence.to_string(),
+                            std::slice::from_ref(&feature),
+                        )
+                        .pop()
+                        .flatten();
+                        if let Some((c, _)) = plane {
+                            level_texts.insert(a.id.clone(), c[2]);
+                        }
+                        plane.map(|(c, _)| c)
+                    }
+                    _ => None,
+                };
+                if let Some(p) = point {
+                    anchors.insert(a.id.clone(), json!([p]));
+                }
+                continue;
+            }
+            // Grids: each datum plane's centre and box, measured as a chain between neighbours.
+            runmat_cad::drawing::AnnotationKind::Grids {
+                occurrence, datums, ..
+            } => {
+                let features: Vec<String> = datums
+                    .iter()
+                    .map(|d| {
+                        models
+                            .published
+                            .get(&values::scoped_key(file, &occurrence.to_string()))
+                            .and_then(|p| p.get(d))
+                            .cloned()
+                            .unwrap_or_else(|| d.clone())
+                    })
+                    .collect();
+                let planes: Option<Vec<_>> =
+                    occurrences::datum_planes(display, &occurrence.to_string(), &features)
+                        .into_iter()
+                        .collect();
+                let Some(planes) = planes else {
+                    problems.push(warn(format!(
+                        "grids `{}`: `{occurrence}` draws no plane for one of {}",
+                        a.id,
+                        datums.join(", ")
+                    )));
+                    continue;
+                };
+                anchors.insert(
+                    a.id.clone(),
+                    json!(planes.iter().map(|(c, _)| c).collect::<Vec<_>>()),
+                );
+                extents.insert(
+                    a.id.clone(),
+                    json!(planes.iter().map(|(_, b)| b).collect::<Vec<_>>()),
+                );
+                grid_texts.insert(a.id.clone(), planes);
+                continue;
+            }
+            runmat_cad::drawing::AnnotationKind::DoorSwing { door, hinge, swing } => {
+                if let Some(s) = occurrences::door_swing(display, &door.to_string(), *hinge, *swing)
+                {
+                    swings.insert(a.id.clone(), s);
+                }
+                continue;
+            }
+            _ => {}
+        }
         // Frames, datum symbols, finish marks and note leaders point at what they annotate.
         if let Some(target) =
             values::leader_target(&a.kind, documents.get(view.model.file.as_str()))
@@ -726,23 +963,48 @@ pub fn compile_json_in(
             }
             continue;
         }
-        let (references, condition) = match &a.kind {
+        let no_occurrences = Vec::new();
+        let (references, condition, on) = match &a.kind {
             runmat_cad::drawing::AnnotationKind::Dimension {
                 references,
                 condition,
+                occurrences,
                 ..
-            } => (references, *condition),
-            runmat_cad::drawing::AnnotationKind::Centerline { between } => {
-                (between, runmat_cad::drawing::ArcCondition::Center)
-            }
+            } => (references, *condition, occurrences),
+            runmat_cad::drawing::AnnotationKind::Centerline { between } => (
+                between,
+                runmat_cad::drawing::ArcCondition::Center,
+                &no_occurrences,
+            ),
             _ => continue,
         };
-        let points: Option<Vec<[f64; 3]>> =
-            references.iter().map(|r| point_of(display, r)).collect();
+        // Each reference's model: the drawn part, or its occurrence of the drawn assembly.
+        let models_of: Option<Vec<&Value>> = (0..references.len())
+            .map(|i| {
+                if on.is_empty() {
+                    Some(display)
+                } else {
+                    scoped(on.get(i)?)
+                }
+            })
+            .collect();
+        let Some(models_of) = models_of else {
+            continue;
+        };
+        let display = models_of.first().copied().unwrap_or(display);
+        let points: Option<Vec<[f64; 3]>> = references
+            .iter()
+            .zip(&models_of)
+            .map(|(r, d)| point_of(d, r))
+            .collect();
         if let Some(mut points) = points {
             values::arc_anchors(display, references, &mut points, condition);
             anchors.insert(a.id.clone(), json!(points));
-            let boxes: Vec<Value> = references.iter().map(|r| extent_of(display, r)).collect();
+            let boxes: Vec<Value> = references
+                .iter()
+                .zip(&models_of)
+                .map(|(r, d)| extent_of(d, r))
+                .collect();
             extents.insert(a.id.clone(), Value::Array(boxes));
             if let (
                 runmat_cad::drawing::AnnotationKind::Dimension {
@@ -776,6 +1038,14 @@ pub fn compile_json_in(
             }
         }
     }
+    if !stage.partial() {
+        problems.extend(cuts::sections_that_cut_nothing(
+            path,
+            &document,
+            &hlr,
+            &parsed.spans,
+        ));
+    }
     let titles = title::title_layouts(path, &document, &index.title_blocks, files, &mut problems);
     // Each sheet's drafting style from its format's standard: text height, arrows, extension
     // lines, dimension offsets, figure orientation and line weights. Exports and the Desktop
@@ -804,6 +1074,33 @@ pub fn compile_json_in(
         o.insert("radii".into(), Value::Object(radii));
         o.insert("normals".into(), Value::Object(normals));
         o.insert("cylinders".into(), Value::Object(cylinders));
+        o.insert("swings".into(), Value::Object(swings));
+        // A grid row's text: the distance between each grid and the next, along the line
+        // through their centres.
+        if let Some(Value::Object(texts)) = o.get_mut("text") {
+            let units = document
+                .formats
+                .iter()
+                .map(|f| f.units)
+                .find(|u| !u.is_mm())
+                .unwrap_or_default();
+            for (id, planes) in &grid_texts {
+                let bays: Vec<String> = planes
+                    .windows(2)
+                    .map(|w| {
+                        let d: f64 = (0..3).map(|i| (w[1].0[i] - w[0].0[i]).powi(2)).sum();
+                        units.length(d.sqrt())
+                    })
+                    .collect();
+                texts.insert(id.clone(), Value::String(bays.join(" · ")));
+            }
+            for (id, z) in &level_texts {
+                texts.insert(
+                    id.clone(),
+                    Value::String(format!("EL. {}", units.elevation(*z))),
+                );
+            }
+        }
         o.insert(
             "hole_tables".into(),
             holes::hole_tables(&document, &exact, displays),
@@ -837,6 +1134,27 @@ pub fn compile_json_in(
         serde_json::to_value(&problems).unwrap_or(Value::Null),
     );
     json_text(&Value::Object(answer))
+}
+
+/// The datums the part file `at` publishes, each with the datum feature it names (a skeleton's
+/// `grid_1` → `grid_1`).
+fn published_datums(at: &str, files: &Files) -> BTreeMap<String, String> {
+    let Some(source) = files.get(at) else {
+        return BTreeMap::new();
+    };
+    let Some(document) = runmat_cad::syntax::parse_part(at, source).document else {
+        return BTreeMap::new();
+    };
+    document
+        .publishes
+        .iter()
+        .filter_map(|p| {
+            let feature = serde_json::to_value(&p.target).ok()?["datum"]["feature"]
+                .as_str()?
+                .to_owned();
+            Some((p.name.to_string(), feature))
+        })
+        .collect()
 }
 
 /// `{ "kind": kind, "data": data }`, holding `data` as it is: `json!` would serialize a copy of
@@ -879,11 +1197,7 @@ fn dot(a: [f64; 3], b: [f64; 3]) -> f64 {
 }
 
 fn radius_mm(v: &runmat_cad::value::ValueExpr) -> Option<f64> {
-    match v {
-        runmat_cad::value::ValueExpr::Quantity { value, unit } if unit == "mm" => Some(*value),
-        runmat_cad::value::ValueExpr::Number { value } => Some(*value),
-        _ => None,
-    }
+    runmat_cad::units::length_mm(v)
 }
 
 /// A model point (mm) a reference names: a cylindrical face's axis at its middle, a face's
@@ -928,7 +1242,7 @@ fn extent_of(display: &Value, reference: &runmat_cad::refs::reference::Reference
     json!([lo, hi])
 }
 
-fn point_of(
+pub(crate) fn point_of(
     display: &Value,
     reference: &runmat_cad::refs::reference::Reference,
 ) -> Option<[f64; 3]> {
@@ -965,12 +1279,53 @@ fn point_of(
 /// parent's view millimetres, with the label and the direction the arrows point).
 /// A section's axes, seen across its parent's cutting line: the parent's right stays right and
 /// its depth becomes up.
-fn section_axes(parent: &crate::hlr::Axes) -> crate::hlr::Axes {
+/// A section that keeps the other side looks the other way: toward the parent's bottom, the
+/// parent's right still right and its depth down (a floor plan cut through a front elevation is
+/// seen from above). A vertical cut looks toward the parent's right (the other side: its left),
+/// with the parent's viewer side up: a vertical cut through a roof plan looks along the building
+/// with the roof up.
+fn section_axes(parent: &crate::hlr::Axes, other_side: bool, vertical: bool) -> crate::hlr::Axes {
+    let neg = |a: [f64; 3]| a.map(|x| -x);
+    if vertical {
+        let depth = if other_side { neg(parent.u) } else { parent.u };
+        let v = neg(parent.depth);
+        // Right-handed like every view: u = depth × v.
+        let u = [
+            depth[1] * v[2] - depth[2] * v[1],
+            depth[2] * v[0] - depth[0] * v[2],
+            depth[0] * v[1] - depth[1] * v[0],
+        ];
+        return crate::hlr::Axes { u, v, depth };
+    }
+    if other_side {
+        return crate::hlr::Axes {
+            u: parent.u,
+            v: parent.depth,
+            depth: neg(parent.v),
+        };
+    }
     crate::hlr::Axes {
         u: parent.u,
-        v: parent.depth.map(|x| -x),
+        v: neg(parent.depth),
         depth: parent.v,
     }
+}
+
+/// How the section view `name` cuts: (keeps the other side, vertical cutting line).
+fn section_sides(document: &runmat_cad::drawing::DrawingDocument, name: &str) -> (bool, bool) {
+    document
+        .views
+        .iter()
+        .find(|v| v.name == name)
+        .and_then(|v| match v.kind {
+            runmat_cad::drawing::ViewKind::Section {
+                keep_other_side,
+                vertical,
+                ..
+            } => Some((keep_other_side, vertical)),
+            _ => None,
+        })
+        .unwrap_or((false, false))
 }
 
 fn section_entry(
@@ -981,17 +1336,27 @@ fn section_entry(
     views: &Value,
     from: &str,
 ) -> Value {
-    let Some((plane, label)) =
-        document
-            .views
-            .iter()
-            .find(|v| v.name == name)
-            .and_then(|v| match &v.kind {
-                runmat_cad::drawing::ViewKind::Section { plane, label, .. } => {
-                    Some((plane, label.clone()))
-                }
-                _ => None,
-            })
+    let Some((plane, label, offset, other_side, vertical)) = document
+        .views
+        .iter()
+        .find(|v| v.name == name)
+        .and_then(|v| match &v.kind {
+            runmat_cad::drawing::ViewKind::Section {
+                plane,
+                label,
+                offset,
+                keep_other_side,
+                vertical,
+                ..
+            } => Some((
+                plane,
+                label.clone(),
+                offset.as_ref(),
+                *keep_other_side,
+                *vertical,
+            )),
+            _ => None,
+        })
     else {
         return Value::Null;
     };
@@ -1005,16 +1370,25 @@ fn section_entry(
         } => Some([0.0; 3]),
         PlaneRef::Datum { .. } => None,
     };
-    let Some(p0) = p0 else {
+    let Some(mut p0) = p0 else {
         return Value::Null;
     };
-    let axes = section_axes(parent);
+    // The cutting line's normal on the parent: its up, or its right for a vertical cut. The
+    // offset moves the cut along it.
+    let normal = if vertical { parent.u } else { parent.v };
+    if let Some(offset) = offset {
+        let Some(d) = radius_mm(offset) else {
+            return Value::Null;
+        };
+        p0 = [0, 1, 2].map(|i| p0[i] + normal[i] * d);
+    }
+    let axes = section_axes(parent, other_side, vertical);
     let mut lines =
         serde_json::to_value(crate::hlr::section_lines(display, &axes, p0)).unwrap_or(Value::Null);
     if let Value::Object(o) = &mut lines {
         o.insert(
             "cut".into(),
-            json!({ "view": from, "at": dot(p0, parent.v), "label": label, "toward": [dot(axes.depth, parent.u), dot(axes.depth, parent.v)] }),
+            json!({ "view": from, "at": dot(p0, normal), "vertical": vertical, "label": label, "toward": [dot(axes.depth, parent.u), dot(axes.depth, parent.v)] }),
         );
     }
     lines
@@ -1062,5 +1436,36 @@ mod exclude_tests {
             .collect();
         assert_eq!(paths, ["housing", "lid_screw1", "pairs"]);
         assert!(without_occurrences(&display, &[]).is_none());
+    }
+}
+
+#[cfg(test)]
+mod section_side_tests {
+    use super::section_axes;
+
+    #[test]
+    fn a_horizontal_cut_that_keeps_the_other_side_is_a_plan_seen_from_above() {
+        let front = crate::hlr::axes("front");
+        // As drawn by default: seen from below, the model above the cut.
+        let up = section_axes(&front, false, false);
+        assert_eq!((up.v, up.depth), ([0.0, -1.0, 0.0], [0.0, 0.0, 1.0]));
+        // Keeping the other side: seen from above with north up, the model below the cut.
+        let plan = section_axes(&front, true, false);
+        assert_eq!(plan.u, [1.0, 0.0, 0.0]);
+        assert_eq!((plan.v, plan.depth), ([0.0, 1.0, 0.0], [0.0, 0.0, -1.0]));
+    }
+
+    #[test]
+    fn a_vertical_cut_through_a_plan_looks_along_the_building_with_the_roof_up() {
+        let top = crate::hlr::axes("top");
+        // Looking east, south on the right.
+        let east = section_axes(&top, false, true);
+        assert_eq!(east.depth, [1.0, 0.0, 0.0]);
+        assert_eq!(east.v, [0.0, 0.0, 1.0]);
+        assert_eq!(east.u, [0.0, -1.0, 0.0]);
+        // The other side: looking west, north on the right.
+        let west = section_axes(&top, true, true);
+        assert_eq!(west.depth, [-1.0, 0.0, 0.0]);
+        assert_eq!(west.u, [0.0, 1.0, 0.0]);
     }
 }

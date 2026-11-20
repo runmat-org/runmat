@@ -102,6 +102,64 @@ impl GeometryScene {
         )]
     }
 
+    /// Measure's dimensions: each a haloed line between its two points with a dot at each end,
+    /// drawn over the model so a dimension behind a wall still reads. The value draws at the
+    /// line's middle in the overlay (`PlotRenderer::geometry_screen_dimensions`).
+    pub(super) fn dimension_nodes(
+        &self,
+        presentation: &GeometryScenePresentation,
+    ) -> Vec<SceneNode> {
+        if presentation.dimensions.is_empty() {
+            return Vec::new();
+        }
+        let mut strokes = Vec::new();
+        for dimension in &presentation.dimensions {
+            let color = dimension.color.unwrap_or(GEOMETRY_DIMENSION_COLOR);
+            let (from, to) = (
+                Vec3::from_array(dimension.from),
+                Vec3::from_array(dimension.to),
+            );
+            if !from.is_finite() || !to.is_finite() {
+                continue;
+            }
+            // Touching items measure zero: the dots alone mark where.
+            append_selection_edge(&mut strokes, from, to, color);
+            append_selection_point(&mut strokes, from, color);
+            append_selection_point(&mut strokes, to, color);
+            for [on, end] in &dimension.extension_lines {
+                let (on, end) = (Vec3::from_array(*on), Vec3::from_array(*end));
+                if !on.is_finite() || !end.is_finite() {
+                    continue;
+                }
+                let run = end - on;
+                let length = run.length();
+                if length <= 1.0e-8 {
+                    continue;
+                }
+                let along = run / length;
+                let gap = extension_gap(self.bounds).min(length * 0.25);
+                // The thin annotation stroke (narrower than the dimension line's).
+                append_stroke(
+                    &mut strokes,
+                    on + along * gap,
+                    end + along * gap,
+                    color,
+                    0.0,
+                );
+            }
+        }
+        if strokes.is_empty() {
+            return Vec::new();
+        }
+        vec![self.annotation_node(
+            "Measure dimensions",
+            "__geometry_measure:dimensions",
+            self.chunks.len() + 3,
+            PipelineType::AnnotationStroke,
+            strokes,
+        )]
+    }
+
     pub(super) fn annotation_nodes(
         &self,
         presentation: &GeometryScenePresentation,
@@ -126,6 +184,13 @@ impl GeometryScene {
                 let Some(frame) = chunk.region_annotation_frame(&annotation.region_id) else {
                     continue;
                 };
+                // A symbol whose anchor the section removed goes with the geometry it marks;
+                // distributed arrows below keep the ones on the kept side.
+                if !presentation.section_keeps(frame.anchor)
+                    && !is_distributed(annotation.kind, direction_given(annotation.direction))
+                {
+                    continue;
+                }
                 let color = annotation
                     .color
                     .unwrap_or_else(|| annotation_color(annotation.kind));
@@ -175,7 +240,10 @@ impl GeometryScene {
                         };
                         let (anchors, face_span) =
                             chunk.distributed_annotation_anchors(&annotation.region_id, frame);
-                        for (index, anchor) in anchors.into_iter().enumerate() {
+                        let anchors = anchors
+                            .into_iter()
+                            .filter(|anchor| presentation.section_keeps(*anchor));
+                        for (index, anchor) in anchors.enumerate() {
                             append_arrow_with_visibility(
                                 &mut stroke_vertices,
                                 surface_arrow_start(anchor, frame.normal, direction, arrow_length),
@@ -259,11 +327,19 @@ impl GeometryScene {
             ));
         }
         if !stroke_vertices.is_empty() {
+            // Symbols draw over the model so a support on a far face still shows. In a section
+            // view the material left in front of a kept symbol (a rib over a mounting hole)
+            // hides it, as it hides that face; symbols on the removed side were dropped above.
+            let pipeline = if presentation.active_section().is_some() {
+                PipelineType::AnnotationStrokeDepth
+            } else {
+                PipelineType::AnnotationStroke
+            };
             nodes.push(self.annotation_node(
                 "FEA study symbols",
                 "__fea_annotations:vectors",
                 self.chunks.len() + 1,
-                PipelineType::AnnotationStroke,
+                pipeline,
                 stroke_vertices,
             ));
         }
@@ -317,6 +393,28 @@ impl GeometryScene {
             instances: None,
         }
     }
+}
+
+/// The kinds drawn as arrows spread over their face, each anchor sectioned on its own.
+fn is_distributed(kind: GeometrySceneAnnotationKind, has_direction: bool) -> bool {
+    has_direction
+        && matches!(
+            kind,
+            GeometrySceneAnnotationKind::Pressure
+                | GeometrySceneAnnotationKind::Traction
+                | GeometrySceneAnnotationKind::HeatFlux
+                | GeometrySceneAnnotationKind::CurrentDensity
+                | GeometrySceneAnnotationKind::NormalVelocity
+                | GeometrySceneAnnotationKind::FlowVelocity
+                | GeometrySceneAnnotationKind::MassFlow
+                | GeometrySceneAnnotationKind::WallMotion
+        )
+}
+
+fn direction_given(direction: Option<[f32; 3]>) -> bool {
+    direction
+        .and_then(normalized_annotation_direction)
+        .is_some()
 }
 
 fn append_annotation_marker(
@@ -489,6 +587,12 @@ struct AnnotationFrame {
     normal: Vec3,
     tangent: Vec3,
     bitangent: Vec3,
+}
+
+/// An extension line's gap at the measured item, and its run past the dimension line: about
+/// 1% of the scene's size.
+fn extension_gap(bounds: BoundingBox) -> f32 {
+    annotation_arrow_length(bounds) * 0.12
 }
 
 fn annotation_arrow_length(bounds: BoundingBox) -> f32 {

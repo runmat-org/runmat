@@ -1,4 +1,6 @@
-//! Result-facing units inferred from existing field identifiers.
+//! Result-facing units inferred from existing field identifiers. A layout that fixes its own
+//! unit (a mode shape's `Mode` ordinal, see `AnalysisFieldLayout::normalized_unit`) takes
+//! precedence over this inference.
 pub(super) fn infer_field_unit(field_id: &str) -> Option<&'static str> {
     let normalized = field_id.to_ascii_lowercase();
     if normalized.starts_with("structural.random_response.variance.") {
@@ -130,10 +132,7 @@ pub(super) fn infer_field_unit(field_id: &str) -> Option<&'static str> {
     if normalized.contains("rotation") {
         return Some("rad");
     }
-    if normalized.contains("contact_gap")
-        || normalized.contains("displacement")
-        || normalized.contains("mode_shape")
-    {
+    if normalized.contains("contact_gap") || normalized.contains("displacement") {
         return Some("m");
     }
     if normalized.contains("velocity") {

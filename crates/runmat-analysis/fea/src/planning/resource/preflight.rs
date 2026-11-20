@@ -16,7 +16,9 @@ use runmat_meshing_core::SolverMeshArtifact;
 
 mod backend;
 mod compilation;
+mod counted;
 pub use compilation::build_structural_resource_plan_from_compilation;
+pub use counted::{estimate_static_solid_from_counts, CountedStaticSolidEstimate};
 mod linearization;
 mod solve_workspace;
 pub use backend::require_executable_static_backend;
@@ -424,6 +426,7 @@ fn build_static_resource_input_with_facts(
         } else {
             0
         },
+        solve_workspace::operator_preparation_bytes(admission_pattern, path)?,
     )?;
     let publishes_linearization = linearization::requires_envelope(step);
     let recovery_values = facts

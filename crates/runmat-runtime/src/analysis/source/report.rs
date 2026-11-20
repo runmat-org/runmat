@@ -3,6 +3,7 @@ use serde::{Deserialize, Serialize};
 
 use super::CheckedFeaSource;
 
+use runmat_fea_source::FeaSemanticProgram;
 pub use runmat_fea_source::{FeaCheckStatus, FeaSourceCheckResult};
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
@@ -31,7 +32,37 @@ impl CheckedFeaSource {
     pub fn check_result(&self) -> FeaSourceCheckResult {
         let diagnostics = self.diagnostics().cloned().collect::<Vec<_>>();
         let status = check_status(&diagnostics);
-        let program = self.semantic_program();
+        let mut program = self.semantic_program();
+        let revision = self.checked_revision(&mut program, &diagnostics);
+        FeaSourceCheckResult {
+            contract: runmat_fea_source::FeaSourceCheckContract::AssessmentsV1,
+            revision,
+            status,
+            root_module: self.root_module.clone(),
+            program,
+            source_index: self.source_index(),
+            geometry_previews: self
+                .program
+                .geometry_inspections
+                .values()
+                .map(|inspection| runmat_fea_source::FeaGeometryPreview {
+                    module_path: inspection.module.clone(),
+                    geometry_id: inspection.geometry.clone(),
+                    source_path: inspection.source_path.clone(),
+                })
+                .collect(),
+            diagnostics,
+        }
+    }
+
+    /// The digest of every checked fact. `program.evaluated_signals` is derived from the program,
+    /// so it is set aside while the digest is taken and never changes the revision.
+    pub(super) fn checked_revision(
+        &self,
+        program: &mut FeaSemanticProgram,
+        diagnostics: &[FeaDiagnostic],
+    ) -> runmat_fea_source::SourceDigest {
+        let evaluated_signals = std::mem::take(&mut program.evaluated_signals);
         let functions = self.program.bound.functions.values().collect::<Vec<_>>();
         let geometry = self
             .program
@@ -55,30 +86,13 @@ impl CheckedFeaSource {
                 functions,
                 geometry,
                 &self.execution_profile_facts,
-                &program,
-                &diagnostics,
+                &*program,
+                diagnostics,
             ))
             .expect("checked source facts are serializable"),
         );
-        FeaSourceCheckResult {
-            contract: runmat_fea_source::FeaSourceCheckContract::AssessmentsV1,
-            revision,
-            status,
-            root_module: self.root_module.clone(),
-            program,
-            source_index: self.source_index(),
-            geometry_previews: self
-                .program
-                .geometry_inspections
-                .values()
-                .map(|inspection| runmat_fea_source::FeaGeometryPreview {
-                    module_path: inspection.module.clone(),
-                    geometry_id: inspection.geometry.clone(),
-                    source_path: inspection.source_path.clone(),
-                })
-                .collect(),
-            diagnostics,
-        }
+        program.evaluated_signals = evaluated_signals;
+        revision
     }
 
     pub fn diagnostics(&self) -> impl Iterator<Item = &FeaDiagnostic> {

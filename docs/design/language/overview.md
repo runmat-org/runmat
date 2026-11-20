@@ -109,7 +109,7 @@ A folder is the unit of scope. Every design in a folder can name every other des
 The editor checks a file as you type. The agent and the command line run the same check:
 
 ```sh
-runmat-design check board/flight_controller.circuit
+runmat check board/flight_controller.circuit
 ```
 
 Every problem has a severity, a code, the place it is written and, for a root cause, the features that failed because of it. See [Checks and diagnostics](/docs/design-language/checks-and-diagnostics).

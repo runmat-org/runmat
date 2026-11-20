@@ -159,7 +159,7 @@ function validateLayout(manifest) {
     if (manifest.layout.kind === "recursive-tree") {
         exactKeys(manifest.layout, ["kind", "root"], "recursive artifact layout");
         canonicalRootPath(manifest.layout.root);
-        const recursiveProfile = (manifest.product === "native-cli" && manifest.artifactProfile === "embedded-aot")
+        const recursiveProfile = (manifest.product === "native-cli" && ["embedded-aot", "distributed-aot"].includes(manifest.artifactProfile))
             || (manifest.product === "desktop-native" && manifest.artifactProfile === "desktop-host");
         if (!recursiveProfile) throw new Error("Recursive-tree artifact layout is invalid for this product profile");
     } else {

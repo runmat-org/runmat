@@ -33,6 +33,12 @@ pub(super) fn sheet_metal_commands() -> Vec<CommandDescriptor> {
                     ],
                 ),
                 qty("k", "K-factor", "ratio", Some(0.44)).shown("bend_rule", &["k_factor"]),
+                length("allowance", "Allowance per 90° bend", 2.0).shown("bend_rule", &["allowance"]),
+                length("deduction", "Deduction per 90° bend", 2.0).shown("bend_rule", &["deduction"]),
+                text("bend_table", "Bend table", None)
+                    .optional()
+                    .help("A bend table is written in Source: the table's rows by thickness, radius and angle")
+                    .shown("bend_rule", &["table"]),
                 text("gauge", "Gauge", Some("16 ga")).optional(),
             ])
             .when(has(Facet::Sketches))
@@ -291,17 +297,44 @@ pub(super) fn sheet_metal_commands() -> Vec<CommandDescriptor> {
             "flat_pattern",
         )),
         cmd("sheet-metal.bend-table", "Bend table", "bend-table", P)
-            .desc("Choose the bend table or rule for this part.")
+            .desc("Choose the bend rule every sheet body of this part follows: a K-factor, DIN 6935 or a bend table in the project.")
+            .kw(&["sheet metal", "k-factor", "bend allowance", "din 6935"])
             .inputs(vec![
-                text("table", "Bend table", Some("company/aluminum.csv")),
-                qty("k", "Default K-factor", "ratio", Some(0.44)),
+                choice(
+                    "rule",
+                    "Bend rule",
+                    &[
+                        ("k_factor", "K-factor"),
+                        ("din6935", "DIN 6935 (K from radius and thickness)"),
+                        ("table", "Bend table in the project"),
+                        ("feature", "Each feature's own rule"),
+                    ],
+                ),
+                qty("k", "K-factor", "ratio", Some(0.44)).shown("rule", &["k_factor"]),
+                text("table", "Bend table", Some("tables/aluminum-bends.csv"))
+                    .shown("rule", &["table"])
+                    .help("A CSV with the columns thickness_mm, radius_mm, angle_deg, allowance_mm"),
             ])
             .edit(edit(EditOp::Set, Section::Settings).item("bend_table")),
         cmd("sheet-metal.gauge", "Gauge", "gauge", P)
-            .desc("Pick the material gauge, which sets thickness and bend radius.")
+            .desc("Pick the material gauge, which sets every sheet body's thickness, bend radius and K-factor.")
+            .kw(&["sheet metal", "thickness", "msg", "awg"])
             .inputs(vec![
-                text("gauge", "Gauge", Some("16 ga")),
-                text("table", "Gauge table", Some("company/steel-gauges.csv")).optional(),
+                choice(
+                    "gauges",
+                    "Gauge table",
+                    &[
+                        ("steel", "Sheet steel (Manufacturers' Standard Gauge)"),
+                        ("aluminum", "Aluminum (Brown & Sharpe)"),
+                        ("file", "A table in the project"),
+                    ],
+                ),
+                text("file", "Table file", Some("tables/steel-gauges.csv"))
+                    .shown("gauges", &["file"])
+                    .help("A CSV with the columns gauge, thickness_mm, bend_radius_mm, k_factor"),
+                text("gauge", "Gauge", Some("16"))
+                    .optional()
+                    .help("Leave empty to use each feature's own thickness and radius"),
             ])
             .edit(edit(EditOp::Set, Section::Settings).item("gauge")),
     ]

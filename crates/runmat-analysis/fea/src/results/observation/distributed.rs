@@ -1,7 +1,9 @@
 mod combination;
 mod payload_bound;
+mod payload_validation;
 pub(crate) use combination::combine_observation_partitions;
 pub use payload_bound::ObservationPartitionPayloadCapacity;
+use payload_validation::validate_contribution_payload;
 use std::collections::BTreeSet;
 
 use runmat_analysis_core::{AnalysisField, AnalysisModel, ObservationId, SpatialReduction};
@@ -287,6 +289,8 @@ pub struct ObservationPartitionContribution {
     pub observation_id: ObservationId,
     pub source_field_definition: RecoveredFieldDefinitionIdentity,
     pub source_field: RecoveredFieldIdentity,
+    /// The run field id of the source field, so the combined result can name the field it read.
+    pub source_field_id: String,
     pub source_partitions: Vec<RecoveredFieldPartitionIdentity>,
     pub source_entity_count: usize,
     pub sample: RecoveredFieldSample,
@@ -306,6 +310,7 @@ struct ObservationPartitionContributionWire {
     observation_id: ObservationId,
     source_field_definition: RecoveredFieldDefinitionIdentity,
     source_field: RecoveredFieldIdentity,
+    source_field_id: String,
     source_partitions: Vec<RecoveredFieldPartitionIdentity>,
     source_entity_count: usize,
     sample: RecoveredFieldSample,
@@ -327,6 +332,7 @@ impl TryFrom<ObservationPartitionContributionWire> for ObservationPartitionContr
             observation_id: wire.observation_id,
             source_field_definition: wire.source_field_definition,
             source_field: wire.source_field,
+            source_field_id: wire.source_field_id,
             source_partitions: wire.source_partitions,
             source_entity_count: wire.source_entity_count,
             sample: wire.sample,
@@ -357,6 +363,7 @@ impl ObservationPartitionContribution {
             observation_id: partition_plan.observation_id.clone(),
             source_field_definition: field.definition.identity(),
             source_field: field.source_field,
+            source_field_id: field.definition.field_id().to_owned(),
             source_partitions: field
                 .partitions
                 .iter()
@@ -451,6 +458,7 @@ impl ObservationPartitionContribution {
         }
         if self.schema_version != 1
             || self.observation_id.0.trim().is_empty()
+            || self.source_field_id.trim().is_empty()
             || self.source_entity_count == 0
             || self.source_partitions.is_empty()
             || self
@@ -485,6 +493,7 @@ impl ObservationPartitionContribution {
                 &self.observation_id,
                 self.source_field_definition,
                 self.source_field,
+                &self.source_field_id,
                 &self.source_partitions,
                 self.source_entity_count,
                 self.sample,
@@ -790,224 +799,4 @@ pub(super) fn evaluate_observation_partition_with_attribution(
         None,
         payload,
     )
-}
-
-fn validate_contribution_payload(
-    partition: &ObservationPartition,
-    contribution: &ObservationPartitionContribution,
-    observation: &ResolvedObservation,
-) -> Result<(), ObservationError> {
-    let storage_components = observation_result_storage_component_count(
-        shape_component_count(&observation.result_value_shape)?,
-        observation.spec.complex_representation,
-    )?;
-    match (&partition.target, &contribution.payload) {
-        (
-            ObservationPartitionTarget::Nodes { identities, .. },
-            ObservationPartitionPayload::SelectedValues { entities, values },
-        ) => {
-            let expected = identities
-                .iter()
-                .copied()
-                .map(ObservationEntity::Node)
-                .collect::<Vec<_>>();
-            if entities != &expected
-                || values.len()
-                    != identities
-                        .len()
-                        .checked_mul(storage_components)
-                        .ok_or(ObservationError::Limit("partition result value count"))?
-            {
-                return Err(ObservationError::Identity(
-                    "nodal observation contribution differs from partition ownership",
-                ));
-            }
-        }
-        (
-            ObservationPartitionTarget::Nodes { indices, .. },
-            ObservationPartitionPayload::WeightedReduction {
-                linear_sum,
-                square_sum,
-                measure,
-            },
-        ) if matches!(
-            reduction_operation(observation),
-            Ok(SpatialReduction::Resultant | SpatialReduction::Moment { .. })
-        ) && linear_sum.len() == storage_components
-            && square_sum.len() == storage_components
-            && *measure == indices.len() as f64 => {}
-        (
-            ObservationPartitionTarget::ConstraintGroups { indices, .. },
-            ObservationPartitionPayload::WeightedReduction {
-                linear_sum,
-                square_sum,
-                measure,
-            },
-        ) if matches!(
-            reduction_operation(observation),
-            Ok(SpatialReduction::Resultant)
-        ) && linear_sum.len() == storage_components
-            && square_sum.len() == storage_components
-            && *measure == indices.len() as f64 => {}
-        (
-            ObservationPartitionTarget::Elements {
-                domain, identities, ..
-            },
-            ObservationPartitionPayload::SelectedValues { entities, values },
-        ) => {
-            let expected = identities
-                .iter()
-                .copied()
-                .map(|identity| super::contract::observation_element_entity(*domain, identity))
-                .collect::<Vec<_>>();
-            if entities != &expected
-                || values.len()
-                    != identities
-                        .len()
-                        .checked_mul(storage_components)
-                        .ok_or(ObservationError::Limit("partition result value count"))?
-            {
-                return Err(ObservationError::Identity(
-                    "element observation contribution differs from partition ownership",
-                ));
-            }
-        }
-        (
-            ObservationPartitionTarget::Points {
-                sample_ordinals,
-                identities,
-            },
-            ObservationPartitionPayload::SelectedValues { entities, values },
-        ) => {
-            let super::ResolvedObservationTarget::Points { samples } = &observation.target else {
-                return Err(ObservationError::Identity(
-                    "point contribution does not match its resolved target",
-                ));
-            };
-            let expected = sample_ordinals
-                .iter()
-                .map(|ordinal| {
-                    let sample = samples.get(*ordinal).ok_or(ObservationError::Identity(
-                        "point contribution exceeds its resolved target",
-                    ))?;
-                    Ok(ObservationEntity::Point {
-                        identity: sample.identity,
-                        ordinal: sample.ordinal,
-                        position_m: sample.position_m,
-                        source_element: sample.source_element_identity,
-                    })
-                })
-                .collect::<Result<Vec<_>, ObservationError>>()?;
-            if identities
-                != &expected
-                    .iter()
-                    .map(|entity| match entity {
-                        ObservationEntity::Point { identity, .. } => *identity,
-                        _ => unreachable!(),
-                    })
-                    .collect::<Vec<_>>()
-                || entities != &expected
-                || values.len()
-                    != sample_ordinals
-                        .len()
-                        .checked_mul(storage_components)
-                        .ok_or(ObservationError::Limit("partition result value count"))?
-            {
-                return Err(ObservationError::Identity(
-                    "point observation contribution differs from partition ownership",
-                ));
-            }
-        }
-        (
-            ObservationPartitionTarget::Connectors { identities, .. },
-            ObservationPartitionPayload::SelectedValues { entities, values },
-        ) => {
-            let expected = identities
-                .iter()
-                .copied()
-                .map(ObservationEntity::Connector)
-                .collect::<Vec<_>>();
-            if entities != &expected
-                || values.len()
-                    != identities
-                        .len()
-                        .checked_mul(storage_components)
-                        .ok_or(ObservationError::Limit("partition result value count"))?
-            {
-                return Err(ObservationError::Identity(
-                    "connector observation contribution differs from partition ownership",
-                ));
-            }
-        }
-        (
-            ObservationPartitionTarget::Connectors { indices, .. },
-            ObservationPartitionPayload::WeightedReduction {
-                linear_sum,
-                square_sum,
-                measure,
-            },
-        ) if matches!(
-            reduction_operation(observation),
-            Ok(SpatialReduction::Resultant)
-        ) && linear_sum.len() == storage_components
-            && square_sum.len() == storage_components
-            && *measure == indices.len() as f64 => {}
-        (
-            ObservationPartitionTarget::Nodes { .. }
-            | ObservationPartitionTarget::Elements { .. }
-            | ObservationPartitionTarget::Points { .. },
-            ObservationPartitionPayload::ExtremaCandidates { entities, values },
-        ) if spatial_extrema(observation).is_some() => {
-            let owned = partition_selected_entities(partition, observation)?;
-            let mut previous = None;
-            for entity in entities {
-                let Some(index) = owned.iter().position(|candidate| candidate == entity) else {
-                    return Err(ObservationError::Identity(
-                        "extrema candidate is not owned by its observation partition",
-                    ));
-                };
-                if previous.is_some_and(|previous| index <= previous) {
-                    return Err(ObservationError::Identity(
-                        "extrema candidates are not in canonical partition order",
-                    ));
-                }
-                previous = Some(index);
-            }
-            if entities.is_empty()
-                || entities.len() != values.len()
-                || values.iter().any(|value| !value.is_finite())
-            {
-                return Err(ObservationError::Identity(
-                    "extrema candidate values differ from partition ownership",
-                ));
-            }
-        }
-        (
-            ObservationPartitionTarget::BoundaryPair {
-                face_indices,
-                first_count,
-                ..
-            },
-            ObservationPartitionPayload::PairedWeightedReduction {
-                first_measure,
-                second_measure,
-                ..
-            },
-        ) if (*first_count > 0) == (*first_measure > 0.0)
-            && (*first_count < face_indices.len()) == (*second_measure > 0.0) => {}
-        (
-            ObservationPartitionTarget::Volume { .. } | ObservationPartitionTarget::Boundary { .. },
-            ObservationPartitionPayload::WeightedReduction {
-                linear_sum,
-                square_sum,
-                ..
-            },
-        ) if linear_sum.len() == storage_components && square_sum.len() == storage_components => {}
-        _ => {
-            return Err(ObservationError::Identity(
-                "observation contribution payload differs from partition target",
-            ))
-        }
-    }
-    Ok(())
 }

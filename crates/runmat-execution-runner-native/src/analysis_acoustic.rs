@@ -12,8 +12,8 @@ use runmat_execution::{resource::ResourceRequest, task::RetryPolicy};
 use crate::{
     analysis_task_pool::{
         execute_analysis_task_batch, execute_governed_analysis_phase, planned_phase_execution,
-        AnalysisTaskBatchPolicy, AnalysisTaskDependency, AnalysisTaskPool, ExecutedAnalysisTask,
-        PreparedAnalysisTask,
+        AnalysisTaskBatchPolicy, AnalysisTaskDependency, AnalysisTaskPool, AnalysisWorkflowClock,
+        ExecutedAnalysisTask, PreparedAnalysisTask,
     },
     NativeExecutionError, NativeExecutionResult,
 };
@@ -41,7 +41,7 @@ pub(crate) async fn execute_with_pool(
     let scope_id = pool.scope_id();
     let pool_id = pool.pool_id();
     let mut coordinator = AcousticStudyCoordinator::new(preparation).map_err(protocol)?;
-    let started = std::time::Instant::now();
+    let workflow_clock = AnalysisWorkflowClock::start(pool);
     let mut preceding = vec![None; coordinator.entries().len()];
     while coordinator
         .entries()
@@ -181,8 +181,7 @@ pub(crate) async fn execute_with_pool(
         &policy,
     )
     .await?;
-    let elapsed = u64::try_from(started.elapsed().as_millis())
-        .map_err(|_| protocol("acoustic task graph elapsed time overflow"))?;
+    let elapsed = workflow_clock.wall_millis(pool)?;
     coordinator
         .complete_assembly(pool, executed.response, accounting, elapsed)
         .map_err(protocol)?;

@@ -42,16 +42,28 @@ const BODY_OPS: &[(&str, &str)] = &[
     ("new", "New body"),
 ];
 
-fn end_fields(prefix: &str, label: &str) -> Vec<Field> {
+/// One extrude direction's end condition and its value fields. `which` names the direction in
+/// the value labels ("" for the first, "Second " for the second), so no two fields share a label.
+fn end_fields(prefix: &str, label: &str, which: &str) -> Vec<Field> {
     let id = |s: &str| format!("{prefix}{s}");
+    let depth = if which.is_empty() {
+        "Depth".to_owned()
+    } else {
+        format!("{which}depth")
+    };
+    let up_to = if which.is_empty() {
+        "Up to".to_owned()
+    } else {
+        format!("{which}up to")
+    };
     vec![
         choice(&id("end"), label, END_CONDITIONS),
-        length(&id("distance"), "Depth", 10.0)
+        length(&id("distance"), &depth, 10.0)
             .shown(&id("end"), &["blind", "mid_plane", "offset_from_face"])
             .drag(Manipulator::Arrow),
         pick(
             &id("up_to"),
-            "Up to",
+            &up_to,
             &[K::Face, K::Vertex, K::Body, K::Plane],
         )
         .shown(

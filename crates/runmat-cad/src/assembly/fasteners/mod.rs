@@ -29,7 +29,7 @@ use crate::assembly::options::Condition;
 use crate::assembly::source::{ConfiguredSummary, PathChain, PublishedGeometry};
 use crate::ids::{ConfigurationName, PublishName};
 use crate::regen::kernel::Transform;
-use crate::units::{Dimension, UnitAuthority};
+use crate::units::{Dimension, Units};
 use crate::value::{Evaluator, ValueEnv, ValueError, ValueExpr};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};

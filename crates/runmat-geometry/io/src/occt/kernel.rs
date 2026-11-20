@@ -15,7 +15,8 @@
 //! separate, roles and ordinals follow the definition.
 
 use runmat_geometry_kernel::analysis::{
-    draft_analysis, AnalysisRequest, AnalysisResult, EdgeContinuity, FaceValue, GeometryAnalyzer,
+    draft_analysis, AnalysisRequest, AnalysisResult, CheckEntity, CheckFinding, CheckProblem,
+    EdgeContinuity, FaceArea, FaceValue, FieldPoint, FieldQuantity, GeometryAnalyzer,
     MassProperties, SectionProperties,
 };
 use runmat_geometry_kernel::frame::Frame;
@@ -112,6 +113,7 @@ pub(crate) struct RProjected {
     pub kind: u8,
     pub entity: u32,
     pub visible: bool,
+    pub smooth: bool,
     pub points: Vec<f64>,
 }
 
@@ -263,6 +265,7 @@ mod backend {
                     kind: p.kind,
                     entity: p.entity,
                     visible: p.visible,
+                    smooth: p.smooth,
                     points: p.points,
                 })
                 .collect(),
@@ -4333,8 +4336,107 @@ impl GeometryAnalyzer for OcctKernel {
                     faces: v.iter().map(|f| *f as u32).collect(),
                 }
             }
+            AnalysisRequest::Check {
+                short_edge,
+                gap,
+                strict,
+            } => {
+                let reals = [*short_edge, *gap, if *strict { 1.0 } else { 0.0 }];
+                let v = backend::analyze(7, &reals, &ids[..1])?;
+                AnalysisResult::Check {
+                    findings: v.chunks_exact(4).filter_map(check_finding).collect(),
+                }
+            }
+            AnalysisRequest::FaceArea { faces } => {
+                let reals: Vec<f64> = faces.iter().map(|f| f64::from(*f)).collect();
+                let v = backend::analyze(8, &reals, &ids[..1])?;
+                if v.len() < 16 {
+                    return Err(failed("the face area answer is short"));
+                }
+                let mut inertia = [[0.0; 3]; 3];
+                for i in 0..3 {
+                    for j in 0..3 {
+                        inertia[i][j] = v[4 + 3 * i + j];
+                    }
+                }
+                AnalysisResult::FaceArea(FaceArea {
+                    area: v[0],
+                    centroid: [v[1], v[2], v[3]],
+                    inertia,
+                    normal: [v[13], v[14], v[15]],
+                })
+            }
+            AnalysisRequest::SurfaceField { quantity, faces } => {
+                let mut reals = vec![match quantity {
+                    FieldQuantity::Thickness => 0.0,
+                    FieldQuantity::Curvature => 1.0,
+                    FieldQuantity::Normal => 2.0,
+                }];
+                for f in faces {
+                    reals.push(f64::from(f.face));
+                    reals.push(f.points.len() as f64);
+                    for p in &f.points {
+                        reals.extend_from_slice(p);
+                    }
+                }
+                let v = backend::analyze(9, &reals, &ids[..1])?;
+                let total: usize = faces.iter().map(|f| f.points.len()).sum();
+                if v.len() != total * 8 {
+                    return Err(failed("the surface field answer has the wrong length"));
+                }
+                let mut points = v.chunks_exact(8).map(field_point);
+                AnalysisResult::SurfaceField {
+                    faces: faces
+                        .iter()
+                        .map(|f| points.by_ref().take(f.points.len()).collect())
+                        .collect(),
+                }
+            }
         })
     }
+}
+
+/// One point of kind 9's flat output: point (3), normal (3), two values; NaN is "none".
+fn field_point(c: &[f64]) -> FieldPoint {
+    let finite = |x: &[f64]| x.iter().all(|v| v.is_finite());
+    FieldPoint {
+        point: finite(&c[0..3]).then(|| [c[0], c[1], c[2]]),
+        normal: finite(&c[3..6]).then(|| [c[3], c[4], c[5]]),
+        a: c[6].is_finite().then_some(c[6]),
+        b: c[7].is_finite().then_some(c[7]),
+    }
+}
+
+/// One finding of kind 7's flat output: (problem, entity, index, value or NaN).
+fn check_finding(c: &[f64]) -> Option<CheckFinding> {
+    use CheckProblem as P;
+    let problem = match c[0] as u32 {
+        0 => P::InvalidBody,
+        1 => P::InvalidFace,
+        2 => P::InvalidEdge,
+        3 => P::InvalidVertex,
+        4 => P::SelfIntersectingFace,
+        5 => P::OpenEdge,
+        6 => P::ShortEdge,
+        7 => P::EdgeGap,
+        8 => P::VertexGap,
+        9 => P::SmallestRadius,
+        10 => P::LargestEdgeGap,
+        11 => P::LargestVertexGap,
+        _ => return None,
+    };
+    let index = c[2] as u32;
+    let entity = match c[1] as u32 {
+        1 => CheckEntity::Face(index),
+        2 => CheckEntity::Edge(index),
+        3 => CheckEntity::Vertex(index),
+        _ => CheckEntity::Body,
+    };
+    Some(CheckFinding {
+        problem,
+        entity,
+        value: c[3].is_finite().then_some(c[3]),
+    })
 }
 
 // ------------------------------------------------------------------------- exact queries
@@ -4375,6 +4477,7 @@ impl ExactQueries for OcctKernel {
                     }
                 },
                 visible: p.visible,
+                smooth: p.smooth,
                 polyline: p.points.chunks(2).map(|c| [c[0], c[1]]).collect(),
             })
             .collect())

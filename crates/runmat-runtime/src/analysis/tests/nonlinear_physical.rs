@@ -273,7 +273,6 @@ fn physical_j2_tet4_tet10_history_survives_cold_filesystem_and_query() {
             .contact_pressure_snapshots
             .iter()
             .all(|f| values(f).is_empty()));
-        assert!(history.thermo_mechanical_temperature_snapshots.is_empty());
         for id in [
             FEA_FIELD_STRUCTURAL_STRESS,
             FEA_FIELD_STRUCTURAL_REACTION_FORCE,

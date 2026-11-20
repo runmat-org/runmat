@@ -50,6 +50,7 @@ pub struct NativeExactMeshingExecutor<'a> {
     policy: MeshingExecutionPolicy,
     progress: Vec<ProgramProgress>,
     cache: Option<cache::NativeMeshingStageCache>,
+    tracker: crate::local_progress::MeshingProgressTracker,
 }
 
 impl<'a> NativeExactMeshingExecutor<'a> {
@@ -62,6 +63,9 @@ impl<'a> NativeExactMeshingExecutor<'a> {
             session,
             policy,
             progress: Vec::new(),
+            tracker: crate::local_progress::MeshingProgressTracker::new(
+                session.progress_observer().clone(),
+            ),
             cache: if policy.reuse_accepted_stages {
                 cache::NativeMeshingStageCache::open(&session.meshing_cache_root)?
             } else {
@@ -154,11 +158,12 @@ impl NativeExactMeshingExecutor<'_> {
             event_code = "meshing.stage.started",
             "meshing stage started"
         );
+        let partition = crate::local_progress::partition_faces(stage.host());
         loop {
-            self.record_progress(task.drain_progress());
+            self.record_progress(task.drain_progress(), workload.stage, partition);
             if let Some(completion) = task.try_completion() {
                 let result = completion.into_delivery_result();
-                self.record_progress(task.drain_progress());
+                self.record_progress(task.drain_progress(), workload.stage, partition);
                 return match result {
                     Ok(success) => {
                         tracing::info!(
@@ -183,7 +188,29 @@ impl NativeExactMeshingExecutor<'_> {
         }
     }
 
-    fn record_progress(&mut self, records: Vec<ProgramProgress>) {
+    fn stage_started(&mut self, stage: &PlannedMeshingStage) {
+        let host = stage.host();
+        self.tracker.stage_started(
+            host.workload.stage,
+            crate::local_progress::partition_faces(host),
+        );
+    }
+
+    fn stage_completed(&mut self, stage: &PlannedMeshingStage) {
+        let host = stage.host();
+        self.tracker.stage_completed(
+            host.workload.stage,
+            crate::local_progress::partition_faces(host),
+        );
+    }
+
+    fn record_progress(
+        &mut self,
+        records: Vec<ProgramProgress>,
+        stage: runmat_meshing_core::MeshingStageKind,
+        partition: runmat_analysis_fea::progress::meshing::MeshingPartitionFaces,
+    ) {
+        self.tracker.record(stage, partition, &records);
         for record in &records {
             if let Ok(progress) = MeshingProgress::canonical_decode(&record.payload) {
                 let checkpoint = tracing::info_span!(
@@ -247,6 +274,7 @@ impl ExactMeshingDagExecutor for NativeExactMeshingExecutor<'_> {
         revision: ProgramRevision,
     ) -> Result<AttemptSuccess, MeshingStageExecutionError> {
         let started = std::time::Instant::now();
+        self.stage_started(stage);
         if let Some(cache) = &self.cache {
             if let Some(success) = cache.restore(
                 stage,
@@ -255,11 +283,13 @@ impl ExactMeshingDagExecutor for NativeExactMeshingExecutor<'_> {
                 self.policy.deadline_unix_millis,
                 started,
             )? {
+                self.stage_completed(stage);
                 return Ok(success);
             }
         }
         let task = self.submit_stage(stage, revision)?;
         let success = self.wait_for_task(task, stage)?;
+        self.stage_completed(stage);
         if let Some(cache) = &mut self.cache {
             cache.retain(
                 stage,
@@ -282,6 +312,7 @@ impl ExactMeshingDagExecutor for NativeExactMeshingExecutor<'_> {
         let mut pending = Vec::new();
         for (index, stage) in stages.iter().enumerate() {
             let started = std::time::Instant::now();
+            self.stage_started(stage);
             let hit = match &self.cache {
                 Some(cache) => cache.restore(
                     stage,
@@ -292,6 +323,9 @@ impl ExactMeshingDagExecutor for NativeExactMeshingExecutor<'_> {
                 )?,
                 None => None,
             };
+            if hit.is_some() {
+                self.stage_completed(stage);
+            }
             results.push(hit);
             if results[index].is_none() {
                 pending.push((index, self.submit_stage(stage, revision.clone())?, started));
@@ -299,6 +333,7 @@ impl ExactMeshingDagExecutor for NativeExactMeshingExecutor<'_> {
         }
         for (index, task, started) in pending {
             let success = self.wait_for_task(task, &stages[index])?;
+            self.stage_completed(&stages[index]);
             if let Some(cache) = &mut self.cache {
                 cache.retain(
                     &stages[index],

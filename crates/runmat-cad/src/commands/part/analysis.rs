@@ -30,8 +30,8 @@ pub(super) fn evaluate() -> Vec<CommandDescriptor> {
             "Section properties",
             "section-properties",
             "section_properties",
-            "Area, centroid and second moments of a planar face or sketch.",
-            vec![pick("section", "Face or sketch", &[K::Face, K::Sketch])],
+            "Area, centroid, second and polar moments and principal moments of planar faces or a sketch.",
+            vec![picks("section", "Faces or sketch", &[K::Face, K::Sketch])],
         ),
         a(
             "evaluate.check-geometry",
@@ -39,7 +39,15 @@ pub(super) fn evaluate() -> Vec<CommandDescriptor> {
             "check",
             "check_geometry",
             "Find invalid faces, short edges, gaps and self-intersections.",
-            vec![flag("strict", "Strict", false)],
+            vec![
+                picks("bodies", "Bodies", &[K::Body]).optional(),
+                flag("strict", "Strict (also self-intersections; slower)", false),
+                flag("short_edges", "Short edges", true),
+                length("short_edge", "Shorter than", 0.01).if_checked("short_edges"),
+                flag("gaps", "Edge and vertex gaps", true),
+                length("gap", "Gaps over", 0.01).if_checked("gaps"),
+                flag("min_radius", "Smallest radius", true),
+            ],
         )
         .kw(&["validate", "repair"]),
         a(
@@ -66,7 +74,7 @@ pub(super) fn evaluate() -> Vec<CommandDescriptor> {
             "Thickness",
             "thickness",
             "thickness",
-            "Color thin and thick regions.",
+            "Color the model by wall thickness and list each face's thinnest and thickest point.",
             vec![
                 length("target", "Target thickness", 2.0),
                 choice(
@@ -92,16 +100,27 @@ pub(super) fn evaluate() -> Vec<CommandDescriptor> {
             "Curvature",
             "curvature",
             "curvature",
-            "Color faces by curvature.",
-            vec![],
+            "Color faces by curvature: convex red, concave blue, flat neutral.",
+            vec![choice(
+                "measure",
+                "Show",
+                &[
+                    ("largest", "Largest curvature"),
+                    ("mean", "Mean curvature"),
+                    ("gaussian", "Gaussian curvature"),
+                ],
+            )],
         ),
         a(
             "evaluate.zebra",
             "Zebra stripes",
             "zebra",
             "zebra",
-            "Show stripes to judge surface continuity.",
-            vec![count("stripes", "Stripes", 20, 2)],
+            "Show stripes to judge surface continuity, and each edge's continuity (G0, G1, G2).",
+            vec![
+                count("stripes", "Stripes", 20, 2),
+                pick("direction", "Light direction", &[K::Plane, K::Face, K::Axis]).optional(),
+            ],
         )
         .kw(&["continuity", "class a"]),
         a(
@@ -110,7 +129,10 @@ pub(super) fn evaluate() -> Vec<CommandDescriptor> {
             "deviation",
             "deviation",
             "Measure the angle between faces along shared edges.",
-            vec![picks("edges", "Edges", &[K::Edge])],
+            vec![
+                picks("edges", "Edges", &[K::Edge]).optional(),
+                angle("tolerance", "Tangent within", 0.5),
+            ],
         ),
         a(
             "evaluate.undercut",
@@ -141,7 +163,10 @@ pub(super) fn evaluate() -> Vec<CommandDescriptor> {
                         ("additive", "Additive"),
                     ],
                 ),
-                text("rules", "Rule pack", Some("company/dfm")).optional(),
+                text("rules", "Company rule pack", Some("company/dfm")).optional(),
+                pick("direction", "Pull or build direction", &[K::Plane, K::Face, K::Axis])
+                    .optional()
+                    .shown("process", &["molding", "additive"]),
             ],
         )
         .kw(&["manufacturability", "design for manufacturing"]),
@@ -150,7 +175,7 @@ pub(super) fn evaluate() -> Vec<CommandDescriptor> {
             "Cost estimate",
             "cost",
             "cost",
-            "Estimate the part's cost for a process and quantity.",
+            "Estimate the part's cost for a process and quantity from your shop's rates.",
             vec![
                 choice(
                     "process",
@@ -163,6 +188,21 @@ pub(super) fn evaluate() -> Vec<CommandDescriptor> {
                     ],
                 ),
                 count("quantity", "Quantity", 100, 1),
+                text("currency", "Currency", Some("USD")).optional(),
+                qty("price", "Material price per kg", "ratio", None),
+                qty("rate", "Machine rate per hour", "ratio", None),
+                qty("setup", "Setup per batch", "ratio", Some(0.0)).optional(),
+                qty("removal_rate", "Removal rate (cm³/min)", "ratio", None)
+                    .shown("process", &["machining"]),
+                length("allowance", "Stock allowance per side", 0.0)
+                    .shown("process", &["machining"]),
+                qty("build_rate", "Build rate (cm³/h)", "ratio", None)
+                    .shown("process", &["additive"]),
+                qty("cycle", "Cycle time per part", "time", None)
+                    .shown("process", &["molding", "sheet_metal"]),
+                qty("tooling", "Tooling (mold or die)", "ratio", Some(0.0))
+                    .optional()
+                    .shown("process", &["molding", "sheet_metal"]),
             ],
         ),
     ]
@@ -177,16 +217,45 @@ pub(super) fn annotate() -> Vec<CommandDescriptor> {
             .when(bodies_exist())
             .edit(edit(EditOp::Add, Section::Pmi).item(item))
     };
+    // Characteristics that take a diametral zone (a feature of size's axis) and a material
+    // condition (ASME Y14.5, ISO 1101).
+    let diametral = &[
+        "position",
+        "straightness",
+        "perpendicularity",
+        "parallelism",
+        "angularity",
+        "concentricity",
+    ];
+    let sized = &[
+        "position",
+        "straightness",
+        "perpendicularity",
+        "parallelism",
+        "angularity",
+    ];
+    let related = &[
+        "position",
+        "perpendicularity",
+        "parallelism",
+        "angularity",
+        "profile_of_line",
+        "profile_of_surface",
+        "concentricity",
+        "symmetry",
+        "circular_runout",
+        "total_runout",
+    ];
     vec![
         pmi(
             "annotate.datum",
             "Datum",
             "datum",
             "datum",
-            "Label a face or feature as a datum.",
+            "Label a face or axis as a datum feature.",
             vec![
-                text("label", "Label", Some("A")),
-                pick("target", "Face or feature", &[K::Face, K::Feature, K::Axis]),
+                text("label", "Label", Some("A")).optional(),
+                pick("target", "Face or axis", &[K::Face, K::Axis]),
             ],
         ),
         pmi(
@@ -194,34 +263,47 @@ pub(super) fn annotate() -> Vec<CommandDescriptor> {
             "GD&T frame",
             "gdt",
             "tolerance",
-            "Add a feature control frame.",
+            "Add a feature control frame to faces.",
             vec![
+                picks("targets", "Applies to", &[K::Face]),
                 choice(
                     "characteristic",
                     "Characteristic",
                     &[
                         ("position", "Position"),
                         ("flatness", "Flatness"),
+                        ("straightness", "Straightness"),
+                        ("circularity", "Circularity"),
+                        ("cylindricity", "Cylindricity"),
+                        ("profile_of_line", "Profile of a line"),
+                        ("profile_of_surface", "Profile of a surface"),
                         ("perpendicularity", "Perpendicularity"),
                         ("parallelism", "Parallelism"),
-                        ("profile_surface", "Profile of a surface"),
-                        ("runout", "Circular runout"),
+                        ("angularity", "Angularity"),
                         ("concentricity", "Concentricity"),
-                        ("cylindricity", "Cylindricity"),
+                        ("symmetry", "Symmetry"),
+                        ("circular_runout", "Circular runout"),
+                        ("total_runout", "Total runout"),
                     ],
                 ),
+                flag("diametral", "Diametral zone (⌀)", false).shown("characteristic", diametral),
                 length("tolerance", "Tolerance", 0.1),
                 choice(
                     "modifier",
                     "Material condition",
                     &[
-                        ("none", "None"),
-                        ("mmc", "Maximum material"),
-                        ("lmc", "Least material"),
+                        ("none", "None (regardless of size)"),
+                        ("mmc", "Maximum material (Ⓜ)"),
+                        ("lmc", "Least material (Ⓛ)"),
                     ],
-                ),
-                text("datums", "Datums", Some("A|B|C")).optional(),
-                picks("targets", "Applies to", &[K::Face, K::Feature]),
+                )
+                .shown("characteristic", sized),
+                text("datums", "Datums", Some("A|B|C"))
+                    .optional()
+                    .help("Primary, secondary and tertiary, with (M) or (L) after a label for its material condition.")
+                    .shown("characteristic", related),
+                flag("projected", "Projected zone (Ⓟ)", false).shown("characteristic", &["position", "perpendicularity"]),
+                length("projected_height", "Projected height", 10.0).if_checked("projected"),
             ],
         ),
         pmi(
@@ -229,9 +311,9 @@ pub(super) fn annotate() -> Vec<CommandDescriptor> {
             "Dimension",
             "dimension",
             "size",
-            "Add a 3D dimension with tolerance.",
+            "Add a 3D dimension with tolerance: a hole's diameter, or the distance between two faces.",
             vec![
-                picks("targets", "Between", &[K::Face, K::Edge, K::Vertex]),
+                picks("targets", "Faces", &[K::Face]),
                 choice(
                     "tolerance",
                     "Tolerance",
@@ -243,8 +325,8 @@ pub(super) fn annotate() -> Vec<CommandDescriptor> {
                         ("fit", "Fit"),
                     ],
                 ),
-                length("plus", "Plus", 0.1).shown("tolerance", &["symmetric", "bilateral"]),
-                length("minus", "Minus", 0.1).shown("tolerance", &["bilateral"]),
+                length("plus", "Plus", 0.1).shown("tolerance", &["symmetric", "bilateral", "limit"]),
+                length("minus", "Minus", 0.1).shown("tolerance", &["bilateral", "limit"]),
                 text("fit", "Fit", Some("H7")).shown("tolerance", &["fit"]),
             ],
         ),
@@ -260,7 +342,10 @@ pub(super) fn annotate() -> Vec<CommandDescriptor> {
                     "Scheme",
                     &[("plus_minus", "Plus and minus"), ("geometric", "Geometric")],
                 ),
-                picks("datums", "Datums", &[K::Face, K::Feature]).optional(),
+                picks("datums", "Datums (A, B, C)", &[K::Face])
+                    .optional()
+                    .help("Planar faces in order. Empty: the part's datums, else its largest faces."),
+                length("tolerance", "Tolerance", 0.1),
             ],
         ),
         pmi(
@@ -268,17 +353,32 @@ pub(super) fn annotate() -> Vec<CommandDescriptor> {
             "Surface finish",
             "surface-finish",
             "finish",
-            "Mark a face's required roughness.",
+            "Mark the roughness faces must have.",
             vec![
                 picks("faces", "Faces", &[K::Face]),
-                qty("ra", "Ra", "length", Some(0.0016)),
+                qty("ra", "Ra", "roughness", Some(1.6)).min(0.0),
                 choice(
-                    "process",
+                    "removal",
                     "Process",
                     &[
                         ("any", "Any"),
                         ("removal_required", "Material removal required"),
                         ("removal_prohibited", "No material removal"),
+                    ],
+                ),
+                text("method", "Method", Some("ground")).optional(),
+                choice(
+                    "lay",
+                    "Lay",
+                    &[
+                        ("none", "Any"),
+                        ("=", "Parallel (=)"),
+                        ("⊥", "Perpendicular (⊥)"),
+                        ("X", "Crossed (X)"),
+                        ("M", "Multidirectional (M)"),
+                        ("C", "Circular (C)"),
+                        ("R", "Radial (R)"),
+                        ("P", "Particulate (P)"),
                     ],
                 ),
             ],
@@ -288,10 +388,12 @@ pub(super) fn annotate() -> Vec<CommandDescriptor> {
             "Coating",
             "coating",
             "coating",
-            "Specify a coating on faces or the part.",
+            "Specify a coating on faces or the whole part.",
             vec![
-                picks("faces", "Faces", &[K::Face, K::Body]).optional(),
                 text("spec", "Specification", Some("anodize type II, black")),
+                picks("faces", "Faces", &[K::Face])
+                    .optional()
+                    .help("Empty: the whole part."),
             ],
         ),
         pmi(
@@ -312,8 +414,18 @@ pub(super) fn annotate() -> Vec<CommandDescriptor> {
                         ("spot", "Spot"),
                     ],
                 ),
+                radio(
+                    "side",
+                    "Side",
+                    &[("arrow", "Arrow side"), ("other", "Other side"), ("both", "Both sides")],
+                ),
                 length("size", "Size", 4.0),
                 flag("all_around", "All around", false),
+                flag("field", "Field weld", false),
+                flag("intermittent", "Intermittent", false).shown("type", &["fillet", "groove"]),
+                length("length", "Length", 50.0).if_checked("intermittent"),
+                length("pitch", "Pitch", 100.0).if_checked("intermittent"),
+                text("tail", "Process (tail)", Some("GMAW")).optional(),
             ],
         ),
         pmi(
@@ -321,15 +433,10 @@ pub(super) fn annotate() -> Vec<CommandDescriptor> {
             "Note",
             "note",
             "note",
-            "Add a note attached to the model.",
+            "Add a note in the model, with a leader to a face, edge or vertex.",
             vec![
                 text("text", "Text", None),
-                pick(
-                    "anchor",
-                    "Attached to",
-                    &[K::Face, K::Edge, K::Vertex, K::Feature],
-                )
-                .optional(),
+                pick("anchor", "Attached to", &[K::Face, K::Edge, K::Vertex]).optional(),
             ],
         ),
         pmi(
@@ -339,17 +446,24 @@ pub(super) fn annotate() -> Vec<CommandDescriptor> {
             "view",
             "Save a view direction that groups annotations.",
             vec![
-                text("name", "Name", Some("Front annotations")),
+                text("name", "Name", Some("front_pmi")),
                 choice(
                     "orientation",
                     "Orientation",
                     &[
                         ("current", "Current view"),
                         ("front", "Front"),
+                        ("back", "Back"),
                         ("top", "Top"),
+                        ("bottom", "Bottom"),
                         ("right", "Right"),
+                        ("left", "Left"),
+                        ("isometric", "Isometric"),
                     ],
                 ),
+                picks("annotations", "Annotations", &[K::Annotation])
+                    .optional()
+                    .help("Empty: every annotation not in a view yet."),
             ],
         ),
     ]
@@ -362,7 +476,8 @@ pub(super) fn simulate() -> Vec<CommandDescriptor> {
             .kw(&["named selection", "boundary", "load face"])
             .inputs(vec![
                 text("name", "Name", Some("mount_face")),
-                radio("kind", "Kind", &[("face", "Faces"), ("edge", "Edges"), ("body", "Bodies"), ("vertex", "Vertices")]),
+                radio("kind", "Kind", &[("face", "Faces"), ("edge", "Edges"), ("body", "Bodies"), ("vertex", "Vertices")])
+                    .help("A study reads face regions by name with `select name`, and a body by its output's name. Edge and vertex regions name items for drawings and assemblies; studies don't read them yet."),
                 picks("select", "Items", &[K::Face, K::Edge, K::Body, K::Vertex]),
                 choice("expect", "Expect", &[("at_least_one", "At least one"), ("exactly_one", "Exactly one"), ("any", "Any number")]),
             ])
@@ -380,25 +495,37 @@ pub(super) fn simulate() -> Vec<CommandDescriptor> {
             ])
             .edit(edit(EditOp::Add, Section::Publishes).item("publish")),
         cmd("simulate.representation", "Representation", "representation", P)
-            .desc("Define how the part appears in assemblies and studies: full, envelope, defeatured, mid-surface or beam.")
+            .desc("Add an analysis representation for meshing: defeatured, mid-surface or beam. Full draws the design itself.")
+            .kw(&["idealization", "midsurface", "mid-surface", "beam", "shell", "simplify"])
             .inputs(vec![
-                choice("kind", "Representation", &[("full", "Full"), ("envelope", "Envelope"), ("defeatured", "Defeatured"), ("mid_surface", "Mid-surface"), ("beam", "Beam")]),
-                text("name", "Name", Some("defeatured")),
+                choice("kind", "Representation", &[("full", "Full"), ("defeatured", "Defeatured"), ("midsurface", "Mid-surface"), ("beam", "Beam")])
+                    .help("Drawn from the bottom strip's Representation menu. A study reads the full design: it can't select a representation yet."),
+                text("name", "Name", Some("simple")).shown("kind", &["defeatured", "midsurface", "beam"]),
+                pick("body", "Body", &[K::Body])
+                    .optional()
+                    .shown("kind", &["midsurface", "beam"])
+                    .help("Empty: the part's only body. A mid-surface needs a thin wall; a beam needs a prismatic body."),
+                length("max_fillet", "Fillets up to", 2.0).shown("kind", &["defeatured"]),
+                length("max_hole", "Holes up to", 3.0).shown("kind", &["defeatured"]),
+                length("max_chamfer", "Chamfers up to", 1.0).shown("kind", &["defeatured"]),
+                flag("keep_regions", "Keep named regions", true).shown("kind", &["defeatured"]),
             ])
             .when(bodies_exist())
             .edit(edit(EditOp::Add, Section::Configurations).item("representation")),
         cmd("simulate.defeature", "Defeature", "defeature", P)
-            .desc("Remove small fillets, holes and chamfers for simulation.")
-            .kw(&["simplify"])
+            .desc("Add a defeatured representation for meshing: small fillets, holes and chamfers removed. The design stays as it is.")
+            .kw(&["simplify", "small features", "suppress fillets"])
             .inputs(vec![
+                text("name", "Name", Some("defeatured"))
+                    .help("Drawn from the bottom strip's Representation menu. A study reads the full design: it can't select a representation yet."),
                 length("max_fillet", "Fillets up to", 2.0),
                 length("max_hole", "Holes up to", 3.0),
                 length("max_chamfer", "Chamfers up to", 1.0),
-                flag("keep_regions", "Keep named regions", true),
+                flag("keep_regions", "Keep named regions", true)
+                    .help("Faces a region holds stay, so a study's loads and supports keep their faces."),
             ])
             .when(bodies_exist())
-            .preview()
-            .edit(add_feature_variant("direct", "direct", "delete_faces")),
+            .edit(edit(EditOp::Add, Section::Configurations).item("representation")),
         cmd("simulate.check", "Study checks", "check", &[EditorKind::Part, EditorKind::Assembly])
             .desc("Check fit and mass before a study meshes the design: overlapping parts, open contacts and parts without a material.")
             .kw(&["preflight", "fit check", "mass check", "before simulation"])

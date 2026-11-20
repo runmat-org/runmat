@@ -46,6 +46,7 @@ pub(super) fn preparation() -> AcousticStudyPreparation {
     step.independent_domain = IndependentDomain::FrequencyHertz(vec![0.2]);
     model.sequence = AnalysisSequence::from_steps("acoustic", vec![step]);
     let compiled = CompiledAnalysisStudy {
+        displays: Vec::new(),
         module_path: "tests/acoustic.fea".into(),
         study_id: "acoustic".into(),
         study_inputs: Vec::new(),

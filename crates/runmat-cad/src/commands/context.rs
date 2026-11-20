@@ -38,9 +38,9 @@ pub(super) fn add(catalog: &mut Catalog) {
             "references",
             P,
         )
-        .desc("List what the item is built on and what is built on it.")
+        .desc("List what the feature is built on and what is built on it.")
         .kw(&["dependencies", "references"])
-        .when(selected_one(&[K::Feature, K::Sketch, K::Body]))
+        .when(selected_one(&[K::Feature, K::Sketch]))
         .edit(analyze("parents_children")),
         cmd("part.where-used", "Where used", "where-used", P)
             .desc(
@@ -98,7 +98,7 @@ pub(super) fn add(catalog: &mut Catalog) {
         .when(selected(&[K::Occurrence]))
         .edit(edit(EditOp::Set, Section::Occurrences).item("configuration")),
         cmd("assembly.show-mates", "Show mates", "mate", A)
-            .desc("Highlight the component's mates and list them in Properties.")
+            .desc("Show the mates that hold the component in the Outline, filtered to it.")
             .when(selected_one(&[K::Occurrence]))
             .edit(view_action("show_mates")),
         cmd("assembly.flip-mate", "Flip", "flip", A)
@@ -295,6 +295,38 @@ pub(super) fn add(catalog: &mut Catalog) {
     let look = || vec![c("view.zoom-selection"), c("view.measure")];
 
     catalog.context_menus.extend([
+        // An assembly's sketch in its Outline.
+        context_menu(
+            K::Sketch,
+            &[EditorKind::Assembly],
+            &[
+                "assembly.edit-sketch",
+                "assembly.suppress",
+                "assembly.delete",
+                "design.show-source",
+            ],
+            vec![
+                vec![c("assembly.edit-sketch")],
+                vec![c("assembly.suppress"), c("assembly.delete")],
+                vec![c("design.show-source"), c("design.copy-reference")],
+            ],
+        ),
+        // An assembly feature (cut, hole, weld bead) in the assembly's Outline.
+        context_menu(
+            K::Feature,
+            &[EditorKind::Assembly],
+            &[
+                "assembly.feature",
+                "assembly.suppress",
+                "assembly.delete",
+                "design.show-source",
+            ],
+            vec![
+                vec![c("assembly.feature")],
+                vec![c("assembly.suppress"), c("assembly.delete")],
+                vec![c("design.show-source"), c("design.copy-reference")],
+            ],
+        ),
         // Topology picked in a part's view: a face, an edge or a vertex.
         context_menu(
             K::Face,
@@ -342,24 +374,11 @@ pub(super) fn add(catalog: &mut Catalog) {
                 vec![c("design.copy-reference")],
             ],
         ),
-        context_menu(
-            K::SketchEntity,
-            P,
-            &[
-                "sketch.constraint",
-                "sketch.construction",
-                "view.zoom-selection",
-                "view.measure",
-            ],
-            vec![
-                vec![c("sketch.constraint"), c("sketch.construction")],
-                look(),
-                vec![c("design.copy-reference")],
-            ],
-        ),
+        sketch_entity_menu(EditorKind::Part, "part.delete"),
+        sketch_entity_menu(EditorKind::Assembly, "assembly.delete"),
         context_menu(
             K::SketchPoint,
-            P,
+            &[EditorKind::Part, EditorKind::Assembly],
             &[
                 "sketch.constraint",
                 "view.zoom-selection",
@@ -558,5 +577,57 @@ pub(super) fn add(catalog: &mut Catalog) {
                 vec![c("drawing.delete")],
             ],
         ),
+        // A part's 3D annotation and annotation view.
+        context_menu(
+            K::Annotation,
+            P,
+            &[
+                "view.zoom-selection",
+                "design.show-source",
+                "design.copy-reference",
+                "part.delete",
+            ],
+            vec![
+                vec![c("view.zoom-selection")],
+                vec![c("design.show-source"), c("design.copy-reference")],
+                vec![c("part.delete")],
+            ],
+        ),
+        context_menu(
+            K::View,
+            P,
+            &[
+                "view.zoom-selection",
+                "design.show-source",
+                "design.copy-reference",
+                "part.delete",
+            ],
+            vec![
+                vec![c("view.zoom-selection")],
+                vec![c("design.show-source"), c("design.copy-reference")],
+                vec![c("part.delete")],
+            ],
+        ),
     ]);
+}
+
+/// A sketch curve's or point entity's menu in `editor` (the Outline row, or a pick in sketch
+/// mode): relations, construction, look, and Delete through the editor's own delete.
+fn sketch_entity_menu(editor: EditorKind, delete: &str) -> ContextMenu {
+    context_menu(
+        K::SketchEntity,
+        &[editor],
+        &[
+            "sketch.constraint",
+            "sketch.construction",
+            "view.zoom-selection",
+            delete,
+        ],
+        vec![
+            vec![c("sketch.constraint"), c("sketch.construction")],
+            vec![c("view.zoom-selection"), c("view.measure")],
+            vec![c("design.copy-reference")],
+            vec![c(delete)],
+        ],
+    )
 }

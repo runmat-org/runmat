@@ -227,7 +227,7 @@ fn a_parts_list_on_the_title_block_steps_left_of_the_right_centring_mark() {
         .map(|k| format!("    use part pin as p{k} {{\n        configuration = {{ select = inputs, values = {{ radius = {k} mm }} }}\n        placement = {{ placement = offset, offset = {{ translation = [{} mm, 0 mm, 0 mm] }} }}\n    }}\n", 30 * k))
         .collect();
     let rig = format!("runmat 0.7\nstd 1\n\nassembly rig {{\n{uses}}}\n");
-    let drawing = "runmat 0.7\nstd 1\n\ndrawing rig {\n    format a4 = { size = { size = iso, name = A4 }, title_block = [] }\n    sheet \"1\" = { format = a4, scale = [1, 5], projection = third_angle }\n    view iso = standard(orientation = isometric, sheet = \"1\", model = { assembly = rig }, at = [70, 120], display = visible_lines)\n    table parts = bom(view = iso, sheet = \"1\", at = [0, 0])\n}\n";
+    let drawing = "runmat 0.7\nstd 1\n\ndrawing rig {\n    format a4 = { size = { size = iso, name = A4 }, title_block = [] }\n    sheet \"1\" = { format = a4, scale = [1, 5], projection = third_angle }\n    view iso = standard(orientation = isometric, sheet = \"1\", model = { assembly = rig }, at = [70, 120], display = visible_lines)\n    table parts = bom(view = iso, sheet = \"1\")\n}\n";
     let files: Files = [
         ("/p/pin.part".to_owned(), pin.to_owned()),
         ("/p/rig.assembly".to_owned(), rig),
@@ -298,7 +298,7 @@ fn a_parts_list_on_the_title_block_steps_left_of_the_right_centring_mark() {
 #[test]
 fn a_parts_list_groups_one_part_number_and_fills_its_description() {
     let rig = "runmat 0.7\nstd 1\n\nassembly rig {\n    use part bracket as a\n    use part bracket as b {\n        placement = { placement = offset, offset = { translation = [100 mm, 0 mm, 0 mm] } }\n    }\n    use part bracket as c {\n        configuration = { select = inputs, values = { width = 90 mm } }\n        placement = { placement = offset, offset = { translation = [0 mm, 100 mm, 0 mm] } }\n    }\n    use part bracket as d {\n        configuration = { select = inputs, values = { width = 70 mm } }\n        placement = { placement = offset, offset = { translation = [100 mm, 100 mm, 0 mm] } }\n    }\n}\n";
-    let drawing = "runmat 0.7\nstd 1\n\ndrawing rig {\n    format a3 = { size = { size = iso, name = A3 }, title_block = [] }\n    sheet \"1\" = { format = a3, scale = [1, 5], projection = third_angle }\n    view iso = standard(orientation = isometric, sheet = \"1\", model = { assembly = rig }, at = [150, 150], display = visible_lines)\n    annotation b1 = balloon(occurrence = [{ name = c }], table = parts, view = iso)\n    table parts = bom(view = iso, sheet = \"1\", at = [0, 0])\n}\n";
+    let drawing = "runmat 0.7\nstd 1\n\ndrawing rig {\n    format a3 = { size = { size = iso, name = A3 }, title_block = [] }\n    sheet \"1\" = { format = a3, scale = [1, 5], projection = third_angle }\n    view iso = standard(orientation = isometric, sheet = \"1\", model = { assembly = rig }, at = [150, 150], display = visible_lines)\n    annotation b1 = balloon(occurrence = [{ name = c }], table = parts, view = iso)\n    table parts = bom(view = iso, sheet = \"1\")\n}\n";
     let files: Files = [
         ("/p/bracket.part".to_owned(), BRACKET.to_owned()),
         ("/p/rig.assembly".to_owned(), rig.to_owned()),
@@ -359,14 +359,43 @@ fn a_section_cuts_through_an_origin_plane() {
         }
         all
     };
+    // origin.zx is the bracket's back face (y = 0): the cut lies on a face and cuts nothing.
     let out = with("origin.zx");
-    assert_eq!(findings(&out), Vec::<Value>::new());
     let cut = &out["projection"]["data"]["hlr"]["a_a"]["cut"];
     assert_eq!(cut["view"], "top", "{cut}");
     assert!(
         cut["at"].as_f64().is_some_and(|at| at.abs() < 1e-6),
         "{cut}"
     );
+    let messages = Value::Array(findings(&out)).to_string();
+    assert!(
+        messages.contains("section a_a cuts no material"),
+        "{messages}"
+    );
+    // Moved 25 mm into the part, through the pocket: hatched, either side of it.
+    for plane in [
+        "origin.zx, offset = 25 mm",
+        "origin.zx, offset = 25 mm, keep_other_side = true",
+    ] {
+        let out = with(plane);
+        assert_eq!(findings(&out), Vec::<Value>::new(), "{plane}");
+        let section = &out["projection"]["data"]["hlr"]["a_a"];
+        assert!(
+            section["cut"]["at"]
+                .as_f64()
+                .is_some_and(|at| (at - 25.0).abs() < 1e-6),
+            "{plane}: {}",
+            section["cut"]
+        );
+        let loops = section["hatch"].as_array().map_or(0, Vec::len);
+        assert!(loops >= 2, "{plane}: {loops} hatch loops");
+        // The sheet draws the hatch on the view.
+        let hatched = out["projection"]["data"]["layouts"]
+            .to_string()
+            .matches("\"hatch\"")
+            .count();
+        assert!(hatched > 0, "{plane}: no hatch on the sheet");
+    }
     let out = with("plane.nowhere");
     let messages = Value::Array(findings(&out)).to_string();
     assert!(
@@ -381,7 +410,7 @@ fn a_section_cuts_through_an_origin_plane() {
 fn a_top_level_parts_list_numbers_balloons_on_sub_assemblies() {
     let pair = "runmat 0.7\nstd 1\n\nassembly pair {\n    use part bracket as a\n    use part bracket as b {\n        placement = { placement = offset, offset = { translation = [100 mm, 0 mm, 0 mm] } }\n    }\n}\n";
     let rig = "runmat 0.7\nstd 1\n\nassembly rig {\n    use assembly pair as left\n    use assembly pair as right {\n        placement = { placement = offset, offset = { translation = [0 mm, 100 mm, 0 mm] } }\n    }\n    use part bracket as base {\n        placement = { placement = offset, offset = { translation = [0 mm, 0 mm, -50 mm] } }\n    }\n}\n";
-    let drawing = "runmat 0.7\nstd 1\n\ndrawing rig {\n    format a3 = { size = { size = iso, name = A3 }, title_block = [] }\n    sheet \"1\" = { format = a3, scale = [1, 5], projection = third_angle }\n    view iso = standard(orientation = isometric, sheet = \"1\", model = { assembly = rig }, at = [150, 150], display = visible_lines)\n    annotation b1 = balloon(occurrence = [{ name = left }], table = parts, view = iso)\n    annotation b2 = balloon(occurrence = [{ name = base }], table = parts, view = iso)\n    table parts = bom(view = iso, sheet = \"1\", at = [0, 0], spec = { structure = top_level })\n}\n";
+    let drawing = "runmat 0.7\nstd 1\n\ndrawing rig {\n    format a3 = { size = { size = iso, name = A3 }, title_block = [] }\n    sheet \"1\" = { format = a3, scale = [1, 5], projection = third_angle }\n    view iso = standard(orientation = isometric, sheet = \"1\", model = { assembly = rig }, at = [150, 150], display = visible_lines)\n    annotation b1 = balloon(occurrence = [{ name = left }], table = parts, view = iso)\n    annotation b2 = balloon(occurrence = [{ name = base }], table = parts, view = iso)\n    table parts = bom(view = iso, sheet = \"1\", spec = { structure = top_level })\n}\n";
     let files: Files = [
         ("/p/bracket.part".to_owned(), BRACKET.to_owned()),
         ("/p/pair.assembly".to_owned(), pair.to_owned()),
@@ -443,7 +472,7 @@ fn a_radius_dimension_carries_its_arc_radius() {
 #[test]
 fn a_parts_list_prints_files_relative_to_the_project() {
     let pair = "runmat 0.7\nstd 1\n\nassembly pair {\n    use part bracket from \"../parts\" as a\n    use part bracket from \"../parts\" as b {\n        placement = { placement = offset, offset = { translation = [100 mm, 0 mm, 0 mm] } }\n    }\n}\n";
-    let drawing = "runmat 0.7\nstd 1\n\ndrawing pair {\n    format a3 = { size = { size = iso, name = A3 }, title_block = [] }\n    sheet \"1\" = { format = a3, scale = [1, 5], projection = third_angle }\n    view iso = standard(orientation = isometric, sheet = \"1\", model = { assembly = pair, from = \"../assemblies\" }, at = [150, 150], display = visible_lines)\n    table parts = bom(view = iso, sheet = \"1\", at = [0, 0], spec = { structure = parts_only, columns = [{ column = { column = item } }, { column = { column = definition } }, { column = { column = quantity } }] })\n}\n";
+    let drawing = "runmat 0.7\nstd 1\n\ndrawing pair {\n    format a3 = { size = { size = iso, name = A3 }, title_block = [] }\n    sheet \"1\" = { format = a3, scale = [1, 5], projection = third_angle }\n    view iso = standard(orientation = isometric, sheet = \"1\", model = { assembly = pair, from = \"../assemblies\" }, at = [150, 150], display = visible_lines)\n    table parts = bom(view = iso, sheet = \"1\", spec = { structure = parts_only, columns = [{ column = { column = item } }, { column = { column = definition } }, { column = { column = quantity } }] })\n}\n";
     let files: Files = [
         ("/w/proj/runmat.toml".to_owned(), String::new()),
         ("/w/proj/parts/bracket.part".to_owned(), BRACKET.to_owned()),
@@ -472,7 +501,7 @@ fn a_parts_list_prints_files_relative_to_the_project() {
 fn a_part_with_two_outputs_is_two_parts_list_items() {
     let unit = "runmat 0.7\nstd 1\n\npart unit {\n    sketch s on origin.xy {\n        c = circle(center = [0 mm, 0 mm], radius = 10 mm)\n    }\n    feature screen = extrude(profile = sketch.s, distance = 2 mm)\n    sketch t on origin.xy {\n        c = circle(center = [40 mm, 0 mm], radius = 10 mm)\n    }\n    feature case = extrude(profile = sketch.t, distance = 5 mm)\n    output screen = { body = feature.screen.body, part_number = \"U-1\", material = \"glass\" }\n    output case = { body = feature.case.body, part_number = \"U-2\", material = \"aluminum_6061\" }\n}\n";
     let rig = "runmat 0.7\nstd 1\n\nassembly rig {\n    use part unit as unit\n}\n";
-    let drawing = "runmat 0.7\nstd 1\n\ndrawing rig {\n    format a3 = { size = { size = iso, name = A3 }, title_block = [] }\n    sheet \"1\" = { format = a3, scale = [1, 1], projection = third_angle }\n    view iso = standard(orientation = isometric, sheet = \"1\", model = { assembly = rig }, at = [150, 150], display = visible_lines)\n    table parts = bom(view = iso, sheet = \"1\", at = [0, 0], spec = { structure = parts_only, columns = [{ column = { column = item } }, { column = { column = part_number } }, { column = { column = description } }, { column = { column = material } }, { column = { column = quantity } }] })\n}\n";
+    let drawing = "runmat 0.7\nstd 1\n\ndrawing rig {\n    format a3 = { size = { size = iso, name = A3 }, title_block = [] }\n    sheet \"1\" = { format = a3, scale = [1, 1], projection = third_angle }\n    view iso = standard(orientation = isometric, sheet = \"1\", model = { assembly = rig }, at = [150, 150], display = visible_lines)\n    table parts = bom(view = iso, sheet = \"1\", spec = { structure = parts_only, columns = [{ column = { column = item } }, { column = { column = part_number } }, { column = { column = description } }, { column = { column = material } }, { column = { column = quantity } }] })\n}\n";
     let files: Files = [
         ("/p/unit.part".to_owned(), unit.to_owned()),
         ("/p/rig.assembly".to_owned(), rig.to_owned()),
@@ -484,4 +513,135 @@ fn a_part_with_two_outputs_is_two_parts_list_items() {
     for text in ["U-1", "U-2", "Glass", "Aluminum 6061", "Screen", "Case"] {
         assert!(table.contains(&format!("\"{text}\"")), "{text}: {table}");
     }
+}
+
+/// `centerlines = false` leaves a view's center marks and centerlines out (a floor plan's posts
+/// and fixtures); the hole's center mark draws by default.
+#[test]
+fn a_view_can_leave_its_centerlines_out() {
+    let files: Files = [("/p/bracket.part".to_owned(), BRACKET.to_owned())].into();
+    let centers = |text: &str| {
+        let out: Value =
+            serde_json::from_str(&compile_json("/p/bracket.drawing", text, &files)).unwrap();
+        out["projection"]["data"]["layouts"]["1"]["primitives"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter(|p| p["id"] == "view:top" && p["style"] == "center")
+            .count()
+    };
+    assert!(
+        centers(DRAWING) > 0,
+        "the hole's center mark draws by default"
+    );
+    let off = DRAWING.replacen(
+        "at = [100, 200],\n        display = hidden_lines\n",
+        "at = [100, 200],\n        display = hidden_lines,\n        centerlines = false\n",
+        1,
+    );
+    assert_ne!(off, DRAWING);
+    assert_eq!(centers(&off), 0);
+}
+
+/// On an assembly view, a dimension and a level mark name faces of the assembly's occurrences:
+/// the value is measured where the assembly places each one, the sheet draws the dimension,
+/// and a reference to a face the occurrence's part lacks is reported.
+#[test]
+fn assembly_view_annotations_measure_their_occurrences_where_they_are_placed() {
+    let rig = "runmat 0.7\nstd 1\n\nassembly rig {\n    use part bracket as a\n    use part bracket as b {\n        placement = { placement = offset, offset = { translation = [100 mm, 0 mm, 25 mm] } }\n    }\n}\n";
+    let drawing = "runmat 0.7\nstd 1\n\ndrawing rig {\n    format a3 = { size = { size = iso, name = A3 }, title_block = [] }\n    sheet \"1\" = { format = a3, scale = [1, 2], projection = third_angle }\n    view front = standard(orientation = front, sheet = \"1\", model = { assembly = rig }, at = [150, 150], display = visible_lines)\n    annotation overall = dimension(style = linear, references = [feature.body.face.side(s1.l4), feature.body.face.side(s1.l2)], occurrences = [[{ name = a }], [{ name = b }]], view = front)\n    annotation top_b = level(label = \"TOP OF B\", on = feature.body.face.end, occurrence = [{ name = b }], view = front)\n    annotation swing = door_swing(door = [{ name = b }], hinge = start, swing = negative, view = front)\n    annotation bad = dimension(style = linear, references = [feature.body.face.side(s1.l4), feature.body.face.side(s1.l7)], occurrences = [[{ name = a }], [{ name = b }]], view = front)\n}\n";
+    let files: Files = [
+        ("/p/bracket.part".to_owned(), BRACKET.to_owned()),
+        ("/p/rig.assembly".to_owned(), rig.to_owned()),
+    ]
+    .into();
+    let out: Value =
+        serde_json::from_str(&compile_json("/p/rig.drawing", drawing, &files)).unwrap();
+    let data = &out["projection"]["data"];
+    assert_eq!(data["text"]["overall"], "180", "{}", data["diagnostics"]);
+    assert_eq!(data["text"]["top_b"], "EL. 35", "{}", data["diagnostics"]);
+    assert_eq!(data["resolved"]["bad"], false);
+    assert!(
+        data["diagnostics"].to_string().contains("doesn't have"),
+        "{}",
+        data["diagnostics"]
+    );
+    let swing = &data["swings"]["swing"];
+    assert!(
+        swing["arc"].as_array().is_some_and(|a| a.len() == 17),
+        "{swing}"
+    );
+    let layout = &data["layouts"]["1"];
+    let dims = layout["dimensions"].as_array().unwrap();
+    assert!(
+        dims.iter()
+            .any(|d| d["id"] == "overall" && d["text"] == "180"),
+        "{}",
+        layout["dimensions"]
+    );
+    let drawn = |id: &str| {
+        layout["primitives"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|p| p["id"] == format!("annotation:{id}"))
+    };
+    assert!(drawn("top_b") && drawn("swing"));
+    assert!(layout["primitives"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|p| p["shape"]["text"] == "TOP OF B"));
+}
+
+/// Grids read the datum planes a skeleton occurrence publishes: the row between them measures
+/// the planes' spacing, and each grid ends in a bubble with its label; a level mark reads a
+/// published level datum's height.
+#[test]
+fn grids_and_level_marks_read_a_skeleton_s_published_datums() {
+    let skeleton = "runmat 0.7\nstd 1\n\npart skel {\n    feature g1 = plane.offset(base = origin.yz, distance = 0 mm)\n    feature g2 = plane.offset(base = origin.yz, distance = 120 mm)\n    feature g3 = plane.offset(base = origin.yz, distance = 200 mm)\n    feature floor = plane.offset(base = origin.xy, distance = 30 mm)\n    publish grid_1 = datum(datum = { datum = feature, feature = g1 })\n    publish grid_2 = datum(datum = { datum = feature, feature = g2 })\n    publish grid_3 = datum(datum = { datum = feature, feature = g3 })\n    publish floor = datum(datum = { datum = feature, feature = floor })\n}\n";
+    let rig = "runmat 0.7\nstd 1\n\nassembly rig {\n    use part skel as skeleton\n    use part bracket as a\n}\n";
+    let drawing = "runmat 0.7\nstd 1\n\ndrawing rig {\n    format a3 = { size = { size = iso, name = A3 }, title_block = [] }\n    sheet \"1\" = { format = a3, scale = [1, 2], projection = third_angle }\n    view top = standard(orientation = top, sheet = \"1\", model = { assembly = rig }, at = [150, 150], display = visible_lines)\n    view front = standard(orientation = front, sheet = \"1\", model = { assembly = rig }, at = [150, 60], display = visible_lines)\n    annotation grids = grids(occurrence = [{ name = skeleton }], datums = [grid_1, grid_2, grid_3], labels = [\"1\", \"2\", \"3\"], view = top)\n    annotation floor = level(label = \"FLOOR\", datum = floor, occurrence = [{ name = skeleton }], view = front)\n    annotation nope = grids(occurrence = [{ name = skeleton }], datums = [grid_1, grid_9], labels = [\"1\", \"9\"], view = top)\n    annotation grids_front = grids(occurrence = [{ name = skeleton }], datums = [grid_1, grid_2, grid_3], labels = [\"1\", \"2\", \"3\"], view = front)\n}\n";
+    let files: Files = [
+        ("/p/bracket.part".to_owned(), BRACKET.to_owned()),
+        ("/p/skel.part".to_owned(), skeleton.to_owned()),
+        ("/p/rig.assembly".to_owned(), rig.to_owned()),
+    ]
+    .into();
+    let out: Value =
+        serde_json::from_str(&compile_json("/p/rig.drawing", drawing, &files)).unwrap();
+    let data = &out["projection"]["data"];
+    assert_eq!(data["text"]["grids"], "120 · 80", "{}", data["diagnostics"]);
+    assert_eq!(data["text"]["floor"], "EL. 30", "{}", data["diagnostics"]);
+    assert_eq!(data["resolved"]["nope"], false);
+    assert!(data["diagnostics"]
+        .to_string()
+        .contains("publishes no datum `grid_9`"));
+    let layout = &data["layouts"]["1"];
+    let prims = layout["primitives"].as_array().unwrap();
+    let bubbles = prims
+        .iter()
+        .filter(|p| p["id"] == "annotation:grids" && p["shape"]["type"] == "circle")
+        .count();
+    assert_eq!(bubbles, 3);
+    for label in ["1", "2", "3"] {
+        assert!(prims
+            .iter()
+            .any(|p| p["id"] == "annotation:grids" && p["shape"]["text"] == label));
+    }
+    let row: Vec<&Value> = layout["dimensions"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|d| d["id"] == "grids")
+        .collect();
+    assert_eq!(row.len(), 2, "{}", layout["dimensions"]);
+    // The same grids on a second view draw their row there too (plans each carry theirs).
+    let again = layout["dimensions"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|d| d["id"] == "grids_front")
+        .count();
+    assert_eq!(again, 2, "{}", layout["findings"]);
 }

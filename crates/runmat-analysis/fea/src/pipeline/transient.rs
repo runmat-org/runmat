@@ -23,7 +23,6 @@ use crate::{
         realize_with_fields as realize_structural_initial_state, RealizedStructuralInitialState,
         StructuralInitialConstraintView, StructuralInitialStateRealizationBasis,
     },
-    pipeline::electro_thermal::recover_realized_electro_thermal_fields,
     pipeline::observation_history::{
         evaluate_field_histories, HistoryFieldSeries, HistoryTopology,
     },

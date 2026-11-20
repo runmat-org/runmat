@@ -73,7 +73,7 @@ pub struct Picks<'a> {
     pub document: &'a PartDocument,
     path: &'a str,
     text: &'a str,
-    bodies: OnceCell<Vec<Value>>,
+    display: OnceCell<Value>,
 }
 
 impl<'a> Picks<'a> {
@@ -82,19 +82,52 @@ impl<'a> Picks<'a> {
             document,
             path,
             text,
-            bodies: OnceCell::new(),
+            display: OnceCell::new(),
         }
+    }
+
+    /// The regenerated part's display (`Null` when it doesn't regenerate).
+    fn display(&self) -> &Value {
+        self.display.get_or_init(|| {
+            compile_part(self.path, self.text)
+                .ok()
+                .and_then(|c| serde_json::to_value(&c.display).ok())
+                .unwrap_or_default()
+        })
     }
 
     /// The regenerated part's display bodies (faces with their reference texts).
     pub fn bodies(&self) -> &[Value] {
-        self.bodies.get_or_init(|| {
-            compile_part(self.path, self.text)
-                .ok()
-                .and_then(|c| serde_json::to_value(&c.display).ok())
-                .and_then(|d| d["bodies"].as_array().cloned())
-                .unwrap_or_default()
-        })
+        self.display()["bodies"]
+            .as_array()
+            .map(Vec::as_slice)
+            .unwrap_or_default()
+    }
+
+    /// Sketch `id`'s plane as the regenerated part draws it.
+    pub(crate) fn sketch_frame(
+        &self,
+        id: &str,
+    ) -> Option<crate::edit::sketch::placed::SketchFrame> {
+        crate::edit::sketch::placed::SketchFrame::of_display(self.display(), id)
+    }
+
+    /// The model point (metres) of a vertex pick: its reference text (`vertex_of(…)`), as the
+    /// regenerated part's display bodies carry it.
+    pub(crate) fn vertex_point(&self, pick: &str) -> Option<[f64; 3]> {
+        self.bodies()
+            .iter()
+            .filter_map(|b| b["vertices"].as_array())
+            .flatten()
+            .find(|v| v["reference"].as_str() == Some(pick))
+            .and_then(|v| {
+                let p = v["point"].as_array()?;
+                Some([
+                    p.first()?.as_f64()?,
+                    p.get(1)?.as_f64()?,
+                    p.get(2)?.as_f64()?,
+                ])
+            })
     }
 
     fn kind_of(&self, feature: &str) -> Option<&'static str> {
@@ -205,6 +238,25 @@ impl<'a> Picks<'a> {
         Err(model(format!(
             "`{pick}` isn't an axis, an edge, a cylindrical face or a sketch line"
         )))
+    }
+
+    /// A direction: anything [`Self::axis`] takes (an edge or axis runs along itself), or a plane
+    /// (a datum plane or the Outline's `origin:top`), which gives its normal. A planar face is
+    /// an axis pick whose direction is its outward normal.
+    pub fn direction(&self, pick: &str) -> Result<Value, EditFailure> {
+        match self.axis(pick) {
+            Ok(axis) => Ok(axis),
+            Err(not_an_axis) => match lower_text(&self.text_of(pick)?) {
+                Ok(v) if v.get("on").is_some() => Ok(json!({ "along": "normal", "plane": v })),
+                _ => Err(match not_an_axis {
+                    EditFailure::Model(_) => model(format!(
+                        "`{pick}` gives no direction; pick a straight edge, an axis, a sketch line, \
+                         a plane or a planar face (its normal)"
+                    )),
+                    other => other,
+                }),
+            },
+        }
     }
 
     /// A point: a datum point, a vertex, or a sketch point (a point entity, an arc's or circle's

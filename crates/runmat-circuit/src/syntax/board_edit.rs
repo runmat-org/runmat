@@ -5,7 +5,8 @@
 //!
 //! - a statement whose printed form is unchanged keeps its text, comments and layout, however
 //!   it was written;
-//! - a changed statement is replaced in place, keeping the comments around it;
+//! - a changed statement is replaced in place, keeping the comments around it and every value
+//!   that still reads the same as written (`12 mil` stays `12 mil`; [`keep_written`]);
 //! - a removed statement takes its own lines and the comment lines directly above it;
 //! - an added statement goes next to its neighbours of the same kind, in print order.
 //!
@@ -20,6 +21,7 @@
 //! Formats ([`copy_room_formats`]) and the board catalog's model edits ([`BoardEdit`],
 //! [`apply_board_edit`]) are built on it.
 
+use super::board::authored::keep_written;
 use super::board::{
     canonical, parse_board, print_board, same_board, statements, statements_where, Group,
     ParsedBoard, Printed,
@@ -241,9 +243,10 @@ pub fn diff_board(
     }
     for (&j, &(i, exact)) in &kept {
         if !exact {
+            let span = parsed.statements[i].span;
             edits.push(TextEdit::replace(
-                parsed.statements[i].span,
-                printed[j].text.clone(),
+                span,
+                keep_written(&source[span.start..span.end], &printed[j].text),
             ));
         }
     }
@@ -465,9 +468,10 @@ fn diff_items(
         edits.push(TextEdit::delete(own_range(source, *at_of.get(id)?)));
     }
     for id in changed {
+        let span = *at_of.get(id)?;
         edits.push(TextEdit::replace(
-            *at_of.get(id)?,
-            text_of.get(id)?.0.to_owned(),
+            span,
+            keep_written(source.get(span.start..span.end)?, text_of.get(id)?.0),
         ));
     }
     let mut inserts: BTreeMap<usize, String> = BTreeMap::new();
@@ -649,6 +653,13 @@ pub enum BoardEdit {
     Lock { items: Vec<Site>, locked: bool },
     /// Deletes items.
     Delete { items: Vec<Site> },
+    /// `board.place` and `board.align`: footprints to new origins (each `(footprint, at)`), on
+    /// `side` when given. A locked footprint refuses.
+    Arrange {
+        moves: Vec<(Site, Point)>,
+        side: Option<Side>,
+        command: &'static str,
+    },
     /// `board.room`: adds a room around components, or replaces the room of that name.
     Room {
         name: String,
@@ -726,6 +737,7 @@ impl BoardEdit {
             BoardEdit::Flip { .. } => "board.flip",
             BoardEdit::Lock { .. } => "board.move",
             BoardEdit::Delete { .. } => "board.select",
+            BoardEdit::Arrange { command, .. } => command,
             BoardEdit::Room { .. } => "board.room",
             BoardEdit::Route { .. } => "board.route",
             BoardEdit::Via { .. } => "board.place-via",
@@ -831,6 +843,22 @@ pub fn apply_board_edit(
                     t.angle = (t.angle + rotation).rem_euclid(360.0);
                 } else {
                     return Err("that item does not move".into());
+                }
+            }
+        }
+        BoardEdit::Arrange { moves, side, .. } => {
+            for (site, at) in moves {
+                let id = resolve(board, sites, site)?;
+                let f = board
+                    .footprints
+                    .get_mut(&id)
+                    .ok_or("only footprints are placed and aligned")?;
+                if f.locked {
+                    return Err(format!("{} is locked", f.reference));
+                }
+                f.at = *at;
+                if let Some(side) = side {
+                    f.side = *side;
                 }
             }
         }

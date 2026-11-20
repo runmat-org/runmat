@@ -1,6 +1,6 @@
 [package]
 name = "runmat-filesystem"
-version = "0.7.1"
+version = "0.7.2"
 edition = "2021"
 description = "Swappable filesystem abstraction for RunMat hosts (native, wasm, remote)."
 license-file = "../../LICENSE.md"
@@ -31,6 +31,8 @@ chrono = { version = "0.4", default-features = false, features = ["clock", "std"
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 wasm-bindgen = "0.2"
+wasm-bindgen-futures = "0.4"
+serde-wasm-bindgen = "0.6"
 js-sys = "0.3"
 web-sys = { version = "0.3", features = ["XmlHttpRequest", "XmlHttpRequestResponseType"] }
 uuid = { version = "1", features = ["v4", "js"], default-features = false }

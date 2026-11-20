@@ -12,7 +12,7 @@ use super::part_cache;
 use runmat_cad::assembly::model::DefinitionKind;
 use runmat_cad::assembly::resolve::ResolvedAssembly;
 use runmat_cad::assembly::source::ConfigKey;
-use runmat_cad::display::{configuration_key, AssemblyDisplay, PartDisplay, PrototypeShape};
+use runmat_cad::display::{AssemblyDisplay, PartDisplay, PrototypeShape};
 use runmat_cad::model::PartDocument;
 use serde_json::Value;
 use std::collections::{BTreeMap, BTreeSet};
@@ -33,19 +33,25 @@ pub fn prototype_digests(
     resolved: &ResolvedAssembly,
     documents: &BTreeMap<String, PartDocument>,
     digests: &BTreeMap<String, String>,
+    operated: &BTreeMap<u32, String>,
 ) -> Vec<Option<String>> {
     let mut seen = BTreeSet::new();
     let mut out = Vec::new();
-    for node in &resolved.nodes {
-        let drawn = matches!(
-            node.definition.kind,
-            DefinitionKind::Part | DefinitionKind::Circuit
-        );
-        if !drawn || node.represented_by_ancestor {
+    for (id, node) in resolved.nodes.iter().enumerate() {
+        if !runmat_cad::display::draws_prototype(resolved, id) {
             continue;
         }
-        let key = configuration_key(node);
+        let key = runmat_cad::display::prototype_key(id, node, operated);
         if !seen.insert(key.clone()) {
+            continue;
+        }
+        // An envelope draws its box: nothing to reuse.
+        if runmat_cad::assembly::representation::is_envelope(resolved, id as u32) {
+            out.push(None);
+            continue;
+        }
+        if let Some(digest) = operated.get(&(id as u32)) {
+            out.push(Some(digest.clone()));
             continue;
         }
         let file = &key.0;

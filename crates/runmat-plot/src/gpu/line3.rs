@@ -22,7 +22,7 @@ pub struct Line3GpuParams {
     pub line_style: LineStyle,
 }
 
-#[repr(C)]
+#[repr(C, align(16))]
 #[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
 struct Line3Uniforms {
     color: [f32; 4],
@@ -30,7 +30,7 @@ struct Line3Uniforms {
     half_width_data: f32,
     line_style: u32,
     thick: u32,
-    _pad: u32,
+    _pad: [u32; 4],
 }
 
 pub fn pack_vertices_from_xyz(
@@ -72,17 +72,15 @@ pub fn pack_vertices_from_xyz(
             entry_point: "main",
         });
 
-    let output_buffer = runmat_accelerate_api::WgpuBufferOwner::new(device.create_buffer(
-        &wgpu::BufferDescriptor {
-            label: Some("line3-gpu-vertices"),
-            size: max_vertices * std::mem::size_of::<Vertex>() as u64,
-            usage: wgpu::BufferUsages::STORAGE
-                | wgpu::BufferUsages::VERTEX
-                | wgpu::BufferUsages::COPY_DST
-                | wgpu::BufferUsages::COPY_SRC,
-            mapped_at_creation: false,
-        },
-    ));
+    let output_buffer = emission.own_buffer(device.create_buffer(&wgpu::BufferDescriptor {
+        label: Some("line3-gpu-vertices"),
+        size: max_vertices * std::mem::size_of::<Vertex>() as u64,
+        usage: wgpu::BufferUsages::STORAGE
+            | wgpu::BufferUsages::VERTEX
+            | wgpu::BufferUsages::COPY_DST
+            | wgpu::BufferUsages::COPY_SRC,
+        mapped_at_creation: false,
+    }));
 
     let uniforms = Line3Uniforms {
         color: params.color.to_array(),
@@ -90,7 +88,7 @@ pub fn pack_vertices_from_xyz(
         half_width_data: params.half_width_data.max(0.0001),
         line_style: line_style_code(params.line_style),
         thick: if params.thick { 1 } else { 0 },
-        _pad: 0,
+        _pad: [0; 4],
     };
     let uniform_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
         label: Some("line3-pack-uniforms"),

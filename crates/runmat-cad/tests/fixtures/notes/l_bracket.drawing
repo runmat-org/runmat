@@ -1,0 +1,36 @@
+runmat 0.7
+std 1
+
+// The L bracket as an agent drew it: four views, GD&T, and its notes as long single lines placed
+// by hand along the bottom of the sheet, over the title block. The layout wraps each note to the
+// room it has and moves the ones with no room clear of the title block, the border and each other.
+drawing l_bracket {
+    format a3 = {
+        size = { size = iso, name = A3 },
+        title_block = [
+            { label = "Title", source = { source = property, name = description } },
+            { label = "Material", source = { source = property, name = material } },
+            { label = "Scale", source = { source = scale } },
+            { label = "Sheet", source = { source = sheet_number } },
+            { label = "Rev", source = { source = revision } }
+        ]
+    }
+    sheet "1" = { format = a3, scale = [1, 1], projection = third_angle }
+
+    view front = standard(orientation = front, sheet = "1", model = { part = l_bracket }, at = [90, 150], display = hidden_lines)
+    view top = projected(from = front, direction = up, sheet = "1", model = { part = l_bracket }, at = [90, 225], display = hidden_lines)
+    view right = projected(from = front, direction = right, sheet = "1", model = { part = l_bracket }, at = [200, 150], display = hidden_lines)
+    view iso = standard(orientation = isometric, sheet = "1", model = { part = l_bracket }, at = [310, 170], display = visible_lines)
+
+    annotation base_holes = hole_callout(hole = feature.base_holes.face.wall(a), view = top)
+    annotation base_pos = gdt(tolerance = base_position, view = top)
+    annotation leg_pos = gdt(tolerance = leg_position, view = front)
+    annotation flat = gdt(tolerance = base_flat, view = right)
+    annotation datum_a = datum_symbol(label = A, view = right)
+    annotation datum_b = datum_symbol(label = B, view = top)
+    annotation datum_c = datum_symbol(label = C, view = front)
+
+    annotation n1 = note(text = "LEG THICKNESS: 3 mm EACH. MATERIAL: ALUMINUM 6061. BREAK SHARP EDGES; DEBURR ALL HOLES BOTH SIDES.", view = iso, at = [210, 40])
+    annotation n2 = note(text = "GENERAL TOLERANCES: ISO 2768-mK WHERE NO INDIVIDUAL TOLERANCE IS SHOWN. HOLE DIAMETER LIMIT: 5.5 TO 5.7 mm. POSITION: ⌀0.2 mm EACH HOLE TO DATUMS A, B AND C.", view = iso, at = [20, 30])
+    annotation n3 = note(text = "6X ⌀5.5 THRU, M5 CLEARANCE, 3 PER LEG. HOLE POSITIONS: X: 15, 30, 45 mm FROM DATUM C; 25 mm FROM THE BEND ON EACH LEG.", view = iso, at = [20, 30])
+}

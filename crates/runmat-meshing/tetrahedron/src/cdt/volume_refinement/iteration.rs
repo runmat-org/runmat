@@ -80,6 +80,9 @@ pub(in crate::cdt) fn refine_owned_with_schedule(
                         .saturating_mul(2)
                         .min(MAXIMUM_REFINEMENT_BATCH_SIZE);
                     insertion_count += batch.inserted_nodes.len() as u64;
+                    runmat_meshing_core::work_count::add_volume_points(
+                        batch.inserted_nodes.len() as u64
+                    );
                     insertions.extend(batch.inserted_nodes);
                     topology = batch.step.topology;
                     quality = batch.step.quality;
@@ -182,6 +185,7 @@ pub(in crate::cdt) fn refine_owned_with_schedule(
             Err(failure) => return Err(failure),
         };
         insertion_count += 1;
+        runmat_meshing_core::work_count::add_volume_points(1);
         queries
             .append(std::slice::from_ref(&candidate.node), cancellation)
             .map_err(super::insertion::candidate_error)?;

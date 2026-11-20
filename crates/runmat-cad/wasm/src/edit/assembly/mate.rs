@@ -42,7 +42,8 @@ use runmat_cad::assembly::model::{
     AnchorRef, AngleMeasure, AssemblyDocument, CamProfile, DistanceMeasure, MateConnector, MateDef,
     MateKind, OffsetExpr, RelPath, RotationExpr, TangentSpec, TargetExpr,
 };
-use runmat_cad::ids::PublishName;
+use runmat_cad::ids::{FeatureId, PublishName, SketchEntityId};
+use runmat_cad::model::sketch::PointRole;
 use runmat_cad::refs::TopoKind;
 use runmat_cad::syntax::edit::EditFailure;
 use runmat_cad::value::ValueExpr;
@@ -106,12 +107,19 @@ fn round_unit(v: V3) -> [f64; 3] {
 
 /// A pick resolved: the component's name, the frame on it (None for the whole component) and
 /// what its connector anchors to.
-struct Resolved {
-    occurrence: String,
-    frame: Option<Frame>,
+pub(super) struct Resolved {
+    pub(super) occurrence: String,
+    pub(super) frame: Option<Frame>,
     /// The frame in assembly coordinates, where the component sits now.
     world: Option<Frame>,
-    anchor: Anchor,
+    pub(super) anchor: Anchor,
+}
+
+impl Resolved {
+    /// Where the pick sits in assembly coordinates (metres), for the component as placed now.
+    pub(super) fn world_origin(&self) -> Option<V3> {
+        self.world.as_ref().map(|w| w.origin)
+    }
 }
 
 /// The entity `list` (`faces`, `edges`, `vertices`) of a body, by index.
@@ -122,7 +130,7 @@ fn entity<'a>(body: Option<&'a Value>, list: &str, index: usize) -> Option<&'a V
         .find(|e| e["index"].as_u64() == Some(index as u64))
 }
 
-fn resolve(
+pub(super) fn resolve(
     document: &AssemblyDocument,
     compiled: &Compiled,
     id: &str,
@@ -152,9 +160,23 @@ fn resolve(
             anchor: Anchor::Connector(name.to_owned()),
         });
     }
+    // A sketch point or line: a connector of the assembly itself, on the sketch.
+    if let Some(layout) = super::sketch::layout_pick(document, compiled, id) {
+        let layout = layout?;
+        return Ok(Resolved {
+            occurrence: String::new(),
+            frame: Some(layout.frame),
+            world: Some(layout.frame),
+            anchor: Anchor::Sketch {
+                sketch: layout.sketch,
+                entity: layout.entity,
+                role: layout.role,
+            },
+        });
+    }
     let pick = parse_pick(id).ok_or_else(|| {
         model(format!(
-            "pick a face, edge, vertex, datum or component for {what}"
+            "pick a face, edge, vertex, datum, sketch point or line, or component for {what}"
         ))
     })?;
     let occurrence = compiled.occurrence_name(&pick.uuid)?;
@@ -190,11 +212,8 @@ fn resolve(
             None,
         ),
     };
-    let frame = frame.ok_or_else(|| {
-        model(format!(
-            "the picked {what} on `{occurrence}` has no frame to mate to"
-        ))
-    })?;
+    let frame =
+        frame.ok_or_else(|| model(format!("{what} on `{occurrence}` has no frame to mate to")))?;
     let anchor = match (&picked, named, file) {
         (Entity::Datum { feature }, _, Some(file)) => Anchor::Datum {
             file,
@@ -234,7 +253,7 @@ fn fresh(taken: impl Fn(&str) -> bool, stem: &str) -> String {
 /// Adds a connector on `pick` and answers its name. A face, edge, vertex or datum is published
 /// from its part ([`Publisher`]) and the connector anchors to that name; a connector the
 /// assembly has is reused (a flipped copy when `flip` asks for the other way).
-fn connector(
+pub(super) fn connector(
     document: &mut AssemblyDocument,
     publisher: &mut Publisher,
     pick: &Resolved,
@@ -245,7 +264,10 @@ fn connector(
             return Ok(existing.clone());
         }
     }
-    let stem = format!("{}_c", pick.occurrence);
+    let stem = match &pick.anchor {
+        Anchor::Sketch { sketch, .. } => format!("{sketch}_c"),
+        _ => format!("{}_c", pick.occurrence),
+    };
     let name = fresh(|n| document.connectors.iter().any(|c| c.name == n), &stem);
     let frozen = |origin: [f64; 3], x: [f64; 3], z: [f64; 3]| AnchorRef::Explicit {
         offset: OffsetExpr {
@@ -266,6 +288,30 @@ fn connector(
             copy.flip = !copy.flip;
             copy
         }
+        Anchor::Sketch {
+            sketch,
+            entity,
+            role,
+        } => MateConnector {
+            name: name.clone(),
+            occurrence: RelPath(Vec::new()),
+            anchor: AnchorRef::Sketch {
+                sketch: FeatureId::new(sketch),
+                entity: SketchEntityId::new(entity),
+                role: match role {
+                    Some(r) => Some(
+                        PointRole::from_word(r)
+                            .ok_or_else(|| model(format!("`{r}` isn't a sketch point")))?,
+                    ),
+                    None => None,
+                },
+            },
+            offset: None,
+            flip,
+            at: None,
+            z: None,
+            x: None,
+        },
         anchor => {
             let anchor = match (anchor, publisher.name_of(anchor)?) {
                 (_, Some(published)) => AnchorRef::Published { name: published },
@@ -328,11 +374,16 @@ pub(super) fn mate(
     // The second pick's component moves and the first stays, unless the second is the
     // assembly's first component, which is fixed as the ground.
     let ground = document.occurrences.first().map(|o| o.name.clone());
-    let moving = if ground.as_deref() == Some(b.occurrence.as_str()) {
+    let moving = if b.occurrence.is_empty() || ground.as_deref() == Some(b.occurrence.as_str()) {
         a.occurrence.clone()
     } else {
         b.occurrence.clone()
     };
+    for side in [&a, &b] {
+        if let Anchor::Sketch { sketch, .. } = &side.anchor {
+            super::sketch::refuse_cycle(document, sketch, &moving)?;
+        }
+    }
     let flip = values.get("flip").and_then(Value::as_bool).unwrap_or(false);
     let exact = |v: ValueExpr| TargetExpr::Exact { value: v };
     let both = |k: FrameKind| kind_of(&a.frame) == Some(k) && kind_of(&b.frame) == Some(k);
@@ -500,10 +551,10 @@ pub(super) fn mate(
     if let Some(occurrence) = document.occurrences.iter_mut().find(|o| o.name == moving) {
         occurrence.fixed = false;
     }
-    let fixed = if moving == a.occurrence {
-        &b.occurrence
-    } else {
-        &a.occurrence
+    let other = if moving == a.occurrence { &b } else { &a };
+    let fixed = match &other.anchor {
+        Anchor::Sketch { sketch, entity, .. } => format!("{sketch}.{entity}"),
+        _ => other.occurrence.clone(),
     };
     Ok(format!("Mated {moving} to {fixed} ({kind})"))
 }

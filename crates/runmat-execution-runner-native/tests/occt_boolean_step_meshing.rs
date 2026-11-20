@@ -16,6 +16,8 @@
 //! - `battery_cold_plate.step`: a battery module's eight cells on 3 mm gap-filler pads, each pad
 //!   on a 1 mm land of an 8 mm cold plate with a 14 x 4 mm serpentine coolant channel (2 mm lid
 //!   and floor), joined with shared interfaces.
+//! - `thin_plate.step`: a 100 x 100 x 2 mm plate, the radiator-panel example's plate cut to a
+//!   third of its width.
 
 use runmat_execution::{Digest, ProgramEnvironment, ProgramRevision};
 use runmat_execution_artifact::cache::{CacheExport, FilesystemObjectStore};
@@ -41,6 +43,7 @@ const ARM_ONLY: &[u8] = include_bytes!("fixtures/boolean_step/arm_only.step");
 const ARM_STUDY: &[u8] = include_bytes!("fixtures/boolean_step/arm_study.step");
 const ESC_THERMAL: &[u8] = include_bytes!("fixtures/boolean_step/esc_thermal.step");
 const BATTERY_COLD_PLATE: &[u8] = include_bytes!("fixtures/boolean_step/battery_cold_plate.step");
+const THIN_PLATE: &[u8] = include_bytes!("fixtures/boolean_step/thin_plate.step");
 const HEATSINK: &[u8] =
     include_bytes!("../../../docs/simulation/examples/geometry/electronics-heatsink.step");
 
@@ -96,7 +99,8 @@ fn a_trimmed_and_cut_lofted_shell_with_its_board_meshes_with_a_shared_interface(
 
 /// Geometry-induced sizing of the battery cold plate at its 12 mm study target. The thinnest
 /// material is the channel's 2 mm lid and floor: two cells across their side strips (1 mm edge
-/// sizing) and one layer across the lid and floor faces (2 mm). The 1 mm lands are steps on the
+/// sizing) and one layer across the lid and floor faces (2.83 mm, the diagonal of a cell 2 mm
+/// thick and 2 mm wide). The 1 mm lands are steps on the
 /// plate's full thickness and the pads are 3 mm layers, so nothing in the model calls for
 /// sizing below 1 mm.
 ///
@@ -175,7 +179,7 @@ fn the_battery_cold_plate_sizes_its_thin_material_and_not_its_steps() {
         .collect::<Vec<_>>();
     let smallest = |sizes: &[f64]| sizes.iter().copied().fold(f64::INFINITY, f64::min);
     assert!(
-        (smallest(&face_gaps) - 2.0).abs() < 1.0e-6,
+        (smallest(&face_gaps) - 2.0 * std::f64::consts::SQRT_2).abs() < 1.0e-6,
         "smallest face gap size {} mm",
         smallest(&face_gaps)
     );
@@ -183,6 +187,26 @@ fn the_battery_cold_plate_sizes_its_thin_material_and_not_its_steps() {
         (smallest(&edge_gaps) - 1.0).abs() < 1.0e-6,
         "smallest edge gap size {} mm",
         smallest(&edge_gaps)
+    );
+}
+
+/// Tet4 elements of `thin_plate.step` (a 100 x 100 x 2 mm plate) at a 10 mm target, measured
+/// on fea/q-g127-thin-plate-sizing: 48,923 elements.
+const THIN_PLATE_MEASURED_ELEMENTS: usize = 48_923;
+
+/// A plate much thinner than its target size takes one layer of cells across its faces and
+/// two across its side strips. When the faces were sized at the thickness itself, no cell could
+/// span the plate within its size and the volume meshed about two layers of 1.25 mm cells:
+/// 95,206 elements. A quarter over the measured count admits ordinary sizing changes and
+/// rejects that refinement.
+#[test]
+fn a_thin_plate_meshes_one_layer_across_its_faces() {
+    let elements = assert_meshes("thin_plate.step", THIN_PLATE, false, 10.0e-3, 1);
+    let ceiling = THIN_PLATE_MEASURED_ELEMENTS * 5 / 4;
+    assert!(
+        elements <= ceiling,
+        "thin_plate.step meshed to {elements} elements, above {ceiling} \
+         (1.25 x the measured {THIN_PLATE_MEASURED_ELEMENTS})"
     );
 }
 

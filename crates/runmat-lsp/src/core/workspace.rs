@@ -4,8 +4,9 @@ use serde_json::json;
 use crate::core::analysis::{
     analyze_document_with_compat_and_source_async, document_symbols, CompatMode, DocumentAnalysis,
 };
-use crate::core::project::ProjectContext;
+use crate::core::project::SourceContext;
 use std::collections::HashSet;
+use std::path::{Component, Path, PathBuf};
 
 pub fn workspace_symbols_with_project(
     docs: &[(Url, String, DocumentAnalysis)],
@@ -20,7 +21,7 @@ pub fn workspace_symbols_with_project(
         let source_hint = docs
             .first()
             .and_then(|(uri, _, _)| source_name_from_uri(uri));
-        if let Some(project) = ProjectContext::discover_from_source_name(source_hint.as_deref()) {
+        if let Some(project) = SourceContext::discover_from_source_name(source_hint.as_deref()) {
             out.extend(project_symbols_sync(&project, compat));
         }
     }
@@ -58,7 +59,7 @@ pub async fn workspace_symbols_with_project_async(
         .first()
         .and_then(|(uri, _, _)| source_name_from_uri(uri));
     if let Some(project) =
-        ProjectContext::discover_from_source_name_async(source_hint.as_deref()).await
+        SourceContext::discover_from_source_name_async(source_hint.as_deref()).await
     {
         out.extend(project_symbols_async(&project, compat).await);
     }
@@ -114,7 +115,7 @@ fn append_document_symbols(
 }
 
 #[cfg(not(target_arch = "wasm32"))]
-fn project_symbols_sync(project: &ProjectContext, compat: CompatMode) -> Vec<SymbolInformation> {
+fn project_symbols_sync(project: &SourceContext, compat: CompatMode) -> Vec<SymbolInformation> {
     let mut out = Vec::new();
     for source in project.visible_source_files() {
         let Some(uri) = file_path_to_url(source) else {
@@ -138,7 +139,7 @@ fn project_symbols_sync(project: &ProjectContext, compat: CompatMode) -> Vec<Sym
 
 #[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
 async fn project_symbols_async(
-    project: &ProjectContext,
+    project: &SourceContext,
     compat: CompatMode,
 ) -> Vec<SymbolInformation> {
     let mut out = Vec::new();
@@ -158,24 +159,7 @@ async fn project_symbols_async(
 }
 
 fn source_name_from_uri(uri: &Url) -> Option<String> {
-    #[cfg(not(target_arch = "wasm32"))]
-    {
-        uri.to_file_path()
-            .ok()
-            .and_then(|path| path.to_str().map(str::to_owned))
-    }
-    #[cfg(target_arch = "wasm32")]
-    {
-        if uri.scheme() != "file" {
-            return None;
-        }
-        let path = uri.path();
-        if path.is_empty() {
-            None
-        } else {
-            Some(path.to_string())
-        }
-    }
+    uri_to_path(uri).and_then(|path| path.to_str().map(str::to_owned))
 }
 
 fn dedupe_symbol_info(symbols: &mut Vec<SymbolInformation>) {
@@ -205,19 +189,182 @@ fn filter_symbols(symbols: Vec<SymbolInformation>, query: Option<&str>) -> Vec<S
         .collect()
 }
 
-fn file_path_to_url(path: &std::path::Path) -> Option<Url> {
+fn file_path_to_url(path: &Path) -> Option<Url> {
+    path_to_uri(path)
+}
+
+/// The file path a `file` URI names.
+///
+/// A URI the host OS can turn into a local path maps to that path. Otherwise a `file` URI with
+/// no host maps to its percent-decoded URI path, such as `/cloud/project/materials.fea`. Those
+/// are virtual paths served by the installed `runmat_filesystem` provider; on Windows they have
+/// no drive, so `Url::to_file_path` refuses them.
+pub fn uri_to_path(uri: &Url) -> Option<PathBuf> {
     #[cfg(not(target_arch = "wasm32"))]
-    {
-        Url::from_file_path(path).ok()
+    if let Ok(path) = uri.to_file_path() {
+        return Some(path);
     }
-    #[cfg(target_arch = "wasm32")]
-    {
-        let raw = path.to_str()?;
-        let normalized = if raw.starts_with('/') {
-            raw.to_string()
+    virtual_uri_path(uri).map(PathBuf::from)
+}
+
+/// The `file` URI for a path.
+///
+/// A path the host OS can turn into a URI maps to that URI. Otherwise a rooted path with no
+/// drive or prefix (a virtual provider path such as `/cloud/project/materials.fea`) maps to
+/// `file://` plus its components joined by `/`, with `.` and `..` resolved. On wasm32 every
+/// path is virtual, and a relative path is read from the provider root.
+pub fn path_to_uri(path: &Path) -> Option<Url> {
+    #[cfg(not(target_arch = "wasm32"))]
+    if let Ok(uri) = Url::from_file_path(path) {
+        return Some(uri);
+    }
+    virtual_path_uri(path)
+}
+
+/// The percent-decoded path of a host-less `file` URI.
+pub(crate) fn virtual_uri_path(uri: &Url) -> Option<String> {
+    if uri.scheme() != "file" || uri.host_str().is_some_and(|host| !host.is_empty()) {
+        return None;
+    }
+    let encoded = uri.path().as_bytes();
+    if encoded.is_empty() {
+        return None;
+    }
+    let mut decoded = Vec::with_capacity(encoded.len());
+    let mut index = 0;
+    while index < encoded.len() {
+        if encoded[index] == b'%' && index + 2 < encoded.len() {
+            let high = hex_value(encoded[index + 1])?;
+            let low = hex_value(encoded[index + 2])?;
+            decoded.push((high << 4) | low);
+            index += 3;
         } else {
-            format!("/{raw}")
-        };
-        Url::parse(&format!("file://{normalized}")).ok()
+            decoded.push(encoded[index]);
+            index += 1;
+        }
+    }
+    String::from_utf8(decoded).ok()
+}
+
+fn hex_value(value: u8) -> Option<u8> {
+    match value {
+        b'0'..=b'9' => Some(value - b'0'),
+        b'a'..=b'f' => Some(value - b'a' + 10),
+        b'A'..=b'F' => Some(value - b'A' + 10),
+        _ => None,
+    }
+}
+
+fn virtual_path_uri(path: &Path) -> Option<Url> {
+    let mut rooted = cfg!(target_arch = "wasm32");
+    let mut uri_path = String::new();
+    for component in path.components() {
+        match component {
+            Component::Prefix(_) => return None,
+            Component::RootDir => rooted = true,
+            Component::CurDir => {}
+            Component::ParentDir => uri_path.push_str("/.."),
+            Component::Normal(part) => {
+                uri_path.push('/');
+                uri_path.push_str(part.to_str()?);
+            }
+        }
+    }
+    if !rooted {
+        return None;
+    }
+    if uri_path.is_empty() {
+        uri_path.push('/');
+    }
+    let mut uri = Url::parse("file:///").ok()?;
+    // `set_path` percent-encodes the components and resolves the `..` segments.
+    uri.set_path(&uri_path);
+    Some(uri)
+}
+
+#[cfg(test)]
+mod uri_path_tests {
+    use super::*;
+
+    #[test]
+    fn a_virtual_path_round_trips_through_its_uri() {
+        let path = Path::new("/cloud/project/materials.fea");
+        let uri = path_to_uri(path).expect("uri");
+        assert_eq!(uri.as_str(), "file:///cloud/project/materials.fea");
+        assert_eq!(uri_to_path(&uri).as_deref(), Some(path));
+    }
+
+    #[test]
+    fn a_space_is_percent_encoded_and_decoded() {
+        let path = Path::new("/cloud/my project/unsaved file.fea");
+        let uri = path_to_uri(path).expect("uri");
+        assert_eq!(
+            uri.as_str(),
+            "file:///cloud/my%20project/unsaved%20file.fea"
+        );
+        assert_eq!(uri_to_path(&uri).as_deref(), Some(path));
+        let parsed = Url::parse("file:///cloud/unsaved%20file.fea").unwrap();
+        assert_eq!(
+            uri_to_path(&parsed),
+            Some(PathBuf::from("/cloud/unsaved file.fea"))
+        );
+    }
+
+    #[test]
+    fn the_virtual_fallback_reads_only_host_less_file_uris() {
+        let untitled = Url::parse("untitled:///cloud/project/main.m").unwrap();
+        assert_eq!(virtual_uri_path(&untitled), None);
+        let remote = Url::parse("file://server/share/main.m").unwrap();
+        assert_eq!(virtual_uri_path(&remote), None);
+    }
+
+    #[test]
+    fn the_virtual_fallback_resolves_dot_segments() {
+        let uri =
+            virtual_path_uri(Path::new("/cloud/project/simulation/../materials.fea")).expect("uri");
+        assert_eq!(uri.as_str(), "file:///cloud/project/materials.fea");
+        assert_eq!(
+            virtual_path_uri(Path::new("/")).unwrap().as_str(),
+            "file:///"
+        );
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn a_relative_native_path_has_no_uri() {
+        assert_eq!(path_to_uri(Path::new("cloud/project/materials.fea")), None);
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn a_windows_drive_path_uses_the_native_conversion() {
+        let path = Path::new(r"C:\Users\me\project\materials.fea");
+        let uri = path_to_uri(path).expect("uri");
+        assert_eq!(uri, Url::from_file_path(path).unwrap());
+        assert_eq!(uri.as_str(), "file:///C:/Users/me/project/materials.fea");
+        assert_eq!(uri_to_path(&uri).as_deref(), Some(path));
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn a_windows_virtual_path_keeps_forward_slashes() {
+        assert!(Url::from_file_path(Path::new("/cloud/project/materials.fea")).is_err());
+        // `PathBuf::join` on Windows inserts a backslash; the URI still uses `/`.
+        let joined = Path::new("/cloud/project").join("materials.fea");
+        let uri = path_to_uri(&joined).expect("uri");
+        assert_eq!(uri.as_str(), "file:///cloud/project/materials.fea");
+        assert_eq!(
+            uri_to_path(&uri),
+            Some(PathBuf::from("/cloud/project/materials.fea"))
+        );
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn a_windows_unc_path_uses_the_native_conversion() {
+        let path = Path::new(r"\\server\share\materials.fea");
+        let uri = path_to_uri(path).expect("uri");
+        assert_eq!(uri, Url::from_file_path(path).unwrap());
+        assert_eq!(uri_to_path(&uri).as_deref(), Some(path));
     }
 }

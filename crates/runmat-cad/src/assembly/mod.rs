@@ -11,8 +11,12 @@
 //! - [`representation`]: representations, load levels R0–R3 and working sets.
 //! - [`bom`]: configuration-aware BOM and where-used.
 //! - [`explode`]: named exploded states (ordered and radial steps, explode lines with jogs).
+//! - [`motion`]: motion studies (mates driven over time, solved frame by frame) and named mate
+//!   positions.
+//! - [`sketches`]: sketches in the assembly, on its origin planes or its connectors.
 //! - [`interference`]: interference and clearance requests through the kernel seam.
-//! - [`index`]: the assembly JSON index and summary cards.
+//! - [`index`]: the assembly JSON index and summary cards; [`interface_rows`]: its mate
+//!   connectors, placed, and its publishes.
 //! - [`synth`]: synthetic aircraft-scale fixtures for the scale gate.
 
 pub mod bom;
@@ -21,13 +25,23 @@ pub mod fasteners;
 pub mod index;
 pub mod interference;
 mod cam;
+pub mod configuration_rows;
+pub mod interface_rows;
 mod mates;
 pub mod model;
+pub mod motion;
+pub mod operations;
 pub mod options;
 mod place;
 pub mod polyline_frame;
+pub mod projection;
+pub mod contact_rows;
+pub mod envelope_rows;
+pub mod option_rows;
 pub mod representation;
 pub mod resolve;
+pub mod settings;
+pub mod sketches;
 pub mod source;
 pub mod synth;
 pub mod validate;

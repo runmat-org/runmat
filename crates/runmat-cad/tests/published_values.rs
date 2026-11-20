@@ -298,14 +298,17 @@ fn v07_geometry_is_not_a_value_and_units_are_checked() {
         ValueExpr::published(SKELETON, "width", XrefContext::Live),
     ));
     let r = env.regen(&d);
-    let dg = diag(&r, DiagCode::ValueFailed);
+    let dg = diag(&r, DiagCode::ValueUnit);
     assert_eq!(
         dg.site.subject,
         Subject::Value {
             name: "input.sweep".into()
         }
     );
-    assert!(dg.message.starts_with("unit mismatch"), "{}", dg.message);
+    assert_eq!(
+        dg.message,
+        "sweep needs a unit of angle such as rad; the value measures length"
+    );
 }
 
 #[test]

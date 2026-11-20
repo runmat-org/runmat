@@ -5,6 +5,7 @@ fn shared_compiled_clone_preserves_definition_and_cold_validation_under_bounded_
     let model = crate::fixtures::fixture_model(crate::fixtures::FixtureId::CantileverLinearStatic);
     let mesh = crate::tests::single_tetrahedron_solver_mesh_for_model(&model);
     let compiled = CompiledAnalysisStudy {
+        displays: Vec::new(),
         module_path: "tests/shared-definition.fea".into(),
         study_id: "shared-definition".into(),
         study_inputs: Vec::new(),

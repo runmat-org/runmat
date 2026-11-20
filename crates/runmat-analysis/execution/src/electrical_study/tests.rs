@@ -54,6 +54,7 @@ pub(crate) fn preparation() -> ElectricalStudyPreparation {
     let step = ProcedureStep::electromagnetic_static("potential");
     model.sequence = AnalysisSequence::from_steps("electrical", vec![step]);
     let compiled = CompiledAnalysisStudy {
+        displays: Vec::new(),
         module_path: "tests/electrical.fea".into(),
         study_id: "electrical".into(),
         study_inputs: Vec::new(),

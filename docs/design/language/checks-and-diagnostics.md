@@ -54,8 +54,10 @@ The check reports *`body` ran but no longer makes `body.side(l9)`* as a root cau
 |---|---|
 | `cad.ref.*` | References: an entity the maker no longer makes (`not_generated`), a reference to a later feature (`forward_reference`), ambiguous or empty selections, kind mismatches |
 | `cad.xref.*` | Reads from other files: an unknown file, a name it does not publish, a missing pinned revision |
-| `cad.sketch.*` | Sketches: over- or under-constrained, redundant constraints, open profiles |
+| `cad.sketch.*` | Sketches: over- or under-constrained, redundant constraints, open profiles, profiles whose sides cross (named with the crossing point) |
 | `cad.regen.*`, `cad.kernel.*` | Regeneration: cascades, operations the geometry kernel could not build |
+| `cad.value.unit`, `circuit.value.unit` | A value whose unit measures something other than what its field needs. The message, underline and quick fixes are the same in every language; see [Wrong units](/docs/design-language/values-and-units#wrong-units) |
+| `cad.body.disconnected` | Added material that touches none of the body it joins, or a body in separate pieces; each piece is named by the features that made it |
 | `cad.region.expectation` | A region that found more or fewer entities than its `expect` |
 | `cad.asm.*` | Assemblies: unknown designs and occurrences, cycles, mates that conflict, are redundant or leave parts under-defined, configuration problems, interference and clearance |
 | `cad.fastener.*` | Fastener sets: paths, exceptions, fits and tables |
@@ -67,11 +69,11 @@ A circuit check reports ERC findings (unconnected pins, outputs driven together,
 
 ## Checking from the command line
 
-`runmat-design check` checks circuits and boards, prints each finding, and exits with status 1 when any file has an error, so a CI job or a coding agent can gate on it:
+`runmat check` checks a circuit or a board, prints each finding, and exits with status 1 when the file has an error, so a CI job or a coding agent can gate on it:
 
 ```sh
-runmat-design check board/flight_controller.circuit.layout
-runmat-design check board/*.circuit --json
+runmat check board/flight_controller.circuit.layout
+runmat check board/flight_controller.circuit --json
 ```
 
 | Option | Effect |
@@ -79,14 +81,14 @@ runmat-design check board/*.circuit --json
 | `--json` | Print the reports as JSON. |
 | `--no-simulate` | Skip the simulation sections' measures. |
 | `--interference` | On an assembly, also check for overlapping parts. |
-| `--root <dir>` | The workspace root, when it is not the file's folder. |
+| `--root <dir>` | On a part, assembly or drawing, the workspace root, when it is not the file's folder. |
 
 `runmat check <file>.circuit` and `runmat test` run the same circuit checks beside `.m` and `.fea` files, with the same `--no-simulate` option.
 
-`runmat-design check` also checks `.part`, `.assembly` and `.drawing` files with the editor's check: it regenerates the part, resolves the assembly's occurrences, mates and patterns, or compiles the drawing's views, prints each diagnostic with its line, and exits with status 1 on any error. `--interference` also checks an assembly for parts that share material, the Evaluate tab's interference check, and fails on any overlap; parts that only touch don't count. Every body of a multi-body part is checked, and each overlap names the first pair of bodies found. Bodies of compressible fill (batt and loose-fill insulation) are left out and counted, because a cable, pipe or box in an insulated cavity displaces the fill:
+`runmat check` also checks `.part`, `.assembly` and `.drawing` files with the editor's check: it regenerates the part, resolves the assembly's occurrences, mates and patterns, or compiles the drawing's views, prints each diagnostic with its line, and exits with status 1 on any error. `--interference` also checks an assembly for parts that share material, the Evaluate tab's interference check, and fails on any overlap; parts that only touch don't count. Every body of a multi-body part is checked, and each overlap names the first pair of bodies found. Bodies of compressible fill (batt and loose-fill insulation) are left out and counted, because a cable, pipe or box in an insulated cavity displaces the fill:
 
 ```sh
-runmat-design check house/house.assembly --interference --root house
+runmat check house/house.assembly --interference --root house
 ```
 
-`runmat check` and `runmat test` take those files too [not yet in the current release](pending:design.tools.runmat-check-design).
+`runmat test` takes those files too [not yet in the current release](pending:design.tools.runmat-check-design).

@@ -112,6 +112,26 @@ pub(super) fn polygon(f: &mut Fields) -> Read<Polygon> {
 
 /// Parses a `.circuit.layout` source.
 pub fn parse_board(path: &str, source: &str) -> ParsedBoard {
+    let (mut out, board) = read_board(path, source);
+    if out.diagnostics.is_empty() {
+        out.board = board;
+    }
+    out
+}
+
+/// The box a layout's outline spans and its stackup's thickness, read even when the layout has
+/// errors elsewhere (a package it doesn't define, say), so an assembly can still place the
+/// board's box. `None` without a `layout` declaration or an outline.
+pub fn board_extent(path: &str, source: &str) -> Option<(crate::geom::Rect, crate::geom::Coord)> {
+    let board = read_board(path, source).1?;
+    if board.outline.outer.is_empty() {
+        return None;
+    }
+    Some((board.outline.bbox(), board.stackup.thickness()))
+}
+
+/// The parse and the board as read, whatever the diagnostics.
+fn read_board(path: &str, source: &str) -> (ParsedBoard, Option<Board>) {
     let syntax = parse_source(Dialect::CircuitLayout, source);
     let mut reader = Reader {
         path,
@@ -162,10 +182,7 @@ pub fn parse_board(path: &str, source: &str) -> ParsedBoard {
     for d in &mut out.diagnostics {
         d.span = trim_span(source, d.span);
     }
-    if out.diagnostics.is_empty() {
-        out.board = board;
-    }
-    out
+    (out, board)
 }
 
 pub(crate) fn use_item(u: &ast::UseDeclaration) -> Read<UseItem> {

@@ -101,30 +101,51 @@ Execution uses the same session pipeline as other hosts: parse, lower, compile, 
 
 ## Compile
 
-Use `runmat compile` to produce a standalone executable for the current host:
+Compile a `.m` script or a function with no required inputs into an executable for the current computer:
 
 ```bash
 runmat compile main.m -o main
 ./main
 ```
 
-Compilation uses the same project/package composition, HIR, MIR, static analysis, builtin catalog, and Native IR as normal execution. Functions in the entry file and configured project source roots are compiled with their stable program identities; list stable cross-directory sources under `[sources].roots` so they are available to static composition. A runtime-only `addpath` cannot retroactively add source code to an already linked executable.
+On Windows, use `-o main.exe` and run `.\main.exe`. The executable includes the program and its RunMat execution runtime. Deployment still needs the native libraries enabled in the build, such as HDF5; it does not need the RunMat CLI or an SDK directory.
 
-The default `--policy=native-specialized` emits target-native code and links the matching RunMat runtime archive embedded in the `runmat` binary. The result does not require a separate RunMat installation or SDK directory at runtime. `--optimization=none|size|speed` controls native object optimization; speed is the default. Native-specialized composition selects exact reachable builtin bindings with ordinary archive extraction and platform dead stripping when the runtime capability and canonical reachability/catalog closure permit it. Otherwise it retains runtime builtin discovery. `--explain-link` and `--link-plan-json` report the actual choice.
+### Prepare the compile-time runtime
 
-The final host link uses a supported system linker and the native development libraries behind enabled runtime features, such as HDF5. Install those platform dependencies and expose their standard library search paths to the linker; RunMat supplies its own matching execution runtime and does not require a separate RunMat SDK.
+The first compile asks to install the matching AOT runtime pack if it is missing. Accept to download, verify and cache it, then continue the compile. Ordinary `.m` execution never requests this pack.
 
-Use `--policy=closed-world` when every runtime target can be proven. RunMat links only the exact reachable catalog-backed builtin bindings, uses ordinary archive extraction and platform dead stripping, and omits parser, compiler, VM, JIT, and object-emission code from the resulting executable. The small HIR/MIR operation schema required to decode and verify Native IR remains part of the runtime. If a call can reach an unknown target, a dynamically extensible builtin, or a builtin without an exact native binding, compilation fails with a specific diagnostic; use `native-specialized` when that broader runtime discovery is intentional.
+For an unattended build, install the pack first:
 
-The `dynamic-runtime` and `portable` policy names reserve distinct product contracts and fail clearly until their complete implementations are available: `dynamic-runtime` requires an embedded frontend and dynamic source loader, while `portable` produces a target-independent artifact instead of a host executable. RunMat does not silently approximate one policy with another.
+```bash
+runmat aot install
+runmat compile main.m --offline -o main
+```
 
-Temporary object, archive, and response-file inputs are private and removed after linking. Use `--keep-temps` for linker diagnosis, `--linker PATH` to select an explicit supported system linker driver, and `--force` to replace an output. Forced replacement preserves the previous executable until the new link succeeds.
+Alternatively, pass `--install-aot-runtime` to authorize installation during compilation. Without prior installation or this flag, a noninteractive compile reports the missing pack and exits.
 
-Use `--explain-link` to see the exact program functions, builtins, classes, method boundaries, providers, extensions, and runtime families retained by compilation, together with the direct, finite-dynamic, or unknown reason for each edge. Closed-world explanations also name each retained builtin binding variant and its stable native symbol. Use `--link-plan-json PATH` to write the same deterministic report for CI or tooling. The JSON includes the program, runtime archive, builtin catalog, target, policy, capability, and reachability identities used by that compilation; `--force` is required to replace an existing report.
+To provision an offline machine, transfer the exact version-and-target pack from the RunMat release and run `runmat aot install --offline --from PATH`. RunMat checks both downloaded and cached packs against the manifest embedded in the CLI.
 
-The compiler validates that the embedded runtime matches the current target, native ABI, schema, RunMat version, runtime identity, and builtin catalog before linking. A source build made with ordinary `cargo build` intentionally lacks that large embedded archive; use the two-phase build helper described in [Build System](/docs/runtime/development/build-system) when developing the standalone workflow.
+### Select sources and linking behavior
 
-See [Native Compilation](/docs/runtime/compiler/native-compilation) for entrypoint and source-closure rules, runtime composition policies, link-plan inspection, platform requirements, and failure diagnosis.
+Compilation uses the shared project/package composition, HIR, MIR, static analysis, builtin catalog and Native IR. Functions in the entry file and configured source roots retain their program identities. List stable cross-directory sources under `[sources].roots`; `addpath` during execution cannot add source to an executable that has already been linked.
+
+The default policy, `native-specialized`, selects exact reachable builtin bindings with ordinary archive extraction and platform dead stripping when runtime capabilities and complete reachability/catalog analysis permit it. Otherwise it retains runtime builtin discovery.
+
+Use `--policy=closed-world` when every runtime target can be proven. This policy links the exact reachable catalog-backed bindings. Unknown calls, dynamically extensible targets and builtins without an exact native binding produce a diagnostic. The resulting runtime omits parser, compiler, VM, JIT and object-emission code while retaining the HIR/MIR operation schema needed to decode Native IR.
+
+The reserved `dynamic-runtime` and `portable` policies currently return capability diagnostics. Their intended products are an executable with a frontend and dynamic source loader, and a target-independent artifact, respectively.
+
+### Inspect and troubleshoot a compile
+
+`--optimization=none|size|speed` selects native object optimization; `speed` is the default. The host linker needs a supported C/C++ toolchain and the native development libraries used by the RunMat build. Use `--linker PATH` to select a driver.
+
+`--explain-link` reports retained program functions, builtin bindings, classes, method boundaries, providers, extensions and runtime families, including direct, finite-dynamic and unknown reachability reasons. `--link-plan-json PATH` writes the same report with program, archive, catalog, target, policy and capability identities. Closed-world reports also identify binding variants and their native symbols.
+
+Temporary objects, the decoded archive and linker response files are private and removed after linking. Use `--keep-temps` to inspect them. `--force` permits replacing an executable or JSON link plan; the previous output remains intact until publication succeeds.
+
+Before linking, RunMat validates the pack against the host target, native ABI, schemas, RunMat version, runtime identity and builtin catalog. For source development, use the [two-phase build helper](/docs/runtime/development/build-system#native-standalone-runtime): plain `cargo build` provides ordinary execution without a compile-time distribution manifest.
+
+See [Native Compilation](/docs/runtime/compiler/native-compilation) for platform requirements, source-closure rules, composition policies and failure diagnosis.
 
 ## Check
 

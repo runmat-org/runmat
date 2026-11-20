@@ -8,9 +8,11 @@
 //! without datums, orientation and location tolerances with them, tolerance values of the
 //! right dimension, and modifiers only where they mean something.
 
+use crate::assembly::views::ModelView;
 use crate::diagnostics::{
     describe_ref_problem, Cause, DiagCode, DiagnosticReport, Severity, Site, Subject,
 };
+use crate::drawing::AnnotationKind;
 use crate::model::items::Cardinality;
 use crate::model::PartDocument;
 use crate::refs::lock::LockSection;
@@ -19,7 +21,7 @@ use crate::refs::publish::PublishedCatalog;
 use crate::refs::reference::Reference;
 use crate::refs::resolve::{ResolutionPolicy, ResolveOutcome, Resolver};
 use crate::regen::engine::RegenResult;
-use crate::units::{Dimension, UnitAuthority};
+use crate::units::{Dimension, Units};
 use crate::value::{DynamicValueEvaluator, Evaluator, ValueExpr};
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
@@ -168,17 +170,84 @@ pub struct SurfaceFinish {
     pub on: Vec<Reference>,
     /// Roughness average (a length).
     pub ra: ValueExpr,
+    /// The production method the finish names (`lapped`, `ground`), written beside the symbol.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub process: Option<String>,
+    /// The direction of the lay as ISO 1302 marks it (`=`, `⊥`, `X`, `M`, `C`, `R`, `P`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub lay: Option<String>,
+    /// Whether the surface must, or must not, be machined (ISO 1302's basic symbol, its bar
+    /// or its circle).
+    #[serde(default, skip_serializing_if = "Removal::is_any")]
+    pub removal: Removal,
 }
 
-/// A finish, coating or treatment by specification (`anodize per MIL-A-8625 type II`).
+/// The material-removal requirement of a surface finish (ISO 1302, ASME Y14.36).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Removal {
+    /// Any process.
+    #[default]
+    Any,
+    /// Material removal by machining is required.
+    Required,
+    /// Material removal is not allowed.
+    Prohibited,
+}
+
+impl Removal {
+    pub fn is_any(&self) -> bool {
+        *self == Removal::Any
+    }
+}
+
+/// A finish, coating or treatment by specification (`anodize per MIL-A-8625 type II`):
+/// `treatment coat1 = { on = [ … ], specification = "anodize type II, black" }`. No faces: the
+/// whole part.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Treatment {
+    #[serde(default)]
+    pub name: String,
+    #[serde(default)]
     pub on: Vec<Reference>,
     pub specification: String,
+}
+
+/// A 3D annotation on the part (model-based definition): the drawing's annotation kinds
+/// ([`AnnotationKind`]), placed in the model instead of on a sheet. A datum symbol, GD&T frame,
+/// toleranced dimension, finish or coating shows the semantic PMI item it names; a note and a
+/// weld symbol carry their own content. References are the part's canonical face and edge
+/// names, so an annotation follows its geometry through every rebuild:
+/// `annotation note1 = note(text = "Deburr all edges", leader = feature.body.face.end, view = front_pmi, at = [0, 0, 12])`.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct ModelAnnotation {
+    /// Stable across edits and merges.
+    pub id: String,
+    pub kind: AnnotationKind,
+    /// The annotation view (a [`ModelView`] in [`PmiSet::views`]) it belongs to.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub view: Option<String>,
+    /// Where its label sits, as an offset from the point it is attached to (mm, part axes).
+    /// Absent: off the attached face along its normal.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub at: Option<[f64; 3]>,
+}
+
+impl ModelAnnotation {
+    /// The model references the annotation points at directly (a weld's edge, a note's leader,
+    /// a finish's face, a dimension's references).
+    pub fn references(&self) -> Vec<&Reference> {
+        match &self.kind {
+            AnnotationKind::Dimension { references, .. } => references.iter().collect(),
+            AnnotationKind::SurfaceFinish { on }
+            | AnnotationKind::Weld { on, .. }
+            | AnnotationKind::CenterMark { on } => vec![on],
+            AnnotationKind::Note { leader, .. } => leader.iter().collect(),
+            AnnotationKind::HoleCallout { hole } => vec![hole],
+            AnnotationKind::Centerline { between } => between.iter().collect(),
+            _ => Vec::new(),
+        }
+    }
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
@@ -197,6 +266,13 @@ pub struct PmiSet {
     pub finishes: Vec<SurfaceFinish>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub treatments: Vec<Treatment>,
+    /// How the PMI shows in the 3D model, and notes and weld symbols on it.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub annotations: Vec<ModelAnnotation>,
+    /// Annotation views: a saved view direction each, grouping the annotations that name it
+    /// (`view front_pmi = { from = [0, -1, 0], up = [0, 0, 1] }`).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub views: Vec<ModelView>,
 }
 
 /// PMI resolved against one regeneration: entity names per item, for drawings and `.fea`.
@@ -208,6 +284,9 @@ pub struct ResolvedPmi {
     /// Per location: the `from` entities, then the `to` entities.
     #[serde(default)]
     pub locations: BTreeMap<String, [Vec<Vec<EntityName>>; 2]>,
+    /// Per 3D annotation: the entities its own references name (a weld's edge, a note's leader).
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub annotations: BTreeMap<String, Vec<Vec<EntityName>>>,
     pub diagnostics: DiagnosticReport,
 }
 
@@ -229,6 +308,8 @@ impl PmiSet {
             && self.locations.is_empty()
             && self.finishes.is_empty()
             && self.treatments.is_empty()
+            && self.annotations.is_empty()
+            && self.views.is_empty()
     }
 }
 
@@ -239,7 +320,7 @@ pub fn resolve_pmi(
     doc: &PartDocument,
     pmi: &PmiSet,
     result: &RegenResult,
-    units: &dyn UnitAuthority,
+    units: &Units,
     dynamic: &dyn DynamicValueEvaluator,
 ) -> ResolvedPmi {
     resolve_pmi_with(
@@ -261,7 +342,7 @@ pub fn resolve_pmi_with(
     doc: &PartDocument,
     pmi: &PmiSet,
     result: &RegenResult,
-    units: &dyn UnitAuthority,
+    units: &Units,
     dynamic: &dyn DynamicValueEvaluator,
     lock: Option<&LockSection>,
     catalog: Option<&dyn PublishedCatalog>,
@@ -436,7 +517,11 @@ pub fn resolve_pmi_with(
                 DiagCode::PmiInvalid,
                 Severity::Error,
                 s("size"),
-                format!("`{}` is a {}, not a size", z.name, q.dimension),
+                format!(
+                    "`{}` is a {}, not a size",
+                    z.name,
+                    crate::value::kind_name(q.dimension)
+                ),
                 Cause::Root,
                 Vec::new(),
             ),
@@ -501,5 +586,89 @@ pub fn resolve_pmi_with(
             );
         }
     }
+    check_annotations(pmi, &labels, &mut out, |out, s, r| resolve(out, s, r, None));
     out
+}
+
+/// The 3D annotations: each names a declared PMI item and annotation view, and its own
+/// references resolve.
+fn check_annotations(
+    pmi: &PmiSet,
+    labels: &BTreeSet<String>,
+    out: &mut ResolvedPmi,
+    mut resolve: impl FnMut(&mut ResolvedPmi, Site, &Reference) -> Vec<Vec<EntityName>>,
+) {
+    let mut ids = BTreeSet::new();
+    let invalid = |out: &mut ResolvedPmi, id: &str, param: &str, message: String| {
+        out.diagnostics.push(
+            DiagCode::PmiInvalid,
+            Severity::Error,
+            site(&format!("annotation.{id}"), param),
+            message,
+            Cause::Root,
+            Vec::new(),
+        );
+    };
+    for a in &pmi.annotations {
+        if !ids.insert(a.id.as_str()) {
+            invalid(
+                out,
+                &a.id,
+                "id",
+                format!("annotation `{}` is declared twice", a.id),
+            );
+        }
+        if let Some(view) = &a.view {
+            if !pmi.views.iter().any(|v| &v.name == view) {
+                invalid(
+                    out,
+                    &a.id,
+                    "view",
+                    format!(
+                        "annotation `{}` names view `{view}`, which the part does not declare",
+                        a.id
+                    ),
+                );
+            }
+        }
+        let missing = match &a.kind {
+            AnnotationKind::Gdt { tolerance } => {
+                (!pmi.tolerances.iter().any(|t| &t.name == tolerance))
+                    .then(|| format!("tolerance `{tolerance}`"))
+            }
+            AnnotationKind::DatumSymbol { label } => {
+                (!labels.contains(label)).then(|| format!("datum `{label}`"))
+            }
+            AnnotationKind::Dimension {
+                pmi: Some(name), ..
+            } => (!pmi.sizes.iter().any(|z| &z.name == name)
+                && !pmi.locations.iter().any(|l| &l.name == name))
+            .then(|| format!("size or location `{name}`")),
+            AnnotationKind::Coating { treatment } => {
+                (!pmi.treatments.iter().any(|t| &t.name == treatment))
+                    .then(|| format!("treatment `{treatment}`"))
+            }
+            _ => None,
+        };
+        if let Some(what) = missing {
+            invalid(
+                out,
+                &a.id,
+                "kind",
+                format!(
+                    "annotation `{}` shows {what}, which the part's PMI does not declare",
+                    a.id
+                ),
+            );
+        }
+        let mut all = Vec::new();
+        for (k, r) in a.references().into_iter().enumerate() {
+            all.extend(resolve(
+                out,
+                site(&format!("annotation.{}", a.id), &format!("on[{k}]")),
+                r,
+            ));
+        }
+        out.annotations.insert(a.id.clone(), all);
+    }
 }

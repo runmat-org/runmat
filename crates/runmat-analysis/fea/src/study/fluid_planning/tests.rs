@@ -50,6 +50,7 @@ fn study() -> (CompiledAnalysisStudy, SolverMeshArtifact) {
     let properties = crate::properties::compile_property_map(&model, Some(&mesh)).unwrap();
     (
         CompiledAnalysisStudy {
+            displays: Vec::new(),
             assessments: Vec::new(),
             module_path: "tests/fluid.fea".into(),
             study_id: "flow".into(),

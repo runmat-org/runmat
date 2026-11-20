@@ -55,6 +55,13 @@ fn pick_index_returns_region_for_triangle() {
     assert_eq!(hit.region_id, Some("face_a".to_string()));
     assert_eq!(hit.vertex_indices, [0, 1, 2]);
     assert!((hit.barycentric_coordinates.iter().sum::<f32>() - 1.0).abs() < 1.0e-5);
+    // The face's normal comes with the pick, so two face picks give the angle between them.
+    assert_eq!(hit.normal, Some([0.0, 0.0, 1.0]));
+    // And its planar face's triangles, so Measure can draw a normal distance between faces.
+    assert_eq!(
+        hit.face_triangles,
+        vec![-1.0, -1.0, 0.0, 1.0, -1.0, 0.0, 0.0, 1.0, 0.0]
+    );
 }
 
 #[test]
@@ -1126,4 +1133,85 @@ fn saved_line_segment_regions_round_trip_and_reject_overruns() {
     let mut bad = lines;
     bad.segment_regions[0].segment_ranges[0].count = 2;
     assert!(bad.restore("lines".into()).is_err());
+}
+
+#[test]
+fn a_section_hides_the_symbols_its_removed_side_anchors() {
+    // A held face at x < 0 and a loaded face at x > 0; the section keeps x >= 0.
+    let face = |x: f32| {
+        vec![
+            vertex([x - 0.4, -0.5, 0.0], [0.5, 0.5, 0.5, 1.0], [0.0, 0.0, 1.0]),
+            vertex([x + 0.4, -0.5, 0.0], [0.5, 0.5, 0.5, 1.0], [0.0, 0.0, 1.0]),
+            vertex([x, 0.5, 0.0], [0.5, 0.5, 0.5, 1.0], [0.0, 0.0, 1.0]),
+        ]
+    };
+    let mut vertices = face(-2.0);
+    vertices.extend(face(2.0));
+    let chunk = GeometrySceneChunk::indexed_triangles(
+        "faces",
+        vertices,
+        vec![0, 1, 2, 3, 4, 5],
+        cad_default_material(),
+    )
+    .with_regions(vec![
+        GeometrySceneRegion::new(
+            "held",
+            None,
+            Some("cad-face".to_string()),
+            vec![GeometrySceneTriangleRange::new(0, 1)],
+        ),
+        GeometrySceneRegion::new(
+            "loaded",
+            None,
+            Some("cad-face".to_string()),
+            vec![GeometrySceneTriangleRange::new(1, 1)],
+        ),
+    ]);
+    let scene = GeometryScene::new("scene", 1, vec![chunk]);
+    let annotation = |region: &str, kind, direction| GeometrySceneRegionAnnotation {
+        region_id: region.to_string(),
+        color: None,
+        kind,
+        label: None,
+        direction,
+        size: None,
+    };
+    let presentation = |section: Option<GeometrySceneSection>| GeometryScenePresentation {
+        region_annotations: vec![
+            annotation("held", GeometrySceneAnnotationKind::FixedSupport, None),
+            annotation(
+                "loaded",
+                GeometrySceneAnnotationKind::Force,
+                Some([0.0, 0.0, -1.0]),
+            ),
+        ],
+        section: Some(section),
+        ..Default::default()
+    };
+    let symbol_xs = |p: &GeometryScenePresentation| -> Vec<f32> {
+        scene
+            .nodes_with_presentation(p)
+            .iter()
+            .filter(|node| node.name == "FEA study symbols")
+            .flat_map(|node| node.render_data.as_ref().unwrap().vertices.clone())
+            .map(|v| v.position[0])
+            .collect()
+    };
+    let whole = symbol_xs(&presentation(None));
+    assert!(whole.iter().any(|x| *x < -1.0) && whole.iter().any(|x| *x > 1.0));
+    let cut = symbol_xs(&presentation(Some(GeometrySceneSection {
+        plane: GeometrySceneSectionPlane {
+            normal: [1.0, 0.0, 0.0],
+            origin: Some([0.0, 0.0, 0.0]),
+            offset: None,
+            label: None,
+        },
+        second_plane: None,
+        cap: true,
+    })));
+    assert!(!cut.is_empty(), "the kept side's load still shows");
+    assert!(
+        cut.iter().all(|x| *x > 0.5),
+        "the held face's support went with the removed side: {cut:?}"
+    );
 }

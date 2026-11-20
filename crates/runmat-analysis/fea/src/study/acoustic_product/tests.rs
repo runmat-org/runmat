@@ -265,6 +265,7 @@ fn authored_tetrahedron(order: ElementOrder) -> AuthoredAcousticFixture {
     };
     let source = GeometryDefinitionSource::Imported(Box::new(ImportedGeometryDefinition {
         preview_extent_m: None,
+        preview_measure: None,
         unit_evidence: geometry.source.unit_evidence.clone(),
         logical_path: "tests/acoustic-tetrahedron.step".into(),
         format: geometry.source.format,
@@ -280,6 +281,7 @@ fn authored_tetrahedron(order: ElementOrder) -> AuthoredAcousticFixture {
         shared_interfaces: false,
     }));
     let study = RealizedStudy {
+        displays: Vec::new(),
         module_path: MODULE.into(),
         study_id: "acoustic_cell".into(),
         geometry: RealizedGeometryInstance {

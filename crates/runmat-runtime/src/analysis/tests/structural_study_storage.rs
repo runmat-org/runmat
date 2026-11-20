@@ -223,6 +223,7 @@ fn authored_output_fields_are_chunked_and_selectively_readable() {
             1.0,
             false,
             None,
+            &Default::default(),
         )
         .expect("render selected field from persisted LOD tiles");
         assert_eq!(scale, 0.0);
@@ -698,7 +699,7 @@ fn remote_completion_uses_a_new_artifact_key_for_the_numbered_schema() {
             .unwrap();
     assert_eq!(
         persisted["schema_version"],
-        "analysis_run_artifact/2026-09-002"
+        "analysis_run_artifact/2026-11-002"
     );
     let _ = fs::remove_dir_all(&root);
 }
@@ -894,7 +895,6 @@ fn filesystem_run_store_rejects_valid_json_with_wrong_envelope_identity() {
 #[test]
 fn memory_provider_run_publication_is_linearizable() {
     let _guard = analysis_test_guard();
-    let _provider_lock = runmat_filesystem::provider_override_lock();
     let _provider_guard =
         runmat_filesystem::replace_provider(Arc::new(runmat_filesystem::MemoryFsProvider::new()));
     let generated = analysis_run_linear_static_with_options(

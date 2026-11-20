@@ -798,6 +798,17 @@ export interface AuthoredOutput {
   policy: AuthoredOutputPolicy;
 }
 
+export interface AuthoredOutputDisplay {
+  output_id: string;
+  unit?: string;
+  unit_source: DisplayUnitSource;
+  range?: DisplayRange;
+  precision?: WireU8;
+  hide?: string[];
+  context?: string[];
+  deformation?: number;
+}
+
 export type AuthoredOutputExpression = {
   step_id: string;
   quantity: ObservationQuantity;
@@ -1032,6 +1043,7 @@ export interface AuthoredStudy {
   inputs: AuthoredInputDefinition[];
   outputs: AuthoredOutput[];
   assessments?: AuthoredAssessment[];
+  displays?: AuthoredOutputDisplay[];
   sequence: AnalysisSequence;
 }
 
@@ -1417,6 +1429,15 @@ export interface Displacement {
   meters: number;
 }
 
+export interface DisplayRange {
+  minimum: number;
+  maximum: number;
+}
+
+export type DisplayUnitSource = "display"
+  | "study"
+  | "si";
+
 export interface DynamicDimension {
   dimension: PhysicalDimension;
   angle_power?: WireI8;
@@ -1506,6 +1527,16 @@ export type ErrorContributionKind = "geometry_admission"
   | "observation_sampling"
   | "precision"
   | "execution_equivalence";
+
+export interface EvaluatedParameterizedSignal {
+  signal_id: SignalId;
+  quantity: PhysicalQuantityKind;
+  unit: string;
+  value_si: EvaluatedSignalValue | null;
+}
+
+export type EvaluatedSignalValue = number
+  | [number, number, number];
 
 export interface ExcitationCase {
   case_id: ExcitationCaseId;
@@ -1721,6 +1752,7 @@ export interface FeaSemanticProgram {
   geometries: GeometryDefinition[];
   meshes: MeshDefinition[];
   models: AuthoredModel[];
+  evaluatedSignals?: FeaStudyEvaluatedSignals[];
 }
 
 export type FeaSourceCheckContract = "assessments_v1";
@@ -1764,6 +1796,12 @@ export interface FeaSourceIndex {
 export interface FeaSourceIndexEntry {
   identity: FeaSourceIdentity;
   location: FeaDiagnosticLocation;
+}
+
+export interface FeaStudyEvaluatedSignals {
+  modulePath: string;
+  studyId: string;
+  signals: EvaluatedParameterizedSignal[];
 }
 
 export type FeaStudyMemberKind = "output"
@@ -2933,6 +2971,19 @@ export interface Pressure {
   pascals: number;
 }
 
+export interface PreviewMeasure {
+  volume_m3: number;
+  area_m2: number;
+  patches: PreviewSurfacePatch[];
+}
+
+export interface PreviewSurfacePatch {
+  area_m2: number;
+  radius_m: number | null;
+  thickness_m: number | null;
+  gap_m: number | null;
+}
+
 export type ProcedureSettings = "none"
   | { structural_random_response: StructuralRandomResponseSettings }
   | { structural_nonlinear: StructuralNonlinearSettings }
@@ -2978,6 +3029,7 @@ export interface PublishedStudyAssessment {
   evidence: ScalarObservationEvidence | null;
   function_execution_identity?: string;
   function_execution_diagnostic?: string;
+  summary_line?: string;
 }
 
 export interface PublishedStudyReassessment {
@@ -3019,6 +3071,8 @@ export type QuantityKind = "length"
   | "electric_charge_density"
   | "stiffness"
   | "damping"
+  | "rotational_stiffness"
+  | "torsional_damping"
   | "foundation_modulus"
   | "rayleigh_mass_coefficient"
   | "rayleigh_stiffness_coefficient"
@@ -3249,6 +3303,10 @@ export interface Rotation {
   radians: number;
 }
 
+export interface RotationalStiffness {
+  newton_meters_per_radian: number;
+}
+
 export type SamplingPolicy = "final"
   | "every_accepted_increment"
   | { time_seconds: number[] }
@@ -3284,6 +3342,7 @@ export interface ScalarObservationEvidence {
   source_identity: string;
   sample: RecoveredFieldSample | null;
   entity: ObservationEntity | null;
+  source_field_id: string | null;
 }
 
 export interface SecondMomentOfArea {
@@ -3826,6 +3885,10 @@ export interface TimeDerivativeRate {
 export type TopologyTransitionPolicy = "require_identical"
   | "project_with_evidence"
   | "adapted_mesh_lineage";
+
+export interface TorsionalDamping {
+  newton_meter_seconds_per_radian: number;
+}
 
 export interface Traction {
   pascals: number;

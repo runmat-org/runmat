@@ -318,3 +318,31 @@ fn texts_drawn_over_each_other_and_items_off_the_frame_are_reported() {
         out.erc
     );
 }
+
+/// Sheet tabs and page numbers follow the hierarchy in natural order: `c2` before `c10`, and a
+/// repeated sheet's `ch[2]` before `ch[10]`, as people number circuits.
+#[test]
+fn sheets_and_pages_are_in_natural_order() {
+    let mut instances = String::new();
+    for name in ["c10", "c2", "c1", "c12"] {
+        instances.push_str(&format!("        instance {name} = {{ sheet = branch }}\n"));
+    }
+    let text = circuit(&format!(
+        "circuit panel {{\n    root = main\n    sheet main {{\n{instances}        instance ch = {{ sheet = branch, repeat = 11 }}\n    }}\n    sheet branch {{\n        component X1 = {{ part = \"RCPT\" }}\n        net N = {{ global = true, power_flag = true }}\n        connect = [net.HOT, X1.HOT]\n        connect = [net.N, X1.NEU]\n    }}\n}}\n"
+    ));
+    let index = compile(&text);
+    let hierarchy: Vec<&str> = index.hierarchy.iter().map(|s| s.path.as_str()).collect();
+    let mut want = vec!["/", "/c1", "/c2", "/c10", "/c12"];
+    let channels: Vec<String> = (0..11).map(|k| format!("/ch[{k}]")).collect();
+    want.extend(channels.iter().map(String::as_str));
+    assert_eq!(hierarchy, want);
+    let pages: Vec<(&str, String)> = index
+        .schematic
+        .sheets
+        .iter()
+        .map(|s| (s.path.as_str(), s.title_block[3].1.clone()))
+        .collect();
+    let first: Vec<&str> = pages.iter().map(|(p, _)| *p).collect();
+    assert_eq!(first, want, "pages in hierarchy order");
+    assert_eq!(pages[3], ("/c10", format!("4 of {}", want.len())));
+}

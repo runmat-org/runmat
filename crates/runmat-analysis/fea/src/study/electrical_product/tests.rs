@@ -18,6 +18,7 @@ fn compiled(
     let mesh = mesh(order, 2);
     let properties = crate::properties::compile_property_map(&model, Some(&mesh)).unwrap();
     CompiledAnalysisStudy {
+        displays: Vec::new(),
         module_path: "tests/electrical.fea".into(),
         study_id: "electrical".into(),
         study_inputs: vec![],

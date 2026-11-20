@@ -39,7 +39,7 @@ fn a_cut_list_on_a_part_without_members_says_so() {
     let files: Files = [("/p/bracket.part".to_owned(), bracket.to_owned())].into();
     let text = drawing(
         "bracket",
-        "    table cuts = cut_list(view = front, sheet = \"1\", at = [0, 0])\n",
+        "    table cuts = cut_list(view = front, sheet = \"1\")\n",
     );
     let out: Value =
         serde_json::from_str(&compile_json("/p/frame.drawing", &text, &files)).unwrap();

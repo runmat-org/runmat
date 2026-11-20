@@ -363,6 +363,9 @@ fn top_view() -> View {
         display: Display::VisibleLines,
         exclude: vec![],
         exploded: None,
+        title: None,
+        centerlines: true,
+        tangent_edges: None,
     }
 }
 
@@ -528,6 +531,7 @@ fn dim(refs: Vec<Reference>) -> AnnotationKind {
         group: None,
         reference: false,
         condition: Default::default(),
+        occurrences: Vec::new(),
     }
 }
 
@@ -553,6 +557,7 @@ fn drawing() -> DrawingDocument {
         header: Default::default(),
         formats: vec![SheetFormat {
             standard: Default::default(),
+            units: Default::default(),
             name: "a3".into(),
             size: SheetSize::Iso { name: "A3".into() },
             title_block: vec![],
@@ -602,7 +607,7 @@ fn drawing() -> DrawingDocument {
                         ..Default::default()
                     },
                 },
-                at: [0.0, 0.0],
+                at: None,
             },
             DrawingTable {
                 name: "holes".into(),
@@ -612,7 +617,7 @@ fn drawing() -> DrawingDocument {
                     origin: Reference::start_cap("body"),
                     spec: HoleTableSpec::default(),
                 },
-                at: [0.0, 0.0],
+                at: None,
             },
         ],
     }
@@ -688,6 +693,7 @@ fn t06_drawing_merges_field_by_field_by_stable_id() {
             AnnotationKind::Note {
                 text: "BREAK EDGES".into(),
                 leader: None,
+                width: None,
             },
         ),
     );
@@ -695,7 +701,7 @@ fn t06_drawing_merges_field_by_field_by_stable_id() {
         name: "revisions".into(),
         sheet: "1".into(),
         kind: TableKind::Revision { rows: Vec::new() },
-        at: [5.0, 5.0],
+        at: Some([5.0, 5.0]),
     });
     let m = merge_drawings(&base, &ours, &theirs, None);
     assert!(m.conflicts.is_empty(), "{:#?}", m.conflicts);
@@ -732,6 +738,7 @@ fn t07_drawing_merge_conflicts_and_re_resolution() {
             AnnotationKind::Note {
                 text: text.into(),
                 leader: None,
+                width: None,
             },
         ));
     }

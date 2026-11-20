@@ -106,6 +106,43 @@ The checker verifies that the sampling domain belongs to the field (time for a t
 
 An assessment compares an output with a `minimum`, a `maximum` or both, in the output's unit, and publishes a pass or fail verdict with the run. `runmat reassess` evaluates revised assessments against a saved result without solving again. See [operations and output queries](./reference/operations-and-output-queries.md).
 
+## Display a field
+
+A `display` statement sets how result views show one field output: the snapshot posters, the saved scenes and the live result view.
+
+```fea fragment
+output von_mises = analysis.static.field.element.von_mises_stress
+display von_mises {
+    unit = MPa
+    range = [0 MPa, 12 MPa]
+    precision = 3
+    hide = [geometry.arm.region.payload]
+    context = [geometry.arm.region.stand]
+    deformation = 200
+}
+```
+
+| Member | Value | Effect |
+| --- | --- | --- |
+| `unit` | A unit of the field's quantity: `MPa`, `degC`, or a quoted compound unit such as `"kW/m^2"` | The legend's range, limit and notes are written in this unit. |
+| `range` | Two values in the field's quantity, minimum below maximum: `[0 MPa, 12 MPa]` or `[0, 12] MPa` | The colour scale is fixed to this range. Values outside it take the end colours, and the legend states the field's true extremes beyond it, such as "▲ 14.2 MPa above the range". Two runs with the same range share one colour scale. |
+| `precision` | An integer from 1 to 6 | The legend writes its numbers with this many significant digits. |
+| `hide` | A list of solid regions of the study geometry: `[geometry.arm.region.payload]` | The view leaves these bodies out. Their values do not count toward the legend's extremes. |
+| `context` | A list of solid regions of the study geometry | The view draws these bodies in translucent grey with no field colour. Their values do not count toward the legend's extremes. |
+| `deformation` | A positive dimensionless number: `200` | The view draws the deformed shape with the displacement multiplied by this factor. Two runs with the same factor are exaggerated equally. Without it, each run chooses a scale from its own displacement. |
+
+Each member is optional, and a `display` statement needs at least one. The named output must be a field output of the study. The checker refuses a unit or range in another quantity, a range whose minimum is not below its maximum, a precision outside 1 to 6, a deformation that is zero, negative or has a unit, and a `hide` or `context` entry that is not a solid region of the study geometry. A region may appear in `hide` or in `context`, not in both.
+
+Each solved body is a solid region the model assigns a material to, named by its region name. Result scenes tag each body's surface with that name, so a viewer can hide or isolate a body after the run. The legend's extremes, its colour range and its overflow markers are taken over the bodies the view draws in field colour. For example, hiding a stiff payload stand-in leaves the arm's own peak on the bar instead of a value at the joint between the two bodies.
+
+Without a `unit`, the legend uses the unit the study already writes that quantity in. The checker looks, in order, at the study's assessment bounds, its analysis blocks, and the loads, constraints, interfaces, excitations and initial conditions of its model. The first value of the field's quantity sets the unit. A thermal study whose model sets `reference_temperature = 20 degC` shows temperatures in °C, with or without a `display` statement. A study that writes no value of that quantity shows SI units. Without a `range`, the colour scale runs from the field's lowest to its highest value.
+
+When the study assesses the shown quantity, the legend states the run's result first, then the limit, then the factor between them: "Peak 17.7 MPa · limit 184 MPa · factor 10.4". A minimum criterion reads "Lowest …". A temperature states its margin instead of a factor: "Peak 63.4 °C · limit 85 °C · margin 21.6 K".
+
+The view of an assessed quantity colours the field the assessment reads, at the location the assessment reads it. A peak stress over element von Mises values is drawn element by element, so the top of the bar and the result on the assessment line are the same number when the view draws the assessed region. The line names the location: "Peak 76.3 MPa (element) · limit 184 MPa · factor 2.41". A view of the same quantity at another location names its location on the legend, such as "Von Mises stress, nodal average".
+
+Each published assessment carries the same line in its `summary_line` field, next to the raw result and limit. Publication writes it in the unit and precision of the display of the field output the assessed value reads. Without such a display, it uses the unit the study writes that quantity in, and otherwise SI. Reports and the Desktop print this field, so the legend, a report and the Desktop show the same text for one run. An assessment with a function rule has no `summary_line`.
+
 ## Read results in `.m` code
 
 Fields are published separately from rendering. After a run, `.m` code loads the result, selects a field and plots or post-processes it:

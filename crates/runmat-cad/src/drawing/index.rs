@@ -7,6 +7,7 @@ use super::{
     check_drawing, AnnotationKind, ArcCondition, DimensionStyle, DrawingDocument, ModelRef,
     ModelReferences,
 };
+use crate::assembly::model::RelPath;
 use crate::diagnostics::Diagnostic;
 use crate::refs::name::EntityName;
 use crate::refs::reference::Reference;
@@ -14,7 +15,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 
 /// Bumped on any change to the projection's shape.
-pub const DRAWING_INDEX_FORMAT_VERSION: u32 = 2;
+pub const DRAWING_INDEX_FORMAT_VERSION: u32 = 3;
 
 /// What the drawn model measures and declares, for annotation text (`40 mm`, `⏥ 0.05 A`).
 pub trait AnnotationValues {
@@ -23,6 +24,7 @@ pub trait AnnotationValues {
         &self,
         _model: &ModelRef,
         _style: DimensionStyle,
+        _occurrences: &[RelPath],
         _entities: &[Vec<EntityName>],
     ) -> Option<String> {
         None
@@ -34,12 +36,24 @@ pub trait AnnotationValues {
         model: &ModelRef,
         style: DimensionStyle,
         condition: ArcCondition,
+        occurrences: &[RelPath],
         entities: &[Vec<EntityName>],
     ) -> Option<String> {
         match condition {
-            ArcCondition::Center => self.dimension(model, style, entities),
+            ArcCondition::Center => self.dimension(model, style, occurrences, entities),
             ArcCondition::Min | ArcCondition::Max => None,
         }
+    }
+    /// A level mark's height, as the mark prints it under its line (`EL. 10'-1 3/4"`): the
+    /// height of the face `on` (of the occurrence `occurrence`, when not empty) above the
+    /// model's origin.
+    fn elevation(
+        &self,
+        _model: &ModelRef,
+        _occurrence: &RelPath,
+        _on: &Reference,
+    ) -> Option<String> {
+        None
     }
     /// A PMI tolerance's feature control frame as text: symbol, value and datums.
     fn tolerance_frame(&self, _model: &ModelRef, _tolerance: &str) -> Option<String> {
@@ -56,6 +70,10 @@ pub trait AnnotationValues {
     }
     /// The finish the part's PMI gives the surface (`Ra 0.8`, with its process when set).
     fn surface_finish(&self, _model: &ModelRef, _on: &Reference) -> Option<String> {
+        None
+    }
+    /// A coating or treatment's specification in the part's PMI, by name.
+    fn treatment(&self, _model: &ModelRef, _name: &str) -> Option<String> {
         None
     }
 }
@@ -89,6 +107,10 @@ pub struct DrawingIndex {
     /// Annotation id → its text as the sheet shows it (`40 mm`, `Balloon 3`, a note with its
     /// fields filled).
     pub text: BTreeMap<String, String>,
+    /// Notes table name → its notes as the sheet shows them, fields filled from the model of
+    /// the first view on its sheet.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub notes: BTreeMap<String, Vec<String>>,
 }
 
 pub fn build_drawing_index(
@@ -110,11 +132,12 @@ pub fn build_drawing_index(
                     pmi,
                     reference,
                     condition,
+                    occurrences,
                     ..
                 } => {
                     let tolerance = pmi.as_ref().and_then(|name| values.pmi_tolerance(at, name));
                     let value = match (
-                        values.dimension_to(at, *style, *condition, entities),
+                        values.dimension_to(at, *style, *condition, occurrences, entities),
                         tolerance,
                     ) {
                         (Some(v), Some(t)) => format!("{v} {t}"),
@@ -139,6 +162,9 @@ pub fn build_drawing_index(
                     .surface_finish(at, on)
                     .unwrap_or_else(|| "Surface finish".into()),
                 AnnotationKind::Weld { symbol, .. } => format!("Weld {symbol}"),
+                AnnotationKind::Coating { treatment } => values
+                    .treatment(at, treatment)
+                    .unwrap_or_else(|| treatment.clone()),
                 AnnotationKind::Note { text, .. } => fill_fields(text, |field| {
                     super::note_field(model, at, &doc.tables, field)
                 }),
@@ -148,12 +174,41 @@ pub fn build_drawing_index(
                 },
                 AnnotationKind::CenterMark { .. } => "Center mark".into(),
                 AnnotationKind::Centerline { .. } => "Centerline".into(),
+                // A datum's height: the compile fills it in from the datum plane.
+                AnnotationKind::Level { on, occurrence, .. } => on
+                    .as_ref()
+                    .and_then(|on| values.elevation(at, occurrence, on))
+                    .unwrap_or_else(|| "Level".into()),
+                // The compile replaces it with the spacing its dimension row prints.
+                AnnotationKind::Grids { labels, .. } => format!("Grids {}", labels.join(", ")),
+                AnnotationKind::DoorSwing { .. } => "Door swing".into(),
             };
             Some((a.id.clone(), shown))
         })
         .collect();
+    let notes = doc
+        .tables
+        .iter()
+        .filter_map(|t| match &t.kind {
+            super::TableKind::Notes { rows, .. } => {
+                let at = super::notes_model(doc, &t.sheet);
+                let shown = rows
+                    .iter()
+                    .map(|r| match at {
+                        Some(at) => {
+                            fill_fields(r, |f| super::note_field(model, at, &doc.tables, f))
+                        }
+                        None => r.clone(),
+                    })
+                    .collect();
+                Some((t.name.clone(), shown))
+            }
+            _ => None,
+        })
+        .collect();
     DrawingIndex {
         text,
+        notes,
         format_version: DRAWING_INDEX_FORMAT_VERSION,
         document: doc.clone(),
         diagnostics: report.diagnostics.diagnostics.clone(),

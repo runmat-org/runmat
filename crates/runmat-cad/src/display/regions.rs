@@ -20,13 +20,27 @@ pub struct SketchRegionDisplay {
     pub triangles: Vec<[u32; 3]>,
 }
 
-fn polygon(l: &[ProfileSegment]) -> Vec<[f64; 2]> {
+/// How finely a region's curved edges are sampled: points on a full closed curve, and on any
+/// other curved segment.
+#[derive(Clone, Copy, Debug)]
+pub struct Sampling {
+    pub closed: usize,
+    pub open: usize,
+}
+
+/// For picking and drawing: 64 points round a circle.
+pub const DISPLAY_SAMPLING: Sampling = Sampling {
+    closed: 64,
+    open: 24,
+};
+
+fn polygon(l: &[ProfileSegment], sampling: Sampling) -> Vec<[f64; 2]> {
     let mut out: Vec<[f64; 2]> = Vec::new();
     for s in l {
         let n = match s.kind {
             SegmentKind::Line => 1,
-            _ if s.is_closed_curve() => 64,
-            _ => 24,
+            _ if s.is_closed_curve() => sampling.closed,
+            _ => sampling.open,
         };
         let pts = s.polyline(n);
         for p in pts {
@@ -72,11 +86,24 @@ fn inside(p: [f64; 2], poly: &[[f64; 2]]) -> bool {
 }
 
 /// The closed regions of `sketch`; none when its profile curves don't all close.
-pub fn sketch_regions(sketch: &Sketch, solved: &SolvedSketch) -> Vec<SketchRegionDisplay> {
+/// A closed region of a sketch as polygons: its loops' curve ids (outer first), and the outer
+/// loop counter-clockwise followed by its holes clockwise, sampled at `sampling`.
+pub struct RegionPolygons {
+    pub loops: Vec<Vec<String>>,
+    pub polygons: Vec<Vec<[f64; 2]>>,
+}
+
+/// Every closed region of a sketch, nested by containment (the regions [`sketch_regions`] draws
+/// and Section properties integrates).
+pub fn region_polygons(
+    sketch: &Sketch,
+    solved: &SolvedSketch,
+    sampling: Sampling,
+) -> Vec<RegionPolygons> {
     let Ok(loops) = profile_loops(sketch, solved) else {
         return Vec::new();
     };
-    let polys: Vec<Vec<[f64; 2]>> = loops.iter().map(|l| polygon(l)).collect();
+    let polys: Vec<Vec<[f64; 2]>> = loops.iter().map(|l| polygon(l, sampling)).collect();
     if polys.iter().any(|p| p.len() < 3) {
         return Vec::new();
     }
@@ -104,14 +131,35 @@ pub fn sketch_regions(sketch: &Sketch, solved: &SolvedSketch) -> Vec<SketchRegio
         let holes: Vec<usize> = (0..polys.len())
             .filter(|h| depth[*h] == depth[o] + 1 && contains(o, *h))
             .collect();
+        let polygons = std::iter::once(o)
+            .chain(holes.iter().copied())
+            .enumerate()
+            .map(|(k, l)| {
+                let mut p = polys[l].clone();
+                // Outer counter-clockwise, holes clockwise.
+                if (signed_area(&p) > 0.0) != (k == 0) {
+                    p.reverse();
+                }
+                p
+            })
+            .collect();
+        out.push(RegionPolygons {
+            loops: std::iter::once(o)
+                .chain(holes)
+                .map(|l| loops[l].iter().map(|s| s.curve.0.clone()).collect())
+                .collect(),
+            polygons,
+        });
+    }
+    out
+}
+
+pub fn sketch_regions(sketch: &Sketch, solved: &SolvedSketch) -> Vec<SketchRegionDisplay> {
+    let mut out = Vec::new();
+    for region in region_polygons(sketch, solved, DISPLAY_SAMPLING) {
         let mut points: Vec<[f64; 2]> = Vec::new();
         let mut index_loops: Vec<Vec<usize>> = Vec::new();
-        for (k, l) in std::iter::once(o).chain(holes.iter().copied()).enumerate() {
-            let mut p = polys[l].clone();
-            // Outer counter-clockwise, holes clockwise.
-            if (signed_area(&p) > 0.0) != (k == 0) {
-                p.reverse();
-            }
+        for p in region.polygons {
             let base = points.len();
             index_loops.push((base..base + p.len()).collect());
             points.extend(p);
@@ -120,10 +168,7 @@ pub fn sketch_regions(sketch: &Sketch, solved: &SolvedSketch) -> Vec<SketchRegio
             continue;
         };
         out.push(SketchRegionDisplay {
-            loops: std::iter::once(o)
-                .chain(holes)
-                .map(|l| loops[l].iter().map(|s| s.curve.0.clone()).collect())
-                .collect(),
+            loops: region.loops,
             points: points.iter().map(|p| [p[0] as f32, p[1] as f32]).collect(),
             triangles: triangles
                 .iter()

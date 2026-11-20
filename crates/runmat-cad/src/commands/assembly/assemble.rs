@@ -36,6 +36,24 @@ pub(super) fn assemble(conn: &[SelectKind]) -> Vec<CommandDescriptor> {
         .preview()
         .edit(edit(EditOp::Add, Section::Occurrences).item("occurrence")),
         asm(
+            "assembly.sketch",
+            "Sketch",
+            "sketch",
+            "Start a sketch in the assembly on an origin plane or a component's planar face.",
+        )
+        .kw(&["2d", "draw", "layout", "in context"])
+        .inputs(vec![pick("plane", "On", &[K::Plane, K::Face])])
+        .edit(edit(EditOp::EnterMode, Section::Features).item("sketch")),
+        asm(
+            "assembly.edit-sketch",
+            "Edit sketch",
+            "sketch",
+            "Open the assembly's sketch for editing.",
+        )
+        .when(selected_one(&[K::Sketch]))
+        .on(&[K::Sketch])
+        .edit(edit(EditOp::EnterMode, Section::Sketch).item("sketch")),
+        asm(
             "assembly.new-part",
             "New part in context",
             "new-part",
@@ -116,11 +134,24 @@ pub(super) fn assemble(conn: &[SelectKind]) -> Vec<CommandDescriptor> {
             "Add a frame on a component to mate to.",
         )
         .inputs(vec![
-            text("name", "Name", Some("pin")),
-            pick("on", "On", &[K::Face, K::Edge, K::Vertex]),
-            flag("flip", "Flip", false),
+            text("name", "Name", None)
+                .optional()
+                .help("Leave empty for the next free name; an existing connector's name changes that connector."),
+            pick(
+                "on",
+                "On",
+                &[K::Face, K::Edge, K::Vertex, K::Plane, K::Axis, K::Point, K::CoordinateSystem, K::SketchPoint, K::SketchEntity],
+            )
+            .optional()
+            .help("A face, edge, vertex or datum of a component, or a point or line of the assembly's sketch. Editing a connector keeps what it stands on when this is empty."),
+            flag("flip", "Flip Z", false),
+            length("x", "Offset X", 0.0).optional(),
+            length("y", "Offset Y", 0.0).optional(),
+            length("z", "Offset Z", 0.0).optional(),
+            qty("angle", "Rotate about Z", "angle", Some(0.0)).optional(),
         ])
         .when(occurrences())
+        .on(&[K::MateConnector])
         .edit(edit(EditOp::Add, Section::Mates).item("connector")),
         asm(
             "assembly.smart-mate",
@@ -159,10 +190,10 @@ pub(super) fn assemble(conn: &[SelectKind]) -> Vec<CommandDescriptor> {
             ),
             picks("components", "Components", &[K::Occurrence]),
             offset("dx", "Delta X", 0.0)
-                .shown("mode", &["triad"])
+                .shown("mode", &["drag", "triad"])
                 .drag(Manipulator::Triad),
-            offset("dy", "Delta Y", 0.0).shown("mode", &["triad"]),
-            offset("dz", "Delta Z", 0.0).shown("mode", &["triad"]),
+            offset("dy", "Delta Y", 0.0).shown("mode", &["drag", "triad"]),
+            offset("dz", "Delta Z", 0.0).shown("mode", &["drag", "triad"]),
             angle("rx", "Rotate X", 0.0).shown("mode", &["triad"]),
             angle("ry", "Rotate Y", 0.0).shown("mode", &["triad"]),
             angle("rz", "Rotate Z", 0.0).shown("mode", &["triad"]),
@@ -240,11 +271,13 @@ pub(super) fn assemble(conn: &[SelectKind]) -> Vec<CommandDescriptor> {
             "assembly.copy-with-mates",
             "Copy with mates",
             "copy",
-            "Copy components with their mates, picking new references.",
+            "Copy components with their connectors and mates; each mate to an outside reference takes the next picked new reference.",
         )
         .inputs(vec![
             picks("components", "Components", &[K::Occurrence]),
-            picks("references", "New references", conn),
+            picks("references", "New references", conn).optional().help(
+                "One pick per mate end outside the copy, in the order the mates are listed; a mate without one keeps its original reference.",
+            ),
         ])
         .when(selected(&[K::Occurrence]))
         .edit(edit(EditOp::Add, Section::Occurrences).item("copy")),

@@ -36,6 +36,8 @@ study response {
 
 #[tokio::test]
 async fn frozen_imported_assessment_executes_portable_boolean_contract() {
+    // Program execution roots values in the process-wide GC heap.
+    let _gc = runmat_gc::gc_test_guard();
     let directory = tempfile::tempdir().unwrap();
     std::fs::create_dir_all(directory.path().join("src")).unwrap();
     std::fs::write(

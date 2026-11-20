@@ -24,12 +24,12 @@ mod presentation;
 mod project;
 #[cfg(not(target_arch = "wasm32"))]
 mod rename;
-#[cfg(test)]
+#[cfg(all(test, not(target_arch = "wasm32")))]
 mod tests;
 
 use presentation::*;
 pub(crate) use project::resolve_project_facts;
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(feature = "native")] // the native backend's rename is the only user
 pub(crate) use rename::{FeaFunctionImportPath, FeaRenameTarget};
 
 #[derive(Clone)]
@@ -41,26 +41,6 @@ pub struct FeaDocumentAnalysis {
 }
 
 impl FeaDocumentAnalysis {
-    pub(crate) fn prepare_with_overlays(
-        source: &str,
-        physical_path: &Path,
-        workspace_roots: &[PathBuf],
-        project_overlays: &[(PathBuf, Vec<u8>)],
-    ) -> Result<runmat_runtime::analysis::PreparedFeaSource, String> {
-        let source_root = source_root(physical_path, workspace_roots);
-        let mut overlays = project_overlays
-            .iter()
-            .filter(|(path, _)| path.starts_with(&source_root))
-            .cloned()
-            .collect::<Vec<_>>();
-        replace_root_overlay(&mut overlays, physical_path, source);
-        runmat_runtime::analysis::prepare_fea_sources_in_root(
-            &source_root,
-            physical_path,
-            &overlays,
-        )
-    }
-
     pub(crate) fn from_checked(
         checked: runmat_runtime::analysis::CheckedFeaSource,
         function_sources: BTreeMap<LogicalSourcePath, Arc<str>>,
@@ -116,6 +96,16 @@ impl FeaDocumentAnalysis {
                 })
             })
             .collect()
+    }
+
+    /// Quick fixes for the diagnostics in `range`: units of the expected kind for a wrong unit.
+    pub fn code_actions(
+        &self,
+        uri: &lsp_types::Url,
+        source: &str,
+        range: Range,
+    ) -> Vec<lsp_types::CodeActionOrCommand> {
+        super::unit_fixes::unit_code_actions(uri, source, &self.diagnostics(source), range)
     }
 
     pub fn syntax(&self) -> Option<&FeaSyntaxModule> {
@@ -286,29 +276,128 @@ pub fn is_fea_uri(uri: &Url) -> bool {
     uri.path().to_ascii_lowercase().ends_with(".fea")
 }
 
-fn source_root(path: &Path, workspace_roots: &[PathBuf]) -> PathBuf {
+/// The folder a study's relative paths (`import … from`, `file =`) may reach: the deepest
+/// workspace root that holds the study, else the enclosing project's folder, else the root of
+/// the study's filesystem. The last case matches the runtime check, whose source root is the
+/// provider root; a document never narrows the root to its own folder.
+pub(crate) fn fea_source_root(
+    path: &Path,
+    workspace_roots: &[PathBuf],
+    project: Option<&super::project::ProjectContext>,
+) -> PathBuf {
     workspace_roots
         .iter()
         .filter(|root| path.starts_with(root))
         .max_by_key(|root| root.components().count())
         .cloned()
         .or_else(|| {
-            super::project::ProjectContext::discover_from_source_name(path.to_str())
-                .and_then(|project| project.manifest_path().parent().map(Path::to_path_buf))
+            project.and_then(|project| project.manifest_path().parent().map(Path::to_path_buf))
         })
-        .or_else(|| path.parent().map(Path::to_path_buf))
-        .unwrap_or_else(|| PathBuf::from("."))
+        .unwrap_or_else(|| filesystem_root(path))
 }
 
-fn replace_root_overlay(overlays: &mut Vec<(PathBuf, Vec<u8>)>, path: &Path, source: &str) {
-    if let Some((_, overlay)) = overlays
-        .iter_mut()
-        .find(|(overlay_path, _)| overlay_path == path)
-    {
-        *overlay = source.as_bytes().to_vec();
-    } else {
-        overlays.push((path.to_path_buf(), source.as_bytes().to_vec()));
+/// `/` for `/project/simulation/x.fea`; the drive root on Windows.
+fn filesystem_root(path: &Path) -> PathBuf {
+    path.ancestors()
+        .last()
+        .filter(|root| !root.as_os_str().is_empty())
+        .map_or_else(|| PathBuf::from("/"), Path::to_path_buf)
+}
+
+/// Check the `.fea` study at `physical_path` with `source` as its text.
+///
+/// Every file the study reads (imported modules, imported `.m` functions, geometry, the project
+/// manifest) comes from `source_overlays` (open editor buffers) or else through the installed
+/// `runmat_filesystem` provider, so a host that installs a project provider (a cloud project's
+/// virtual paths) gets that project's files. Every read uses the provider's async API, the
+/// files of a part or assembly the study meshes included. Relative paths resolve within the
+/// folder `fea_source_root` picks.
+pub async fn analyze_fea_source(
+    source: &str,
+    physical_path: &Path,
+    workspace_roots: &[PathBuf],
+    source_overlays: &BTreeMap<PathBuf, String>,
+    compat: super::analysis::CompatMode,
+) -> Result<FeaDocumentAnalysis, String> {
+    let project =
+        super::project::ProjectContext::discover_from_source_name_async(physical_path.to_str())
+            .await;
+    let source_root = fea_source_root(physical_path, workspace_roots, project.as_ref());
+    let mut prepared =
+        prepare_fea_snapshot(source, physical_path, &source_root, source_overlays).await?;
+    let requests = prepared.function_requests()?;
+    let facts = resolve_project_facts(
+        &source_root,
+        &requests,
+        project.as_ref(),
+        compat,
+        source_overlays,
+    )
+    .await?;
+    let geometry = prepared
+        .requests(facts.functions.clone(), facts.profiles.clone())?
+        .geometry;
+    for request in geometry {
+        let path =
+            runmat_runtime::analysis::physical_source_path(&source_root, &request.logical_path)
+                .map_err(|error| error.to_string())?;
+        if runmat_runtime::geometry::design_source::is_design_geometry(
+            request.logical_path.as_str(),
+        ) {
+            // A regeneration failure is reported by the check at the geometry's `file =`. An
+            // open editor buffer stands in for the design's own file.
+            let text = source_overlays.get(&path).map(String::as_bytes);
+            match runmat_runtime::geometry::design_source::design_geometry_async(&path, text).await
+            {
+                Ok(bytes) => prepared.add_geometry(request.logical_path, bytes)?,
+                Err(error) => prepared.add_geometry_failure(request.logical_path, error),
+            }
+        } else if let Ok(bytes) = runmat_filesystem::read_async(&path).await {
+            prepared.add_geometry(request.logical_path, bytes)?;
+        }
     }
+    prepared
+        .check(facts.functions, facts.profiles)
+        .map(|checked| FeaDocumentAnalysis::from_checked(checked, facts.function_sources))
+}
+
+/// The study's module graph, with each module read from `source_overlays` or else through the
+/// provider's async API. A module that can't be read stays out; the check reports it at its
+/// import.
+pub(crate) async fn prepare_fea_snapshot(
+    source: &str,
+    physical_path: &Path,
+    source_root: &Path,
+    source_overlays: &BTreeMap<PathBuf, String>,
+) -> Result<runmat_runtime::analysis::PreparedFeaSourceSnapshot, String> {
+    use runmat_runtime::analysis::FeaSourceSnapshotBuilder;
+    let logical_path = runmat_runtime::analysis::logical_source_path(source_root, physical_path)?;
+    let root = FeaSourceSnapshotBuilder::source_module(logical_path, source.as_bytes().to_vec());
+    let mut snapshot = FeaSourceSnapshotBuilder::new(source_root, root)?;
+    let mut attempted = std::collections::BTreeSet::new();
+    loop {
+        let missing = snapshot
+            .missing_module_paths()?
+            .into_iter()
+            .filter(|path| attempted.insert(path.clone()))
+            .collect::<Vec<_>>();
+        if missing.is_empty() {
+            break;
+        }
+        for logical_path in missing {
+            let path = runmat_runtime::analysis::physical_source_path(source_root, &logical_path)
+                .map_err(|error| error.to_string())?;
+            let bytes = match source_overlays.get(&path) {
+                Some(text) => text.as_bytes().to_vec(),
+                None => match runmat_filesystem::read_async(&path).await {
+                    Ok(bytes) => bytes,
+                    Err(_) => continue,
+                },
+            };
+            snapshot.add_module(FeaSourceSnapshotBuilder::source_module(logical_path, bytes))?;
+        }
+    }
+    snapshot.prepare()
 }
 
 fn token_at(syntax: &FeaSyntaxModule, source: &str, position: &Position) -> Option<FeaToken> {

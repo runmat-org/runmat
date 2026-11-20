@@ -75,6 +75,7 @@ fn check_planning(order: ElementOrder, consumer: Consumer) {
         "project/geometry/tetrahedron.step",
         GeometryInspection {
             preview_extent_m: None,
+            preview_measure: None,
             unit_evidence: Default::default(),
             shared_faces: Default::default(),
             content_digest: SourceDigest(*document.source.content_digest.bytes()),
@@ -82,6 +83,7 @@ fn check_planning(order: ElementOrder, consumer: Consumer) {
             capabilities: vec![
                 GeometryInspectionCapability::Topology,
                 GeometryInspectionCapability::PersistentIds,
+                GeometryInspectionCapability::AuthoredNames,
             ],
             exchange: None,
             resolved_units: None,

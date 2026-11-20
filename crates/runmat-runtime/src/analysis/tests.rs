@@ -42,22 +42,21 @@ use runmat_analysis_fea::{
     fea_transient_velocity_field_id, ComputeBackend, FeaProgressPhase, FeaProgressStatus,
     SolverMethod, SolverPreconditioner, FEA_FIELD_ACOUSTIC_PARTICLE_VELOCITY,
     FEA_FIELD_ACOUSTIC_PRESSURE_IMAG, FEA_FIELD_ACOUSTIC_PRESSURE_MAGNITUDE,
-    FEA_FIELD_ACOUSTIC_PRESSURE_REAL, FEA_FIELD_CFD_WALL_SHEAR_STRESS,
-    FEA_FIELD_ELECTRO_THERMAL_JOULE_HEAT, FEA_FIELD_MODAL_EIGENVALUE, FEA_FIELD_MODAL_FREQUENCY_HZ,
-    FEA_FIELD_MODAL_MODAL_MASS, FEA_FIELD_MODAL_MODAL_STIFFNESS, FEA_FIELD_MODAL_M_ORTHOGONALITY,
-    FEA_FIELD_MODAL_PARTICIPATION_FACTOR, FEA_FIELD_MODAL_RELATIVE_FREQUENCY_SEPARATION,
-    FEA_FIELD_MODAL_RESIDUAL_NORM, FEA_FIELD_STRUCTURAL_BEAM_AXIAL_FORCE,
-    FEA_FIELD_STRUCTURAL_BEAM_BENDING_MOMENT, FEA_FIELD_STRUCTURAL_BEAM_BENDING_STRESS,
-    FEA_FIELD_STRUCTURAL_BEAM_SHEAR_FORCE, FEA_FIELD_STRUCTURAL_BEAM_TORSION_MOMENT,
-    FEA_FIELD_STRUCTURAL_BEAM_TORSION_STRESS, FEA_FIELD_STRUCTURAL_DISPLACEMENT,
-    FEA_FIELD_STRUCTURAL_EQUATION_SCALE, FEA_FIELD_STRUCTURAL_NODAL_VON_MISES,
-    FEA_FIELD_STRUCTURAL_REACTION_FORCE, FEA_FIELD_STRUCTURAL_REACTION_MOMENT,
-    FEA_FIELD_STRUCTURAL_RESIDUAL_NORM, FEA_FIELD_STRUCTURAL_ROTATION,
-    FEA_FIELD_STRUCTURAL_SHELL_BENDING_MOMENT, FEA_FIELD_STRUCTURAL_SHELL_MEMBRANE_FORCE,
-    FEA_FIELD_STRUCTURAL_SHELL_TRANSVERSE_SHEAR, FEA_FIELD_STRUCTURAL_SHELL_VON_MISES,
-    FEA_FIELD_STRUCTURAL_STRAIN, FEA_FIELD_STRUCTURAL_STRAIN_ENERGY_DENSITY,
-    FEA_FIELD_STRUCTURAL_STRESS, FEA_FIELD_STRUCTURAL_TOTAL_STRAIN_ENERGY,
-    FEA_FIELD_STRUCTURAL_VON_MISES,
+    FEA_FIELD_ACOUSTIC_PRESSURE_REAL, FEA_FIELD_CFD_WALL_SHEAR_STRESS, FEA_FIELD_MODAL_EIGENVALUE,
+    FEA_FIELD_MODAL_FREQUENCY_HZ, FEA_FIELD_MODAL_MODAL_MASS, FEA_FIELD_MODAL_MODAL_STIFFNESS,
+    FEA_FIELD_MODAL_M_ORTHOGONALITY, FEA_FIELD_MODAL_PARTICIPATION_FACTOR,
+    FEA_FIELD_MODAL_RELATIVE_FREQUENCY_SEPARATION, FEA_FIELD_MODAL_RESIDUAL_NORM,
+    FEA_FIELD_STRUCTURAL_BEAM_AXIAL_FORCE, FEA_FIELD_STRUCTURAL_BEAM_BENDING_MOMENT,
+    FEA_FIELD_STRUCTURAL_BEAM_BENDING_STRESS, FEA_FIELD_STRUCTURAL_BEAM_SHEAR_FORCE,
+    FEA_FIELD_STRUCTURAL_BEAM_TORSION_MOMENT, FEA_FIELD_STRUCTURAL_BEAM_TORSION_STRESS,
+    FEA_FIELD_STRUCTURAL_DISPLACEMENT, FEA_FIELD_STRUCTURAL_EQUATION_SCALE,
+    FEA_FIELD_STRUCTURAL_NODAL_VON_MISES, FEA_FIELD_STRUCTURAL_REACTION_FORCE,
+    FEA_FIELD_STRUCTURAL_REACTION_MOMENT, FEA_FIELD_STRUCTURAL_RESIDUAL_NORM,
+    FEA_FIELD_STRUCTURAL_ROTATION, FEA_FIELD_STRUCTURAL_SHELL_BENDING_MOMENT,
+    FEA_FIELD_STRUCTURAL_SHELL_MEMBRANE_FORCE, FEA_FIELD_STRUCTURAL_SHELL_TRANSVERSE_SHEAR,
+    FEA_FIELD_STRUCTURAL_SHELL_VON_MISES, FEA_FIELD_STRUCTURAL_STRAIN,
+    FEA_FIELD_STRUCTURAL_STRAIN_ENERGY_DENSITY, FEA_FIELD_STRUCTURAL_STRESS,
+    FEA_FIELD_STRUCTURAL_TOTAL_STRAIN_ENERGY, FEA_FIELD_STRUCTURAL_VON_MISES,
 };
 use runmat_geometry_core::{
     EntityIdRange, EntityKind, GeometryAsset, GeometrySource, MeshDescriptor, MeshKind, Region,
@@ -73,10 +72,13 @@ mod admission_roots;
 mod admission_validation;
 mod nonlinear_physical;
 mod persisted_record_shape;
+mod render_topology_presence;
+mod run_record_shape;
 mod static_admission;
 mod structural_study_intent;
 mod structural_study_storage;
 mod topology_identity;
+mod static_assessments;
 mod transient_assessments;
 
 fn test_linear_workload_identity(
@@ -2774,7 +2776,6 @@ fn analysis_run_linear_static_rejects_thermo_coupling_on_structural_step() {
 #[test]
 fn analysis_run_linear_static_persists_artifacts_through_runtime_filesystem_provider() {
     let _guard = analysis_test_guard();
-    let _provider_lock = runmat_filesystem::provider_override_lock();
     storage::reset_artifact_store_for_tests();
     let sandbox_root = temp_artifact_root("artifact-provider");
     let _ = fs::remove_dir_all(&sandbox_root);
@@ -3165,13 +3166,6 @@ fn analysis_field_descriptors_include_physics_units_and_locations() {
             AnalysisFieldLocation::Mode,
         ),
         (
-            fea_modal_mode_shape_field_id(1),
-            "modal",
-            "mode_shape",
-            Some("m"),
-            AnalysisFieldLocation::Node,
-        ),
-        (
             FEA_FIELD_ACOUSTIC_PRESSURE_REAL.to_string(),
             "acoustic",
             "pressure_real",
@@ -3190,13 +3184,6 @@ fn analysis_field_descriptors_include_physics_units_and_locations() {
             "thermal",
             "temperature_gradient",
             Some("K/m"),
-            AnalysisFieldLocation::Element,
-        ),
-        (
-            FEA_FIELD_ELECTRO_THERMAL_JOULE_HEAT.to_string(),
-            "electro_thermal",
-            "joule_heat",
-            Some("W/m^3"),
             AnalysisFieldLocation::Element,
         ),
         (
@@ -3272,6 +3259,66 @@ fn analysis_field_descriptors_include_physics_units_and_locations() {
         assert_eq!(descriptor.family, family, "{field_id} family");
         assert_eq!(descriptor.unit.as_deref(), unit, "{field_id} unit");
     }
+
+    // A mode shape is a normalized eigenvector: its `Mode` ordinal fixes the unit at "1"
+    // whatever quantity it shapes, and its id implies no length.
+    let mode_shape = |field_id: String, quantity, value_shape| {
+        AnalysisFieldDescriptor::from_field(&AnalysisField::host_f64(
+            &field_id,
+            runmat_analysis_core::AnalysisFieldLayout::new(
+                quantity,
+                runmat_analysis_core::FieldLocation::Node,
+                value_shape,
+            )
+            .mode(0),
+            vec![1, 3],
+            vec![0.0; 3],
+        ))
+    };
+    for descriptor in [
+        mode_shape(
+            fea_modal_mode_shape_field_id(1),
+            runmat_analysis_core::ObservationQuantity::Displacement,
+            runmat_analysis_core::ObservationValueShape::Vector3,
+        ),
+        mode_shape(
+            "buckling.rotation_shape.1".into(),
+            runmat_analysis_core::ObservationQuantity::Rotation,
+            runmat_analysis_core::ObservationValueShape::Vector3,
+        ),
+    ] {
+        assert_eq!(
+            descriptor.unit.as_deref(),
+            Some("1"),
+            "{}",
+            descriptor.field_id
+        );
+    }
+    let acoustic_mode = AnalysisFieldDescriptor::from_field(&AnalysisField::host_f64(
+        "acoustic.mode_shape.1",
+        runmat_analysis_core::AnalysisFieldLayout::scalar(
+            runmat_analysis_core::ObservationQuantity::AcousticPressure,
+            runmat_analysis_core::FieldLocation::Node,
+        )
+        .mode(0),
+        vec![1],
+        vec![0.0],
+    ));
+    assert_eq!(acoustic_mode.unit.as_deref(), Some("1"));
+    assert_eq!(
+        AnalysisFieldDescriptor::from_field(&AnalysisField::host_f64(
+            "modal.mode_shape.1",
+            runmat_analysis_core::AnalysisFieldLayout::scalar(
+                runmat_analysis_core::ObservationQuantity::Residual,
+                runmat_analysis_core::FieldLocation::Global,
+            ),
+            vec![1],
+            vec![0.0],
+        ))
+        .unit,
+        None,
+        "the id alone no longer claims a length"
+    );
 
     let membrane = AnalysisFieldDescriptor::from_field(&AnalysisField::host_f64(
         FEA_FIELD_STRUCTURAL_SHELL_MEMBRANE_FORCE,
@@ -4156,7 +4203,7 @@ fn analysis_run_transient_rejects_electro_thermal_context_on_structural_step() {
 }
 
 #[test]
-fn analysis_results_summary_surfaces_thermo_nonlinear_metrics_rejects_unsupported_envelope() {
+fn analysis_run_nonlinear_rejects_an_unsupported_thermomechanical_envelope() {
     let _guard = analysis_test_guard();
     let mut model = sample_solid_model();
     model.sequence.steps = vec![ProcedureStep::coupled(
@@ -4680,6 +4727,16 @@ fn analysis_results_by_run_id_rejects_unknown_artifact_schema() {
     )
     .expect_err("unknown analysis artifact schemas must be rejected");
     assert_eq!(error.error_type, OperationErrorType::Internal);
+    assert!(
+        error.message.contains(
+            "this result was saved by an earlier version of RunMat (record format \
+             `analysis_run_artifact/unknown`)"
+        ) && error
+            .message
+            .contains("run the study again to regenerate it"),
+        "{}",
+        error.message
+    );
 
     storage::reset_artifact_store_for_tests();
     let _ = fs::remove_dir_all(&root);

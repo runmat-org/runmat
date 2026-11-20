@@ -128,5 +128,14 @@ pub async fn execute_owned_fea_study_step(
     let context = Rc::try_unwrap(context)
         .map_err(|_| js_error("Owned worker admission remained active after execution."))?;
     let settled = context.settle(outcome).await;
-    super::fea_lease::merge_js_lease_error(result.map(|(json, _)| json), settled.err())
+    if let Ok((json, false)) = &result {
+        // The step's own error travels in the response; show it here as well.
+        super::fea_lease::log_worker_failure("executeOwnedFeaStudyStep", &JsValue::from_str(json));
+    }
+    let result =
+        super::fea_lease::merge_js_lease_error(result.map(|(json, _)| json), settled.err());
+    if let Err(error) = &result {
+        super::fea_lease::log_worker_failure("executeOwnedFeaStudyStep", error);
+    }
+    result
 }

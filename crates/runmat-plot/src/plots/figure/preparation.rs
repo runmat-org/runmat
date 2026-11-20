@@ -10,7 +10,7 @@ pub(crate) struct PreparedAxesExtents {
 impl Figure {
     pub(crate) fn prepare_axes_extents(&mut self, viewports: &[(u32, u32)]) -> PreparedAxesExtents {
         let base = self.reference_base_bounds_by_axes();
-        let mut bounds: Vec<Option<BoundingBox>> = vec![None; self.total_axes().max(1)];
+        let mut bounds: Vec<Option<BoundingBox>> = vec![None; self.axes_count()];
         for (index, plot) in self.plots.iter_mut().enumerate() {
             if !plot.is_visible() {
                 continue;
@@ -21,6 +21,13 @@ impl Figure {
                 .copied()
                 .unwrap_or(0)
                 .min(bounds.len() - 1);
+            if self
+                .axes_metadata
+                .get(axes)
+                .is_some_and(|metadata| metadata.retired)
+            {
+                continue;
+            }
             let extent = plot.prepared_axes_extent(
                 viewports.get(axes).copied(),
                 ReferenceExtentContext {

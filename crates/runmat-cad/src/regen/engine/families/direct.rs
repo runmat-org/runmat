@@ -20,6 +20,18 @@ impl<'a, 'b> Run<'a, 'b> {
                     self.value(id, "motion.dz", dz, Dimension::LENGTH)?,
                 ],
             },
+            DirectMotion::Along {
+                direction,
+                distance,
+                reverse,
+            } => {
+                let (_, d) = self.axis(i, id, "motion.direction", direction)?;
+                let s = self.value(id, "motion.distance", distance, Dimension::LENGTH)?
+                    * if *reverse { -1.0 } else { 1.0 };
+                FaceMotion::Translate {
+                    vector: [d[0] * s, d[1] * s, d[2] * s],
+                }
+            }
             DirectMotion::Rotate { axis, angle } => {
                 let (p, d) = self.axis(i, id, "motion.axis", axis)?;
                 FaceMotion::Rotate {
@@ -56,6 +68,33 @@ impl<'a, 'b> Run<'a, 'b> {
                     ));
                 }
                 let motion = self.motion(i, id, motion)?;
+                // A planar face moved along its own plane slides in place: its neighbours have
+                // nothing to extend to, so the edit says which way to pick instead of failing in
+                // the kernel.
+                if let FaceMotion::Translate { vector } = motion {
+                    let length =
+                        (vector[0] * vector[0] + vector[1] * vector[1] + vector[2] * vector[2])
+                            .sqrt();
+                    let in_plane = length > 0.0
+                        && set.iter().all(|h| {
+                            self.face_normal(h).is_some_and(|n| {
+                                (n[0] * vector[0] + n[1] * vector[1] + n[2] * vector[2]).abs()
+                                    < 1e-9 * length.max(1.0)
+                            })
+                        });
+                    if in_plane {
+                        return Err(self.error(
+                            id,
+                            Some("motion"),
+                            DiagCode::RegenInvalid,
+                            "the direction lies in the moved faces' own plane, so they would slide in place; \
+                             pick a direction across the faces, such as a plane parallel to them (its normal) or an edge \
+                             square to them"
+                                .into(),
+                            Vec::new(),
+                        ));
+                    }
+                }
                 self.check_relations(i, id, keep, &set, &motion)?;
                 let faces = Self::operand_entities(&set, &operands);
                 Ok(op(KernelOp::MoveFaces { faces, motion }, operands, simple))

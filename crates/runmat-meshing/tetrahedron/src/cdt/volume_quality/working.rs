@@ -8,11 +8,13 @@ mod frontier;
 mod grading;
 mod output;
 mod ranking;
+mod resident;
 mod trial;
 pub(in crate::cdt) use context::PreparedLocalQuality;
 pub(in crate::cdt) use frontier::QualityCursor;
 use ranking::Ranking;
 pub(in crate::cdt) use ranking::SpectrumDelta;
+pub(in crate::cdt) use resident::quality_payload_bytes;
 pub(in crate::cdt) use trial::QualityTrial;
 type CellKey = [StableDigest; 4];
 #[cfg(test)]
@@ -134,6 +136,15 @@ impl WorkingVolumeQuality {
         )
     }
 
+    /// Heap bytes of the cells' quality records once collected into a canonical vector.
+    pub(in crate::cdt) fn handoff_bytes(&self) -> u64 {
+        self.cells.values().fold(
+            runmat_meshing_core::resident_bytes::vec_bytes::<DelaunayTetrahedronQuality>(
+                self.cells.len(),
+            ),
+            |sum, entry| sum.saturating_add(quality_payload_bytes(&entry.quality)),
+        )
+    }
     pub(in crate::cdt) fn cell_count(&self) -> usize {
         self.cells.len()
     }

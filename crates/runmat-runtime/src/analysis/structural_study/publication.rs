@@ -15,8 +15,8 @@ use crate::analysis::frequency_result::CompletedStructuralFrequencyStep;
 use crate::analysis::{
     run_operation_for_identity, storage, AnalysisExecutionStep, AnalysisRunResult,
     AnalysisSolverOptions, AnalysisStudyRunData, AnalysisStudyStatePublicationData,
-    AnalysisStudyStepRunData, QualityGate, RunStatus, ANALYSIS_RUN_STUDY_OPERATION,
-    ANALYSIS_RUN_STUDY_OP_VERSION,
+    AnalysisStudyStepRunData, QualityGate, RenderTopologyPresence, RunStatus,
+    ANALYSIS_RUN_STUDY_OPERATION, ANALYSIS_RUN_STUDY_OP_VERSION,
 };
 
 pub(in crate::analysis) mod evidence;
@@ -175,6 +175,8 @@ pub(in crate::analysis) fn complete_study_run_prepared(
     let mut entry_scoped_state_steps = BTreeSet::new();
     let mut solver_results = BTreeMap::new();
     let mut original_sources = BTreeMap::new();
+    // Loaded once, at the first frequency sweep step: the render topology its record saves.
+    let mut frequency_render_topology = None;
     for (ordinal, authored) in authored_steps.into_iter().enumerate() {
         let completed = completed_by_id
             .remove(&authored.procedure_step.step_id)
@@ -289,6 +291,17 @@ pub(in crate::analysis) fn complete_study_run_prepared(
             authored.procedure_step.step_id.clone(),
             completed.solver_result_identity,
         );
+        if run.standard_persistence.is_none() && frequency_render_topology.is_none() {
+            frequency_render_topology = Some(load_frequency_render_topology(
+                &context,
+                solver_mesh_artifact_path.as_deref(),
+            )?);
+        }
+        // The same topology staging hands to the store below, so the record states what it saves.
+        let render_topology = RenderTopologyPresence::of(match &run.standard_persistence {
+            Some(standard) => standard.render_topology.as_ref(),
+            None => frequency_render_topology.as_ref().and_then(Option::as_ref),
+        });
         let step_result = AnalysisStudyStepRunData {
             ordinal,
             procedure_step: authored.procedure_step,
@@ -305,6 +318,7 @@ pub(in crate::analysis) fn complete_study_run_prepared(
             provenance: run.provenance,
             numerical_result,
             evidence_artifact_path,
+            render_topology: Some(render_topology),
         };
         if let Some(persistence) = run.frequency_persistence {
             frequency_runs_to_persist.push((step_result.clone(), persistence));
@@ -365,22 +379,7 @@ pub(in crate::analysis) fn complete_study_run_prepared(
         &entry_scoped_state_steps,
         &staging,
     )?;
-    // A structural or acoustic frequency sweep saves the render tiles of the mesh it was
-    // solved on, as every standard run does, so its figures replay from the saved record alone.
-    let frequency_render_topology =
-        if frequency_runs_to_persist.is_empty() && acoustic_frequency_runs_to_persist.is_empty() {
-            None
-        } else {
-            solver_mesh_artifact_path
-                .as_deref()
-                .map(std::path::Path::new)
-                .map(crate::analysis::solver_mesh_artifact::load_solver_mesh_artifact)
-                .transpose()
-                .map_err(|error| {
-                    completion_error(&context, "RM.FEA.RUN_STUDY.ARTIFACT_STORE_FAILED", error)
-                })?
-                .and_then(|mesh| crate::analysis::render_topology_from_solver_mesh(Some(&mesh)))
-        };
+    let frequency_render_topology = frequency_render_topology.flatten();
     for (step, persistence) in &frequency_runs_to_persist {
         staging
             .stage_structural_frequency(
@@ -457,6 +456,7 @@ pub(in crate::analysis) fn complete_study_run_prepared(
             states: state_results,
             solver_mesh_artifact_path,
             meshing_evidence_artifact_path,
+            regions: crate::analysis::contracts::AnalysisStudyRegion::of_model(&model),
             study_fingerprint,
             operation_sequence,
             run_status,
@@ -474,6 +474,22 @@ pub(in crate::analysis) fn complete_study_run_prepared(
         store,
         definition: authored_study_digest,
     })
+}
+
+/// A structural or acoustic frequency sweep saves the render tiles of the mesh it was solved
+/// on, as every standard run does, so its figures replay from the saved record alone.
+fn load_frequency_render_topology(
+    context: &OperationContext,
+    solver_mesh_artifact_path: Option<&str>,
+) -> Result<Option<crate::analysis::AnalysisRenderTopology>, OperationErrorEnvelope> {
+    Ok(solver_mesh_artifact_path
+        .map(std::path::Path::new)
+        .map(crate::analysis::solver_mesh_artifact::load_solver_mesh_artifact)
+        .transpose()
+        .map_err(|error| {
+            completion_error(context, "RM.FEA.RUN_STUDY.ARTIFACT_STORE_FAILED", error)
+        })?
+        .and_then(|mesh| crate::analysis::render_topology_from_solver_mesh(Some(&mesh))))
 }
 
 fn worst_gate(left: QualityGate, right: QualityGate) -> QualityGate {

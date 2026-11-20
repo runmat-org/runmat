@@ -1,0 +1,3491 @@
+{
+ "schema_version": 1,
+ "measured_inputs": {
+  "sha256": "bbf50649dc5805138f95ccfbd66d20c23944b229b17da7803bedda1f3dd051af",
+  "files": 26439,
+  "encoding": "git-mode-type-blob-path-tuples-v1"
+ },
+ "accepted_inputs": {
+  "sha256": "56052a994423cb306f39bf40b8404b23f41554124330d90fee0a81d7823bfa16",
+  "files": 26444,
+  "encoding": "git-mode-type-blob-path-tuples-v1"
+ },
+ "cohorts": [
+  "driver-recovery-physics"
+ ],
+ "qualification_evidence": [
+  {
+   "path": "qualification/scientific/evidence/cargo-fmt-072-20261118.json",
+   "sha256": "2c594eafc5ccc8a2b81287db7d3a15a41ccbfd4e4bbc0e3b5b5a9e567c261ddc"
+  }
+ ],
+ "changed_inputs": [
+  {
+   "path": "crates/runmat-accelerate-api/src/wgpu_access/mod.rs",
+   "before": [
+    "100644",
+    "blob",
+    "47596777fefc4352b83c36d369e3d5b519158812"
+   ],
+   "after": [
+    "100644",
+    "blob",
+    "a361f71455b0a4955909124dcd771b92842a3ead"
+   ],
+   "reason": "Rendering only (Windows pan fix, WPAN-R a6b169e91b/ba195739b9/c3113a728b): a GPU buffer owner can record the device that made it, so a renderer on another device copies provider data once per data change. Solver arithmetic, published values and receipt measurements are unchanged; no cohort renders an interactive native surface."
+  },
+  {
+   "path": "crates/runmat-accelerate-api/src/wgpu_buffer_owner.rs",
+   "before": [
+    "100644",
+    "blob",
+    "33e10c820b1e9d3244d2a2af24c64c429b7acc7f"
+   ],
+   "after": [
+    "100644",
+    "blob",
+    "3e06ec994f95985851e864f1dac4954439a2e35d"
+   ],
+   "reason": "Rendering only (Windows pan fix, WPAN-R a6b169e91b/ba195739b9/c3113a728b): a GPU buffer owner can record the device that made it, so a renderer on another device copies provider data once per data change. Solver arithmetic, published values and receipt measurements are unchanged; no cohort renders an interactive native surface."
+  },
+  {
+   "path": "crates/runmat-analysis/core/src/lib.rs",
+   "before": [
+    "100644",
+    "blob",
+    "c24a286969d89344dc6afcb62941c915a5678ab3"
+   ],
+   "after": [
+    "100644",
+    "blob",
+    "9d90c02926ae9a2b0fffaa8b82bef69ce622e4d6"
+   ],
+   "reason": "Formatting only: cargo fmt --all with the pinned rustfmt (rustc 1.90.0) and the repository rustfmt.toml. Tokens, expressions, arguments and control flow are unchanged."
+  },
+  {
+   "path": "crates/runmat-analysis/core/src/study/output/quantity/source_names.rs",
+   "before": [
+    "100644",
+    "blob",
+    "11838501d36f2311dcb65d95597c5859ca5fd429"
+   ],
+   "after": [
+    "100644",
+    "blob",
+    "1873e966802128128f0db02c96c6ea18c3df9581"
+   ],
+   "reason": "Formatting only: cargo fmt --all with the pinned rustfmt (rustc 1.90.0) and the repository rustfmt.toml. Tokens, expressions, arguments and control flow are unchanged."
+  },
+  {
+   "path": "crates/runmat-analysis/execution/src/geometry_materialization/host.rs",
+   "before": [
+    "100644",
+    "blob",
+    "c06788d4f0f119f0e20e5e5cdf4a6df0d67ebed8"
+   ],
+   "after": [
+    "100644",
+    "blob",
+    "0ca678c29c6279ba0dc101015585491ac4c4b42e"
+   ],
+   "reason": "Formatting only: cargo fmt --all with the pinned rustfmt (rustc 1.90.0) and the repository rustfmt.toml. Tokens, expressions, arguments and control flow are unchanged."
+  },
+  {
+   "path": "crates/runmat-analysis/fea/src/adaptation/structural_recovery/qualification_tests.rs",
+   "before": [
+    "100644",
+    "blob",
+    "ce9a6232a08d423ec5bc410adad9b6a373352276"
+   ],
+   "after": [
+    "100644",
+    "blob",
+    "b557e3d5886cd30ea5536127c7d36d4c98dd6ede"
+   ],
+   "reason": "Test only: 9a71c20da8 adds #[ignore] to multigrid_static_plan_covers_the_measured_solve (G128, FEA-approved): the multigrid plan under-reports the measured solve by about 9 MB. The plan and the solver are unchanged. No cohort runs this test."
+  },
+  {
+   "path": "crates/runmat-analysis/fea/src/execution/source_field_locations_tests.rs",
+   "before": [
+    "100644",
+    "blob",
+    "f37e43350af7800fa648cb8a1fd50b651f531712"
+   ],
+   "after": [
+    "100644",
+    "blob",
+    "e2289654b1fc24d9abee200f0ad8dd0c96f1f274"
+   ],
+   "reason": "Formatting only: cargo fmt --all with the pinned rustfmt (rustc 1.90.0) and the repository rustfmt.toml. Tokens, expressions, arguments and control flow are unchanged."
+  },
+  {
+   "path": "crates/runmat-analysis/fea/src/planning/operations/qualification_tests.rs",
+   "before": [
+    "100644",
+    "blob",
+    "de633518db3341fd0c0d6be862b85f9fcdc78986"
+   ],
+   "after": [
+    "100644",
+    "blob",
+    "f68a992045b424afe09a27b9bee34182b439fa95"
+   ],
+   "reason": "Formatting only: cargo fmt --all with the pinned rustfmt (rustc 1.90.0) and the repository rustfmt.toml. Tokens, expressions, arguments and control flow are unchanged."
+  },
+  {
+   "path": "crates/runmat-analysis/fea/src/planning/operations/static_solid.rs",
+   "before": [
+    "100644",
+    "blob",
+    "fc53a46a871536db9d166cf2da16163ef8e01e27"
+   ],
+   "after": [
+    "100644",
+    "blob",
+    "84257dba57a138a851a01a98df20b820891db52d"
+   ],
+   "reason": "Formatting only: cargo fmt --all with the pinned rustfmt (rustc 1.90.0) and the repository rustfmt.toml. Tokens, expressions, arguments and control flow are unchanged."
+  },
+  {
+   "path": "crates/runmat-analysis/fea/src/progress/counter_tests.rs",
+   "before": [
+    "100644",
+    "blob",
+    "2ff1ed8e038624d85949902a9dca4e1aec731c8c"
+   ],
+   "after": [
+    "100644",
+    "blob",
+    "075c740e0994558bb7f59953f0994ddf5371ddcc"
+   ],
+   "reason": "Formatting only: cargo fmt --all with the pinned rustfmt (rustc 1.90.0) and the repository rustfmt.toml. Tokens, expressions, arguments and control flow are unchanged."
+  },
+  {
+   "path": "crates/runmat-analysis/fea/src/progress/meshing_tests.rs",
+   "before": [
+    "100644",
+    "blob",
+    "7f643d30aefa711603b4c9e22dcd0fa71b1a8588"
+   ],
+   "after": [
+    "100644",
+    "blob",
+    "4eb03d8d20d63b9f5aa0e3738de7ae565cc0403d"
+   ],
+   "reason": "Formatting only: cargo fmt --all with the pinned rustfmt (rustc 1.90.0) and the repository rustfmt.toml. Tokens, expressions, arguments and control flow are unchanged."
+  },
+  {
+   "path": "crates/runmat-analysis/fea/src/progress/rate_tests.rs",
+   "before": [
+    "100644",
+    "blob",
+    "7420613011762b8780fdab4a1d357ff75c4b974b"
+   ],
+   "after": [
+    "100644",
+    "blob",
+    "82fb5eae98f44bfd0189aa45f628a13e6e03ac54"
+   ],
+   "reason": "Formatting only: cargo fmt --all with the pinned rustfmt (rustc 1.90.0) and the repository rustfmt.toml. Tokens, expressions, arguments and control flow are unchanged."
+  },
+  {
+   "path": "crates/runmat-analysis/fea/src/progress/relay.rs",
+   "before": [
+    "100644",
+    "blob",
+    "4006bfd2fd9e6204c6108df3e822c438d8a15a6e"
+   ],
+   "after": [
+    "100644",
+    "blob",
+    "f1d519111158a5f91cd7f9f4326988dc35ef920c"
+   ],
+   "reason": "Formatting only: cargo fmt --all with the pinned rustfmt (rustc 1.90.0) and the repository rustfmt.toml. Tokens, expressions, arguments and control flow are unchanged."
+  },
+  {
+   "path": "crates/runmat-analysis/fea/src/progress/relay_tests.rs",
+   "before": [
+    "100644",
+    "blob",
+    "089e27888b627d47df7afc7c25279779d67a8140"
+   ],
+   "after": [
+    "100644",
+    "blob",
+    "fcbe67bc7175bd2eb96b2f47be8878005e101ec7"
+   ],
+   "reason": "Formatting only: cargo fmt --all with the pinned rustfmt (rustc 1.90.0) and the repository rustfmt.toml. Tokens, expressions, arguments and control flow are unchanged."
+  },
+  {
+   "path": "crates/runmat-analysis/fea/src/progress/solver_tests.rs",
+   "before": [
+    "100644",
+    "blob",
+    "13cd2f4743537aac0248b83ae6ecd7636c3d13a5"
+   ],
+   "after": [
+    "100644",
+    "blob",
+    "a686565b215c094c711baff300b275c336024dee"
+   ],
+   "reason": "Formatting only: cargo fmt --all with the pinned rustfmt (rustc 1.90.0) and the repository rustfmt.toml. Tokens, expressions, arguments and control flow are unchanged."
+  },
+  {
+   "path": "crates/runmat-analysis/fea/src/progress/trace.rs",
+   "before": [
+    "100644",
+    "blob",
+    "89920485041ebbc376ac0025e02666b9d23d13f8"
+   ],
+   "after": [
+    "100644",
+    "blob",
+    "fbbc909d429c30f9789171ffe10c85c63111ffb6"
+   ],
+   "reason": "Formatting only: cargo fmt --all with the pinned rustfmt (rustc 1.90.0) and the repository rustfmt.toml. Tokens, expressions, arguments and control flow are unchanged."
+  },
+  {
+   "path": "crates/runmat-analysis/fea/src/progress/trace_tests.rs",
+   "before": [
+    "100644",
+    "blob",
+    "43f2a5bb51ce6e1aa614a85eb5eec1fe93477e06"
+   ],
+   "after": [
+    "100644",
+    "blob",
+    "8e9016e9a4b893a0abfaec06908226e3663f3a62"
+   ],
+   "reason": "Formatting only: cargo fmt --all with the pinned rustfmt (rustc 1.90.0) and the repository rustfmt.toml. Tokens, expressions, arguments and control flow are unchanged."
+  },
+  {
+   "path": "crates/runmat-analysis/fea/src/tests/solid_static_awaited_capacity.rs",
+   "before": [
+    "100644",
+    "blob",
+    "acb0202cc22d68ea80f83981476c3f0b2b0ff164"
+   ],
+   "after": [
+    "100644",
+    "blob",
+    "a6715d9e8ab373a7d164fe7b4b0907ab2113a8e4"
+   ],
+   "reason": "Formatting only: cargo fmt --all with the pinned rustfmt (rustc 1.90.0) and the repository rustfmt.toml. Tokens, expressions, arguments and control flow are unchanged."
+  },
+  {
+   "path": "crates/runmat-analysis/language/src/semantic/geometry/authored_names.rs",
+   "before": [
+    "100644",
+    "blob",
+    "76ec166329527cdf1141fd150538d9120a61e2b2"
+   ],
+   "after": [
+    "100644",
+    "blob",
+    "c4bc9e4ecf95738a78f785cdf82461ba636dfbdd"
+   ],
+   "reason": "Formatting only: cargo fmt --all with the pinned rustfmt (rustc 1.90.0) and the repository rustfmt.toml. Tokens, expressions, arguments and control flow are unchanged."
+  },
+  {
+   "path": "crates/runmat-analysis/language/src/semantic/procedure/output/published.rs",
+   "before": [
+    "100644",
+    "blob",
+    "9c6d178bc002f2ca9c592ec3fc0292017222b9fd"
+   ],
+   "after": [
+    "100644",
+    "blob",
+    "c748622b07eefef52f882c336867aa19f1b9d986"
+   ],
+   "reason": "Formatting only: cargo fmt --all with the pinned rustfmt (rustc 1.90.0) and the repository rustfmt.toml. Tokens, expressions, arguments and control flow are unchanged."
+  },
+  {
+   "path": "crates/runmat-analysis/language/src/semantic/procedure/study.rs",
+   "before": [
+    "100644",
+    "blob",
+    "e40c5316c07806e9359214fef3b875b16790452b"
+   ],
+   "after": [
+    "100644",
+    "blob",
+    "3b7ead0ab3b8d31bcab215faa2f3059d3253933e"
+   ],
+   "reason": "Formatting only: cargo fmt --all with the pinned rustfmt (rustc 1.90.0) and the repository rustfmt.toml. Tokens, expressions, arguments and control flow are unchanged."
+  },
+  {
+   "path": "crates/runmat-analysis/language/src/semantic/units.rs",
+   "before": [
+    "100644",
+    "blob",
+    "7cec79b14b92a1f55802b2cb20164ce817b048c8"
+   ],
+   "after": [
+    "100644",
+    "blob",
+    "13cdf987c1d999e0e9be1d9b67cea59949ba6291"
+   ],
+   "reason": "Formatting only: cargo fmt --all with the pinned rustfmt (rustc 1.90.0) and the repository rustfmt.toml. Tokens, expressions, arguments and control flow are unchanged."
+  },
+  {
+   "path": "crates/runmat-analysis/language/tests/programs.rs",
+   "before": [
+    "100644",
+    "blob",
+    "b4d9039ffe975ad53345789b805192ea9c6d0142"
+   ],
+   "after": [
+    "100644",
+    "blob",
+    "34f93c0bb69f77289a44f4206eff70ae64e98984"
+   ],
+   "reason": "Formatting only: cargo fmt --all with the pinned rustfmt (rustc 1.90.0) and the repository rustfmt.toml. Tokens, expressions, arguments and control flow are unchanged."
+  },
+  {
+   "path": "crates/runmat-cad/src/assembly/configuration_rows.rs",
+   "before": [
+    "100644",
+    "blob",
+    "619611388abf72e95fc045188806da6b75ccd1d8"
+   ],
+   "after": [
+    "100644",
+    "blob",
+    "4b6bd3660b00c15327de0a9e334e6cafe2d8a42d"
+   ],
+   "reason": "Formatting only: cargo fmt --all with the pinned rustfmt (rustc 1.90.0) and the repository rustfmt.toml. Tokens, expressions, arguments and control flow are unchanged."
+  },
+  {
+   "path": "crates/runmat-cad/src/assembly/explode.rs",
+   "before": [
+    "100644",
+    "blob",
+    "2256a8fe17e3a8e020a56447b43b21921cd4fdf2"
+   ],
+   "after": [
+    "100644",
+    "blob",
+    "17dbffeb4e06d2126a0fbaa7677db5b78df90e4f"
+   ],
+   "reason": "Formatting only: cargo fmt --all with the pinned rustfmt (rustc 1.90.0) and the repository rustfmt.toml. Tokens, expressions, arguments and control flow are unchanged."
+  },
+  {
+   "path": "crates/runmat-cad/src/assembly/index.rs",
+   "before": [
+    "100644",
+    "blob",
+    "80dacb38c6010ac089ac4a0ca401f028d3e54b6c"
+   ],
+   "after": [
+    "100644",
+    "blob",
+    "6930f5ee3fd25e6b74fe817ca73c0b82361f895d"
+   ],
+   "reason": "Formatting only: cargo fmt --all with the pinned rustfmt (rustc 1.90.0) and the repository rustfmt.toml. Tokens, expressions, arguments and control flow are unchanged."
+  },
+  {
+   "path": "crates/runmat-cad/src/assembly/interface_rows.rs",
+   "before": [
+    "100644",
+    "blob",
+    "c5e6880a9eaedb84af67fae9b1c451c3ecab6f18"
+   ],
+   "after": [
+    "100644",
+    "blob",
+    "4a93656997ba454d2bd84e9b2f8a3ea6265221b2"
+   ],
+   "reason": "Formatting only: cargo fmt --all with the pinned rustfmt (rustc 1.90.0) and the repository rustfmt.toml. Tokens, expressions, arguments and control flow are unchanged."
+  },
+  {
+   "path": "crates/runmat-cad/src/assembly/mates.rs",
+   "before": [
+    "100644",
+    "blob",
+    "998eb5504675fe9e8590e58482fe8fa087674da7"
+   ],
+   "after": [
+    "100644",
+    "blob",
+    "fdbf170228b2d3bc481b8fd4b6569e1aaad3eb1a"
+   ],
+   "reason": "Formatting only: cargo fmt --all with the pinned rustfmt (rustc 1.90.0) and the repository rustfmt.toml. Tokens, expressions, arguments and control flow are unchanged."
+  },
+  {
+   "path": "crates/runmat-cad/src/assembly/motion/drag.rs",
+   "before": [
+    "100644",
+    "blob",
+    "5d2bf0473c0ca89c12c5718691ef7a96557be23b"
+   ],
+   "after": [
+    "100644",
+    "blob",
+    "b43cd421eb9198136008eae106b300aa8d835af9"
+   ],
+   "reason": "Formatting only: cargo fmt --all with the pinned rustfmt (rustc 1.90.0) and the repository rustfmt.toml. Tokens, expressions, arguments and control flow are unchanged."
+  },
+  {
+   "path": "crates/runmat-cad/src/assembly/motion/dynamics/dense.rs",
+   "before": [
+    "100644",
+    "blob",
+    "50dead8324fdb917cb77fcb11726974c39f33be3"
+   ],
+   "after": [
+    "100644",
+    "blob",
+    "fa026a4586092c4d0db498711dfc0eb01ad0c645"
+   ],
+   "reason": "Formatting only: cargo fmt --all with the pinned rustfmt (rustc 1.90.0) and the repository rustfmt.toml. Tokens, expressions, arguments and control flow are unchanged."
+  },
+  {
+   "path": "crates/runmat-cad/src/assembly/motion/dynamics/mod.rs",
+   "before": [
+    "100644",
+    "blob",
+    "971fd2675f38492f03007daad2be80466dfe6fdf"
+   ],
+   "after": [
+    "100644",
+    "blob",
+    "6b04ba5d98d97fe987d51983d1d2fca062854f84"
+   ],
+   "reason": "Formatting only: cargo fmt --all with the pinned rustfmt (rustc 1.90.0) and the repository rustfmt.toml. Tokens, expressions, arguments and control flow are unchanged."
+  },
+  {
+   "path": "crates/runmat-cad/src/assembly/motion/dynamics/model.rs",
+   "before": [
+    "100644",
+    "blob",
+    "90858da90b0fcc59cebc5193aa86e3440104f2e9"
+   ],
+   "after": [
+    "100644",
+    "blob",
+    "e94b6a1fc9873c97e279e7833f33d8a8d36b2067"
+   ],
+   "reason": "Formatting only: cargo fmt --all with the pinned rustfmt (rustc 1.90.0) and the repository rustfmt.toml. Tokens, expressions, arguments and control flow are unchanged."
+  },
+  {
+   "path": "crates/runmat-cad/src/assembly/motion/dynamics/tests.rs",
+   "before": [
+    "100644",
+    "blob",
+    "654f6e41f00998e93771766e668d55c9b4427681"
+   ],
+   "after": [
+    "100644",
+    "blob",
+    "04db3c729304948f1b3eecb198ba9ef0fac90243"
+   ],
+   "reason": "Formatting only: cargo fmt --all with the pinned rustfmt (rustc 1.90.0) and the repository rustfmt.toml. Tokens, expressions, arguments and control flow are unchanged."
+  },
+  {
+   "path": "crates/runmat-cad/src/assembly/motion/kinematics.rs",
+   "before": [
+    "100644",
+    "blob",
+    "438920447996b0890dc93ffd1d7d95d67e16c700"
+   ],
+   "after": [
+    "100644",
+    "blob",
+    "adc155d3fcc5e17f3bc01c2a74621ffd59354e10"
+   ],
+   "reason": "Formatting only: cargo fmt --all with the pinned rustfmt (rustc 1.90.0) and the repository rustfmt.toml. Tokens, expressions, arguments and control flow are unchanged."
+  },
+  {
+   "path": "crates/runmat-cad/src/assembly/operations.rs",
+   "before": [
+    "100644",
+    "blob",
+    "4fdc429f99909bd41a117ebead534dedd71d9c21"
+   ],
+   "after": [
+    "100644",
+    "blob",
+    "3b38521f95bc85b0be58107a43ee4bdc0d32147b"
+   ],
+   "reason": "Formatting only: cargo fmt --all with the pinned rustfmt (rustc 1.90.0) and the repository rustfmt.toml. Tokens, expressions, arguments and control flow are unchanged."
+  },
+  {
+   "path": "crates/runmat-cad/src/assembly/representation.rs",
+   "before": [
+    "100644",
+    "blob",
+    "b35bcce02d0c4b55491206df19c312a154e4fd30"
+   ],
+   "after": [
+    "100644",
+    "blob",
+    "e1a1ecb25aae02c189ae768d8538ad0e9c23b4d0"
+   ],
+   "reason": "Formatting only: cargo fmt --all with the pinned rustfmt (rustc 1.90.0) and the repository rustfmt.toml. Tokens, expressions, arguments and control flow are unchanged."
+  },
+  {
+   "path": "crates/runmat-cad/src/assembly/sketches.rs",
+   "before": [
+    "100644",
+    "blob",
+    "d4959727145ff59811259c1dd62bbb6db4e03b72"
+   ],
+   "after": [
+    "100644",
+    "blob",
+    "07d519604e4c37868ae398f8c80cd9eb8b8874ad"
+   ],
+   "reason": "Formatting only: cargo fmt --all with the pinned rustfmt (rustc 1.90.0) and the repository rustfmt.toml. Tokens, expressions, arguments and control flow are unchanged."
+  },
+  {
+   "path": "crates/runmat-cad/src/assembly/source.rs",
+   "before": [
+    "100644",
+    "blob",
+    "d0085c8670b206b9b83db5808db2326c0b1e064a"
+   ],
+   "after": [
+    "100644",
+    "blob",
+    "386524c9764d8b1776c4783ca133aae8b9d00b78"
+   ],
+   "reason": "Formatting only: cargo fmt --all with the pinned rustfmt (rustc 1.90.0) and the repository rustfmt.toml. Tokens, expressions, arguments and control flow are unchanged."
+  },
+  {
+   "path": "crates/runmat-cad/src/commands/context.rs",
+   "before": [
+    "100644",
+    "blob",
+    "00e366eacf628104c48921daf81ecd6092cf0ff7"
+   ],
+   "after": [
+    "100644",
+    "blob",
+    "54f5c0048a8177dfce4a65863e414514b17e438b"
+   ],
+   "reason": "Formatting only: cargo fmt --all with the pinned rustfmt (rustc 1.90.0) and the repository rustfmt.toml. Tokens, expressions, arguments and control flow are unchanged."
+  },
+  {
+   "path": "crates/runmat-cad/src/commands/mod.rs",
+   "before": [
+    "100644",
+    "blob",
+    "9b4fbef8d306fd1c986e23e0db444d3f65bbd36a"
+   ],
+   "after": [
+    "100644",
+    "blob",
+    "07fcf3102072325d6dacccbd756f03b14367f4c8"
+   ],
+   "reason": "Formatting only: cargo fmt --all with the pinned rustfmt (rustc 1.90.0) and the repository rustfmt.toml. Tokens, expressions, arguments and control flow are unchanged."
+  },
+  {
+   "path": "crates/runmat-cad/src/commands/part/mod.rs",
+   "before": [
+    "100644",
+    "blob",
+    "5612bdc804ee953489279a245d2ab227fc7c667c"
+   ],
+   "after": [
+    "100644",
+    "blob",
+    "ac8c7391510e9e9711e983f69652b13c1fa172ff"
+   ],
+   "reason": "Formatting only: cargo fmt --all with the pinned rustfmt (rustc 1.90.0) and the repository rustfmt.toml. Tokens, expressions, arguments and control flow are unchanged."
+  },
+  {
+   "path": "crates/runmat-cad/src/display.rs",
+   "before": [
+    "100644",
+    "blob",
+    "668301c0c7277cd5a5017d53875f3ee790144511"
+   ],
+   "after": [
+    "100644",
+    "blob",
+    "69d4d93dec4dd87c721d77eac8a964f552e4c56f"
+   ],
+   "reason": "Formatting only: cargo fmt --all with the pinned rustfmt (rustc 1.90.0) and the repository rustfmt.toml. Tokens, expressions, arguments and control flow are unchanged."
+  },
+  {
+   "path": "crates/runmat-cad/src/display/references.rs",
+   "before": [
+    "100644",
+    "blob",
+    "10e4e1396390d0e92b1d6b71ca06c75787c1a25d"
+   ],
+   "after": [
+    "100644",
+    "blob",
+    "66fbb2f0daa73509f9d0fba714faad79d75a50ec"
+   ],
+   "reason": "Formatting only: cargo fmt --all with the pinned rustfmt (rustc 1.90.0) and the repository rustfmt.toml. Tokens, expressions, arguments and control flow are unchanged."
+  },
+  {
+   "path": "crates/runmat-cad/src/drawing/index.rs",
+   "before": [
+    "100644",
+    "blob",
+    "53e048c2ec957e3ef81470b7cb82bf91d61d4c52"
+   ],
+   "after": [
+    "100644",
+    "blob",
+    "0530cd7a92f7caef77d3c89c23489afaa130bc0c"
+   ],
+   "reason": "Formatting only: cargo fmt --all with the pinned rustfmt (rustc 1.90.0) and the repository rustfmt.toml. Tokens, expressions, arguments and control flow are unchanged."
+  },
+  {
+   "path": "crates/runmat-cad/src/drawing/units.rs",
+   "before": [
+    "100644",
+    "blob",
+    "29104de756bc4335149c1380cfd9cf8d4ecffea4"
+   ],
+   "after": [
+    "100644",
+    "blob",
+    "8e1e9f7cb146d0aa38b475b9272d7064e34d8ece"
+   ],
+   "reason": "Formatting only: cargo fmt --all with the pinned rustfmt (rustc 1.90.0) and the repository rustfmt.toml. Tokens, expressions, arguments and control flow are unchanged."
+  },
+  {
+   "path": "crates/runmat-cad/src/index/file_state.rs",
+   "before": [
+    "100644",
+    "blob",
+    "f09e62bafc46f8d4839dd1ab37928db8a79fdd5c"
+   ],
+   "after": [
+    "100644",
+    "blob",
+    "bc7c15ab299658182262713dadc4846050d0ee56"
+   ],
+   "reason": "Formatting only: cargo fmt --all with the pinned rustfmt (rustc 1.90.0) and the repository rustfmt.toml. Tokens, expressions, arguments and control flow are unchanged."
+  },
+  {
+   "path": "crates/runmat-cad/src/index/reference_facts.rs",
+   "before": [
+    "100644",
+    "blob",
+    "e19bcd75781fc82517c8f8e404e1406eb7576dbe"
+   ],
+   "after": [
+    "100644",
+    "blob",
+    "4410a66336d00ea5d81d1d2eb32f416b856fd74b"
+   ],
+   "reason": "Formatting only: cargo fmt --all with the pinned rustfmt (rustc 1.90.0) and the repository rustfmt.toml. Tokens, expressions, arguments and control flow are unchanged."
+  },
+  {
+   "path": "crates/runmat-cad/src/model/materials.rs",
+   "before": [
+    "100644",
+    "blob",
+    "d67bf52fdd3fa3e80232d676bc8e1c6b1fa9dc99"
+   ],
+   "after": [
+    "100644",
+    "blob",
+    "0b9d2a91911caa8a1129b6f938275684637e0949"
+   ],
+   "reason": "Formatting only: cargo fmt --all with the pinned rustfmt (rustc 1.90.0) and the repository rustfmt.toml. Tokens, expressions, arguments and control flow are unchanged."
+  },
+  {
+   "path": "crates/runmat-cad/src/modules/file_form.rs",
+   "before": [
+    "100644",
+    "blob",
+    "0b872af2430411f3153c087317a55a411f604edd"
+   ],
+   "after": [
+    "100644",
+    "blob",
+    "16277e04bd16fce0e69aa5bfc0e2b878a89b2691"
+   ],
+   "reason": "Formatting only: cargo fmt --all with the pinned rustfmt (rustc 1.90.0) and the repository rustfmt.toml. Tokens, expressions, arguments and control flow are unchanged."
+  },
+  {
+   "path": "crates/runmat-cad/src/modules/file_form_tests.rs",
+   "before": [
+    "100644",
+    "blob",
+    "988270a859c976811b0484073c607f7c3ee202a8"
+   ],
+   "after": [
+    "100644",
+    "blob",
+    "97b590b4702edc50f9e7407328ba3b46ecfbcf46"
+   ],
+   "reason": "Formatting only: cargo fmt --all with the pinned rustfmt (rustc 1.90.0) and the repository rustfmt.toml. Tokens, expressions, arguments and control flow are unchanged."
+  },
+  {
+   "path": "crates/runmat-cad/src/pmi.rs",
+   "before": [
+    "100644",
+    "blob",
+    "47c7333da64b6814bb6b4e706c77fef829cdb148"
+   ],
+   "after": [
+    "100644",
+    "blob",
+    "2057cfe190b782ab712a03cbf3254b7eed54e0d8"
+   ],
+   "reason": "Formatting only: cargo fmt --all with the pinned rustfmt (rustc 1.90.0) and the repository rustfmt.toml. Tokens, expressions, arguments and control flow are unchanged."
+  },
+  {
+   "path": "crates/runmat-cad/src/refs/release_store.rs",
+   "before": [
+    "100644",
+    "blob",
+    "cb1ebaf06de12f4ff5fa87202b2d06515be273f4"
+   ],
+   "after": [
+    "100644",
+    "blob",
+    "35c30a751a3c40effa71f73b221a6cf60351771b"
+   ],
+   "reason": "Formatting only: cargo fmt --all with the pinned rustfmt (rustc 1.90.0) and the repository rustfmt.toml. Tokens, expressions, arguments and control flow are unchanged."
+  },
+  {
+   "path": "crates/runmat-cad/src/regen/engine/families/direct.rs",
+   "before": [
+    "100644",
+    "blob",
+    "0aab659f04573c8a411f44e43928e91ded9f941d"
+   ],
+   "after": [
+    "100644",
+    "blob",
+    "252ccf9eb4657c98bac43444c7de18ff263d4146"
+   ],
+   "reason": "Formatting only: cargo fmt --all with the pinned rustfmt (rustc 1.90.0) and the repository rustfmt.toml. Tokens, expressions, arguments and control flow are unchanged."
+  },
+  {
+   "path": "crates/runmat-cad/src/regen/engine/features.rs",
+   "before": [
+    "100644",
+    "blob",
+    "b34763b1c51f4c829e11954c1832299b195da892"
+   ],
+   "after": [
+    "100644",
+    "blob",
+    "628944c631c3df4f3a9fe5ebe94e2d58b934f23c"
+   ],
+   "reason": "Formatting only: cargo fmt --all with the pinned rustfmt (rustc 1.90.0) and the repository rustfmt.toml. Tokens, expressions, arguments and control flow are unchanged."
+  },
+  {
+   "path": "crates/runmat-cad/src/regen/engine/inputs.rs",
+   "before": [
+    "100644",
+    "blob",
+    "1ce3af5382e831c8295d1513c3494c44f2c9cdac"
+   ],
+   "after": [
+    "100644",
+    "blob",
+    "8bb6f0afc16281251ba02544908fab37da6cce09"
+   ],
+   "reason": "Formatting only: cargo fmt --all with the pinned rustfmt (rustc 1.90.0) and the repository rustfmt.toml. Tokens, expressions, arguments and control flow are unchanged."
+  },
+  {
+   "path": "crates/runmat-cad/src/regen/engine/profiles.rs",
+   "before": [
+    "100644",
+    "blob",
+    "beaa9c4b083fe4c809985f1233485453b77c4bc9"
+   ],
+   "after": [
+    "100644",
+    "blob",
+    "9ed9411484d1e34e428f24efb7b48154f6068599"
+   ],
+   "reason": "Formatting only: cargo fmt --all with the pinned rustfmt (rustc 1.90.0) and the repository rustfmt.toml. Tokens, expressions, arguments and control flow are unchanged."
+  },
+  {
+   "path": "crates/runmat-cad/src/syntax/arguments/families.rs",
+   "before": [
+    "100644",
+    "blob",
+    "471388d2e76ef8cd1e7e7a145d4974f6470e865a"
+   ],
+   "after": [
+    "100644",
+    "blob",
+    "42769f6d32abc40f8b8ec00542b79bb0936146d1"
+   ],
+   "reason": "Formatting only: cargo fmt --all with the pinned rustfmt (rustc 1.90.0) and the repository rustfmt.toml. Tokens, expressions, arguments and control flow are unchanged."
+  },
+  {
+   "path": "crates/runmat-cad/src/syntax/arguments/features.rs",
+   "before": [
+    "100644",
+    "blob",
+    "de760180a34789164de310d638210235a66c1253"
+   ],
+   "after": [
+    "100644",
+    "blob",
+    "d759ad9373c75345ba09eb14c4cd6b27bc099875"
+   ],
+   "reason": "Formatting only: cargo fmt --all with the pinned rustfmt (rustc 1.90.0) and the repository rustfmt.toml. Tokens, expressions, arguments and control flow are unchanged."
+  },
+  {
+   "path": "crates/runmat-cad/src/syntax/arguments/mod.rs",
+   "before": [
+    "100644",
+    "blob",
+    "731a30a7ec3065ee596d78d7d839a014c9c5141a"
+   ],
+   "after": [
+    "100644",
+    "blob",
+    "718ddf6b12e9d91dac594e4bf796be6126ca53f7"
+   ],
+   "reason": "Formatting only: cargo fmt --all with the pinned rustfmt (rustc 1.90.0) and the repository rustfmt.toml. Tokens, expressions, arguments and control flow are unchanged."
+  },
+  {
+   "path": "crates/runmat-cad/src/syntax/arguments/sketch.rs",
+   "before": [
+    "100644",
+    "blob",
+    "bdf956f52ebe6d01d2cd2541d7690219c50c0d96"
+   ],
+   "after": [
+    "100644",
+    "blob",
+    "b44ced85f0841df49cbaba8a61cdc2dacfa9d1e6"
+   ],
+   "reason": "Formatting only: cargo fmt --all with the pinned rustfmt (rustc 1.90.0) and the repository rustfmt.toml. Tokens, expressions, arguments and control flow are unchanged."
+  },
+  {
+   "path": "crates/runmat-cad/src/syntax/arguments/tests.rs",
+   "before": [
+    "100644",
+    "blob",
+    "812ff6af305a0b686b8e38121f2a6dfe16e213bd"
+   ],
+   "after": [
+    "100644",
+    "blob",
+    "0b58327892b1bd18173fe190b5853767d7333da7"
+   ],
+   "reason": "Formatting only: cargo fmt --all with the pinned rustfmt (rustc 1.90.0) and the repository rustfmt.toml. Tokens, expressions, arguments and control flow are unchanged."
+  },
+  {
+   "path": "crates/runmat-cad/src/syntax/refs.rs",
+   "before": [
+    "100644",
+    "blob",
+    "960d950f23ad309153e4117e7dc2d7db6ae263b9"
+   ],
+   "after": [
+    "100644",
+    "blob",
+    "259f14c3514a3ad3076256b3eff246bac0877e83"
+   ],
+   "reason": "Formatting only: cargo fmt --all with the pinned rustfmt (rustc 1.90.0) and the repository rustfmt.toml. Tokens, expressions, arguments and control flow are unchanged."
+  },
+  {
+   "path": "crates/runmat-cad/src/syntax/rename/follow.rs",
+   "before": [
+    "100644",
+    "blob",
+    "395cea25b65f98a1b59153eb9b78a1753016143f"
+   ],
+   "after": [
+    "100644",
+    "blob",
+    "e3d1fe104ba6ffafbcbc80b16b1189b5f063b639"
+   ],
+   "reason": "Formatting only: cargo fmt --all with the pinned rustfmt (rustc 1.90.0) and the repository rustfmt.toml. Tokens, expressions, arguments and control flow are unchanged."
+  },
+  {
+   "path": "crates/runmat-cad/src/syntax/rename/mod.rs",
+   "before": [
+    "100644",
+    "blob",
+    "09d2901beb71b0be242be138de4c3529299b5df0"
+   ],
+   "after": [
+    "100644",
+    "blob",
+    "acc8cf176d9d09b3756a7d3f8ba706dc5e88f407"
+   ],
+   "reason": "Formatting only: cargo fmt --all with the pinned rustfmt (rustc 1.90.0) and the repository rustfmt.toml. Tokens, expressions, arguments and control flow are unchanged."
+  },
+  {
+   "path": "crates/runmat-cad/tests/argument_registry.rs",
+   "before": [
+    "100644",
+    "blob",
+    "b156a6ee05b7a536c0c70a77adfa56d9ff97c7ad"
+   ],
+   "after": [
+    "100644",
+    "blob",
+    "36277d1b849e4b48114847cca19b51ab7a8bc730"
+   ],
+   "reason": "Formatting only: cargo fmt --all with the pinned rustfmt (rustc 1.90.0) and the repository rustfmt.toml. Tokens, expressions, arguments and control flow are unchanged."
+  },
+  {
+   "path": "crates/runmat-cad/tests/assembly.rs",
+   "before": [
+    "100644",
+    "blob",
+    "7857f7d851a3dd9accef0c61e9cfe3200fd6bbf1"
+   ],
+   "after": [
+    "100644",
+    "blob",
+    "7c8258c089fce0048c90ee1590ee392ed34363b3"
+   ],
+   "reason": "Formatting only: cargo fmt --all with the pinned rustfmt (rustc 1.90.0) and the repository rustfmt.toml. Tokens, expressions, arguments and control flow are unchanged."
+  },
+  {
+   "path": "crates/runmat-cad/tests/part_kinds.rs",
+   "before": [
+    "100644",
+    "blob",
+    "8c0f91cc8a068291ce986c549b972f6ae82682bd"
+   ],
+   "after": [
+    "100644",
+    "blob",
+    "f129dc798382c92ffb839fad5d477d8905918dd1"
+   ],
+   "reason": "Formatting only: cargo fmt --all with the pinned rustfmt (rustc 1.90.0) and the repository rustfmt.toml. Tokens, expressions, arguments and control flow are unchanged."
+  },
+  {
+   "path": "crates/runmat-cad/tests/pmi_drawing.rs",
+   "before": [
+    "100644",
+    "blob",
+    "ad90da01811bb408405d68112d97c8e9cf00bff3"
+   ],
+   "after": [
+    "100644",
+    "blob",
+    "cb26ae01079f1ed7f9daded537a8cf54c07b6d8c"
+   ],
+   "reason": "Formatting only: cargo fmt --all with the pinned rustfmt (rustc 1.90.0) and the repository rustfmt.toml. Tokens, expressions, arguments and control flow are unchanged."
+  },
+  {
+   "path": "crates/runmat-cad/tests/regen.rs",
+   "before": [
+    "100644",
+    "blob",
+    "6629686be4b20caf8574fbc2f56a38aad4fb9b85"
+   ],
+   "after": [
+    "100644",
+    "blob",
+    "21f2cf09f8659a99bfdedcd6e50fffec4b5595e1"
+   ],
+   "reason": "Formatting only: cargo fmt --all with the pinned rustfmt (rustc 1.90.0) and the repository rustfmt.toml. Tokens, expressions, arguments and control flow are unchanged."
+  },
+  {
+   "path": "crates/runmat-cad/tests/rename.rs",
+   "before": [
+    "100644",
+    "blob",
+    "887c96b70bd2602a46c68ea0feadea6a5dd39c34"
+   ],
+   "after": [
+    "100644",
+    "blob",
+    "e2fc4761d07fd5db093bbc9d7b39647a2f3c9220"
+   ],
+   "reason": "Formatting only: cargo fmt --all with the pinned rustfmt (rustc 1.90.0) and the repository rustfmt.toml. Tokens, expressions, arguments and control flow are unchanged."
+  },
+  {
+   "path": "crates/runmat-cad/tests/sketch_text.rs",
+   "before": [
+    "100644",
+    "blob",
+    "a10b0c09cb3af413edfba470e3d13f3b77dfe76f"
+   ],
+   "after": [
+    "100644",
+    "blob",
+    "ab6e70d4b3c7fb21643f819cb20f7da85a776ffe"
+   ],
+   "reason": "Formatting only: cargo fmt --all with the pinned rustfmt (rustc 1.90.0) and the repository rustfmt.toml. Tokens, expressions, arguments and control flow are unchanged."
+  },
+  {
+   "path": "crates/runmat-cad/tests/syntax.rs",
+   "before": [
+    "100644",
+    "blob",
+    "4b4e013a0ab02781c8002278b989e51c3418bc3f"
+   ],
+   "after": [
+    "100644",
+    "blob",
+    "108cb5c1c8bc20ad454225f847efa2756d24df3d"
+   ],
+   "reason": "Formatting only: cargo fmt --all with the pinned rustfmt (rustc 1.90.0) and the repository rustfmt.toml. Tokens, expressions, arguments and control flow are unchanged."
+  },
+  {
+   "path": "crates/runmat-cad/wasm/src/analyze/drawing_check.rs",
+   "before": [
+    "100644",
+    "blob",
+    "bb39577f5fda5a7c066cbb77f08895d126b54043"
+   ],
+   "after": [
+    "100644",
+    "blob",
+    "b74e5f21ec234fc074bd66e813c550f2821cc121"
+   ],
+   "reason": "Formatting only: cargo fmt --all with the pinned rustfmt (rustc 1.90.0) and the repository rustfmt.toml. Tokens, expressions, arguments and control flow are unchanged."
+  },
+  {
+   "path": "crates/runmat-cad/wasm/src/analyze/fit_tests.rs",
+   "before": [
+    "100644",
+    "blob",
+    "f152fb948d41cedb62df2cce9f473b54e9966906"
+   ],
+   "after": [
+    "100644",
+    "blob",
+    "c12863d22d0f4f4392b9d92268144bec5c9fe035"
+   ],
+   "reason": "Formatting only: cargo fmt --all with the pinned rustfmt (rustc 1.90.0) and the repository rustfmt.toml. Tokens, expressions, arguments and control flow are unchanged."
+  },
+  {
+   "path": "crates/runmat-cad/wasm/src/analyze/holes.rs",
+   "before": [
+    "100644",
+    "blob",
+    "8448f8934b6d1ecad433e07abcf32c54ce253d87"
+   ],
+   "after": [
+    "100644",
+    "blob",
+    "0fbaf248038bd00e2d2d9a95b9ecfd7c4f65afca"
+   ],
+   "reason": "Formatting only: cargo fmt --all with the pinned rustfmt (rustc 1.90.0) and the repository rustfmt.toml. Tokens, expressions, arguments and control flow are unchanged."
+  },
+  {
+   "path": "crates/runmat-cad/wasm/src/analyze/interfaces.rs",
+   "before": [
+    "100644",
+    "blob",
+    "5fb62a01f00225117e4247eb450f71d1b963e68b"
+   ],
+   "after": [
+    "100644",
+    "blob",
+    "7fecbe1c2fcb8027f1eeed224c5a1f7aea20d337"
+   ],
+   "reason": "Formatting only: cargo fmt --all with the pinned rustfmt (rustc 1.90.0) and the repository rustfmt.toml. Tokens, expressions, arguments and control flow are unchanged."
+  },
+  {
+   "path": "crates/runmat-cad/wasm/src/analyze/motion_collision.rs",
+   "before": [
+    "100644",
+    "blob",
+    "876730a9a8467581f6f56dd71df8432a34d50566"
+   ],
+   "after": [
+    "100644",
+    "blob",
+    "a7da3afc2e092b1a5c8cd91ac5dc5a6e499f5c3c"
+   ],
+   "reason": "Formatting only: cargo fmt --all with the pinned rustfmt (rustc 1.90.0) and the repository rustfmt.toml. Tokens, expressions, arguments and control flow are unchanged."
+  },
+  {
+   "path": "crates/runmat-cad/wasm/src/analyze/tests.rs",
+   "before": [
+    "100644",
+    "blob",
+    "4557e53692dfdc8e84fd5d777b93a433075e5241"
+   ],
+   "after": [
+    "100644",
+    "blob",
+    "7f0f0494b22326d12cdaad47254f3f58d64abcd3"
+   ],
+   "reason": "Formatting only: cargo fmt --all with the pinned rustfmt (rustc 1.90.0) and the repository rustfmt.toml. Tokens, expressions, arguments and control flow are unchanged."
+  },
+  {
+   "path": "crates/runmat-cad/wasm/src/drawing.rs",
+   "before": [
+    "100644",
+    "blob",
+    "0f15d9df7605018483854b30d08ae5c8794e5cc4"
+   ],
+   "after": [
+    "100644",
+    "blob",
+    "6c93101514c9fec47a315419ac2fc34538f4a349"
+   ],
+   "reason": "Formatting only: cargo fmt --all with the pinned rustfmt (rustc 1.90.0) and the repository rustfmt.toml. Tokens, expressions, arguments and control flow are unchanged."
+  },
+  {
+   "path": "crates/runmat-cad/wasm/src/drawing/layout/callouts.rs",
+   "before": [
+    "100644",
+    "blob",
+    "a6f77531cbcb2ba23394625309bdc4ac5aca79ca"
+   ],
+   "after": [
+    "100644",
+    "blob",
+    "2b0f00533e03077b88ad8bdb68b1612f33b5965a"
+   ],
+   "reason": "Formatting only: cargo fmt --all with the pinned rustfmt (rustc 1.90.0) and the repository rustfmt.toml. Tokens, expressions, arguments and control flow are unchanged."
+  },
+  {
+   "path": "crates/runmat-cad/wasm/src/drawing/layout/dims.rs",
+   "before": [
+    "100644",
+    "blob",
+    "dba5f216286782c84d299e89bebde674d51dab3b"
+   ],
+   "after": [
+    "100644",
+    "blob",
+    "8643f116ea795ffb68b486051e9a32cf24226b0c"
+   ],
+   "reason": "Formatting only: cargo fmt --all with the pinned rustfmt (rustc 1.90.0) and the repository rustfmt.toml. Tokens, expressions, arguments and control flow are unchanged."
+  },
+  {
+   "path": "crates/runmat-cad/wasm/src/drawing/layout/lining.rs",
+   "before": [
+    "100644",
+    "blob",
+    "68bd8042e02a6e1d89d6aac5a44fda139cb5d192"
+   ],
+   "after": [
+    "100644",
+    "blob",
+    "cb309b7acd861af0b1efed142c53b5ff80f12071"
+   ],
+   "reason": "Formatting only: cargo fmt --all with the pinned rustfmt (rustc 1.90.0) and the repository rustfmt.toml. Tokens, expressions, arguments and control flow are unchanged."
+  },
+  {
+   "path": "crates/runmat-cad/wasm/src/drawing/layout/marks.rs",
+   "before": [
+    "100644",
+    "blob",
+    "d9486e4b15b91597facce0d016a5221cc449dc48"
+   ],
+   "after": [
+    "100644",
+    "blob",
+    "c470b5390d8a9bd58194181db8a9ac1d89a59c3d"
+   ],
+   "reason": "Formatting only: cargo fmt --all with the pinned rustfmt (rustc 1.90.0) and the repository rustfmt.toml. Tokens, expressions, arguments and control flow are unchanged."
+  },
+  {
+   "path": "crates/runmat-cad/wasm/src/drawing/layout/notes.rs",
+   "before": [
+    "100644",
+    "blob",
+    "0cb788b23f52580f984260ce05e06dfd4b5d929a"
+   ],
+   "after": [
+    "100644",
+    "blob",
+    "c6e88f75dd0c3338061ea58f5e3f036a1cecca6b"
+   ],
+   "reason": "Formatting only: cargo fmt --all with the pinned rustfmt (rustc 1.90.0) and the repository rustfmt.toml. Tokens, expressions, arguments and control flow are unchanged."
+  },
+  {
+   "path": "crates/runmat-cad/wasm/src/drawing/layout/notes_tests.rs",
+   "before": [
+    "100644",
+    "blob",
+    "94bfbd6e88519a98d40cdcd818aa286df11e0534"
+   ],
+   "after": [
+    "100644",
+    "blob",
+    "4bf9470576f75dcf86d6e5793a61d77615119aa2"
+   ],
+   "reason": "Formatting only: cargo fmt --all with the pinned rustfmt (rustc 1.90.0) and the repository rustfmt.toml. Tokens, expressions, arguments and control flow are unchanged."
+  },
+  {
+   "path": "crates/runmat-cad/wasm/src/drawing/layout/plan_marks.rs",
+   "before": [
+    "100644",
+    "blob",
+    "79ae4a2b1b401c7976e7181bd20ee3599f0b9e6b"
+   ],
+   "after": [
+    "100644",
+    "blob",
+    "fccfbf4701f02ca2cd063fef06323bc1d9b42e5f"
+   ],
+   "reason": "Formatting only: cargo fmt --all with the pinned rustfmt (rustc 1.90.0) and the repository rustfmt.toml. Tokens, expressions, arguments and control flow are unchanged."
+  },
+  {
+   "path": "crates/runmat-cad/wasm/src/drawing/layout/tables.rs",
+   "before": [
+    "100644",
+    "blob",
+    "82a2d49a3ea30bbc29f693db8f63f10cf0f160a8"
+   ],
+   "after": [
+    "100644",
+    "blob",
+    "83a886bda99e89e1fe4c49cd69d4f0b08ad614e1"
+   ],
+   "reason": "Formatting only: cargo fmt --all with the pinned rustfmt (rustc 1.90.0) and the repository rustfmt.toml. Tokens, expressions, arguments and control flow are unchanged."
+  },
+  {
+   "path": "crates/runmat-cad/wasm/src/drawing/layout/views.rs",
+   "before": [
+    "100644",
+    "blob",
+    "b189b368ad55e40a9e5f29919b1c77337df6eaee"
+   ],
+   "after": [
+    "100644",
+    "blob",
+    "f7e94d93138ab12d7fc86c3181088a103f995488"
+   ],
+   "reason": "Formatting only: cargo fmt --all with the pinned rustfmt (rustc 1.90.0) and the repository rustfmt.toml. Tokens, expressions, arguments and control flow are unchanged."
+  },
+  {
+   "path": "crates/runmat-cad/wasm/src/drawing/occurrences.rs",
+   "before": [
+    "100644",
+    "blob",
+    "bf3d09fcfb95b01cf1acdab58436371b751bb306"
+   ],
+   "after": [
+    "100644",
+    "blob",
+    "04ca10c8ebbd86d7d5cf55659d8182311611c18e"
+   ],
+   "reason": "Formatting only: cargo fmt --all with the pinned rustfmt (rustc 1.90.0) and the repository rustfmt.toml. Tokens, expressions, arguments and control flow are unchanged."
+  },
+  {
+   "path": "crates/runmat-cad/wasm/src/drawing/tests.rs",
+   "before": [
+    "100644",
+    "blob",
+    "b524b63964c85e919941ce2e7a1d8ab0908d2f22"
+   ],
+   "after": [
+    "100644",
+    "blob",
+    "9d80a6575e5ba3d0da85bed32863206b8c5a79df"
+   ],
+   "reason": "Formatting only: cargo fmt --all with the pinned rustfmt (rustc 1.90.0) and the repository rustfmt.toml. Tokens, expressions, arguments and control flow are unchanged."
+  },
+  {
+   "path": "crates/runmat-cad/wasm/src/drawing/values.rs",
+   "before": [
+    "100644",
+    "blob",
+    "a0ecf515a0ee31d73b8ef1088b8c54857903c852"
+   ],
+   "after": [
+    "100644",
+    "blob",
+    "6aed9be5e590c9c45e16300c0691d04c90516927"
+   ],
+   "reason": "Formatting only: cargo fmt --all with the pinned rustfmt (rustc 1.90.0) and the repository rustfmt.toml. Tokens, expressions, arguments and control flow are unchanged."
+  },
+  {
+   "path": "crates/runmat-cad/wasm/src/drawing_edits/items.rs",
+   "before": [
+    "100644",
+    "blob",
+    "50b73f3210a31387cd8c99afbf6cbb3402603fea"
+   ],
+   "after": [
+    "100644",
+    "blob",
+    "dd4f84f658a40fa9cad305bb20f08b244f225c49"
+   ],
+   "reason": "Formatting only: cargo fmt --all with the pinned rustfmt (rustc 1.90.0) and the repository rustfmt.toml. Tokens, expressions, arguments and control flow are unchanged."
+  },
+  {
+   "path": "crates/runmat-cad/wasm/src/drawing_edits/pmi.rs",
+   "before": [
+    "100644",
+    "blob",
+    "d97e1bfcd3b3fcf666325b45b9991bd8496a46ea"
+   ],
+   "after": [
+    "100644",
+    "blob",
+    "e1a773f158ee1d496a1d24a70a90bc11fa61c42e"
+   ],
+   "reason": "Formatting only: cargo fmt --all with the pinned rustfmt (rustc 1.90.0) and the repository rustfmt.toml. Tokens, expressions, arguments and control flow are unchanged."
+  },
+  {
+   "path": "crates/runmat-cad/wasm/src/drawing_edits/tests.rs",
+   "before": [
+    "100644",
+    "blob",
+    "d1c312ce4150a299a392b56e7ab871862cb83a62"
+   ],
+   "after": [
+    "100644",
+    "blob",
+    "12609f3b04059b33028a5e99b9eec20eb2ec9e5d"
+   ],
+   "reason": "Formatting only: cargo fmt --all with the pinned rustfmt (rustc 1.90.0) and the repository rustfmt.toml. Tokens, expressions, arguments and control flow are unchanged."
+  },
+  {
+   "path": "crates/runmat-cad/wasm/src/edit/assembly.rs",
+   "before": [
+    "100644",
+    "blob",
+    "22f1b8c251178d1ca3d31fe62bed58e2cfe66ca3"
+   ],
+   "after": [
+    "100644",
+    "blob",
+    "403384f006de0ea957961368b31fa7f798bcb24a"
+   ],
+   "reason": "Formatting only: cargo fmt --all with the pinned rustfmt (rustc 1.90.0) and the repository rustfmt.toml. Tokens, expressions, arguments and control flow are unchanged."
+  },
+  {
+   "path": "crates/runmat-cad/wasm/src/edit/assembly/anchors.rs",
+   "before": [
+    "100644",
+    "blob",
+    "f8e526bb3dee74620b8f948510e2cf27c6da4b9e"
+   ],
+   "after": [
+    "100644",
+    "blob",
+    "51858f545d41c4f40ed0955c2c34a242142cc496"
+   ],
+   "reason": "Formatting only: cargo fmt --all with the pinned rustfmt (rustc 1.90.0) and the repository rustfmt.toml. Tokens, expressions, arguments and control flow are unchanged."
+  },
+  {
+   "path": "crates/runmat-cad/wasm/src/edit/assembly/configurations_tests.rs",
+   "before": [
+    "100644",
+    "blob",
+    "58e030cfc5c61d4726bff36d786e1880f4848795"
+   ],
+   "after": [
+    "100644",
+    "blob",
+    "08a0f74603b97b4c3facf9433afc13c41306975f"
+   ],
+   "reason": "Formatting only: cargo fmt --all with the pinned rustfmt (rustc 1.90.0) and the repository rustfmt.toml. Tokens, expressions, arguments and control flow are unchanged."
+  },
+  {
+   "path": "crates/runmat-cad/wasm/src/edit/assembly/configure_tests.rs",
+   "before": [
+    "100644",
+    "blob",
+    "a0a8e2515e7615f47e0734958bbf5c6259766131"
+   ],
+   "after": [
+    "100644",
+    "blob",
+    "2cb43003db591d84ae9bcd35c72ce0c0e954b3e7"
+   ],
+   "reason": "Formatting only: cargo fmt --all with the pinned rustfmt (rustc 1.90.0) and the repository rustfmt.toml. Tokens, expressions, arguments and control flow are unchanged."
+  },
+  {
+   "path": "crates/runmat-cad/wasm/src/edit/assembly/connector_tests.rs",
+   "before": [
+    "100644",
+    "blob",
+    "dad940763a79c635c84f6ce014ec8e9f81295a86"
+   ],
+   "after": [
+    "100644",
+    "blob",
+    "d087b38d75b4053b33f7e966a988a5086bdfcaf0"
+   ],
+   "reason": "Formatting only: cargo fmt --all with the pinned rustfmt (rustc 1.90.0) and the repository rustfmt.toml. Tokens, expressions, arguments and control flow are unchanged."
+  },
+  {
+   "path": "crates/runmat-cad/wasm/src/edit/assembly/drag.rs",
+   "before": [
+    "100644",
+    "blob",
+    "fa20df507803bb868f6464ff345fa2143104ecf5"
+   ],
+   "after": [
+    "100644",
+    "blob",
+    "22aa86318a0ba8ca1815cb1390a75db40c1d64e0"
+   ],
+   "reason": "Formatting only: cargo fmt --all with the pinned rustfmt (rustc 1.90.0) and the repository rustfmt.toml. Tokens, expressions, arguments and control flow are unchanged."
+  },
+  {
+   "path": "crates/runmat-cad/wasm/src/edit/assembly/drag_tests.rs",
+   "before": [
+    "100644",
+    "blob",
+    "0dfe0c2b04f7761d28bd0d7f9732f717be9bc004"
+   ],
+   "after": [
+    "100644",
+    "blob",
+    "35450a52e70b96259d30c17fd7625e80cdc13bec"
+   ],
+   "reason": "Formatting only: cargo fmt --all with the pinned rustfmt (rustc 1.90.0) and the repository rustfmt.toml. Tokens, expressions, arguments and control flow are unchanged."
+  },
+  {
+   "path": "crates/runmat-cad/wasm/src/edit/assembly/envelopes.rs",
+   "before": [
+    "100644",
+    "blob",
+    "7d1eff5dda45308c484db82e5ebe84e42b0621d6"
+   ],
+   "after": [
+    "100644",
+    "blob",
+    "a2f77be0eb05424033f7bc794761486a7fce6b77"
+   ],
+   "reason": "Formatting only: cargo fmt --all with the pinned rustfmt (rustc 1.90.0) and the repository rustfmt.toml. Tokens, expressions, arguments and control flow are unchanged."
+  },
+  {
+   "path": "crates/runmat-cad/wasm/src/edit/assembly/envelopes_tests.rs",
+   "before": [
+    "100644",
+    "blob",
+    "b5d4d1f8f83ea63b3e1ff142b857056c07849548"
+   ],
+   "after": [
+    "100644",
+    "blob",
+    "3c9ed2f95a0268a5807e228d70d3956bdea525c5"
+   ],
+   "reason": "Formatting only: cargo fmt --all with the pinned rustfmt (rustc 1.90.0) and the repository rustfmt.toml. Tokens, expressions, arguments and control flow are unchanged."
+  },
+  {
+   "path": "crates/runmat-cad/wasm/src/edit/assembly/motion.rs",
+   "before": [
+    "100644",
+    "blob",
+    "fd441f2ca72b324e94c7aa3b8c879d5898645b4b"
+   ],
+   "after": [
+    "100644",
+    "blob",
+    "874282a396547a5040cb22fea91055782f3d59a0"
+   ],
+   "reason": "Formatting only: cargo fmt --all with the pinned rustfmt (rustc 1.90.0) and the repository rustfmt.toml. Tokens, expressions, arguments and control flow are unchanged."
+  },
+  {
+   "path": "crates/runmat-cad/wasm/src/edit/assembly/motion_tests.rs",
+   "before": [
+    "100644",
+    "blob",
+    "0642e0b2a22855228941442a5c73f2b593332a85"
+   ],
+   "after": [
+    "100644",
+    "blob",
+    "fd6bbe7f2907b3596a1eb809f0a6ce8b76b30c40"
+   ],
+   "reason": "Formatting only: cargo fmt --all with the pinned rustfmt (rustc 1.90.0) and the repository rustfmt.toml. Tokens, expressions, arguments and control flow are unchanged."
+  },
+  {
+   "path": "crates/runmat-cad/wasm/src/edit/assembly/operation.rs",
+   "before": [
+    "100644",
+    "blob",
+    "e0d4d2a1e73a1d896ef0b461f13314e044f5562a"
+   ],
+   "after": [
+    "100644",
+    "blob",
+    "e7c029ed94a4eebd4185b83abfe31530c0bc9e56"
+   ],
+   "reason": "Formatting only: cargo fmt --all with the pinned rustfmt (rustc 1.90.0) and the repository rustfmt.toml. Tokens, expressions, arguments and control flow are unchanged."
+  },
+  {
+   "path": "crates/runmat-cad/wasm/src/edit/assembly/operation_tests.rs",
+   "before": [
+    "100644",
+    "blob",
+    "d5b43d55b02502fd38b03189f8eb46d4219d1938"
+   ],
+   "after": [
+    "100644",
+    "blob",
+    "74eadde1018a2c1dbe3caf44817928547f787574"
+   ],
+   "reason": "Formatting only: cargo fmt --all with the pinned rustfmt (rustc 1.90.0) and the repository rustfmt.toml. Tokens, expressions, arguments and control flow are unchanged."
+  },
+  {
+   "path": "crates/runmat-cad/wasm/src/edit/assembly/pins.rs",
+   "before": [
+    "100644",
+    "blob",
+    "88d9c72d559cedb03655b2cd988c5e41834909a6"
+   ],
+   "after": [
+    "100644",
+    "blob",
+    "d0fe247edb86d483af9c379f5c69fb458adbe56e"
+   ],
+   "reason": "Formatting only: cargo fmt --all with the pinned rustfmt (rustc 1.90.0) and the repository rustfmt.toml. Tokens, expressions, arguments and control flow are unchanged."
+  },
+  {
+   "path": "crates/runmat-cad/wasm/src/edit/assembly/pins_tests.rs",
+   "before": [
+    "100644",
+    "blob",
+    "1d5ed0fb59759ca4dcddb726ba13e23e581edb84"
+   ],
+   "after": [
+    "100644",
+    "blob",
+    "d5f394672e177713791d4c78e2d6d417ae3e2753"
+   ],
+   "reason": "Formatting only: cargo fmt --all with the pinned rustfmt (rustc 1.90.0) and the repository rustfmt.toml. Tokens, expressions, arguments and control flow are unchanged."
+  },
+  {
+   "path": "crates/runmat-cad/wasm/src/edit/assembly/properties.rs",
+   "before": [
+    "100644",
+    "blob",
+    "9d61e361911eb987a863aa172702dabf7cdd5fc0"
+   ],
+   "after": [
+    "100644",
+    "blob",
+    "c26ba239bdc595db698ccef2eac19f0a476a430b"
+   ],
+   "reason": "Formatting only: cargo fmt --all with the pinned rustfmt (rustc 1.90.0) and the repository rustfmt.toml. Tokens, expressions, arguments and control flow are unchanged."
+  },
+  {
+   "path": "crates/runmat-cad/wasm/src/edit/assembly/publishes.rs",
+   "before": [
+    "100644",
+    "blob",
+    "f75e4c442ac8ea926a9382f25799e86879c50342"
+   ],
+   "after": [
+    "100644",
+    "blob",
+    "b332d330b47960dd111dcd88157afd9dc640cee9"
+   ],
+   "reason": "Formatting only: cargo fmt --all with the pinned rustfmt (rustc 1.90.0) and the repository rustfmt.toml. Tokens, expressions, arguments and control flow are unchanged."
+  },
+  {
+   "path": "crates/runmat-cad/wasm/src/edit/assembly/settings.rs",
+   "before": [
+    "100644",
+    "blob",
+    "a9e42b9fa3a32bd5385c774b01267587b579017d"
+   ],
+   "after": [
+    "100644",
+    "blob",
+    "287d983c29c41042a263f6d8927189ff751222cb"
+   ],
+   "reason": "Formatting only: cargo fmt --all with the pinned rustfmt (rustc 1.90.0) and the repository rustfmt.toml. Tokens, expressions, arguments and control flow are unchanged."
+  },
+  {
+   "path": "crates/runmat-cad/wasm/src/edit/assembly/skeleton_tests.rs",
+   "before": [
+    "100644",
+    "blob",
+    "1b3066cae37629d1526505d9a3cb22bf69ca7b5a"
+   ],
+   "after": [
+    "100644",
+    "blob",
+    "beab9944852ed8812fa1b2d9472747f66c8d9772"
+   ],
+   "reason": "Formatting only: cargo fmt --all with the pinned rustfmt (rustc 1.90.0) and the repository rustfmt.toml. Tokens, expressions, arguments and control flow are unchanged."
+  },
+  {
+   "path": "crates/runmat-cad/wasm/src/edit/assembly/sketch.rs",
+   "before": [
+    "100644",
+    "blob",
+    "a5725c04a203b9296486174474ba9cf7fa9e28ea"
+   ],
+   "after": [
+    "100644",
+    "blob",
+    "4d6ae7dafdb8d2ea92286c28978f637c9896e365"
+   ],
+   "reason": "Formatting only: cargo fmt --all with the pinned rustfmt (rustc 1.90.0) and the repository rustfmt.toml. Tokens, expressions, arguments and control flow are unchanged."
+  },
+  {
+   "path": "crates/runmat-cad/wasm/src/edit/assembly/structure.rs",
+   "before": [
+    "100644",
+    "blob",
+    "ff0b73ade2fc109daafffdd015226e6a525b6817"
+   ],
+   "after": [
+    "100644",
+    "blob",
+    "70755b9135e6aef8335a1f59fce97806b80e9cb1"
+   ],
+   "reason": "Formatting only: cargo fmt --all with the pinned rustfmt (rustc 1.90.0) and the repository rustfmt.toml. Tokens, expressions, arguments and control flow are unchanged."
+  },
+  {
+   "path": "crates/runmat-cad/wasm/src/edit/assembly/to_fea.rs",
+   "before": [
+    "100644",
+    "blob",
+    "02b4fcea888f64ed4053b4ab90c2f78bd0298f5d"
+   ],
+   "after": [
+    "100644",
+    "blob",
+    "c85676197119e915a4960b39fc49549832964f82"
+   ],
+   "reason": "Formatting only: cargo fmt --all with the pinned rustfmt (rustc 1.90.0) and the repository rustfmt.toml. Tokens, expressions, arguments and control flow are unchanged."
+  },
+  {
+   "path": "crates/runmat-cad/wasm/src/edit/assembly/to_fea_tests.rs",
+   "before": [
+    "100644",
+    "blob",
+    "033129e2907c0a425257d29279f1c624a0287ca5"
+   ],
+   "after": [
+    "100644",
+    "blob",
+    "5491ef1491876c2b80aad404315079f2bfe16ef7"
+   ],
+   "reason": "Formatting only: cargo fmt --all with the pinned rustfmt (rustc 1.90.0) and the repository rustfmt.toml. Tokens, expressions, arguments and control flow are unchanged."
+  },
+  {
+   "path": "crates/runmat-cad/wasm/src/edit/history.rs",
+   "before": [
+    "100644",
+    "blob",
+    "6e8eac35f1f2d1181c8258c409af58053be49d93"
+   ],
+   "after": [
+    "100644",
+    "blob",
+    "0a57906a4f722eafb4d34e057e90e2a6b808c9a4"
+   ],
+   "reason": "Formatting only: cargo fmt --all with the pinned rustfmt (rustc 1.90.0) and the repository rustfmt.toml. Tokens, expressions, arguments and control flow are unchanged."
+  },
+  {
+   "path": "crates/runmat-cad/wasm/src/edit/history/tests.rs",
+   "before": [
+    "100644",
+    "blob",
+    "6a4b55041465675efb47f55e813662264a9d1150"
+   ],
+   "after": [
+    "100644",
+    "blob",
+    "afdcf341da19b1f6bd165a04557ed196318e2b80"
+   ],
+   "reason": "Formatting only: cargo fmt --all with the pinned rustfmt (rustc 1.90.0) and the repository rustfmt.toml. Tokens, expressions, arguments and control flow are unchanged."
+  },
+  {
+   "path": "crates/runmat-cad/wasm/src/edit/release.rs",
+   "before": [
+    "100644",
+    "blob",
+    "8e290d7ccfa8b117b817769dc5f46378105049ae"
+   ],
+   "after": [
+    "100644",
+    "blob",
+    "f831394926a71a3531607a81561d6bde69c38c8c"
+   ],
+   "reason": "Formatting only: cargo fmt --all with the pinned rustfmt (rustc 1.90.0) and the repository rustfmt.toml. Tokens, expressions, arguments and control flow are unchanged."
+  },
+  {
+   "path": "crates/runmat-cad/wasm/src/edit/sketch/tests.rs",
+   "before": [
+    "100644",
+    "blob",
+    "33a891ce33b0eee06aea12965cca9e8164c135cb"
+   ],
+   "after": [
+    "100644",
+    "blob",
+    "c66017eec718ab1a00eae04e5b30fa30bcc9b5fc"
+   ],
+   "reason": "Formatting only: cargo fmt --all with the pinned rustfmt (rustc 1.90.0) and the repository rustfmt.toml. Tokens, expressions, arguments and control flow are unchanged."
+  },
+  {
+   "path": "crates/runmat-cad/wasm/src/edit/sketch/text.rs",
+   "before": [
+    "100644",
+    "blob",
+    "7aeac298970cb175dedcdecaacbd8d736160a043"
+   ],
+   "after": [
+    "100644",
+    "blob",
+    "b03a5688669b9a0b735b2f1b95ce3ba44dcc6378"
+   ],
+   "reason": "Formatting only: cargo fmt --all with the pinned rustfmt (rustc 1.90.0) and the repository rustfmt.toml. Tokens, expressions, arguments and control flow are unchanged."
+  },
+  {
+   "path": "crates/runmat-cad/wasm/src/edit/sketch/text_tests.rs",
+   "before": [
+    "100644",
+    "blob",
+    "8c63bed1a8d40b86d2b063aa2df79665a6c512a7"
+   ],
+   "after": [
+    "100644",
+    "blob",
+    "a0958ec1e8fa878694b1bbffba08fa52f4599131"
+   ],
+   "reason": "Formatting only: cargo fmt --all with the pinned rustfmt (rustc 1.90.0) and the repository rustfmt.toml. Tokens, expressions, arguments and control flow are unchanged."
+  },
+  {
+   "path": "crates/runmat-cad/wasm/src/evaluate.rs",
+   "before": [
+    "100644",
+    "blob",
+    "2ed3dc673216ca5297618ff7a086e8af627b212c"
+   ],
+   "after": [
+    "100644",
+    "blob",
+    "ba33f5d922107619f5cc5d57b4dbe248d27871b5"
+   ],
+   "reason": "Formatting only: cargo fmt --all with the pinned rustfmt (rustc 1.90.0) and the repository rustfmt.toml. Tokens, expressions, arguments and control flow are unchanged."
+  },
+  {
+   "path": "crates/runmat-cad/wasm/src/exchange.rs",
+   "before": [
+    "100644",
+    "blob",
+    "a6e4ecb3c1215a6095d5164ec90c0c0f8d6c4ece"
+   ],
+   "after": [
+    "100644",
+    "blob",
+    "0948237a4e63d7ab1bdc670cb302123655113df8"
+   ],
+   "reason": "Formatting only: cargo fmt --all with the pinned rustfmt (rustc 1.90.0) and the repository rustfmt.toml. Tokens, expressions, arguments and control flow are unchanged."
+  },
+  {
+   "path": "crates/runmat-cad/wasm/src/exchange/study.rs",
+   "before": [
+    "100644",
+    "blob",
+    "bf3a7eb904a44f3a169da17a3577a7095d1d3df8"
+   ],
+   "after": [
+    "100644",
+    "blob",
+    "553e102444bc59925f6b7986c4ee3bb39695b8ca"
+   ],
+   "reason": "Formatting only: cargo fmt --all with the pinned rustfmt (rustc 1.90.0) and the repository rustfmt.toml. Tokens, expressions, arguments and control flow are unchanged."
+  },
+  {
+   "path": "crates/runmat-cad/wasm/src/features.rs",
+   "before": [
+    "100644",
+    "blob",
+    "aa84d4e66bdf3fd2ad4520e64085e7c4a145044c"
+   ],
+   "after": [
+    "100644",
+    "blob",
+    "d50fbe74dbd3fa5c60f33bd566c85d2e2450a270"
+   ],
+   "reason": "Formatting only: cargo fmt --all with the pinned rustfmt (rustc 1.90.0) and the repository rustfmt.toml. Tokens, expressions, arguments and control flow are unchanged."
+  },
+  {
+   "path": "crates/runmat-cad/wasm/src/features/panel_inputs_tests.rs",
+   "before": [
+    "100644",
+    "blob",
+    "65d3340f01c4ca15dbf63c92dc76cc2a1b243aff"
+   ],
+   "after": [
+    "100644",
+    "blob",
+    "48475156ac6e50a76fe2761612d78d63754afcac"
+   ],
+   "reason": "Formatting only: cargo fmt --all with the pinned rustfmt (rustc 1.90.0) and the repository rustfmt.toml. Tokens, expressions, arguments and control flow are unchanged."
+  },
+  {
+   "path": "crates/runmat-cad/wasm/src/hlr.rs",
+   "before": [
+    "100644",
+    "blob",
+    "af86b875140853480e2027cf7dd2de0baaf4e604"
+   ],
+   "after": [
+    "100644",
+    "blob",
+    "8a277f5e2d5e62cd993d99a7be8dd249bdbc9dfc"
+   ],
+   "reason": "Formatting only: cargo fmt --all with the pinned rustfmt (rustc 1.90.0) and the repository rustfmt.toml. Tokens, expressions, arguments and control flow are unchanged."
+  },
+  {
+   "path": "crates/runmat-cad/wasm/src/mass.rs",
+   "before": [
+    "100644",
+    "blob",
+    "99e5ef81a6a922a0cc9122aece97a8a0c1f71d88"
+   ],
+   "after": [
+    "100644",
+    "blob",
+    "8618f5223ed790db180f2eff7ca089951989019f"
+   ],
+   "reason": "Formatting only: cargo fmt --all with the pinned rustfmt (rustc 1.90.0) and the repository rustfmt.toml. Tokens, expressions, arguments and control flow are unchanged."
+  },
+  {
+   "path": "crates/runmat-cad/wasm/src/motion.rs",
+   "before": [
+    "100644",
+    "blob",
+    "17c4dd8da876a3a14004c57113c00434edb862c7"
+   ],
+   "after": [
+    "100644",
+    "blob",
+    "12acd223590cb9d4a4933a0d8475ddb0785d407a"
+   ],
+   "reason": "Formatting only: cargo fmt --all with the pinned rustfmt (rustc 1.90.0) and the repository rustfmt.toml. Tokens, expressions, arguments and control flow are unchanged."
+  },
+  {
+   "path": "crates/runmat-cad/wasm/src/operated.rs",
+   "before": [
+    "100644",
+    "blob",
+    "06c8af6807ddf30e2a8b995da146e55e48e106bf"
+   ],
+   "after": [
+    "100644",
+    "blob",
+    "d6cc31fc37a94d09bbd970d807448a07afce66b0"
+   ],
+   "reason": "Formatting only: cargo fmt --all with the pinned rustfmt (rustc 1.90.0) and the repository rustfmt.toml. Tokens, expressions, arguments and control flow are unchanged."
+  },
+  {
+   "path": "crates/runmat-cad/wasm/src/parents.rs",
+   "before": [
+    "100644",
+    "blob",
+    "4bd4c1c44b5bdafd43a74b71b78087f79084aeae"
+   ],
+   "after": [
+    "100644",
+    "blob",
+    "c8dac76f077770a5e096720d8c2c130d7faf7215"
+   ],
+   "reason": "Formatting only: cargo fmt --all with the pinned rustfmt (rustc 1.90.0) and the repository rustfmt.toml. Tokens, expressions, arguments and control flow are unchanged."
+  },
+  {
+   "path": "crates/runmat-cad/wasm/src/study_checks.rs",
+   "before": [
+    "100644",
+    "blob",
+    "384530e46d702f432038d35a1acb99355d31e3b2"
+   ],
+   "after": [
+    "100644",
+    "blob",
+    "88c3b4c0c07d11ea2d00b7459bec502cd8a81d5c"
+   ],
+   "reason": "Formatting only: cargo fmt --all with the pinned rustfmt (rustc 1.90.0) and the repository rustfmt.toml. Tokens, expressions, arguments and control flow are unchanged."
+  },
+  {
+   "path": "crates/runmat-cad/wasm/src/xref_repairs.rs",
+   "before": [
+    "100644",
+    "blob",
+    "fb200d7ffb6044ecea72b146125715c5c0084bb7"
+   ],
+   "after": [
+    "100644",
+    "blob",
+    "19d3cfe7ab7e15a3464252417f410e0cde096f13"
+   ],
+   "reason": "Formatting only: cargo fmt --all with the pinned rustfmt (rustc 1.90.0) and the repository rustfmt.toml. Tokens, expressions, arguments and control flow are unchanged."
+  },
+  {
+   "path": "crates/runmat-circuit/src/ids.rs",
+   "before": [
+    "100644",
+    "blob",
+    "afb55c7155b7591bd4cc632444c654553d1e0035"
+   ],
+   "after": [
+    "100644",
+    "blob",
+    "06864c11151976774d994e0c5df6cb0bc52e77d5"
+   ],
+   "reason": "Formatting only: cargo fmt --all with the pinned rustfmt (rustc 1.90.0) and the repository rustfmt.toml. Tokens, expressions, arguments and control flow are unchanged."
+  },
+  {
+   "path": "crates/runmat-circuit/src/runtime/values.rs",
+   "before": [
+    "100644",
+    "blob",
+    "5deaad94586644e8ef4309fb757e18309d515867"
+   ],
+   "after": [
+    "100644",
+    "blob",
+    "45cc0f2127d183f324a23a6293d8dc4e8825d18c"
+   ],
+   "reason": "Formatting only: cargo fmt --all with the pinned rustfmt (rustc 1.90.0) and the repository rustfmt.toml. Tokens, expressions, arguments and control flow are unchanged."
+  },
+  {
+   "path": "crates/runmat-circuit/src/syntax/board/authored.rs",
+   "before": [
+    "100644",
+    "blob",
+    "40a869e8b7521f398cb718c9ddf47a55c7c96e25"
+   ],
+   "after": [
+    "100644",
+    "blob",
+    "330e991dc26a147eebed9d2ba1fadcd5129ad774"
+   ],
+   "reason": "Formatting only: cargo fmt --all with the pinned rustfmt (rustc 1.90.0) and the repository rustfmt.toml. Tokens, expressions, arguments and control flow are unchanged."
+  },
+  {
+   "path": "crates/runmat-circuit/src/syntax/forms.rs",
+   "before": [
+    "100644",
+    "blob",
+    "d57326aa34683724fc5b5496f0617fe0ffcc4824"
+   ],
+   "after": [
+    "100644",
+    "blob",
+    "5f47d85ea11fe278427ee21fcf9e5f01cc51fb41"
+   ],
+   "reason": "Formatting only: cargo fmt --all with the pinned rustfmt (rustc 1.90.0) and the repository rustfmt.toml. Tokens, expressions, arguments and control flow are unchanged."
+  },
+  {
+   "path": "crates/runmat-circuit/src/syntax/mod.rs",
+   "before": [
+    "100644",
+    "blob",
+    "24d30dde9cb15794e418a5d2e3755df758ddcdcd"
+   ],
+   "after": [
+    "100644",
+    "blob",
+    "1cf141a67193266c40b36438bd00b261e138d19a"
+   ],
+   "reason": "Formatting only: cargo fmt --all with the pinned rustfmt (rustc 1.90.0) and the repository rustfmt.toml. Tokens, expressions, arguments and control flow are unchanged."
+  },
+  {
+   "path": "crates/runmat-circuit/src/syntax/simulation.rs",
+   "before": [
+    "100644",
+    "blob",
+    "8e69201252a4c5e4462dafc1accaf2f280c1c273"
+   ],
+   "after": [
+    "100644",
+    "blob",
+    "3318d6408acee6b97b83956462968856287e19be"
+   ],
+   "reason": "Formatting only: cargo fmt --all with the pinned rustfmt (rustc 1.90.0) and the repository rustfmt.toml. Tokens, expressions, arguments and control flow are unchanged."
+  },
+  {
+   "path": "crates/runmat-circuit/src/syntax/simulation_print.rs",
+   "before": [
+    "100644",
+    "blob",
+    "f1c4543a4633380d186bc72518d93a1b957e3ef2"
+   ],
+   "after": [
+    "100644",
+    "blob",
+    "a7c8c2862aba798d957fa9a5d0a47a784e1daf95"
+   ],
+   "reason": "Formatting only: cargo fmt --all with the pinned rustfmt (rustc 1.90.0) and the repository rustfmt.toml. Tokens, expressions, arguments and control flow are unchanged."
+  },
+  {
+   "path": "crates/runmat-circuit/src/syntax/summaries.rs",
+   "before": [
+    "100644",
+    "blob",
+    "fb2e72e5c1795e0fd03fc46b9694fe72ac20464c"
+   ],
+   "after": [
+    "100644",
+    "blob",
+    "0d97910f0b06e006dd625421185a09b29435ca59"
+   ],
+   "reason": "Formatting only: cargo fmt --all with the pinned rustfmt (rustc 1.90.0) and the repository rustfmt.toml. Tokens, expressions, arguments and control flow are unchanged."
+  },
+  {
+   "path": "crates/runmat-circuit/src/syntax/values.rs",
+   "before": [
+    "100644",
+    "blob",
+    "77788f6539e9f9ac3f0217d12f4e56057ee29497"
+   ],
+   "after": [
+    "100644",
+    "blob",
+    "4f36edaa764e9063efebc2072e8a189d029a46dd"
+   ],
+   "reason": "Formatting only: cargo fmt --all with the pinned rustfmt (rustc 1.90.0) and the repository rustfmt.toml. Tokens, expressions, arguments and control flow are unchanged."
+  },
+  {
+   "path": "crates/runmat-circuit/tests/context_commands.rs",
+   "before": [
+    "100644",
+    "blob",
+    "52c29c6b9822c64f9ceb1aa3a0d2929cb8ff1429"
+   ],
+   "after": [
+    "100644",
+    "blob",
+    "194134af72b0adafce007912080d1883f9d59d9b"
+   ],
+   "reason": "Formatting only: cargo fmt --all with the pinned rustfmt (rustc 1.90.0) and the repository rustfmt.toml. Tokens, expressions, arguments and control flow are unchanged."
+  },
+  {
+   "path": "crates/runmat-circuit/tests/review_rules.rs",
+   "before": [
+    "100644",
+    "blob",
+    "2ad2412dcdf25548903ac2cbb8dc8987462c8b5d"
+   ],
+   "after": [
+    "100644",
+    "blob",
+    "5ef5725dd48ec2d05c8d85e6041c609ad66aee25"
+   ],
+   "reason": "Formatting only: cargo fmt --all with the pinned rustfmt (rustc 1.90.0) and the repository rustfmt.toml. Tokens, expressions, arguments and control flow are unchanged."
+  },
+  {
+   "path": "crates/runmat-cli/src/commands/fea/snapshot/views.rs",
+   "before": [
+    "100644",
+    "blob",
+    "f0f2dbc2434016eae8719c007705ddc4b21e8370"
+   ],
+   "after": [
+    "100644",
+    "blob",
+    "76decc91d4da02c9736a82599251bab416ab691b"
+   ],
+   "reason": "Display only: 1e945c104a (disp072) makes the CLI snapshot poster call the shared mode-shape legend function in runmat-runtime field_scene/legend.rs instead of its own copy. The poster label, unit and range are unchanged (47 CLI snapshot tests pass). Solver arithmetic, published fields and receipt measurements are unchanged."
+  },
+  {
+   "path": "crates/runmat-cli/src/commands/fea/snapshot/views/profiles.rs",
+   "before": [
+    "100644",
+    "blob",
+    "d0580bef5afd0eade987f2af8fc18b8b93748ac3"
+   ],
+   "after": [
+    "100644",
+    "blob",
+    "25e75b690693b51b7dcb6a33d87c7f3663422b62"
+   ],
+   "reason": "Display only: 1e945c104a (disp072) makes the CLI snapshot poster call the shared mode-shape legend function in runmat-runtime field_scene/legend.rs instead of its own copy. The poster label, unit and range are unchanged (47 CLI snapshot tests pass). Solver arithmetic, published fields and receipt measurements are unchanged."
+  },
+  {
+   "path": "crates/runmat-cli/tests/check_cli.rs",
+   "before": [
+    "100644",
+    "blob",
+    "64be22962969b845956584773731573e40a56227"
+   ],
+   "after": [
+    "100644",
+    "blob",
+    "3c45b2255e9be1c82bcdadabc4a6eed03668e146"
+   ],
+   "reason": "Test only: FEA's 9eea056cac expects the earlier Lowering diagnostic fea.semantic.output.field_location for an observation its family doesn't publish. No cohort runs this test, and the checker is unchanged."
+  },
+  {
+   "path": "crates/runmat-constraint/src/rows.rs",
+   "before": [
+    "100644",
+    "blob",
+    "d87fe1cbb9e96cbce5ca1d51bb28406a6ad8ffaa"
+   ],
+   "after": [
+    "100644",
+    "blob",
+    "6f40c09ef2e684ca07452c59b2a1802405bd43b5"
+   ],
+   "reason": "Formatting only: cargo fmt --all with the pinned rustfmt (rustc 1.90.0) and the repository rustfmt.toml. Tokens, expressions, arguments and control flow are unchanged."
+  },
+  {
+   "path": "crates/runmat-design-syntax/grammar/fea.tmLanguage.json",
+   "before": [
+    "100644",
+    "blob",
+    "a417ab9b9d57f5ac78bf420ffbb1bab02a95c8a4"
+   ],
+   "after": [
+    "100644",
+    "blob",
+    "1d7bdbbfae0fcb466e63cfef381acc9bc993f514"
+   ],
+   "reason": "Editor syntax-highlighting grammar, regenerated from the compiler tables. It adds temperature to the field-quantity words. No simulation, solver, CAD or circuit code reads it."
+  },
+  {
+   "path": "crates/runmat-design-syntax/src/dialect.rs",
+   "before": [
+    "100644",
+    "blob",
+    "d38cb809afed34a6699d94a767c589e5ae80e0e5"
+   ],
+   "after": [
+    "100644",
+    "blob",
+    "a17636ca45fd7bc02d7dd1e895ab112e3483ed37"
+   ],
+   "reason": "Formatting only: cargo fmt --all with the pinned rustfmt (rustc 1.90.0) and the repository rustfmt.toml. Tokens, expressions, arguments and control flow are unchanged."
+  },
+  {
+   "path": "crates/runmat-design-syntax/tests/design_documents.rs",
+   "before": [
+    "100644",
+    "blob",
+    "1974b12e7f890fdf5836f36c07103f7366317dcf"
+   ],
+   "after": [
+    "100644",
+    "blob",
+    "7e5dd9bb0c1d4339f79a85b5d989f0b38b0f2e8d"
+   ],
+   "reason": "Formatting only: cargo fmt --all with the pinned rustfmt (rustc 1.90.0) and the repository rustfmt.toml. Tokens, expressions, arguments and control flow are unchanged."
+  },
+  {
+   "path": "crates/runmat-design-tools/src/inspect.rs",
+   "before": [
+    "100644",
+    "blob",
+    "7228f52a0deaa3c4336459a3c21f98afef9a67a1"
+   ],
+   "after": [
+    "100644",
+    "blob",
+    "7c1e283dfae0f1b5b7ab2bb2cbf1fb975751946c"
+   ],
+   "reason": "Formatting only: cargo fmt --all with the pinned rustfmt (rustc 1.90.0) and the repository rustfmt.toml. Tokens, expressions, arguments and control flow are unchanged."
+  },
+  {
+   "path": "crates/runmat-design-tools/src/workspace.rs",
+   "before": [
+    "100644",
+    "blob",
+    "bf499e6f03e65de9d4eec5aef0f2453ee6ddfd22"
+   ],
+   "after": [
+    "100644",
+    "blob",
+    "cd63eccda33a1a5575788faf160a91c82ec65c54"
+   ],
+   "reason": "Formatting only: cargo fmt --all with the pinned rustfmt (rustc 1.90.0) and the repository rustfmt.toml. Tokens, expressions, arguments and control flow are unchanged."
+  },
+  {
+   "path": "crates/runmat-design-tools/tests/drawing_notes.rs",
+   "before": [
+    "100644",
+    "blob",
+    "076714a43473413c8ac9bb06672850a92d21aeec"
+   ],
+   "after": [
+    "100644",
+    "blob",
+    "47c864c5793b7be392b43c0a4160c747cf5f4259"
+   ],
+   "reason": "Formatting only: cargo fmt --all with the pinned rustfmt (rustc 1.90.0) and the repository rustfmt.toml. Tokens, expressions, arguments and control flow are unchanged."
+  },
+  {
+   "path": "crates/runmat-design-tools/tests/dwg.rs",
+   "before": [
+    "100644",
+    "blob",
+    "bed22391cfb32354e299944c269213926643e7d2"
+   ],
+   "after": [
+    "100644",
+    "blob",
+    "695abe9b28f030308b74fcae01a8c054902337d1"
+   ],
+   "reason": "Formatting only: cargo fmt --all with the pinned rustfmt (rustc 1.90.0) and the repository rustfmt.toml. Tokens, expressions, arguments and control flow are unchanged."
+  },
+  {
+   "path": "crates/runmat-design-tools/tests/recognize.rs",
+   "before": [
+    "100644",
+    "blob",
+    "6d799ba3eeffac62e6c6814295ffc97f03a2ce07"
+   ],
+   "after": [
+    "100644",
+    "blob",
+    "a6fc67aada65318f31a3cc277bcaa18c31472b60"
+   ],
+   "reason": "Test only: escapes the temp STEP path's backslashes in the part source so the recognize tests compile on Windows (no-op on Linux and macOS). No production code changes. No cohort runs it."
+  },
+  {
+   "path": "crates/runmat-design-tools/tests/tools.rs",
+   "before": [
+    "100644",
+    "blob",
+    "f8915dd3f7983470c9cd60360848d01b8dfcdad2"
+   ],
+   "after": [
+    "100644",
+    "blob",
+    "b54b5769612944966f134265d389bb1f74b39251"
+   ],
+   "reason": "Formatting only: cargo fmt --all with the pinned rustfmt (rustc 1.90.0) and the repository rustfmt.toml. Tokens, expressions, arguments and control flow are unchanged."
+  },
+  {
+   "path": "crates/runmat-filesystem/src/pinned/tests.rs",
+   "before": [
+    "100644",
+    "blob",
+    "9082d99f23240bb42408a3cfdc21f0549a7f09af"
+   ],
+   "after": [
+    "100644",
+    "blob",
+    "dd01a2719b330df3f4fa7b6882dd5e8bf36b8040"
+   ],
+   "reason": "Formatting only: cargo fmt --all with the pinned rustfmt (rustc 1.90.0) and the repository rustfmt.toml. Tokens, expressions, arguments and control flow are unchanged."
+  },
+  {
+   "path": "crates/runmat-filesystem/src/remote/native.rs",
+   "before": [
+    "100644",
+    "blob",
+    "40b215bdf012fdd5aa8425ae09e56a941f077c1d"
+   ],
+   "after": [
+    "100644",
+    "blob",
+    "3797c0885fd98c6e28a8c273a2c4f4ad1d5a95ab"
+   ],
+   "reason": "Remote file read only: 3af73068ba returns an empty buffer for a 0-byte pinned version without a server range request (the server refuses a 1-byte range on an empty file). Nonempty reads are unchanged; the test server now refuses out-of-range reads as the server does. No cohort reads a remote filesystem."
+  },
+  {
+   "path": "crates/runmat-filesystem/src/remote/wasm.rs",
+   "before": [
+    "100644",
+    "blob",
+    "fbd84460415c1ee43c7d06e17ef4fb933e93b64c"
+   ],
+   "after": [
+    "100644",
+    "blob",
+    "95210834cbab0a1436ed7672e825c3a8bebe5e40"
+   ],
+   "reason": "Remote file read only: 3af73068ba returns an empty buffer for a 0-byte pinned version without a server range request (the server refuses a 1-byte range on an empty file). Nonempty reads are unchanged; the test server now refuses out-of-range reads as the server does. No cohort reads a remote filesystem."
+  },
+  {
+   "path": "crates/runmat-geometry/io/src/exact.rs",
+   "before": [
+    "100644",
+    "blob",
+    "207c5b0123d5b1671b9745c4abd0399caa1872c5"
+   ],
+   "after": [
+    "100644",
+    "blob",
+    "33f561b22af89f1d7c9af8694c9b7cf7847206eb"
+   ],
+   "reason": "Formatting only: cargo fmt --all with the pinned rustfmt (rustc 1.90.0) and the repository rustfmt.toml. Tokens, expressions, arguments and control flow are unchanged."
+  },
+  {
+   "path": "crates/runmat-geometry/io/src/occt/exact_step_writer.cc",
+   "before": [
+    "100644",
+    "blob",
+    "5ea243d9c67f3c67bb6e37ccadcfc66be2742d5d"
+   ],
+   "after": [
+    "100644",
+    "blob",
+    "e9911de05b538dfcab5d631b0b67ac31d4bf9f38"
+   ],
+   "reason": "STEP export only; no cohort exports STEP. d36e979417 makes each exported part's surfaces direct (ShapeCustom_DirectModification) before the OCCT writer, so OCCT 8.0 no longer drops a cone face with a negative semi-angle; every indirect elementary surface is written direct and other surfaces keep their geometry. A later commit corrects the code comment to say so (comment only). Import, healing and meshing are unchanged."
+  },
+  {
+   "path": "crates/runmat-geometry/kernel/src/stroke.rs",
+   "before": [
+    "100644",
+    "blob",
+    "91bfdbed154867c73eafeb4c707b7494662541a4"
+   ],
+   "after": [
+    "100644",
+    "blob",
+    "67da4bae755226f810bc6b401d3121870625ab3b"
+   ],
+   "reason": "Formatting only: cargo fmt --all with the pinned rustfmt (rustc 1.90.0) and the repository rustfmt.toml. Tokens, expressions, arguments and control flow are unchanged."
+  },
+  {
+   "path": "crates/runmat-geometry/kernel/src/stroke/tests.rs",
+   "before": [
+    "100644",
+    "blob",
+    "8d141aa53c6c47487c282174dbd3c676a63b598e"
+   ],
+   "after": [
+    "100644",
+    "blob",
+    "820441a9afc0a37bac0166b33562f099481b089c"
+   ],
+   "reason": "Formatting only: cargo fmt --all with the pinned rustfmt (rustc 1.90.0) and the repository rustfmt.toml. Tokens, expressions, arguments and control flow are unchanged."
+  },
+  {
+   "path": "crates/runmat-geometry/wasm-host/src/cad.rs",
+   "before": [
+    "100644",
+    "blob",
+    "132b70e830af2395bfe1fbca7517989dd2537710"
+   ],
+   "after": [
+    "100644",
+    "blob",
+    "52f81f39768db05f313f04724b5b9a644c6b0f86"
+   ],
+   "reason": "STEP import table per thread; the cohort imports no STEP file. a6fb58c3ad and the following commit keep the OCCT host's table of the current request's STEP files per thread and clear it when the call ends. cad_airliner_drawing calls cad::call but imports no STEP file, so its table is empty before and after; the other three cohorts don't link this host."
+  },
+  {
+   "path": "crates/runmat-geometry/wasm-host/tests/cad_direct.rs",
+   "before": [
+    "100644",
+    "blob",
+    "20bd725413ff9e8ae68e49d409b48eed13b1ec5a"
+   ],
+   "after": [
+    "100644",
+    "blob",
+    "7811ec5a2527d2f917ae7743fccb6ba27151664f"
+   ],
+   "reason": "Formatting only: cargo fmt --all with the pinned rustfmt (rustc 1.90.0) and the repository rustfmt.toml. Tokens, expressions, arguments and control flow are unchanged."
+  },
+  {
+   "path": "crates/runmat-geometry/wasm-host/tests/cad_direct_imported.rs",
+   "before": [
+    "100644",
+    "blob",
+    "343ac5ccd789656e2e68badf84581ee993d66c2f"
+   ],
+   "after": [
+    "100644",
+    "blob",
+    "0fee185b1e91c06f47f9589ba59e55f8a75a9bd6"
+   ],
+   "reason": "Formatted by the cargo fmt pass, then 5de5f69b59 makes this OCCT CAD test read the mass-properties report's always-known volume (data.volume) instead of data.total.volume, which 97188de511 leaves null for a part with no density. No production code changes. No cohort runs it: typed_fea_geometry_cli, remote::driver_replacement_tests, runtime_scale and cad_airliner_drawing are other test targets."
+  },
+  {
+   "path": "crates/runmat-geometry/wasm-host/tests/cad_drawing_tangent.rs",
+   "before": [
+    "100644",
+    "blob",
+    "82d5921213a6e9131c9a39743069da7f4e2b386d"
+   ],
+   "after": [
+    "100644",
+    "blob",
+    "08510a943f29b9597d50408dc99fe929fdbab118"
+   ],
+   "reason": "Formatting only: cargo fmt --all with the pinned rustfmt (rustc 1.90.0) and the repository rustfmt.toml. Tokens, expressions, arguments and control flow are unchanged."
+  },
+  {
+   "path": "crates/runmat-geometry/wasm-host/tests/cad_evaluate.rs",
+   "before": [
+    "100644",
+    "blob",
+    "6bb428a4562c87d98a3056fd72e12972b56c00e6"
+   ],
+   "after": [
+    "100644",
+    "blob",
+    "69b380d9619731cb944fbe1dfb23e3ea9110240c"
+   ],
+   "reason": "Formatting only: cargo fmt --all with the pinned rustfmt (rustc 1.90.0) and the repository rustfmt.toml. Tokens, expressions, arguments and control flow are unchanged."
+  },
+  {
+   "path": "crates/runmat-geometry/wasm-host/tests/cad_face_profiles.rs",
+   "before": [
+    "100644",
+    "blob",
+    "c12c22aaeb384e2569a5340c06beed1e3d650234"
+   ],
+   "after": [
+    "100644",
+    "blob",
+    "9e6380d0da9f22604443251514cca9979442e083"
+   ],
+   "reason": "Test only: 5de5f69b59 makes this OCCT CAD test read the mass-properties report's always-known volume (data.volume) instead of data.total.volume, which 97188de511 leaves null for a part with no density. No production code changes. No cohort runs it: typed_fea_geometry_cli, remote::driver_replacement_tests, runtime_scale and cad_airliner_drawing are other test targets."
+  },
+  {
+   "path": "crates/runmat-geometry/wasm-host/tests/cad_motion.rs",
+   "before": [
+    "100644",
+    "blob",
+    "0dc08c8b9b184bf14d6ef97a351d173b9df18936"
+   ],
+   "after": [
+    "100644",
+    "blob",
+    "fe4ccdb6c3367067e494f2cec6a701ed5b38f0d1"
+   ],
+   "reason": "Formatting only: cargo fmt --all with the pinned rustfmt (rustc 1.90.0) and the repository rustfmt.toml. Tokens, expressions, arguments and control flow are unchanged."
+  },
+  {
+   "path": "crates/runmat-geometry/wasm-host/tests/cad_pattern_split.rs",
+   "before": [
+    "100644",
+    "blob",
+    "1b427db20a7c09b9c951356df24cf1be0badbebf"
+   ],
+   "after": [
+    "100644",
+    "blob",
+    "20d5692452f279b2e417167383637ca53111cfdc"
+   ],
+   "reason": "Test only: 5de5f69b59 makes this OCCT CAD test read the mass-properties report's always-known volume (data.volume) instead of data.total.volume, which 97188de511 leaves null for a part with no density. No production code changes. No cohort runs it: typed_fea_geometry_cli, remote::driver_replacement_tests, runtime_scale and cad_airliner_drawing are other test targets."
+  },
+  {
+   "path": "crates/runmat-geometry/wasm-host/tests/cad_picked_references.rs",
+   "before": [
+    "100644",
+    "blob",
+    "e49218c3351b2cf6411537c386a6e8f239ac9125"
+   ],
+   "after": [
+    "100644",
+    "blob",
+    "2a273e886b8f5dbe3aac6bdf4c9867857b86da23"
+   ],
+   "reason": "Test only: 5de5f69b59 makes this OCCT CAD test read the mass-properties report's always-known volume (data.volume) instead of data.total.volume, which 97188de511 leaves null for a part with no density. No production code changes. No cohort runs it: typed_fea_geometry_cli, remote::driver_replacement_tests, runtime_scale and cad_airliner_drawing are other test targets."
+  },
+  {
+   "path": "crates/runmat-geometry/wasm-host/tests/cad_representations.rs",
+   "before": [
+    "100644",
+    "blob",
+    "4e3195c4a64f3a7b7959c290f47dde593ca79665"
+   ],
+   "after": [
+    "100644",
+    "blob",
+    "626f35a01b74487c214e41777d110735f12e85cf"
+   ],
+   "reason": "Formatting only: cargo fmt --all with the pinned rustfmt (rustc 1.90.0) and the repository rustfmt.toml. Tokens, expressions, arguments and control flow are unchanged."
+  },
+  {
+   "path": "crates/runmat-geometry/wasm-host/tests/cad_sheet_metal_commands.rs",
+   "before": [
+    "100644",
+    "blob",
+    "b9c58709ab858c6af270df613286bbbd787a2346"
+   ],
+   "after": [
+    "100644",
+    "blob",
+    "6b45050c3932ab7a6a5867a585120f46a1a354fd"
+   ],
+   "reason": "Test only: 5de5f69b59 makes this OCCT CAD test read the mass-properties report's always-known volume (data.volume) instead of data.total.volume, which 97188de511 leaves null for a part with no density. No production code changes. No cohort runs it: typed_fea_geometry_cli, remote::driver_replacement_tests, runtime_scale and cad_airliner_drawing are other test targets."
+  },
+  {
+   "path": "crates/runmat-geometry/wasm-host/tests/cad_sheet_metal_convert.rs",
+   "before": [
+    "100644",
+    "blob",
+    "8c3f9d88fa51f2189edc8d63b05b33f233d6ccbc"
+   ],
+   "after": [
+    "100644",
+    "blob",
+    "e1af35a04b7c9277846608aeb464f305e94e1bb8"
+   ],
+   "reason": "Test only: 5de5f69b59 makes this OCCT CAD test read the mass-properties report's always-known volume (data.volume) instead of data.total.volume, which 97188de511 leaves null for a part with no density. No production code changes. No cohort runs it: typed_fea_geometry_cli, remote::driver_replacement_tests, runtime_scale and cad_airliner_drawing are other test targets."
+  },
+  {
+   "path": "crates/runmat-geometry/wasm-host/tests/cad_sketch_geometry.rs",
+   "before": [
+    "100644",
+    "blob",
+    "1d65868a8996da80ca9745d35b83e0944fdae572"
+   ],
+   "after": [
+    "100644",
+    "blob",
+    "84877308e0d3e43124e25ae834e98296b4ec18b9"
+   ],
+   "reason": "Formatting only: cargo fmt --all with the pinned rustfmt (rustc 1.90.0) and the repository rustfmt.toml. Tokens, expressions, arguments and control flow are unchanged."
+  },
+  {
+   "path": "crates/runmat-geometry/wasm-host/tests/cad_step_import.rs",
+   "before": [
+    "100644",
+    "blob",
+    "3d13022736b483979d53b42340bde6d40d2fe0bb"
+   ],
+   "after": [
+    "100644",
+    "blob",
+    "525af7a5fadac41a4f1d0be0e8b57c55e35d5279"
+   ],
+   "reason": "Test only: adds a STEP export round-trip of a part with a drill point (a cone with a negative semi-angle) and a countersink, asserting every face is written, the re-imported solid is closed, and face names and colours survive. It covers d36e979417 (STEP export only). No production code changes. No cohort runs it: typed_fea_geometry_cli, remote::driver_replacement_tests, runtime_scale and cad_airliner_drawing are other test targets. 6c5e093873 then escapes the temp path's backslashes in the part source so the test compiles on Windows; test only."
+  },
+  {
+   "path": "crates/runmat-geometry/wasm-host/tests/cad_surface_commands.rs",
+   "before": [
+    "100644",
+    "blob",
+    "3a03e957a8727a688c2f7bd0806182ef3fb517cf"
+   ],
+   "after": [
+    "100644",
+    "blob",
+    "00671042ace28a8da2bf89eb6c173f3e0b9f4ae8"
+   ],
+   "reason": "Test only: 5de5f69b59 makes this OCCT CAD test read the mass-properties report's always-known volume (data.volume) instead of data.total.volume, which 97188de511 leaves null for a part with no density. No production code changes. No cohort runs it: typed_fea_geometry_cli, remote::driver_replacement_tests, runtime_scale and cad_airliner_drawing are other test targets."
+  },
+  {
+   "path": "crates/runmat-geometry/wasm-host/tests/cad_surfaces.rs",
+   "before": [
+    "100644",
+    "blob",
+    "fa8e2588452b7cc6ebc0f16a67c1c686bdcadde3"
+   ],
+   "after": [
+    "100644",
+    "blob",
+    "37a25956cfcfe39d24042531b918d0d8df1163ea"
+   ],
+   "reason": "Test only: 5de5f69b59 makes this OCCT CAD test read the mass-properties report's always-known volume (data.volume) instead of data.total.volume, which 97188de511 leaves null for a part with no density. No production code changes. No cohort runs it: typed_fea_geometry_cli, remote::driver_replacement_tests, runtime_scale and cad_airliner_drawing are other test targets."
+  },
+  {
+   "path": "crates/runmat-geometry/wasm-host/tests/meshing_progress.rs",
+   "before": [
+    "100644",
+    "blob",
+    "5f23803b2bd2b822b0b6dc42298da979406ffb7e"
+   ],
+   "after": [
+    "100644",
+    "blob",
+    "70dfbd96d701d1ecea1f718e0dccc35112552889"
+   ],
+   "reason": "Formatting only: cargo fmt --all with the pinned rustfmt (rustc 1.90.0) and the repository rustfmt.toml. Tokens, expressions, arguments and control flow are unchanged."
+  },
+  {
+   "path": "crates/runmat-logging/src/lib.rs",
+   "before": [
+    "100644",
+    "blob",
+    "87eb282f36d41168d1577d16cd821dc799274796"
+   ],
+   "after": [
+    "100644",
+    "blob",
+    "f8fdebaa2990e9f8ff2960e76f0c85ad82f8fed7"
+   ],
+   "reason": "Formatting only: cargo fmt --all with the pinned rustfmt (rustc 1.90.0) and the repository rustfmt.toml. Tokens, expressions, arguments and control flow are unchanged."
+  },
+  {
+   "path": "crates/runmat-logging/tests/event_without_message.rs",
+   "before": [
+    "100644",
+    "blob",
+    "d87c581ad665cba8706a1acaef483625e4a00fe0"
+   ],
+   "after": [
+    "100644",
+    "blob",
+    "be11a1d35f2d01508542c2bca437b7d817bb4288"
+   ],
+   "reason": "Formatting only: cargo fmt --all with the pinned rustfmt (rustc 1.90.0) and the repository rustfmt.toml. Tokens, expressions, arguments and control flow are unchanged."
+  },
+  {
+   "path": "crates/runmat-logging/tests/trace_feed_spans.rs",
+   "before": [
+    "100644",
+    "blob",
+    "f684dd42f0b96b706bd915f31aa8e2d09a742632"
+   ],
+   "after": [
+    "100644",
+    "blob",
+    "a40b8144aa2290fccba43e9045d251b65a505c3b"
+   ],
+   "reason": "Formatting only: cargo fmt --all with the pinned rustfmt (rustc 1.90.0) and the repository rustfmt.toml. Tokens, expressions, arguments and control flow are unchanged."
+  },
+  {
+   "path": "crates/runmat-lsp/src/backend.rs",
+   "before": [
+    "100644",
+    "blob",
+    "7c391dd5504e806e57aed6fdcc9bfb12aa567428"
+   ],
+   "after": [
+    "100644",
+    "blob",
+    "834a5608eaff93bf8c5cc8d7e00541e20f56041f"
+   ],
+   "reason": "Formatting only: cargo fmt --all with the pinned rustfmt (rustc 1.90.0) and the repository rustfmt.toml. Tokens, expressions, arguments and control flow are unchanged."
+  },
+  {
+   "path": "crates/runmat-lsp/src/core/design.rs",
+   "before": [
+    "100644",
+    "blob",
+    "839ee5bf5f639bcdcc17fd757a81689b19a45419"
+   ],
+   "after": [
+    "100644",
+    "blob",
+    "0efeb05595ac6b2aa2b5a46b7bc43746f90d18cb"
+   ],
+   "reason": "Formatting only: cargo fmt --all with the pinned rustfmt (rustc 1.90.0) and the repository rustfmt.toml. Tokens, expressions, arguments and control flow are unchanged."
+  },
+  {
+   "path": "crates/runmat-lsp/src/core/design/calls.rs",
+   "before": [
+    "100644",
+    "blob",
+    "2ed9019e092a5a4abe6b4ffd92e36a7305a466da"
+   ],
+   "after": [
+    "100644",
+    "blob",
+    "a346cc2411287e6aae2839a5a9c10235053a644c"
+   ],
+   "reason": "Formatting only: cargo fmt --all with the pinned rustfmt (rustc 1.90.0) and the repository rustfmt.toml. Tokens, expressions, arguments and control flow are unchanged."
+  },
+  {
+   "path": "crates/runmat-lsp/src/core/design/help.rs",
+   "before": [
+    "100644",
+    "blob",
+    "534cb944e37b27975566740833fed6ff1b294e30"
+   ],
+   "after": [
+    "100644",
+    "blob",
+    "a2318a2b9d5acd62d767172d17c18440bf2f94cf"
+   ],
+   "reason": "Formatting only: cargo fmt --all with the pinned rustfmt (rustc 1.90.0) and the repository rustfmt.toml. Tokens, expressions, arguments and control flow are unchanged."
+  },
+  {
+   "path": "crates/runmat-lsp/src/core/design/help_tests.rs",
+   "before": [
+    "100644",
+    "blob",
+    "a6342ec402ea45f205ea6213afebf636ad3e3235"
+   ],
+   "after": [
+    "100644",
+    "blob",
+    "93a501bfa0c953bd017c1b7f2c4f87421ac83c98"
+   ],
+   "reason": "Formatting only: cargo fmt --all with the pinned rustfmt (rustc 1.90.0) and the repository rustfmt.toml. Tokens, expressions, arguments and control flow are unchanged."
+  },
+  {
+   "path": "crates/runmat-lsp/src/core/design/words.rs",
+   "before": [
+    "100644",
+    "blob",
+    "35b35ec73cab59321a22d36221d0e5b2f1e4dd62"
+   ],
+   "after": [
+    "100644",
+    "blob",
+    "97b2ab2f2552f4e6396d57199ed01e672bb12d90"
+   ],
+   "reason": "Formatting only: cargo fmt --all with the pinned rustfmt (rustc 1.90.0) and the repository rustfmt.toml. Tokens, expressions, arguments and control flow are unchanged."
+  },
+  {
+   "path": "crates/runmat-lsp/src/core/units_spec.rs",
+   "before": [
+    "100644",
+    "blob",
+    "f36b4985e9d5b8b4563268f7c83020ca8e732b63"
+   ],
+   "after": [
+    "100644",
+    "blob",
+    "d31be929a81233526ef1d20218c991358c06b56a"
+   ],
+   "reason": "Formatting only: cargo fmt --all with the pinned rustfmt (rustc 1.90.0) and the repository rustfmt.toml. Tokens, expressions, arguments and control flow are unchanged."
+  },
+  {
+   "path": "crates/runmat-meshing/tetrahedron/src/cdt/volume_refinement/iteration.rs",
+   "before": [
+    "100644",
+    "blob",
+    "60f43f6bde7a6915e359786880d2c07f33147662"
+   ],
+   "after": [
+    "100644",
+    "blob",
+    "f2cd6ed151bec30121f0540967d164d4755f039c"
+   ],
+   "reason": "Formatting only: cargo fmt --all with the pinned rustfmt (rustc 1.90.0) and the repository rustfmt.toml. Tokens, expressions, arguments and control flow are unchanged."
+  },
+  {
+   "path": "crates/runmat-plot/src/core/plot_renderer.rs",
+   "before": [
+    "100644",
+    "blob",
+    "c54d0335d4de7f6df70b919b2e451d0fde1c33bc"
+   ],
+   "after": [
+    "100644",
+    "blob",
+    "5562622fe69f66b04b2f73d29c0c98aa9324be6c"
+   ],
+   "reason": "Rendering only (Windows pan fix, WPAN-R a6b169e91b/ba195739b9/c3113a728b): plot renderer shares scenes by Arc, caches the offscreen fallback renderer, retains presented frames only on request, and copies foreign-device buffers once per data change. Solver arithmetic, published values and receipt measurements are unchanged; no cohort renders an interactive native surface."
+  },
+  {
+   "path": "crates/runmat-plot/src/core/plot_renderer/foreign_buffers.rs",
+   "before": null,
+   "after": [
+    "100644",
+    "blob",
+    "0e00cb945eebcaba866d186c1a6b404a7ac48571"
+   ],
+   "reason": "Rendering only (Windows pan fix, WPAN-R a6b169e91b/ba195739b9/c3113a728b): plot renderer shares scenes by Arc, caches the offscreen fallback renderer, retains presented frames only on request, and copies foreign-device buffers once per data change. Solver arithmetic, published values and receipt measurements are unchanged; no cohort renders an interactive native surface."
+  },
+  {
+   "path": "crates/runmat-plot/src/core/plot_renderer/geometry_presentation.rs",
+   "before": [
+    "100644",
+    "blob",
+    "0a9eed8b4ef8f8233f7f9a7854932ad715da21c6"
+   ],
+   "after": [
+    "100644",
+    "blob",
+    "47221912b9e8de3310718d3f508577f769204f9d"
+   ],
+   "reason": "Rendering only (Windows pan fix, WPAN-R a6b169e91b/ba195739b9/c3113a728b): plot renderer shares scenes by Arc, caches the offscreen fallback renderer, retains presented frames only on request, and copies foreign-device buffers once per data change. Solver arithmetic, published values and receipt measurements are unchanged; no cohort renders an interactive native surface."
+  },
+  {
+   "path": "crates/runmat-plot/src/core/plot_renderer/render_frame.rs",
+   "before": [
+    "100644",
+    "blob",
+    "1336bf73ab90943eb07304e0e50b83d5bce0df27"
+   ],
+   "after": [
+    "100644",
+    "blob",
+    "2aab75cf540ca7d7d658491e81a2e112b5d1125a"
+   ],
+   "reason": "Rendering only (Windows pan fix, WPAN-R a6b169e91b/ba195739b9/c3113a728b): plot renderer shares scenes by Arc, caches the offscreen fallback renderer, retains presented frames only on request, and copies foreign-device buffers once per data change. Solver arithmetic, published values and receipt measurements are unchanged; no cohort renders an interactive native surface."
+  },
+  {
+   "path": "crates/runmat-plot/src/core/plot_renderer/scene_setup.rs",
+   "before": [
+    "100644",
+    "blob",
+    "53364758c2ef26a4703037e952236bbeeee078d0"
+   ],
+   "after": [
+    "100644",
+    "blob",
+    "17f1969088201540c589e3b9ce7999a81ce58710"
+   ],
+   "reason": "Rendering only (Windows pan fix, WPAN-R a6b169e91b/ba195739b9/c3113a728b): plot renderer shares scenes by Arc, caches the offscreen fallback renderer, retains presented frames only on request, and copies foreign-device buffers once per data change. Solver arithmetic, published values and receipt measurements are unchanged; no cohort renders an interactive native surface."
+  },
+  {
+   "path": "crates/runmat-plot/src/core/plot_renderer/view_fit.rs",
+   "before": [
+    "100644",
+    "blob",
+    "2bfd4077d2de26002721c59e9b2b520ff8a87b59"
+   ],
+   "after": [
+    "100644",
+    "blob",
+    "3168f3d89884ba5e02d8dde1108333b322eb03a0"
+   ],
+   "reason": "Rendering only (Windows pan fix, WPAN-R a6b169e91b/ba195739b9/c3113a728b): plot renderer shares scenes by Arc, caches the offscreen fallback renderer, retains presented frames only on request, and copies foreign-device buffers once per data change. Solver arithmetic, published values and receipt measurements are unchanged; no cohort renders an interactive native surface."
+  },
+  {
+   "path": "crates/runmat-plot/src/export/native_surface.rs",
+   "before": [
+    "100644",
+    "blob",
+    "31dbdcffef95d17475bd7ccdeb96fbf4aa9d6465"
+   ],
+   "after": [
+    "100644",
+    "blob",
+    "10a36239113dd59ecaf88cf990053f1c2b081131"
+   ],
+   "reason": "Rendering only (Windows pan fix, WPAN-R a6b169e91b/ba195739b9/c3113a728b): plot renderer shares scenes by Arc, caches the offscreen fallback renderer, retains presented frames only on request, and copies foreign-device buffers once per data change. Solver arithmetic, published values and receipt measurements are unchanged; no cohort renders an interactive native surface."
+  },
+  {
+   "path": "crates/runmat-plot/src/export/native_surface/foreign_device_tests.rs",
+   "before": null,
+   "after": [
+    "100644",
+    "blob",
+    "749245b88c982ffdb97a0dbfdcd31d41c09f4e4c"
+   ],
+   "reason": "Test only (WPAN-R): GPU frame-reuse and cross-device pixel-parity tests. No cohort runs them."
+  },
+  {
+   "path": "crates/runmat-plot/src/export/native_surface/frame_reuse_tests.rs",
+   "before": null,
+   "after": [
+    "100644",
+    "blob",
+    "eec623a77b8ea0ceb162f8a368cc042f7928da59"
+   ],
+   "reason": "Test only (WPAN-R): GPU frame-reuse and cross-device pixel-parity tests. No cohort runs them."
+  },
+  {
+   "path": "crates/runmat-plot/src/export/native_surface/presented_frame.rs",
+   "before": null,
+   "after": [
+    "100644",
+    "blob",
+    "f47791be7fdaba4621d0b0b51c6b97eefb61cc3d"
+   ],
+   "reason": "Rendering only (Windows pan fix, WPAN-R a6b169e91b/ba195739b9/c3113a728b): plot renderer shares scenes by Arc, caches the offscreen fallback renderer, retains presented frames only on request, and copies foreign-device buffers once per data change. Solver arithmetic, published values and receipt measurements are unchanged; no cohort renders an interactive native surface."
+  },
+  {
+   "path": "crates/runmat-plot/src/export/native_surface/shared_scene.rs",
+   "before": null,
+   "after": [
+    "100644",
+    "blob",
+    "9df66e5dd01c5f5758b8337f0e4a993ec7b4dd28"
+   ],
+   "reason": "Rendering only (Windows pan fix, WPAN-R a6b169e91b/ba195739b9/c3113a728b): plot renderer shares scenes by Arc, caches the offscreen fallback renderer, retains presented frames only on request, and copies foreign-device buffers once per data change. Solver arithmetic, published values and receipt measurements are unchanged; no cohort renders an interactive native surface."
+  },
+  {
+   "path": "crates/runmat-plot/src/gpu/area.rs",
+   "before": [
+    "100644",
+    "blob",
+    "0e091517bea31527308fe9d0adf0277984e28ce9"
+   ],
+   "after": [
+    "100644",
+    "blob",
+    "dec7823c776a5437a89ec6a5b7785dd88b8686bd"
+   ],
+   "reason": "Rendering only (Windows pan fix, WPAN-R a6b169e91b/ba195739b9/c3113a728b): GPU packers tag their vertex and indirect buffers with their device. Solver arithmetic, published values and receipt measurements are unchanged; no cohort renders an interactive native surface."
+  },
+  {
+   "path": "crates/runmat-plot/src/gpu/bar.rs",
+   "before": [
+    "100644",
+    "blob",
+    "5ad3fe01a44a47ab61641af4ebbd776e801c9eca"
+   ],
+   "after": [
+    "100644",
+    "blob",
+    "681a5afbc2c2b6ac8c4e1b1155025b43a8e1f96f"
+   ],
+   "reason": "Rendering only (Windows pan fix, WPAN-R a6b169e91b/ba195739b9/c3113a728b): GPU packers tag their vertex and indirect buffers with their device. Solver arithmetic, published values and receipt measurements are unchanged; no cohort renders an interactive native surface."
+  },
+  {
+   "path": "crates/runmat-plot/src/gpu/contour.rs",
+   "before": [
+    "100644",
+    "blob",
+    "0d4757ff9ba3b073475d5baa6c108e0417aeab4b"
+   ],
+   "after": [
+    "100644",
+    "blob",
+    "8a9483d5c3187acfe2eb99850c9f8f387ece789e"
+   ],
+   "reason": "Rendering only (Windows pan fix, WPAN-R a6b169e91b/ba195739b9/c3113a728b): GPU packers tag their vertex and indirect buffers with their device. Solver arithmetic, published values and receipt measurements are unchanged; no cohort renders an interactive native surface."
+  },
+  {
+   "path": "crates/runmat-plot/src/gpu/contour_fill.rs",
+   "before": [
+    "100644",
+    "blob",
+    "6c252fe663f35e22444055250f8b0d38b73a50fd"
+   ],
+   "after": [
+    "100644",
+    "blob",
+    "42c7e339c1f60dedc28c267a00cc65e660adfc09"
+   ],
+   "reason": "Rendering only (Windows pan fix, WPAN-R a6b169e91b/ba195739b9/c3113a728b): GPU packers tag their vertex and indirect buffers with their device. Solver arithmetic, published values and receipt measurements are unchanged; no cohort renders an interactive native surface."
+  },
+  {
+   "path": "crates/runmat-plot/src/gpu/errorbar.rs",
+   "before": [
+    "100644",
+    "blob",
+    "05af0c4a9937f9f4ca2fb4de2e35f068491c7fbc"
+   ],
+   "after": [
+    "100644",
+    "blob",
+    "caf56e386f2753db7e1dd86c7215e5cf36e0ce3d"
+   ],
+   "reason": "Rendering only (Windows pan fix, WPAN-R a6b169e91b/ba195739b9/c3113a728b): GPU packers tag their vertex and indirect buffers with their device. Solver arithmetic, published values and receipt measurements are unchanged; no cohort renders an interactive native surface."
+  },
+  {
+   "path": "crates/runmat-plot/src/gpu/image.rs",
+   "before": [
+    "100644",
+    "blob",
+    "26022773394ef72ba615158386bf019c7f22bbb3"
+   ],
+   "after": [
+    "100644",
+    "blob",
+    "95de4788ca225ee731c103125d1513964368d878"
+   ],
+   "reason": "Rendering only (Windows pan fix, WPAN-R a6b169e91b/ba195739b9/c3113a728b): GPU packers tag their vertex and indirect buffers with their device. Solver arithmetic, published values and receipt measurements are unchanged; no cohort renders an interactive native surface."
+  },
+  {
+   "path": "crates/runmat-plot/src/gpu/line.rs",
+   "before": [
+    "100644",
+    "blob",
+    "d97c4f2f039fc4c2ae0d2e24b9417ce87c162ca3"
+   ],
+   "after": [
+    "100644",
+    "blob",
+    "18d03c7eccf7afb6db074f4e185ec3bfa7d2d7b0"
+   ],
+   "reason": "Rendering only (Windows pan fix, WPAN-R a6b169e91b/ba195739b9/c3113a728b): GPU packers tag their vertex and indirect buffers with their device. Solver arithmetic, published values and receipt measurements are unchanged; no cohort renders an interactive native surface."
+  },
+  {
+   "path": "crates/runmat-plot/src/gpu/line3.rs",
+   "before": [
+    "100644",
+    "blob",
+    "f516c62b7bd468ed98e1a636307b3e4b9455394c"
+   ],
+   "after": [
+    "100644",
+    "blob",
+    "5aa6b1a729b2ce1958c6f1f47ca463a9c3b585ae"
+   ],
+   "reason": "Rendering only (Windows pan fix, WPAN-R a6b169e91b/ba195739b9/c3113a728b): GPU packers tag their vertex and indirect buffers with their device. Solver arithmetic, published values and receipt measurements are unchanged; no cohort renders an interactive native surface."
+  },
+  {
+   "path": "crates/runmat-plot/src/gpu/quiver.rs",
+   "before": [
+    "100644",
+    "blob",
+    "b7a512506a0a3d9d4c3ca99c4efc9c53dc5959f0"
+   ],
+   "after": [
+    "100644",
+    "blob",
+    "477b10317ec351260e2aa22d01b638303e8d2edf"
+   ],
+   "reason": "Rendering only (Windows pan fix, WPAN-R a6b169e91b/ba195739b9/c3113a728b): GPU packers tag their vertex and indirect buffers with their device. Solver arithmetic, published values and receipt measurements are unchanged; no cohort renders an interactive native surface."
+  },
+  {
+   "path": "crates/runmat-plot/src/gpu/scatter2.rs",
+   "before": [
+    "100644",
+    "blob",
+    "95ea7f45424eac23bb31f7b7ce8d366c0fa56854"
+   ],
+   "after": [
+    "100644",
+    "blob",
+    "07955625e85c65eb8f591c97fa40d2b2280cd8ee"
+   ],
+   "reason": "Rendering only (Windows pan fix, WPAN-R a6b169e91b/ba195739b9/c3113a728b): GPU packers tag their vertex and indirect buffers with their device. Solver arithmetic, published values and receipt measurements are unchanged; no cohort renders an interactive native surface."
+  },
+  {
+   "path": "crates/runmat-plot/src/gpu/scatter3.rs",
+   "before": [
+    "100644",
+    "blob",
+    "4c8461b102846396422a82b385d995b4bf9ba9c0"
+   ],
+   "after": [
+    "100644",
+    "blob",
+    "4fb9a618453b101eda26a7a1c0d0ceff29e50017"
+   ],
+   "reason": "Rendering only (Windows pan fix, WPAN-R a6b169e91b/ba195739b9/c3113a728b): GPU packers tag their vertex and indirect buffers with their device. Solver arithmetic, published values and receipt measurements are unchanged; no cohort renders an interactive native surface."
+  },
+  {
+   "path": "crates/runmat-plot/src/gpu/stairs.rs",
+   "before": [
+    "100644",
+    "blob",
+    "bab658371b2a69cab5b4dd6ee55ff5c6c8a0b078"
+   ],
+   "after": [
+    "100644",
+    "blob",
+    "8f4f4a4c75bbb3222053222ceeba4f30656abb6e"
+   ],
+   "reason": "Rendering only (Windows pan fix, WPAN-R a6b169e91b/ba195739b9/c3113a728b): GPU packers tag their vertex and indirect buffers with their device. Solver arithmetic, published values and receipt measurements are unchanged; no cohort renders an interactive native surface."
+  },
+  {
+   "path": "crates/runmat-plot/src/gpu/stem.rs",
+   "before": [
+    "100644",
+    "blob",
+    "1817ca5b326c8b2213970f244ce0a9e77ee5eac8"
+   ],
+   "after": [
+    "100644",
+    "blob",
+    "52e5f6d15b9e85f37d647a213760587f18bfed4c"
+   ],
+   "reason": "Rendering only (Windows pan fix, WPAN-R a6b169e91b/ba195739b9/c3113a728b): GPU packers tag their vertex and indirect buffers with their device. Solver arithmetic, published values and receipt measurements are unchanged; no cohort renders an interactive native surface."
+  },
+  {
+   "path": "crates/runmat-plot/src/gpu/surface.rs",
+   "before": [
+    "100644",
+    "blob",
+    "cdedcc59f6800ccae2b7719906e797c1c89bfa76"
+   ],
+   "after": [
+    "100644",
+    "blob",
+    "6fe3df987c10a8c9630dbaeadd0cccb578fd5b35"
+   ],
+   "reason": "Rendering only (Windows pan fix, WPAN-R a6b169e91b/ba195739b9/c3113a728b): GPU packers tag their vertex and indirect buffers with their device. Solver arithmetic, published values and receipt measurements are unchanged; no cohort renders an interactive native surface."
+  },
+  {
+   "path": "crates/runmat-plot/src/plots/figure/geometry_source.rs",
+   "before": [
+    "100644",
+    "blob",
+    "0ffc0f39f26145e877bc498abf9ec620d872bdf8"
+   ],
+   "after": [
+    "100644",
+    "blob",
+    "808a83c223de416b77683ca7ee7e21c2a8d6e0b3"
+   ],
+   "reason": "Rendering only (Windows pan fix, WPAN-R a6b169e91b/ba195739b9/c3113a728b): plot renderer shares scenes by Arc, caches the offscreen fallback renderer, retains presented frames only on request, and copies foreign-device buffers once per data change. Solver arithmetic, published values and receipt measurements are unchanged; no cohort renders an interactive native surface."
+  },
+  {
+   "path": "crates/runmat-plot/src/web.rs",
+   "before": [
+    "100644",
+    "blob",
+    "e0d481cc6832b672c62a9ddedad4418255fa82fc"
+   ],
+   "after": [
+    "100644",
+    "blob",
+    "5478f11f8559d0a0e33350efd2a179bc5d1cac1b"
+   ],
+   "reason": "Rendering only (Windows pan fix, WPAN-R a6b169e91b/ba195739b9/c3113a728b): plot renderer shares scenes by Arc, caches the offscreen fallback renderer, retains presented frames only on request, and copies foreign-device buffers once per data change. Solver arithmetic, published values and receipt measurements are unchanged; no cohort renders an interactive native surface."
+  },
+  {
+   "path": "crates/runmat-runtime/src/analysis/field_scene.rs",
+   "before": [
+    "100644",
+    "blob",
+    "b99263dba56f04ab4300f1cae3db36975e652d7b"
+   ],
+   "after": [
+    "100644",
+    "blob",
+    "abb6f83bbf74e496b3bd61af61423b29a308bff4"
+   ],
+   "reason": "Display only: 1e945c104a (disp072) labels a mode-ordinal field in the live field-scene legend as 'Mode N relative amplitude', 0 to 1, as the snapshot posters already do, and carries the mode index on FieldData for that label. It changes legend text and range only; solver arithmetic, published field values, units in the store and receipt measurements are unchanged. Then 18dc173c6f (field_scene cleanup): FieldData's normalized flag is replaced by mode.is_some(), the one source it was always derived from; field_scene.rs returns to 600 lines. Display only; no behaviour change."
+  },
+  {
+   "path": "crates/runmat-runtime/src/analysis/field_scene/deformation.rs",
+   "before": [
+    "100644",
+    "blob",
+    "7e6496510f4e0759eef7bbab86b1e4b21d0517e1"
+   ],
+   "after": [
+    "100644",
+    "blob",
+    "0a9f01ec5a6300f18e370bd2695e3bdcfe3b0ede"
+   ],
+   "reason": "Display only: 1e945c104a (disp072) labels a mode-ordinal field in the live field-scene legend as 'Mode N relative amplitude', 0 to 1, as the snapshot posters already do, and carries the mode index on FieldData for that label. It changes legend text and range only; solver arithmetic, published field values, units in the store and receipt measurements are unchanged."
+  },
+  {
+   "path": "crates/runmat-runtime/src/analysis/field_scene/geometry.rs",
+   "before": [
+    "100644",
+    "blob",
+    "281d3ed1c2ffe7639f9633cc2a6489a08dc05d0e"
+   ],
+   "after": [
+    "100644",
+    "blob",
+    "6e16237a9ca4b8d53859502ef4941c7a50fee390"
+   ],
+   "reason": "Display only: the field-scene cleanup reads a mode shape as mode.is_some() instead of the removed normalized flag it was derived from. No behaviour change; solver arithmetic and published values are unchanged. No cohort renders a live field scene."
+  },
+  {
+   "path": "crates/runmat-runtime/src/analysis/field_scene/legend.rs",
+   "before": [
+    "100644",
+    "blob",
+    "f5dce334181e98cbb139008126a780499172e3b5"
+   ],
+   "after": [
+    "100644",
+    "blob",
+    "9c5af0d0c8d2b244ada9f3f987bfb6c84e1ff672"
+   ],
+   "reason": "Display only: 1e945c104a (disp072) labels a mode-ordinal field in the live field-scene legend as 'Mode N relative amplitude', 0 to 1, as the snapshot posters already do, and carries the mode index on FieldData for that label. It changes legend text and range only; solver arithmetic, published field values, units in the store and receipt measurements are unchanged."
+  },
+  {
+   "path": "crates/runmat-runtime/src/analysis/field_scene/legend/tests.rs",
+   "before": [
+    "100644",
+    "blob",
+    "7fcf9f17739623aa3810233a7e7514d46c8daff2"
+   ],
+   "after": [
+    "100644",
+    "blob",
+    "6e01f8bd7d17233703a306aa72327021474b70fb"
+   ],
+   "reason": "Formatting only: cargo fmt --all with the pinned rustfmt (rustc 1.90.0) and the repository rustfmt.toml. Tokens, expressions, arguments and control flow are unchanged."
+  },
+  {
+   "path": "crates/runmat-runtime/src/analysis/field_scene/stats.rs",
+   "before": [
+    "100644",
+    "blob",
+    "d1794d80d8ed359056a385f196b9d5e6126843de"
+   ],
+   "after": [
+    "100644",
+    "blob",
+    "b11ae94d59dd2f2685be3a44bee61883a273f858"
+   ],
+   "reason": "Display only: the field-scene cleanup reads a mode shape as mode.is_some() instead of the removed normalized flag it was derived from. No behaviour change; solver arithmetic and published values are unchanged. No cohort renders a live field scene."
+  },
+  {
+   "path": "crates/runmat-runtime/src/analysis/field_scene/view.rs",
+   "before": [
+    "100644",
+    "blob",
+    "0fdec65b38a72cf422d18c4fb6cdff6bbb4653a9"
+   ],
+   "after": [
+    "100644",
+    "blob",
+    "83161fee82712b93d8d85b396772aca729a7c6cb"
+   ],
+   "reason": "Display only: 1e945c104a (disp072) labels a mode-ordinal field in the live field-scene legend as 'Mode N relative amplitude', 0 to 1, as the snapshot posters already do, and carries the mode index on FieldData for that label. It changes legend text and range only; solver arithmetic, published field values, units in the store and receipt measurements are unchanged. Then 18dc173c6f (field_scene cleanup): FieldData's normalized flag is replaced by mode.is_some(), the one source it was always derived from; field_scene.rs returns to 600 lines. Display only; no behaviour change."
+  },
+  {
+   "path": "crates/runmat-runtime/src/analysis/mod.rs",
+   "before": [
+    "100644",
+    "blob",
+    "bec67f764f92d2cf516401518ce879c71126631c"
+   ],
+   "after": [
+    "100644",
+    "blob",
+    "9ac04a79c1a3a0ef239fd6ebffa33456de7ae3b5"
+   ],
+   "reason": "Formatting only: cargo fmt --all with the pinned rustfmt (rustc 1.90.0) and the repository rustfmt.toml. Tokens, expressions, arguments and control flow are unchanged."
+  },
+  {
+   "path": "crates/runmat-runtime/src/analysis/prepared_study_publication/tests/preparation.rs",
+   "before": [
+    "100644",
+    "blob",
+    "3ef6200fda25d252a96c2cd5090719af2328aad9"
+   ],
+   "after": [
+    "100644",
+    "blob",
+    "e9a9f7debf63e912820fabbc0effd77691b5cf90"
+   ],
+   "reason": "Formatting only: cargo fmt --all with the pinned rustfmt (rustc 1.90.0) and the repository rustfmt.toml. Tokens, expressions, arguments and control flow are unchanged."
+  },
+  {
+   "path": "crates/runmat-runtime/src/analysis/tests.rs",
+   "before": [
+    "100644",
+    "blob",
+    "5cc4d2048f77b73382876476c7b8b37ff14027ef"
+   ],
+   "after": [
+    "100644",
+    "blob",
+    "b7eff1fea5bc3ebc485cbb599a756ae6d9178cee"
+   ],
+   "reason": "Formatting only: cargo fmt --all with the pinned rustfmt (rustc 1.90.0) and the repository rustfmt.toml. Tokens, expressions, arguments and control flow are unchanged."
+  },
+  {
+   "path": "crates/runmat-runtime/src/builtins/generated_wasm_registry.rs",
+   "before": [
+    "100644",
+    "blob",
+    "4a80752722615d713bab3049d29240eb2d47cf92"
+   ],
+   "after": [
+    "100644",
+    "blob",
+    "51738d5704d793af7fb4c630f19a7419c9b017c8"
+   ],
+   "reason": "Generated: scripts/regenerate-wasm-registry.sh after the subplot axes-slot repair (8b33ada885) changed the builtin source fingerprint. Only REGISTRY_SOURCE_FINGERPRINT changes; the 3084 registry entries, builtin and constant counts and manifest digest are identical. It is read only by the wasm32 build; no cohort runs a wasm build. Then: Generated: wasm builtin registry regenerated after the plotting builtin source changes; only REGISTRY_SOURCE_FINGERPRINT changes; 3084 entries identical. Read only by the wasm32 build."
+  },
+  {
+   "path": "crates/runmat-runtime/src/builtins/plotting/core/geometry_scene.rs",
+   "before": [
+    "100644",
+    "blob",
+    "53c775bc935bdf01276f61381ae838941455fabe"
+   ],
+   "after": [
+    "100644",
+    "blob",
+    "4fe80bde374ad9b9da8f57dd8117c398d7e44301"
+   ],
+   "reason": "Rendering only (Windows pan fix, WPAN-R a6b169e91b/ba195739b9/c3113a728b): the geometry-scene registry shares scenes by Arc (copy-on-write edits) so a camera-only frame copies no geometry; clone_geometry_scene keeps its behaviour. Solver arithmetic, published values and receipt measurements are unchanged; no cohort renders an interactive native surface."
+  },
+  {
+   "path": "crates/runmat-runtime/src/builtins/plotting/core/state/property_mutation/layout.rs",
+   "before": [
+    "100644",
+    "blob",
+    "983ba29dee8ee6452eb594bc7512ce9cc4825c2a"
+   ],
+   "after": [
+    "100644",
+    "blob",
+    "b9ca350ed14e15cda6f423caa05a4f92077605c0"
+   ],
+   "reason": "Formatted by the cargo fmt pass, then 8b33ada885 adds pin_legacy_axes_to_subplot_grid: on the first subplot of a uniform-grid figure, axes i takes slot i of the requested grid instead of being retired. This is the plotting state for subplot only. None of the four cohorts calls subplot: typed_fea_geometry_cli, remote::driver_replacement_tests, runtime_scale and cad_airliner_drawing contain no subplot call."
+  },
+  {
+   "path": "crates/runmat-runtime/src/builtins/plotting/core/web.rs",
+   "before": [
+    "100644",
+    "blob",
+    "519d71dd94c072be5d86d1b79fcc149bf0bc5cf0"
+   ],
+   "after": [
+    "100644",
+    "blob",
+    "5733fb74b6c5d83b2577f13bfab1026943af9702"
+   ],
+   "reason": "Rendering only (Windows pan fix, WPAN-R a6b169e91b/ba195739b9/c3113a728b): the geometry-scene registry shares scenes by Arc (copy-on-write edits) so a camera-only frame copies no geometry; clone_geometry_scene keeps its behaviour. Solver arithmetic, published values and receipt measurements are unchanged; no cohort renders an interactive native surface."
+  },
+  {
+   "path": "crates/runmat-runtime/src/builtins/plotting/mod.rs",
+   "before": [
+    "100644",
+    "blob",
+    "cec397724dadf0cf4d6f2e667b8cfe3175e3f393"
+   ],
+   "after": [
+    "100644",
+    "blob",
+    "e19f1a1b6e8009e7b65654a21d8973b0a297a65e"
+   ],
+   "reason": "Rendering only (Windows pan fix, WPAN-R a6b169e91b/ba195739b9/c3113a728b): the geometry-scene registry shares scenes by Arc (copy-on-write edits) so a camera-only frame copies no geometry; clone_geometry_scene keeps its behaviour. Solver arithmetic, published values and receipt measurements are unchanged; no cohort renders an interactive native surface."
+  },
+  {
+   "path": "crates/runmat-runtime/src/geometry/design_source.rs",
+   "before": [
+    "100644",
+    "blob",
+    "12d11bcd030d3667a24a99c8b44efd1127fdba8b"
+   ],
+   "after": [
+    "100644",
+    "blob",
+    "b2f0f183d7bdb0977499423320046ab2a4a699b9"
+   ],
+   "reason": "Formatting only: cargo fmt --all with the pinned rustfmt (rustc 1.90.0) and the repository rustfmt.toml. Tokens, expressions, arguments and control flow are unchanged."
+  },
+  {
+   "path": "crates/runmat-runtime/tests/operation_contracts.rs",
+   "before": [
+    "100644",
+    "blob",
+    "db5b69947c008f1f2d0a400eb6ae5456ebba5da3"
+   ],
+   "after": [
+    "100644",
+    "blob",
+    "fa9c8287210c48d9a63523e4ed83733bfdeb7ee0"
+   ],
+   "reason": "Formatting only: cargo fmt --all with the pinned rustfmt (rustc 1.90.0) and the repository rustfmt.toml. Tokens, expressions, arguments and control flow are unchanged."
+  },
+  {
+   "path": "crates/runmat-sparse-solvers/src/trace.rs",
+   "before": [
+    "100644",
+    "blob",
+    "c2c4da678a3e8896b631e67bd27f8309c1b4898a"
+   ],
+   "after": [
+    "100644",
+    "blob",
+    "0a41227a3790c770974dfdc526a7c6d5694ee396"
+   ],
+   "reason": "Formatting only: cargo fmt --all with the pinned rustfmt (rustc 1.90.0) and the repository rustfmt.toml. Tokens, expressions, arguments and control flow are unchanged."
+  },
+  {
+   "path": "crates/runmat-types/src/physical/materials/catalog/metals.rs",
+   "before": [
+    "100644",
+    "blob",
+    "58d68a9d58899a2e44531fd4e1f41976bb363f79"
+   ],
+   "after": [
+    "100644",
+    "blob",
+    "93d8c1984850e6156589079af60e1fd3f5cf0dc7"
+   ],
+   "reason": "Formatting only: cargo fmt --all with the pinned rustfmt (rustc 1.90.0) and the repository rustfmt.toml. Tokens, expressions, arguments and control flow are unchanged."
+  },
+  {
+   "path": "crates/runmat-types/src/physical/materials/citations.rs",
+   "before": [
+    "100644",
+    "blob",
+    "16869460711e90e0473ef611b52505f3347d2e3a"
+   ],
+   "after": [
+    "100644",
+    "blob",
+    "fc60ef4693b0e889565d42f614f415f0af705dda"
+   ],
+   "reason": "Formatting only: cargo fmt --all with the pinned rustfmt (rustc 1.90.0) and the repository rustfmt.toml. Tokens, expressions, arguments and control flow are unchanged."
+  },
+  {
+   "path": "crates/runmat-types/src/physical/materials/mod.rs",
+   "before": [
+    "100644",
+    "blob",
+    "04ba403b8071effc03dfe664a1889f6cc51cd7c3"
+   ],
+   "after": [
+    "100644",
+    "blob",
+    "30b788067083e6bf372de635a091974e498b4116"
+   ],
+   "reason": "Formatting only: cargo fmt --all with the pinned rustfmt (rustc 1.90.0) and the repository rustfmt.toml. Tokens, expressions, arguments and control flow are unchanged."
+  },
+  {
+   "path": "crates/runmat-types/src/physical/materials/tests.rs",
+   "before": [
+    "100644",
+    "blob",
+    "81f952a8dda70dc8465bfb150d4eb1d7c7d0898e"
+   ],
+   "after": [
+    "100644",
+    "blob",
+    "134749e699eb5604e957f58a142729bf8ba3da60"
+   ],
+   "reason": "Formatting only: cargo fmt --all with the pinned rustfmt (rustc 1.90.0) and the repository rustfmt.toml. Tokens, expressions, arguments and control flow are unchanged."
+  },
+  {
+   "path": "crates/runmat-types/src/physical/materials/validate.rs",
+   "before": [
+    "100644",
+    "blob",
+    "a64400bf791aaa4986a2ad1c8a0870a73ae00689"
+   ],
+   "after": [
+    "100644",
+    "blob",
+    "ca1e3bf76ed3a1be9c128c7226da38d8a6a2e1c4"
+   ],
+   "reason": "Formatting only: cargo fmt --all with the pinned rustfmt (rustc 1.90.0) and the repository rustfmt.toml. Tokens, expressions, arguments and control flow are unchanged."
+  },
+  {
+   "path": "crates/runmat-types/src/physical/parse.rs",
+   "before": [
+    "100644",
+    "blob",
+    "4ce0aa7c59fa4f5ca7e9bd0020b8c5eace42a13f"
+   ],
+   "after": [
+    "100644",
+    "blob",
+    "4550842e2cc8d8c272840cead5f760c6186a0918"
+   ],
+   "reason": "Formatting only: cargo fmt --all with the pinned rustfmt (rustc 1.90.0) and the repository rustfmt.toml. Tokens, expressions, arguments and control flow are unchanged."
+  },
+  {
+   "path": "crates/runmat-types/src/physical/unit_message.rs",
+   "before": [
+    "100644",
+    "blob",
+    "b206774affad4a674f3058cf7cf92c989621632e"
+   ],
+   "after": [
+    "100644",
+    "blob",
+    "fe23c69257b218a37e2fce6b2d00b371aa4b8ef5"
+   ],
+   "reason": "Formatting only: cargo fmt --all with the pinned rustfmt (rustc 1.90.0) and the repository rustfmt.toml. Tokens, expressions, arguments and control flow are unchanged."
+  },
+  {
+   "path": "crates/runmat-types/src/physical/unit_names.rs",
+   "before": [
+    "100644",
+    "blob",
+    "b1b535e183fd0b1891acc980c70db6e769b66e1e"
+   ],
+   "after": [
+    "100644",
+    "blob",
+    "797451f48672eda29afec1b4c52aabe461d91b29"
+   ],
+   "reason": "Formatting only: cargo fmt --all with the pinned rustfmt (rustc 1.90.0) and the repository rustfmt.toml. Tokens, expressions, arguments and control flow are unchanged."
+  },
+  {
+   "path": "crates/runmat-wasm/src/api/fea_lease.rs",
+   "before": [
+    "100644",
+    "blob",
+    "0660a41b332f28d845b117316904dc0427b2f282"
+   ],
+   "after": [
+    "100644",
+    "blob",
+    "03800100c36a149cb9b14497e73c5208788c5027"
+   ],
+   "reason": "Formatting only: cargo fmt --all with the pinned rustfmt (rustc 1.90.0) and the repository rustfmt.toml. Tokens, expressions, arguments and control flow are unchanged."
+  },
+  {
+   "path": "crates/runmat-wasm/src/api/fea_step_worker.rs",
+   "before": [
+    "100644",
+    "blob",
+    "ab148ee4e30cae87080a7c0c236f7de68a34863b"
+   ],
+   "after": [
+    "100644",
+    "blob",
+    "541624a5ec2d1bf5dc3ebc016fcf5adad89d6f18"
+   ],
+   "reason": "Formatting only: cargo fmt --all with the pinned rustfmt (rustc 1.90.0) and the repository rustfmt.toml. Tokens, expressions, arguments and control flow are unchanged."
+  }
+ ],
+ "reason": "Conserves the fresh 0.7.2 scientific measurements across the CI repairs. cargo fmt --all on the measured source (3583e21662, whose scientific inputs equal the measured 912f34e3cd inventory) reproduces the 191 formatted Rust files of bd7dd3a4d1 blob for blob. Other changed inputs: the regenerated FEA highlighting grammar and the regenerated wasm builtin registry (fingerprint line only), which adds one field-quantity word and no execution path reads it; the empty pinned-file read in the remote filesystem providers (3af73068ba); the mode-shape legend wording in the live field scene and CLI snapshot (1e945c104a; legend text and range only); the Windows pan renderer work (WPAN-R: shared scenes, cached fallback, cross-device GPU buffers; rendering only); the subplot axes-slot repair in runtime plotting state (8b33ada885), which no cohort exercises; the OCCT host's per-thread STEP import table (a6fb58c3ad; the airliner cohort imports no STEP file, so its table is empty either way); the STEP exporter's direct-surface pass (d36e979417; no cohort exports STEP); and test-only edits that no cohort runs (eight OCCT CAD tests read the always-known mass-properties volume; the G128 multigrid memory test is ignored). Solver arithmetic, model inputs, dependencies, features and thresholds are unchanged. This review is not a rerun of the scientific or performance measurements."
+}

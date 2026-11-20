@@ -11,6 +11,7 @@
 //!   it with: a plane's square (X along its first side, Z its normal), an axis's line, a point's
 //!   cross, a frame's three axis lines.
 
+use runmat_cad::display::wire;
 use serde_json::Value;
 
 pub type V3 = [f64; 3];
@@ -71,22 +72,33 @@ pub fn unit(a: V3) -> V3 {
 pub use runmat_cad::assembly::polyline_frame::perpendicular;
 use runmat_cad::assembly::polyline_frame::{fit_circle, polyline_frame};
 
-fn points(values: &Value) -> Vec<V3> {
-    let flat: Vec<f64> = values
-        .as_array()
-        .map(|a| a.iter().filter_map(Value::as_f64).collect())
-        .unwrap_or_default();
-    flat.chunks_exact(3).map(|c| [c[0], c[1], c[2]]).collect()
+/// A display number array as points. The array is inline or, while the CAD host writes meshes
+/// as bytes beside the JSON (the Desktop's framed calls), a mesh reference into those bytes:
+/// [`wire::numbers`] reads both.
+pub fn points(values: &Value) -> Vec<V3> {
+    wire::numbers(values)
+        .chunks_exact(3)
+        .map(|c| [c[0], c[1], c[2]])
+        .collect()
+}
+
+/// A display index array (triangles), inline or a mesh reference ([`points`]).
+pub fn indices(values: &Value) -> Vec<usize> {
+    wire::numbers(values)
+        .into_iter()
+        .map(|n| n as usize)
+        .collect()
 }
 
 /// The frame of display face `face` (positions, triangles).
 pub fn face_frame(face: &Value) -> Option<Frame> {
-    let p = points(&face["positions"]);
-    let t: Vec<usize> = face["triangles"]
-        .as_array()?
-        .iter()
-        .filter_map(|v| v.as_u64().map(|n| n as usize))
-        .collect();
+    mesh_frame(&points(&face["positions"]), &indices(&face["triangles"]))
+}
+
+/// The frame of a face mesh: `p` its points, `t` its triangles (three indices each). A planar
+/// face gives a plane whatever its loops (a plate's top with holes through it); a curved one an
+/// axis.
+pub fn mesh_frame(p: &[V3], t: &[usize]) -> Option<Frame> {
     let mut normals = Vec::new();
     let (mut area_normal, mut centroid, mut area) = ([0.0; 3], [0.0; 3], 0.0);
     for tri in t.chunks_exact(3) {
@@ -128,7 +140,7 @@ pub fn face_frame(face: &Value) -> Option<Frame> {
         }
     }
     let axis = unit(best.0);
-    let (centre, radius) = fit_circle(&p, centroid, axis)?;
+    let (centre, radius) = fit_circle(p, centroid, axis)?;
     Some(Frame {
         kind: FrameKind::Axis,
         origin: centre,

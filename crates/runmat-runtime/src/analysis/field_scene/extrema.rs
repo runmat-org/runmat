@@ -36,6 +36,19 @@ pub fn field_extrema(
     nodes: Option<&[[f64; 3]]>,
     elements: Option<&[Vec<usize>]>,
 ) -> Result<FieldExtrema, String> {
+    field_extrema_counted(run_id, selection, nodes, elements, None)
+}
+
+/// [`field_extrema`] over the nodes or elements `counted` keeps (every one without it): the
+/// extremes of the bodies a view draws in field colour
+/// ([`super::regions::ViewRegions::counted_entities`]).
+pub fn field_extrema_counted(
+    run_id: &str,
+    selection: &AnalysisFieldSelection,
+    nodes: Option<&[[f64; 3]]>,
+    elements: Option<&[Vec<usize>]>,
+    counted: Option<&super::regions::CountedEntities>,
+) -> Result<FieldExtrema, String> {
     let field = load_field(run_id, selection)?;
     let entities = field.value_count / field.components;
     let mesh_entities = match field.location {
@@ -62,6 +75,13 @@ pub fn field_extrema(
                 return Err(format!("field '{}' has a non-finite value", field.label));
             }
             let index = entity + offset;
+            let kept = counted.is_none_or(|counted| match field.location {
+                AnalysisFieldLocation::Node => counted.counts_node(index / per_entity),
+                _ => counted.counts_element(index / per_entity),
+            });
+            if !kept {
+                continue;
+            }
             if minimum.is_none_or(|(best, _)| value < best) {
                 minimum = Some((value, index));
             }
@@ -88,7 +108,10 @@ pub fn field_extrema(
         }
     };
     let (Some(minimum), Some(maximum)) = (minimum, maximum) else {
-        return Err(format!("field '{}' has no values", field.label));
+        return Err(format!(
+            "field '{}' has no values in the regions the view draws",
+            field.label
+        ));
     };
     Ok(FieldExtrema {
         minimum: locate(minimum),

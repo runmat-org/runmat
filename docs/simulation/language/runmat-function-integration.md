@@ -1,3 +1,8 @@
+---
+description: How a .fea study imports a .m function to generate signals, spectra or geometry, including physical axes, complex frequency inputs and editor navigation.
+keywords: [.m function import, generated signals, generated spectra, generated geometry, complex frequency input, RunMat function]
+doc_type: language-reference
+---
 # RunMat function integration
 
 Use a `.m` function when an input requires bounded computation that does not belong in the

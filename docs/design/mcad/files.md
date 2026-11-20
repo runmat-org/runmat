@@ -20,9 +20,13 @@ A part file declares one part: `part <name> { … }`. The name matches the file 
 | `material = { body, material }` | a body's material | [Outputs](/docs/mcad/part/regions-and-publish#outputs) |
 | `region <name> : <kind> = { select, expect, label }` | a named, checked selection | [Regions](/docs/mcad/part/regions-and-publish#regions) |
 | `publish <name> = …` | a region, value or frame other files read | [Published values](/docs/mcad/part/regions-and-publish#published-values) |
-| `datum`, `tolerance`, `size`, `location`, `finish` | semantic PMI | [PMI](/docs/mcad/part/regions-and-publish#pmi) |
+| `datum`, `tolerance`, `size`, `location`, `finish`, `treatment` | semantic PMI | [PMI](/docs/mcad/part/regions-and-publish#pmi) |
+| `annotation <name> = <kind>(…)`, `view <name> = { from, up }` | 3D annotations and annotation views | [3D annotations](/docs/mcad/part/regions-and-publish#3d-annotations) |
 | `configuration <name> = { … }` | a member of the product family | [Configurations](/docs/mcad/part/configurations) |
 | `link <kind> <item> to "<target>"` | a traceable link | [Links](/docs/mcad/part/regions-and-publish#links) |
+| `settings = { units, decimals, standard, tolerance }` | the units and decimals readouts use, the drafting standard and the ISO 2768-1 general tolerance | [Document settings](/docs/mcad/guides/model-a-part#document-settings) |
+| `sheet_metal = { gauges, gauge, bend_table, k }` | the gauge and bend rule every sheet body follows | [Gauges and bend tables](/docs/mcad/guides/sheet-metal#gauges-and-bend-tables) |
+| `feature_def <name> = { params, features }` | a reusable feature other parts insert with `library(def = …)` | [Library features and parts](/docs/mcad/part/features#library-features-and-parts) |
 
 ## `.assembly`
 
@@ -34,13 +38,15 @@ An assembly file declares one assembly: `assembly <name> { … }`.
 | `use part <design> as <occurrence> { … }`, `use assembly …` | an occurrence: a placed part or sub-assembly | [Occurrences and mates](/docs/mcad/assembly/mates#occurrences) |
 | `connector <name> = { occurrence, anchor, offset, flip }` | a frame that mates join | [Connectors](/docs/mcad/assembly/mates#connectors) |
 | `mate <name> = { kind, a, b }` | a joint between two connectors | [Mates](/docs/mcad/assembly/mates#mates) |
+| `sketch <name> on <plane> { … }` | a sketch on an origin plane or on a connector (`plane.<connector>`) | [Sketches in an assembly](/docs/mcad/assembly/sketches) |
+| `operation <name> = cut(…)`, `hole(…)`, `weld(…)` | an assembly feature: a cut, holes or a weld bead through components, from an assembly sketch | [Assembly features](/docs/mcad/assembly/features) |
 | `pattern <name> = <layout>(seeds = […], …)` | keyed copies of occurrences | [Patterns](/docs/mcad/assembly/patterns-and-mirrors#pattern-layouts) |
 | `mirror <name> = { seeds, plane, hand }` | reflected copies | [Mirrors](/docs/mcad/assembly/patterns-and-mirrors#mirrors) |
 | `fasteners <name> = { layout, fastener, stack, exceptions }` | a fastener set along a path | [Fasteners](/docs/mcad/assembly/patterns-and-mirrors#fasteners) |
 | `publish <name> = …` | frames and values for the assembly's own users | [Published values](/docs/mcad/part/regions-and-publish#published-values) |
 | `part_number = "…"` | the assembly's part number | |
 | `options = { axes, rules, groups, configurations }` | a configurable product: option axes, rules between them, effectivity groups and named configurations | [Options](#options) |
-| `exploded <name> = { … }` | an exploded state for drawings and instructions | |
+| `exploded <name> = { … }` | an exploded state for drawings and instructions ([Exploded views](/docs/mcad/assembly/exploded-views)) | |
 | `view <name> = { from, up, default }` | a saved camera | |
 
 ### Options
@@ -115,4 +121,5 @@ A drawing file declares one drawing: `drawing <name> { … }`.
 - A part is self-contained. It can read published values from other parts (a skeleton) and `.m` functions in its folder.
 - An assembly places parts and assemblies by name, picks their configurations or sets their inputs, and mates them.
 - A drawing shows parts and assemblies by name and reads their PMI, properties and configurations.
+- A part reads library features and parts from the `library/` folder beside it, and the Profile library offers the custom profiles in `library/profiles/` (one `.part` each, holding a sketch named `profile`); see [Library features and parts](/docs/mcad/part/features#library-features-and-parts) and [Structural profiles](/docs/mcad/part/features#structural-profiles).
 - A study (`.fea`) reads the exported geometry with the region names the part gives it; see [Import and export](/docs/mcad/import-export).

@@ -78,6 +78,10 @@ impl<'a> MeshingGeometryEvaluationControl<'a> {
         self
     }
 
+    pub fn maximum_allocation_bytes(&self) -> u64 {
+        self.maximum_allocation_bytes
+    }
+
     pub fn remaining_allocation_bytes(&self) -> u64 {
         self.maximum_allocation_bytes
             .saturating_sub(self.usage.allocation_bytes.load(Ordering::Relaxed))
@@ -90,6 +94,12 @@ impl<'a> MeshingGeometryEvaluationControl<'a> {
             search_work: self.usage.search_work.load(Ordering::Relaxed),
             iterations: self.usage.iterations.load(Ordering::Relaxed),
         }
+    }
+
+    /// The largest requirement, what the stage held plus what it asked for, that the memory
+    /// ceiling refused; zero when nothing was refused.
+    pub fn refused_allocation_bytes(&self) -> u64 {
+        self.usage.refused_allocation_bytes.load(Ordering::Relaxed)
     }
 
     /// Search work done by every view of this stage since the previous exact-geometry probe.
@@ -200,6 +210,9 @@ impl GeometryEvaluationControl for MeshingGeometryEvaluationControl<'_> {
                     .filter(|next| *next <= self.maximum_allocation_bytes)
             })
             .map_err(|live| {
+                self.usage
+                    .refused_allocation_bytes
+                    .fetch_max(live.saturating_add(count), Ordering::Relaxed);
                 GeometryEvaluationError::new(
                     GeometryEvaluationErrorKind::AllocationBudgetExceeded,
                     format!("exact geometry allocation exceeds the execution resource budget: requested {count} bytes, live {live} bytes, maximum {} bytes", self.maximum_allocation_bytes),

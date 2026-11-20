@@ -73,6 +73,7 @@ pub(super) fn publish(
     )
     .unwrap();
     let compiled = runmat_analysis_fea::study::CompiledAnalysisStudy {
+        displays: Vec::new(),
         module_path: "original-native-frequency.fea".into(),
         study_id: "original-frequency".into(),
         study_inputs: Vec::new(),

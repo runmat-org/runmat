@@ -1,0 +1,948 @@
+//! The Evaluate tab's commands on parts and assemblies, as results the Desktop lists under the
+//! canvas: `analyze(path, text, files, request)` → `{ ok: true, title, summary, columns, rows,
+//! problems }` or `{ ok: false, message }`.
+//!
+//! - `evaluate.mass-properties`: mass, volume, centre of gravity and inertia about it, from
+//!   each part's material or `density` property ([`crate::mass`]); for an assembly, one row
+//!   per part occurrence.
+//! - `evaluate.interference`, `evaluate.clearance` (`values.minimum`, mm): part occurrences that
+//!   share material, and those closer than the clearance, on their exact bodies
+//!   ([`crate::evaluate::assembly_clearance`]); `values.changed` (occurrence paths) limits them
+//!   to the pairs those occurrences are in.
+//!
+//! - `weldment.cut-list`: a weldment part's members grouped by profile, length and end angles.
+//! - `evaluate.draft`: each face's draft against a pull direction (`values.direction`, a pick;
+//!   `values.angle`, degrees), banded ([`crate::draft_analysis`]).
+//! - `evaluate.undercut`: faces the part blocks along every way they can release from a
+//!   two-part mould along the pull (`values.direction`), by rays along it ([`crate::undercut`]).
+//! - `evaluate.check-geometry`: invalid faces, edges and vertices, open and short edges, gaps
+//!   and self-intersections, found by the kernel ([`check_geometry`]).
+//! - `evaluate.section-properties`: area, centroid, second and polar moments and principal
+//!   moments of planar faces or a sketch's regions ([`section_properties`]).
+//! - `evaluate.thickness`, `evaluate.curvature`, `evaluate.zebra`: a value at every point of
+//!   each face's mesh, measured on the exact surface, that colors the model while the results
+//!   are open ([`field`]); rows per face (thickness, curvature) or per edge (zebra's
+//!   continuity).
+//! - `evaluate.deviation`: the angle between the two faces along edges ([`deviation`]).
+//! - `evaluate.dfm`: the part checked by a process's rule pack, and a company pack
+//!   ([`dfm`]).
+//! - `evaluate.cost`: the part's cost from the shop's rates you enter ([`cost`]).
+//! - `drawing.check`: a drawing against its models and drafting rules: references, models,
+//!   title block, overlaps and scales ([`drawing_check`]).
+//! - `sketch.check`: a part's or an assembly's sketch checked for the feature it will make
+//!   ([`sketch_check`]).
+//! - `view.measure`: distances, angles, radii, lengths and areas between picks, with dimensions
+//!   to draw on the model ([`crate::measure`]).
+//! - `simulate.check`: the fit and mass checks a study runs before it meshes
+//!   ([`crate::study_checks`]; `values.gap`, mm, for open contacts).
+//! - `part.parents-children`: what the selected feature is built on and what is built on it
+//!   ([`crate::parents`]).
+//!
+//! The assembly Evaluate tab's `assembly.mass-properties`, `assembly.interference` and
+//! `assembly.clearance` run the same checks. On assemblies only:
+//!
+//! - `assembly.visualization`: part occurrences sorted by mass, volume, cost or count and
+//!   colored by it ([`visualization`]).
+//! - `assembly.interface-check`: each mate's connectors, attachments and publishes against what
+//!   the definitions publish now ([`interfaces`]).
+//! - `assembly.hole-alignment`, `assembly.hole-check`: holes in different parts that meet and
+//!   whether they line up; the check adds each fastener's hole fit and grip ([`holes`]).
+//!
+//! - `motion.collision`: interference at every solved frame of a motion study
+//!   ([`motion_collision`]).
+//!
+//! `values.configuration` names the active configuration. Rows name occurrences by path in
+//! `items`, so selecting a row selects them.
+
+mod check_geometry;
+mod cost;
+mod curvature;
+mod deviation;
+mod dfm;
+pub mod drawing_check;
+mod field;
+mod holes;
+mod interfaces;
+mod motion_collision;
+mod section_properties;
+mod sketch_check;
+mod thickness;
+mod visualization;
+mod zebra;
+
+use crate::mass::{assembly_mass, part_mass, MassReport};
+use crate::runtime::Files;
+use serde::{Deserialize, Serialize};
+use serde_json::{json, Map, Value};
+
+#[derive(Clone, Debug, Default, Deserialize)]
+pub struct AnalyzeRequest {
+    pub command: String,
+    #[serde(default)]
+    pub values: Map<String, Value>,
+    /// The Outline ids the command started from (Parents and children's feature).
+    #[serde(default)]
+    pub selection: Vec<String>,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Serialize)]
+pub struct Row {
+    pub cells: Vec<String>,
+    /// Outline IDs of what the row is about (`occurrence:<path>`).
+    pub items: Vec<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub severity: Option<&'static str>,
+    /// The row's entry in the result's color legend: the row's marker takes that color, as the
+    /// model does (draft bands). Rows without one show their severity.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub legend: Option<usize>,
+    /// The canonical reference the row is about, when it names one entity (a face): shown on
+    /// hover and copied from the row, while the first cell reads as a label.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub reference: Option<String>,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Serialize)]
+pub struct Analysis {
+    pub title: String,
+    pub summary: String,
+    pub columns: Vec<String>,
+    pub rows: Vec<Row>,
+    pub problems: Vec<String>,
+    /// The typed result (the mass report, the interference list), for agents and exports.
+    pub data: Value,
+    /// Colors the model takes while the results are open (draft bands), with their legend.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub colors: Option<FaceColors>,
+    /// The settings the result was computed with (`Pull: Top plane (+Z)`, `Draft angle: 2°`),
+    /// shown in the results header.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub settings: Vec<String>,
+    /// A direction to draw on the model while the results are open (the pull).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub arrow: Option<ModelArrow>,
+    /// Dimensions to draw on the model while the results are open, and to keep there when the
+    /// result is pinned (Measure's distances, radii and angles).
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub dimensions: Vec<ModelDimension>,
+    /// A value over the model's faces drawn as colors (thickness, curvature, zebra): those
+    /// faces redraw from the field's meshes while the results are open.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub field: Option<field::SurfaceField>,
+}
+
+/// A dimension on the model: a line between two points (model units, metres) with its value, in
+/// the renderer's dimension shape (runmat-plot `GeometrySceneDimension`).
+#[derive(Clone, Debug, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ModelDimension {
+    pub from: [f64; 3],
+    pub to: [f64; 3],
+    pub label: String,
+    /// Lines joining a dimension-line end that stands off its item to that item's outline, each
+    /// `[point on the item, dimension-line end]` (a normal distance between faces that don't
+    /// overlap seen along the normal).
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub extension_lines: Vec<[[f64; 3]; 2]>,
+}
+
+/// An arrow on the model: from `origin` along the unit `direction`, `length` long (model
+/// units, metres), with a short label at its tip.
+#[derive(Clone, Debug, PartialEq, Serialize)]
+pub struct ModelArrow {
+    pub origin: [f64; 3],
+    pub direction: [f64; 3],
+    pub length: f64,
+    pub label: String,
+}
+
+/// An analysis's colors on the model: a legend, and each face's entry in it. Faces are named as
+/// the rows name them (canonical references).
+#[derive(Clone, Debug, Default, PartialEq, Serialize)]
+pub struct FaceColors {
+    pub legend: Vec<LegendEntry>,
+    pub faces: Vec<FaceColor>,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize)]
+pub struct LegendEntry {
+    pub label: String,
+    /// Linear RGBA, 0 to 1.
+    pub color: [f32; 4],
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize)]
+pub struct FaceColor {
+    pub item: String,
+    /// The index of the face's legend entry.
+    pub entry: usize,
+}
+
+/// Draft bands on the model, in legend order: positive green, negative blue, needs draft red,
+/// straddles amber.
+const DRAFT_BANDS: [(crate::draft_analysis::DraftBand, &str, [f32; 4]); 4] = {
+    use crate::draft_analysis::DraftBand;
+    [
+        (DraftBand::Positive, "Positive", [0.22, 0.66, 0.36, 1.0]),
+        (DraftBand::Negative, "Negative", [0.24, 0.48, 0.86, 1.0]),
+        (
+            DraftBand::NeedsDraft,
+            "Needs draft",
+            [0.86, 0.24, 0.22, 1.0],
+        ),
+        (DraftBand::Straddle, "Straddles", [0.93, 0.66, 0.16, 1.0]),
+    ]
+};
+
+/// A band's entry in [`DRAFT_BANDS`].
+fn draft_entry(band: crate::draft_analysis::DraftBand) -> usize {
+    DRAFT_BANDS
+        .iter()
+        .position(|(b, ..)| *b == band)
+        .unwrap_or(0)
+}
+
+fn draft_colors(faces: &[crate::draft_analysis::FaceDraft]) -> FaceColors {
+    FaceColors {
+        legend: DRAFT_BANDS
+            .iter()
+            .map(|(_, label, color)| LegendEntry {
+                label: (*label).into(),
+                color: *color,
+            })
+            .collect(),
+        faces: faces
+            .iter()
+            .map(|f| FaceColor {
+                item: f.face.clone(),
+                entry: draft_entry(f.band),
+            })
+            .collect(),
+    }
+}
+
+/// The pull drawn on the model: from the top of the part's bounds along the pull, a third of
+/// its size long.
+fn pull_arrow(display: &runmat_cad::display::PartDisplay, pull: [f64; 3]) -> Option<ModelArrow> {
+    display.bounds.as_ref().map(|b| {
+        let lo = b.min.map(f64::from);
+        let hi = b.max.map(f64::from);
+        let centre = [0, 1, 2].map(|i| (lo[i] + hi[i]) / 2.0);
+        let size = (0..3).map(|i| hi[i] - lo[i]).fold(0.0, f64::max);
+        let reach = (0..3)
+            .map(|i| (hi[i] - lo[i]) / 2.0 * pull[i].abs())
+            .sum::<f64>();
+        ModelArrow {
+            origin: [0, 1, 2].map(|i| centre[i] + pull[i] * reach),
+            direction: pull,
+            length: size / 3.0,
+            label: "Pull".into(),
+        }
+    })
+}
+
+/// The pull pick as the results header names it.
+fn pull_label(pick: &str, pull: [f64; 3], label: Option<String>) -> String {
+    let axis = match pull.map(|c| (c * 1e6).round() / 1e6) {
+        [x, y, z] if (x.abs() - 1.0).abs() < 1e-6 && y == 0.0 && z == 0.0 => {
+            Some(if x > 0.0 { "+X" } else { "−X" })
+        }
+        [x, y, z] if (y.abs() - 1.0).abs() < 1e-6 && x == 0.0 && z == 0.0 => {
+            Some(if y > 0.0 { "+Y" } else { "−Y" })
+        }
+        [x, y, z] if (z.abs() - 1.0).abs() < 1e-6 && x == 0.0 && y == 0.0 => {
+            Some(if z > 0.0 { "+Z" } else { "−Z" })
+        }
+        _ => None,
+    };
+    let what = match pick {
+        "origin:top" | "origin.xy" => "Top plane".to_string(),
+        "origin:front" | "origin.zx" => "Front plane".to_string(),
+        "origin:right" | "origin.yz" => "Right plane".to_string(),
+        "origin:x" | "origin.x" => "X axis".to_string(),
+        "origin:y" | "origin.y" => "Y axis".to_string(),
+        "origin:z" | "origin.z" => "Z axis".to_string(),
+        _ => label.unwrap_or_else(|| "a face".into()),
+    };
+    match axis {
+        Some(axis) => format!("{what} ({axis})"),
+        None => format!("{what} ({:.2}, {:.2}, {:.2})", pull[0], pull[1], pull[2]),
+    }
+}
+
+fn g(kg: f64) -> String {
+    if kg >= 1.0 {
+        format!("{kg:.3} kg")
+    } else {
+        format!("{:.1} g", kg * 1000.0)
+    }
+}
+
+fn mm(m: f64) -> String {
+    format!("{:.2}", m * 1000.0)
+}
+
+/// What a results cell says for a value that is unknown (a mass without a density).
+const UNKNOWN: &str = "unknown";
+
+/// The unit system a part's or an assembly's settings name ([`runmat_cad::assembly::settings`]);
+/// `None` without settings.
+pub fn document_units(
+    path: &str,
+    text: &str,
+    files: &Files,
+) -> Option<runmat_cad::assembly::settings::UnitSystem> {
+    document_readout(path, text, files).map(|r| r.units)
+}
+
+/// How a part's or an assembly's readouts show values: its settings' units, decimals and
+/// general tolerance. `None` without settings.
+pub fn document_readout(
+    path: &str,
+    text: &str,
+    files: &Files,
+) -> Option<runmat_cad::assembly::settings::Readout> {
+    let settings = if path.ends_with(".assembly") {
+        let scope = crate::runtime::module_scope(path, text, files);
+        runmat_cad::syntax::parse_assembly_in(path, text, &scope)
+            .document?
+            .settings
+    } else if path.ends_with(".part") {
+        runmat_cad::syntax::parse_part(path, text)
+            .document?
+            .settings
+    } else {
+        None
+    };
+    settings.map(|s| s.readout())
+}
+
+fn mass_analysis(
+    report: &MassReport,
+    units: Option<runmat_cad::assembly::settings::Readout>,
+) -> Analysis {
+    let volume = |v: f64| match units {
+        Some(u) => u.volume(v),
+        None => format!("{:.1} cm³", v * 1e6),
+    };
+    let summary = match (&report.total, units) {
+        // In the document's units.
+        (Some(t), Some(u)) => {
+            let c = t.center;
+            let l = |v: f64| u.number(u.length_value(v), 6);
+            let mi = |r: usize, k: usize| {
+                let s = u.inertia(t.inertia[r][k]);
+                s.split(' ').next().unwrap_or_default().to_owned()
+            };
+            format!(
+                "{} · {} · CG ({}, {}, {}) {} · Ixx {} Iyy {} Izz {} {}·{}² about the CG",
+                u.mass(t.mass),
+                u.volume(t.volume),
+                l(c[0]),
+                l(c[1]),
+                l(c[2]),
+                u.length_unit(),
+                mi(0, 0),
+                mi(1, 1),
+                mi(2, 2),
+                u.mass_unit(),
+                u.length_unit()
+            )
+        }
+        (Some(t), None) => {
+            let c = t.center;
+            // kg·mm², the unit drawings and data sheets quote.
+            let i = |r: usize, k: usize| format!("{:.1}", t.inertia[r][k] * 1e6);
+            format!(
+                "{} · {:.1} cm³ · CG ({}, {}, {}) mm · Ixx {} Iyy {} Izz {} kg·mm² about the CG",
+                g(t.mass),
+                report.volume * 1e6,
+                mm(c[0]),
+                mm(c[1]),
+                mm(c[2]),
+                i(0, 0),
+                i(1, 1),
+                i(2, 2)
+            )
+        }
+        // No density is assumed: mass, CG and inertia stay unknown, and the summary says why.
+        (None, _) => format!(
+            "Mass, CG and inertia unknown · {} · {}",
+            volume(report.volume),
+            report.unknown.as_deref().unwrap_or("a part has no density")
+        ),
+    };
+    let rows = report
+        .parts
+        .iter()
+        .map(|p| Row {
+            cells: vec![
+                p.path.clone(),
+                p.configuration.clone(),
+                p.material
+                    .as_deref()
+                    .map(runmat_cad::drawing::bom_table::material_name)
+                    .unwrap_or_else(|| "—".into()),
+                p.density
+                    .map(|d| match units {
+                        Some(u) => u.density(d),
+                        None => format!("{d:.0} kg/m³"),
+                    })
+                    .unwrap_or_else(|| UNKNOWN.into()),
+                match units {
+                    Some(u) => u.volume(p.volume),
+                    None => format!("{:.2} cm³", p.volume * 1e6),
+                },
+                p.mass
+                    .map(|m| match units {
+                        Some(u) => u.mass(m),
+                        None => g(m),
+                    })
+                    .unwrap_or_else(|| UNKNOWN.into()),
+            ],
+            items: p.item.iter().cloned().collect(),
+            severity: p.mass.is_none().then_some("warning"),
+            legend: None,
+            reference: None,
+        })
+        .collect();
+    Analysis {
+        title: "Mass properties".into(),
+        summary,
+        columns: [
+            "Part",
+            "Configuration",
+            "Material",
+            "Density",
+            "Volume",
+            "Mass",
+        ]
+        .map(String::from)
+        .to_vec(),
+        rows,
+        problems: report.problems.clone(),
+        data: serde_json::to_value(report).unwrap_or(Value::Null),
+        colors: None,
+        settings: Vec::new(),
+        arrow: None,
+        dimensions: Vec::new(),
+        field: None,
+    }
+}
+
+/// Runs an Evaluate command on the part or assembly `path`.
+pub fn analyze(
+    path: &str,
+    text: &str,
+    files: &Files,
+    request: &AnalyzeRequest,
+) -> Result<Analysis, String> {
+    let configuration = request
+        .values
+        .get("configuration")
+        .and_then(Value::as_str)
+        .filter(|c| !c.is_empty() && *c != "default");
+    let assembly = path.ends_with(".assembly");
+    match request.command.as_str() {
+        "evaluate.mass-properties" | "assembly.mass-properties" => {
+            let report = if assembly {
+                assembly_mass(path, text, files, configuration)?
+            } else {
+                part_mass(path, text, configuration)?
+            };
+            Ok(mass_analysis(&report, document_readout(path, text, files)))
+        }
+        "evaluate.interference"
+        | "evaluate.clearance"
+        | "assembly.interference"
+        | "assembly.clearance"
+            if assembly =>
+        {
+            let clearance = if request.command.ends_with(".clearance") {
+                // The catalog field is in millimetres.
+                request
+                    .values
+                    .get("minimum")
+                    .and_then(Value::as_f64)
+                    .unwrap_or(1.0)
+                    / 1000.0
+            } else {
+                0.0
+            };
+            // `values.changed`: the occurrence paths a change added or moved; only their pairs.
+            let changed: Option<Vec<String>> = request
+                .values
+                .get("changed")
+                .and_then(Value::as_array)
+                .map(|names| {
+                    names
+                        .iter()
+                        .filter_map(Value::as_str)
+                        .map(str::to_owned)
+                        .collect()
+                });
+            let found = crate::evaluate::assembly_clearance_of(
+                path,
+                text,
+                files,
+                configuration,
+                clearance,
+                changed.as_deref(),
+            )?;
+            let mut rows: Vec<Row> = found
+                .overlaps
+                .iter()
+                .map(|o| Row {
+                    cells: vec![
+                        o.a.clone(),
+                        o.b.clone(),
+                        format!("overlap {:.3} cm³", o.volume * 1e6),
+                    ],
+                    items: o.items.to_vec(),
+                    severity: Some("error"),
+                    legend: None,
+                    reference: None,
+                })
+                .collect();
+            rows.extend(found.near.iter().map(|n| Row {
+                cells: vec![
+                    n.a.clone(),
+                    n.b.clone(),
+                    format!("gap {} mm", mm(n.distance)),
+                ],
+                items: n.items.to_vec(),
+                severity: Some("warning"),
+                legend: None,
+                reference: None,
+            }));
+            let plural = |n: usize| if n == 1 { "" } else { "s" };
+            let mut summary = format!(
+                "{} part{} checked · {} overlapping pair{}",
+                found.parts,
+                plural(found.parts),
+                found.overlaps.len(),
+                plural(found.overlaps.len())
+            );
+            if clearance > 0.0 {
+                summary += &format!(
+                    " · {} pair{} closer than {} mm",
+                    found.near.len(),
+                    plural(found.near.len()),
+                    mm(clearance)
+                );
+            }
+            Ok(Analysis {
+                title: if clearance > 0.0 {
+                    "Clearance"
+                } else {
+                    "Interference"
+                }
+                .into(),
+                summary,
+                columns: ["Part", "With", "Finding"].map(String::from).to_vec(),
+                rows,
+                problems: found.errors.clone(),
+                data: serde_json::to_value(&found).unwrap_or(Value::Null),
+                colors: None,
+                settings: Vec::new(),
+                arrow: None,
+                dimensions: Vec::new(),
+                field: None,
+            })
+        }
+        "evaluate.interference"
+        | "evaluate.clearance"
+        | "assembly.interference"
+        | "assembly.clearance" => {
+            Err("interference and clearance are checked between an assembly's parts".into())
+        }
+        "weldment.cut-list" if !assembly => {
+            let part =
+                crate::runtime::regenerate_part_in(path, text, configuration, &Default::default())
+                    .map_err(|d| d.first().map(|d| d.message.clone()).unwrap_or_default())?;
+            let mut rows = Vec::new();
+            let mut problems = Vec::new();
+            let mut members = 0;
+            for (feature, record) in &part.result.state.records {
+                let runmat_cad::regen::records::FeatureRecord::Weldment { cut_list, .. } = record
+                else {
+                    continue;
+                };
+                for r in cut_list {
+                    members += r.quantity;
+                    if r.mass_per_member.is_none() {
+                        problems.push(format!(
+                            "{feature} item {}: mass unknown: {}",
+                            r.item,
+                            runmat_cad::model::materials::no_density_reason(r.material.as_deref())
+                        ));
+                    }
+                    rows.push(Row {
+                        cells: vec![
+                            r.item.to_string(),
+                            r.quantity.to_string(),
+                            r.description.clone(),
+                            r.material
+                                .as_deref()
+                                .map(runmat_cad::drawing::bom_table::material_name)
+                                .unwrap_or_else(|| "—".into()),
+                            format!("{} mm", mm(r.length)),
+                            format!("{:.1}°", r.start_angle.to_degrees()),
+                            format!("{:.1}°", r.end_angle.to_degrees()),
+                            r.mass_per_member.map(g).unwrap_or_else(|| UNKNOWN.into()),
+                        ],
+                        items: vec![format!("feature:{feature}")],
+                        severity: r.mass_per_member.is_none().then_some("warning"),
+                        legend: None,
+                        reference: None,
+                    });
+                }
+            }
+            if rows.is_empty() {
+                return Err("the part has no structural members".into());
+            }
+            Ok(Analysis {
+                title: "Cut list".into(),
+                summary: format!(
+                    "{} item{} · {members} members",
+                    rows.len(),
+                    if rows.len() == 1 { "" } else { "s" }
+                ),
+                columns: [
+                    "Item",
+                    "Qty",
+                    "Description",
+                    "Material",
+                    "Length",
+                    "Start angle",
+                    "End angle",
+                    "Mass each",
+                ]
+                .map(String::from)
+                .to_vec(),
+                rows,
+                problems,
+                data: Value::Null,
+                colors: None,
+                settings: Vec::new(),
+                arrow: None,
+                dimensions: Vec::new(),
+                field: None,
+            })
+        }
+        "evaluate.draft" if !assembly => {
+            use crate::draft_analysis::{draft_faces, pull_direction, DraftBand};
+            let part =
+                crate::runtime::regenerate_part_in(path, text, configuration, &Default::default())
+                    .map_err(|d| d.first().map(|d| d.message.clone()).unwrap_or_default())?;
+            let pick = crate::features::picks_of(&request.values, "direction")
+                .into_iter()
+                .next()
+                .ok_or("pick the pull direction: an origin plane or axis, or a face")?;
+            let pull = pull_direction(&part.display, &pick)?;
+            let angle = request
+                .values
+                .get("angle")
+                .and_then(Value::as_f64)
+                .unwrap_or(1.0);
+            let label = crate::face_labels::label;
+            let faces = draft_faces(&part.display, pull, angle, &label);
+            let picked = part.display.bodies.iter().find_map(|b| {
+                b.faces
+                    .iter()
+                    .find(|f| f.reference.as_deref() == Some(pick.as_str()))
+                    .map(|f| label(b.index, f))
+            });
+            let pull_text = pull_label(&pick, pull, picked);
+            let arrow = pull_arrow(&part.display, pull);
+            let count = |b: DraftBand| faces.iter().filter(|f| f.band == b).count();
+            let (needs, straddle) = (count(DraftBand::NeedsDraft), count(DraftBand::Straddle));
+            let summary = format!(
+                "{} faces · {} positive · {} negative · {needs} need draft · {straddle} straddle the parting line",
+                faces.len(),
+                count(DraftBand::Positive),
+                count(DraftBand::Negative),
+            );
+            let rows = faces
+                .iter()
+                .map(|f| Row {
+                    cells: vec![
+                        f.label.clone(),
+                        format!("{:.1}°", f.min),
+                        format!("{:.1}°", f.max),
+                        match f.band {
+                            DraftBand::Positive => "Positive",
+                            DraftBand::Negative => "Negative",
+                            DraftBand::NeedsDraft => "Needs draft",
+                            DraftBand::Straddle => "Straddles",
+                        }
+                        .into(),
+                    ],
+                    items: vec![f.face.clone()],
+                    severity: match f.band {
+                        DraftBand::NeedsDraft => Some("warning"),
+                        DraftBand::Straddle => Some("info"),
+                        _ => None,
+                    },
+                    legend: Some(draft_entry(f.band)),
+                    reference: Some(f.face.clone()),
+                })
+                .collect();
+            Ok(Analysis {
+                title: "Draft analysis".into(),
+                summary,
+                columns: ["Face", "Least draft", "Greatest draft", "Band"]
+                    .map(String::from)
+                    .to_vec(),
+                rows,
+                problems: Vec::new(),
+                data: serde_json::json!({ "pull": pull, "angle": angle, "faces": faces }),
+                colors: Some(draft_colors(&faces)),
+                settings: vec![
+                    format!("Pull: {pull_text}"),
+                    format!("Draft angle: {angle}°"),
+                ],
+                arrow,
+                dimensions: Vec::new(),
+                field: None,
+            })
+        }
+        "evaluate.undercut" if !assembly => {
+            use crate::draft_analysis::pull_direction;
+            use crate::undercut::{undercut_faces, UndercutBand};
+            let part =
+                crate::runtime::regenerate_part_in(path, text, configuration, &Default::default())
+                    .map_err(|d| d.first().map(|d| d.message.clone()).unwrap_or_default())?;
+            let pick = crate::features::picks_of(&request.values, "direction")
+                .into_iter()
+                .next()
+                .ok_or("pick the pull direction: an origin plane or axis, or a face")?;
+            let pull = pull_direction(&part.display, &pick)?;
+            let label = crate::face_labels::label;
+            let faces = undercut_faces(&part.display, pull, &label);
+            let picked = part.display.bodies.iter().find_map(|b| {
+                b.faces
+                    .iter()
+                    .find(|f| f.reference.as_deref() == Some(pick.as_str()))
+                    .map(|f| label(b.index, f))
+            });
+            let bands = [
+                (
+                    UndercutBand::Cavity,
+                    "Releases with the cavity",
+                    [0.22, 0.66, 0.36, 1.0],
+                ),
+                (
+                    UndercutBand::Core,
+                    "Releases with the core",
+                    [0.24, 0.48, 0.86, 1.0],
+                ),
+                (UndercutBand::Undercut, "Undercut", [0.86, 0.24, 0.22, 1.0]),
+            ];
+            let entry = |b: UndercutBand| bands.iter().position(|(x, ..)| *x == b).unwrap_or(0);
+            let count = |b: UndercutBand| faces.iter().filter(|f| f.band == b).count();
+            let undercut = count(UndercutBand::Undercut);
+            let summary =
+                format!(
+                "{} faces · {} release with the cavity · {} with the core · {undercut} undercut{}",
+                faces.len(),
+                count(UndercutBand::Cavity),
+                count(UndercutBand::Core),
+                if undercut > 0 { " (a side action, a lifter or a part change)" } else { "" }
+            );
+            let rows = faces
+                .iter()
+                .map(|f| Row {
+                    cells: vec![
+                        f.label.clone(),
+                        format!("{:.0} %", f.share * 100.0),
+                        bands[entry(f.band)].1.into(),
+                    ],
+                    items: vec![f.face.clone()],
+                    severity: (f.band == UndercutBand::Undercut).then_some("warning"),
+                    legend: Some(entry(f.band)),
+                    reference: Some(f.face.clone()),
+                })
+                .collect();
+            Ok(Analysis {
+                title: "Undercut".into(),
+                summary,
+                columns: ["Face", "Undercut area", "Release"]
+                    .map(String::from)
+                    .to_vec(),
+                rows,
+                problems: Vec::new(),
+                data: serde_json::json!({ "pull": pull, "faces": faces }),
+                colors: Some(FaceColors {
+                    legend: bands
+                        .iter()
+                        .map(|(_, l, c)| LegendEntry {
+                            label: (*l).into(),
+                            color: *c,
+                        })
+                        .collect(),
+                    faces: faces
+                        .iter()
+                        .map(|f| FaceColor {
+                            item: f.face.clone(),
+                            entry: entry(f.band),
+                        })
+                        .collect(),
+                }),
+                settings: vec![format!("Pull: {}", pull_label(&pick, pull, picked))],
+                arrow: pull_arrow(&part.display, pull),
+                dimensions: Vec::new(),
+                field: None,
+            })
+        }
+        "simulate.check" => {
+            // values.gap: the open-contact gap in mm.
+            let gap = request
+                .values
+                .get("gap")
+                .and_then(Value::as_f64)
+                .map(|mm| mm / 1000.0);
+            let found = crate::study_checks::study_checks(path, text, files, configuration, gap)?;
+            let errors = found
+                .checks
+                .iter()
+                .filter(|c| c.severity == "error")
+                .count();
+            let warnings = found
+                .checks
+                .iter()
+                .filter(|c| c.severity == "warning")
+                .count();
+            let plural = |n: usize| if n == 1 { "" } else { "s" };
+            let mut summary = format!(
+                "{} · {} part{}",
+                found
+                    .mass
+                    .total
+                    .as_ref()
+                    .map_or_else(|| "mass unknown".to_owned(), |t| g(t.mass)),
+                found.mass.parts.len(),
+                plural(found.mass.parts.len())
+            );
+            summary += &if found.ready() {
+                format!(" · ready to mesh · {warnings} warning{}", plural(warnings))
+            } else {
+                format!(
+                    " · {errors} error{} to fix before the study meshes · {warnings} warning{}",
+                    plural(errors),
+                    plural(warnings)
+                )
+            };
+            let rows = found
+                .checks
+                .iter()
+                .map(|c| Row {
+                    cells: vec![
+                        if c.check == "fit" { "Fit" } else { "Mass" }.into(),
+                        c.message.clone(),
+                    ],
+                    items: c.items.clone(),
+                    severity: Some(c.severity),
+                    legend: None,
+                    reference: None,
+                })
+                .collect();
+            Ok(Analysis {
+                title: "Study checks".into(),
+                summary,
+                columns: ["Check", "Finding"].map(String::from).to_vec(),
+                rows,
+                problems: Vec::new(),
+                data: serde_json::to_value(&found).unwrap_or(Value::Null),
+                colors: None,
+                settings: Vec::new(),
+                arrow: None,
+                dimensions: Vec::new(),
+                field: None,
+            })
+        }
+        "evaluate.check-geometry" if !assembly => {
+            check_geometry::check_geometry(path, text, configuration, &request.values)
+        }
+        "evaluate.section-properties" if !assembly => {
+            section_properties::section_properties(path, text, configuration, &request.values)
+        }
+        "evaluate.thickness" if !assembly => {
+            thickness::thickness(path, text, configuration, &request.values)
+        }
+        "evaluate.curvature" if !assembly => {
+            curvature::curvature(path, text, configuration, &request.values)
+        }
+        "evaluate.zebra" if !assembly => zebra::zebra(path, text, configuration, &request.values),
+        "evaluate.deviation" if !assembly => {
+            deviation::deviation(path, text, configuration, &request.values)
+        }
+        "evaluate.cost" if !assembly => cost::cost(path, text, configuration, &request.values),
+        "evaluate.dfm" if !assembly => dfm::dfm(path, text, files, configuration, &request.values),
+        "drawing.check" if path.ends_with(".drawing") => {
+            drawing_check::analysis(path, text, files, &request.values)
+        }
+        "sketch.check" => sketch_check::sketch_check(
+            path,
+            text,
+            files,
+            configuration,
+            &request.values,
+            &request.selection,
+        ),
+        "view.measure" => crate::measure::measure(path, text, files, &request.values),
+        "assembly.visualization" if assembly => {
+            visualization::visualization(path, text, files, configuration, &request.values)
+        }
+        "motion.collision" if assembly => motion_collision::collision(
+            path,
+            text,
+            files,
+            configuration,
+            &request.values,
+            &request.selection,
+        ),
+        "assembly.interface-check" if assembly => {
+            interfaces::interface_check(path, text, files, configuration, &request.values)
+        }
+        "assembly.hole-alignment" | "assembly.hole-check" if assembly => holes::hole_check(
+            path,
+            text,
+            files,
+            configuration,
+            &request.values,
+            request.command == "assembly.hole-check",
+        ),
+        "part.parents-children" | "part.show-references" if !assembly => {
+            crate::parents::parents_children(path, text, &request.selection)
+        }
+        other => Err(format!(
+            "`{other}` isn't an Evaluate command for parts and assemblies"
+        )),
+    }
+}
+
+/// `analyze` as JSON.
+pub fn analyze_json(path: &str, text: &str, files: &Files, request: &str) -> String {
+    let request: AnalyzeRequest = match serde_json::from_str(request) {
+        Ok(r) => r,
+        Err(e) => {
+            return json!({ "ok": false, "message": format!("the request isn't valid: {e}") })
+                .to_string()
+        }
+    };
+    match analyze(path, text, files, &request) {
+        Ok(a) => {
+            let mut v = serde_json::to_value(&a).unwrap_or(Value::Null);
+            v["ok"] = Value::Bool(true);
+            v.to_string()
+        }
+        Err(message) => json!({ "ok": false, "message": message }).to_string(),
+    }
+}
+
+#[cfg(test)]
+pub(crate) mod tests;
+
+#[cfg(test)]
+mod fit_tests;

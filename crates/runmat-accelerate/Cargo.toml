@@ -1,6 +1,6 @@
 [package]
 name = "runmat-accelerate"
-version = "0.7.1"
+version = "0.7.2"
 edition = "2021"
 license-file = "../../LICENSE.md"
 description = "Pluggable GPU acceleration layer for RunMat (CUDA, ROCm, Metal, Vulkan/Spir-V)"

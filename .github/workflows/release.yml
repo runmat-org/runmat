@@ -245,7 +245,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: ./infra/scripts/prepare-windows-cross-dependencies.ps1 -Target "${{ matrix.platform.target }}"
 
-      - name: Build release CLI with embedded AOT runtime (Unix)
+      - name: Build release CLI and separate AOT runtime (Unix)
         if: runner.os != 'Windows'
         shell: bash
         env:
@@ -274,7 +274,7 @@ jobs:
             -Target "${{ matrix.platform.target }}" `
             -Destination "target/windows-dxc/${{ matrix.platform.target }}"
 
-      - name: Build release CLI with embedded AOT runtime (Windows)
+      - name: Build release CLI and separate AOT runtime (Windows)
         if: runner.os == 'Windows'
         shell: pwsh
         env:
@@ -288,7 +288,20 @@ jobs:
         run: |
           $ErrorActionPreference = 'Stop'
           & ./scripts/build-runmat-with-aot-runtime.ps1 --locked --release --target "${{ matrix.platform.target }}" --bin runmat --features "blas-lapack,vendored-openssl,occt-native"
-          if ($LASTEXITCODE -ne 0) { throw "embedded-runtime release build failed with exit code $LASTEXITCODE" }
+          if ($LASTEXITCODE -ne 0) { throw "separate-runtime release build failed with exit code $LASTEXITCODE" }
+
+      - name: Stage versioned AOT runtime assets
+        shell: bash
+        run: |
+          if [[ "$GITHUB_EVENT_NAME" == push ]]; then
+            pack_version="${VERSION#v}"
+          else
+            pack_version="$(node -p 'require("./bindings/ts/package.json").version')"
+          fi
+          node scripts/distribution/stage-aot-runtime-pack.mjs \
+            "target/${{ matrix.platform.target }}/release/runmat-aot-runtime.zip" \
+            "target/${{ matrix.platform.target }}/release/runmat-aot-runtime.json" \
+            . "$pack_version" "${{ matrix.platform.target }}"
 
       - name: Sign and notarize release artifact (macOS)
         if: runner.os == 'macOS'
@@ -310,14 +323,19 @@ jobs:
           source_revision="$(git rev-parse HEAD)"
           node scripts/runtime/stage-builtin-example-product.mjs \
             --binary "target/${{ matrix.platform.target }}/release/${{ matrix.platform.bin }}" \
-            --destination "$root/product" --executable-name "${{ matrix.platform.bin }}"
+            --destination "$root/product" --executable-name "${{ matrix.platform.bin }}" \
+            --aot-runtime-pack "target/${{ matrix.platform.target }}/release/runmat-aot-runtime.zip"
           node scripts/runtime/verify-builtin-examples.mjs artifacts \
-            --product native-cli --profile embedded-aot --source-revision "$source_revision" \
+            --product native-cli --profile distributed-aot --source-revision "$source_revision" \
             --root "$root/product" --entrypoint "runmat-binary=${{ matrix.platform.bin }}" \
+            --entrypoint "compile-runtime-pack=runmat-aot-runtime.zip" \
             --output "$root/${{ matrix.platform.release_for }}.artifact-manifest.json"
           node scripts/distribution/accept-native-product.mjs \
             "$root/${{ matrix.platform.release_for }}.artifact-manifest.json" \
             "$root/${{ matrix.platform.release_for }}.acceptance.json"
+          node scripts/distribution/accept-aot-runtime-pack.mjs \
+            "$root/product/${{ matrix.platform.bin }}" "$root/product/runmat-aot-runtime.zip" \
+            "$root/${{ matrix.platform.release_for }}.aot-runtime-acceptance.json"
 
       - name: Stage and accept distributed product (Windows)
         if: runner.os == 'Windows' && matrix.platform.target != 'aarch64-pc-windows-gnu'
@@ -335,7 +353,8 @@ jobs:
             "scripts/runtime/stage-builtin-example-product.mjs",
             "--binary", "target/${{ matrix.platform.target }}/release/${{ matrix.platform.bin }}",
             "--destination", "$root/product",
-            "--executable-name", "${{ matrix.platform.bin }}"
+            "--executable-name", "${{ matrix.platform.bin }}",
+            "--aot-runtime-pack", "target/${{ matrix.platform.target }}/release/runmat-aot-runtime.zip"
           )
           $arguments += @("--dependency-dir", $dxc.BinDir, "--dependency-notice-dir", $dxc.NoticeDir)
           $vcpkgBin = Join-Path $env:VCPKG_ROOT ("installed\" + $env:VCPKG_DEFAULT_TRIPLET + "\bin")
@@ -347,14 +366,19 @@ jobs:
           & node @arguments
           if ($LASTEXITCODE -ne 0) { throw "native product staging failed with exit code $LASTEXITCODE" }
           & node scripts/runtime/verify-builtin-examples.mjs artifacts `
-            --product native-cli --profile embedded-aot --source-revision $sourceRevision `
+            --product native-cli --profile distributed-aot --source-revision $sourceRevision `
             --root "$root/product" --entrypoint "runmat-binary=${{ matrix.platform.bin }}" `
+            --entrypoint "compile-runtime-pack=runmat-aot-runtime.zip" `
             --output "$root/${{ matrix.platform.release_for }}.artifact-manifest.json"
           if ($LASTEXITCODE -ne 0) { throw "native artifact manifest failed with exit code $LASTEXITCODE" }
           & node scripts/distribution/accept-native-product.mjs `
             "$root/${{ matrix.platform.release_for }}.artifact-manifest.json" `
             "$root/${{ matrix.platform.release_for }}.acceptance.json"
           if ($LASTEXITCODE -ne 0) { throw "native product probe failed with exit code $LASTEXITCODE" }
+          & node scripts/distribution/accept-aot-runtime-pack.mjs `
+            "$root/product/${{ matrix.platform.bin }}" "$root/product/runmat-aot-runtime.zip" `
+            "$root/${{ matrix.platform.release_for }}.aot-runtime-acceptance.json"
+          if ($LASTEXITCODE -ne 0) { throw "compile runtime acceptance failed with exit code $LASTEXITCODE" }
 
       - name: Package as archive (Windows)
         if: runner.os == 'Windows' && matrix.platform.target != 'aarch64-pc-windows-gnu'
@@ -407,6 +431,7 @@ jobs:
           path: |
             runmat-*.tar.gz
             runmat-*.zip
+            runmat-aot-runtime-*.json
             artifacts/release-product/${{ matrix.platform.release_for }}/*.json
           if-no-files-found: error
 
@@ -475,7 +500,10 @@ jobs:
           prerelease: false
 
   publish-crates:
-    if: github.event_name == 'push'
+    # crates.io publication is off for v0.7.2 and v0.7.3 (owner, 2026-11-17) and resumes with 0.7.4.
+    # The job is skipped for those tags. Finalize the GitHub Release with
+    # finalize-release.yml and defer_crates=true, as for v0.7.1.
+    if: github.event_name == 'push' && !startsWith(github.ref_name, 'v0.7.2') && !startsWith(github.ref_name, 'v0.7.3')
     name: Publish crates to crates.io
     needs: [release-validation, meshing-release-evidence]
     environment: Production

@@ -209,15 +209,46 @@ fn finite_workspace_policy_quotes_and_executes_same_nonpivoting_factor() {
             Err(SolverError::Unsupported(_))
         ));
     }
+    let options = DirectOptions {
+        workspace: DirectWorkspacePolicy::CallerOwned,
+        ..DirectOptions::new(FactorKind::BunchKaufman)
+    };
+    assert!(matches!(
+        SymbolicFactorization::analyze::<f64>(a.as_ref().into(), &options, SolveControl::NONE),
+        Err(SolverError::Unsupported(_))
+    ));
+    // Caller-owned LU factors simplicially, so no kernel keeps unquoted packing storage. Its
+    // pivoting fill keeps the quote nominal, which is never a finite numeric admission.
+    let options = DirectOptions {
+        workspace: DirectWorkspacePolicy::CallerOwned,
+        ..DirectOptions::new(FactorKind::Lu)
+    };
+    let symbolic =
+        SymbolicFactorization::analyze::<f64>(a.as_ref().into(), &options, SolveControl::NONE)
+            .unwrap();
+    assert!(symbolic.estimate().nominal);
+    assert!(matches!(
+        DirectSolver::<f64>::factorize(
+            symbolic.clone(),
+            a.as_ref().into(),
+            options.clone(),
+            Some(u64::MAX),
+            SolveControl::NONE
+        ),
+        Err(SolverError::Unsupported(_))
+    ));
+    let solver = DirectSolver::<f64>::factorize(
+        symbolic,
+        a.as_ref().into(),
+        options,
+        None,
+        SolveControl::NONE,
+    )
+    .unwrap();
+    let mut x = b.clone();
+    solver.solve_in_place(&mut x, 1).unwrap();
+    assert!(relative_residual(&a, &x, &b) < 1e-12);
     for kind in [FactorKind::BunchKaufman, FactorKind::Lu] {
-        let options = DirectOptions {
-            workspace: DirectWorkspacePolicy::CallerOwned,
-            ..DirectOptions::new(kind)
-        };
-        assert!(matches!(
-            SymbolicFactorization::analyze::<f64>(a.as_ref().into(), &options, SolveControl::NONE),
-            Err(SolverError::Unsupported(_))
-        ));
         let managed = DirectOptions::new(kind);
         let symbolic =
             SymbolicFactorization::analyze::<f64>(a.as_ref().into(), &managed, SolveControl::NONE)

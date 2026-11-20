@@ -1,4 +1,4 @@
-const { hasSerde, serde, splitTopLevel } = require("./syntax.cjs");
+const { hasSerde, leadingAttributes, serde, splitTopLevel } = require("./syntax.cjs");
 const { ADAPTER, NARROW, WIDE, renderAdaptedField, wideIntegerError } = require("./wire-integers.cjs");
 
 const TERMINALS = new Map([
@@ -63,15 +63,16 @@ function renderDeclaration(declaration, registry, scalarTypes) {
 function renderFields(body, containerAttrs, registry, generics, scalarTypes) {
   const renameAll = serde(containerAttrs, "rename_all");
   const fields = splitTopLevel(body).flatMap((raw) => {
-    const match = raw.match(/^((?:#\[[\s\S]*?\]\s*)*)(?:pub\s+)?([A-Za-z_][A-Za-z0-9_]*):\s*([\s\S]+)$/);
-    if (!match || hasSerde(match[1], "skip") || hasSerde(match[1], "skip_serializing")) return [];
-    const option = unwrap(match[3].trim(), "Option");
-    const omission = serde(match[1], "skip_serializing_if");
+    const { attrs, rest } = leadingAttributes(raw);
+    const match = rest.match(/^(?:pub\s+)?([A-Za-z_][A-Za-z0-9_]*):\s*([\s\S]+)$/);
+    if (!match || hasSerde(attrs, "skip") || hasSerde(attrs, "skip_serializing")) return [];
+    const option = unwrap(match[2].trim(), "Option");
+    const omission = serde(attrs, "skip_serializing_if");
     const optional = omission !== null;
     const omitsNone = option && omission === "Option::is_none";
-    const type = renderSerializedFieldType(match[3].trim(), match[1], registry, generics, scalarTypes, omitsNone);
-    const explicit = serde(match[1], "rename");
-    const name = explicit ?? rename(match[2], renameAll);
+    const type = renderSerializedFieldType(match[2].trim(), attrs, registry, generics, scalarTypes, omitsNone);
+    const explicit = serde(attrs, "rename");
+    const name = explicit ?? rename(match[1], renameAll);
     return [`  ${safeProperty(name)}${optional ? "?" : ""}: ${type};`];
   });
   return `{\n${fields.join("\n")}\n}`;
@@ -100,11 +101,11 @@ function renderSerializedFieldType(raw, attrs, registry, generics, scalarTypes, 
 
 function renderTupleFields(body, registry, generics, scalarTypes) {
   return splitTopLevel(body).flatMap((raw) => {
-    const match = raw.match(/^((?:#\[[\s\S]*?\]\s*)*)([\s\S]+)$/);
-    if (!match) throw new Error(`Unsupported serialized tuple field ${raw}`);
-    if (hasSerde(match[1], "skip") || hasSerde(match[1], "skip_serializing")) return [];
-    if (serde(match[1], "skip_serializing_if") !== null) throw new Error(`Conditional tuple field omission requires an explicit wire contract: ${raw}`);
-    return [renderSerializedFieldType(stripVisibility(match[2]), match[1], registry, generics, scalarTypes)];
+    const { attrs, rest } = leadingAttributes(raw);
+    if (!rest) throw new Error(`Unsupported serialized tuple field ${raw}`);
+    if (hasSerde(attrs, "skip") || hasSerde(attrs, "skip_serializing")) return [];
+    if (serde(attrs, "skip_serializing_if") !== null) throw new Error(`Conditional tuple field omission requires an explicit wire contract: ${raw}`);
+    return [renderSerializedFieldType(stripVisibility(rest), attrs, registry, generics, scalarTypes)];
   });
 }
 
@@ -133,12 +134,13 @@ function renderEnum(declaration, registry, scalarTypes) {
 }
 
 function parseVariant(raw) {
-  const match = raw.match(/^((?:#\[[\s\S]*?\]\s*)*)([A-Za-z_][A-Za-z0-9_]*)([\s\S]*)$/);
+  const { attrs, rest } = leadingAttributes(raw);
+  const match = rest.match(/^([A-Za-z_][A-Za-z0-9_]*)([\s\S]*)$/);
   if (!match) return null;
-  const tail = match[3].trim();
-  if (!tail) return { attrs: match[1], name: match[2], shape: "unit", body: "" };
-  if (tail.startsWith("(")) return { attrs: match[1], name: match[2], shape: "tuple", body: tail.slice(1, -1) };
-  if (tail.startsWith("{")) return { attrs: match[1], name: match[2], shape: "named", body: tail.slice(1, -1) };
+  const tail = match[2].trim();
+  if (!tail) return { attrs, name: match[1], shape: "unit", body: "" };
+  if (tail.startsWith("(")) return { attrs, name: match[1], shape: "tuple", body: tail.slice(1, -1) };
+  if (tail.startsWith("{")) return { attrs, name: match[1], shape: "named", body: tail.slice(1, -1) };
   throw new Error(`Unsupported enum variant ${raw}`);
 }
 

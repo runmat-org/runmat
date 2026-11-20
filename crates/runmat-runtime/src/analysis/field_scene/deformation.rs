@@ -1,12 +1,12 @@
 //! Display scaling respects the distinction between physical displacement and
 //! arbitrarily normalized modal vectors. Neither changes the retained field.
-/// A published mode shape, recognized from its declared state ordinal. Its amplitude is a
-/// normalization, not a physical value.
-pub(super) fn is_mode_shape(descriptor: &crate::analysis::AnalysisFieldDescriptor) -> bool {
-    matches!(
-        descriptor.layout.ordinal,
-        runmat_analysis_core::FieldOrdinal::Mode(_)
-    )
+/// The zero-based mode of a published mode shape, recognized from its declared state ordinal.
+/// Its amplitude is a normalization, not a physical value.
+pub(super) fn mode_index(descriptor: &crate::analysis::AnalysisFieldDescriptor) -> Option<usize> {
+    match descriptor.layout.ordinal {
+        runmat_analysis_core::FieldOrdinal::Mode(index) => Some(index),
+        _ => None,
+    }
 }
 
 /// A nodal 3-vector displacement (static, stepped or modal) that can displace the shape.
@@ -81,7 +81,7 @@ mod scene_tests {
                 3,
                 vec![0.0, 0.0, 0.0, 0.0, 0.0, 0.0, amplitude, 0.0, 0.0],
                 "modal.mode_shape.1",
-                "m",
+                "1",
             )
             .mode_shape();
             let (scene, scale) = scene_from_topology(

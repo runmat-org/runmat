@@ -3,43 +3,10 @@
   "cohort": "authored-cli-physics",
   "policy_sha256": "eeab2d440d501db5062b1302e786dd0680fa4bf1065d061bfe57f6691b7a233b",
   "measured": {
-    "source_revision": "67e7985cd2d7b4978b9ed6312713da97b148a6a3",
-    "exit_code": 0,
-    "passed": 12,
-    "failed": 0,
-    "ignored": 0,
-    "filtered_out": 0,
-    "test_seconds": 2477.83,
-    "case_names": [
-      "acoustic::authored_acoustic_orders_publish_cold_native_fields_and_exact_state_catalog",
-      "acoustic::duct::authored_incident_duct_refines_and_reopens_full_partial_complex_components",
-      "acoustic::duct::authored_matched_duct_refines_and_reopens_full_partial_complex_components",
-      "acoustic::duct::authored_volume_velocity_duct_refines_and_reopens_full_partial_complex_components",
-      "acoustic::response::pressure_transient_publishes_its_complete_time_history",
-      "acoustic::response::rigid_cube_cavity_modes_match_rectangular_room_frequencies",
-      "assessments::authored_transient_and_frequency_assessments_reopen_without_re_solving_the_numerical_run",
-      "authored_thermal_orders_and_procedures_publish_cold_uniform_equilibrium",
-      "electrical::authored_charged_poisson_tet10_signed_gauge_and_cold_publication",
-      "electrical::authored_electrical_prism_both_equations_orders_sign_and_gauge_reopen_cold",
-      "generated_and_derived_geometry_complete_the_typed_study_pipeline",
-      "harmonic::authored_harmonic_generated_and_explicit_sources_preserve_rod_response_and_phase"
-    ],
-    "log_sha256": "f35aeb9defbceae6378381bbb761a0138ec7cbfdc3776b34f47ba225427a45eb",
-    "log_location": "gh-linux-20260327-125436:/home/nallana/rm1293/logs/consolidated-67e7985cd2-physics.authored-cli-physics.log",
-    "artifacts": [
-      {
-        "sha256": "fbca974f503d00a9ffd4dbc67e33598d52988a580626c1c0d58b369a5611f4df",
-        "bytes": 356206472,
-        "location": "gh-linux-20260327-125436:/home/nallana/rm1293/logs/consolidated-67e7985cd2-physics-artifacts/authored-cli-physics",
-        "executed_path": "/home/nallana/rm1293/targets/release/deps/typed_fea_geometry_cli-7aabf5b004ce44ea"
-      },
-      {
-        "sha256": "fdcebddc83ed3fde2ee4dc924bd48d84dd51737f2c214b3a1f36fc32a1acc6e6",
-        "bytes": 682562232,
-        "location": "gh-linux-20260327-125436:/home/nallana/rm1293/logs/consolidated-67e7985cd2-physics-artifacts/runmat",
-        "executed_path": "/home/nallana/rm1293/targets/release/runmat"
-      }
-    ],
+    "source_revision": "dac88251baaa60d5834296cbce89c727092da233",
+    "target": "linux-x86_64",
+    "hardware": "GCP N1 highmem-16 (design-build-0717), Intel Xeon, 16 vCPU and 104 GiB RAM",
+    "toolchain": "rustc 1.90.0 (1159e78c4 2025-09-14)",
     "command": [
       "cargo",
       "test",
@@ -54,46 +21,96 @@
       "--",
       "--test-threads=1"
     ],
-    "target": "linux-x86_64",
-    "hardware": "GCP N1 highmem-16, Intel Xeon, 16 vCPU and 104 GiB RAM",
-    "toolchain": "rustc 1.90.0 (1159e78c4 2025-09-14)",
     "profile": {
       "release": true,
       "debug": 0,
-      "strip": "symbols",
-      "cargo_build_jobs": 8,
-      "incremental": false
+      "incremental": false,
+      "rust_test_nocapture": true
     },
+    "log_sha256": "fd7fe1b13fd709f477cc19cce8e80847d7b6dee1a2bf73623414d01ed1ecfbe4",
+    "log_location": "design-build-0717:/home/nallana/runs/f-receipts-0717/authored-cli-physics.tests.log (copy: runmat-acc-2 design-coord/release/evidence/receipts-dac88251ba/linux-0717)",
+    "passed": 12,
+    "failed": 0,
+    "ignored": 0,
+    "filtered_out": 0,
+    "exit_code": 0,
+    "case_names": [
+      "acoustic::authored_acoustic_orders_publish_cold_native_fields_and_exact_state_catalog",
+      "acoustic::duct::authored_incident_duct_refines_and_reopens_full_partial_complex_components",
+      "acoustic::duct::authored_matched_duct_refines_and_reopens_full_partial_complex_components",
+      "acoustic::duct::authored_volume_velocity_duct_refines_and_reopens_full_partial_complex_components",
+      "acoustic::response::pressure_transient_publishes_its_complete_time_history",
+      "acoustic::response::rigid_cube_cavity_modes_match_rectangular_room_frequencies",
+      "assessments::authored_transient_and_frequency_assessments_reopen_without_re_solving_the_numerical_run",
+      "authored_thermal_orders_and_procedures_publish_cold_uniform_equilibrium",
+      "electrical::authored_charged_poisson_tet10_signed_gauge_and_cold_publication",
+      "electrical::authored_electrical_prism_both_equations_orders_sign_and_gauge_reopen_cold",
+      "generated_and_derived_geometry_complete_the_typed_study_pipeline",
+      "harmonic::authored_harmonic_generated_and_explicit_sources_preserve_rod_response_and_phase"
+    ],
     "selected_filter": null,
     "inputs": {
-      "sha256": "ba994ecda5890f03352b0d1d658b4eae17c1363da19add65f5dd359cfbe99ce2",
-      "files": 26117,
+      "sha256": "82e3f3ef00d70b90678b39c575d9e94442cc2cbae2cbcd0077890c46639851fc",
+      "files": 26448,
       "encoding": "git-mode-type-blob-path-tuples-v1"
     },
+    "artifacts": [
+      {
+        "sha256": "d65e6554ed2d15f0099dd199af76fbbe2d5186d364d7bdf11833e798e11ef8ec",
+        "location": "design-build-0717:/home/nallana/targets/q2-receipts/release/deps/typed_fea_geometry_cli-a3ebe779ec33d89e"
+      },
+      {
+        "sha256": "81f5e9a359760d30d00ddaef26a0fe28a34c065fd91a4e4ebabbab81b5fbc7cc",
+        "bytes": 903969456,
+        "location": "design-build-0717:/home/nallana/runs/f-receipts-0717/authored-cli-physics.runmat-cli.bin (hard link)",
+        "executed_path": "/home/nallana/targets/q2-receipts/release/runmat"
+      }
+    ],
+    "test_seconds": 1678.69,
     "source_verification": {
       "status": "verified",
-      "root": "/home/nallana/rm1293/candidates/settings-r964-linux",
-      "revision": "67e7985cd2d7b4978b9ed6312713da97b148a6a3",
-      "files": 27272,
-      "before_and_after": true
+      "revision": "dac88251baaa60d5834296cbce89c727092da233",
+      "files": 27660,
+      "before_and_after": true,
+      "checks": [
+        {
+          "revision": "dac88251baaa60d5834296cbce89c727092da233",
+          "host": "design-build-0717",
+          "tracked_files": 27660,
+          "differing": 0,
+          "diff_lines": [],
+          "checked_at": "2026-11-19T23:52:54Z",
+          "method": "git archive of the revision vs the receipt source tree, rsync -rlpcni (checksums, tracked files only)"
+        },
+        {
+          "revision": "dac88251baaa60d5834296cbce89c727092da233",
+          "host": "design-build-0717",
+          "tracked_files": 27660,
+          "differing": 0,
+          "diff_lines": [],
+          "checked_at": "2026-11-20T03:38:10Z",
+          "method": "git archive of the revision vs the receipt source tree, rsync -rlpcni (checksums, tracked files only)"
+        }
+      ]
     },
-    "source_scope": "All 27,272 canonical source files match the frozen consolidated snapshot before and after the required authored, recovery and bounded exact-kernel cohorts. Retained executables have byte-verified copies. Credentials and .env files are excluded from the source transfer."
+    "source_scope": "All 27,660 tracked source files of dac88251ba matched the receipt tree before the run (checksum sync) and after it (checksum dry-run, 0 differing). The spawned runmat CLI is hashed and kept as a hard link."
   },
+  "scope": "Fresh 0.7.2 combined-qualification run on the frozen candidate dac88251ba (GCP N1 highmem-16 (design-build-0717), Intel Xeon, 16 vCPU and 104 GiB RAM).",
   "conservation": {
     "measured_inputs": {
-      "sha256": "ba994ecda5890f03352b0d1d658b4eae17c1363da19add65f5dd359cfbe99ce2",
-      "files": 26117,
+      "sha256": "82e3f3ef00d70b90678b39c575d9e94442cc2cbae2cbcd0077890c46639851fc",
+      "files": 26448,
       "encoding": "git-mode-type-blob-path-tuples-v1"
     },
     "accepted_inputs": {
-      "sha256": "55f884d6cb44d49c880e97e043a427c54be4a91e9d00a6ab8874ac7cf6f03a06",
-      "files": 26117,
+      "sha256": "3e8870de46a03715aacaa8ef0b57a056df50e263427bc1e52ccce5cd5932db3d",
+      "files": 26449,
       "encoding": "git-mode-type-blob-path-tuples-v1"
     },
-    "reason": "Conserves the existing scientific measurements across release-publication metadata changes. The only scientific input changes remove publish=false from two required Rust libraries. Package versions, dependencies, features, targets, implementation source, numerical inputs and thresholds are unchanged. Rate-limit retry handling and release scheduling are publication tooling, not simulation execution. This review is not a rerun of scientific or performance measurements.",
+    "reason": "Conserves the fresh 0.7.2 scientific measurements on dac88251ba across G132 24074bbb35: pure move of analysis_authoring_workflow, analysis_procedure_ids, analysis_output_operation_ids, analysis_language_reference_paths into contracts/authoring_catalog.rs, re-exported at the same path; no behaviour change; debt ceiling file lowered 2467\u21922442; FEA OK 2026-11-20. Every line removed from contracts.rs is in the new module; the only other lines are the mod line, the re-export, the module doc comment, its import and one test import. scripts/development/fea-module-size-debt.json is not a scientific input. Solver arithmetic, model inputs, dependencies, features and thresholds are unchanged. This review is not a rerun of the scientific or performance measurements.",
     "review": {
-      "path": "qualification/scientific/reviews/publication-metadata-20261113-authored-cli-physics.json",
-      "sha256": "b34bd31eedf320142f506a8c9904c7f546cb4ce7fa9190f202bf21e4154a547b"
+      "path": "qualification/scientific/reviews/g132-authoring-catalog-move-20261120-authored-cli-physics.json",
+      "sha256": "04774daffecf74b8b3f3da1858cb10256f8936e8a83b3c09275babd1d63d62c0"
     }
   }
 }

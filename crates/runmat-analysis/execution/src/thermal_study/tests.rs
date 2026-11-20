@@ -45,6 +45,7 @@ pub(crate) fn preparation() -> ThermalStudyPreparation {
         vec![ProcedureStep::thermal_transient("heat")],
     );
     let compiled = CompiledAnalysisStudy {
+        displays: Vec::new(),
         module_path: "tests/thermal.fea".into(),
         study_id: "thermal".into(),
         study_inputs: Vec::new(),

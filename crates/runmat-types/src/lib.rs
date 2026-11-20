@@ -6,6 +6,7 @@ pub mod dimension;
 mod exception;
 pub use exception::ExceptionProperty;
 pub mod fact;
+pub mod font;
 pub mod geometry;
 pub mod identity;
 pub mod integer_literal;

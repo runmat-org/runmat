@@ -40,6 +40,10 @@ pub struct ImportedGeometryDefinition {
     /// or part of the exact-kernel materialization wire contract.
     #[serde(skip)]
     pub preview_extent_m: Option<[f64; 3]>,
+    /// Derived preview volume, area and sizing spectrum for the check-time mesh estimate;
+    /// like the extent, never part of the wire contract.
+    #[serde(skip)]
+    pub preview_measure: Option<super::PreviewMeasure>,
     pub logical_path: String,
     pub format: GeometrySourceFormat,
     pub authored_units: Option<LengthUnit>,

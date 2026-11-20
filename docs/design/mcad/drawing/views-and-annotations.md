@@ -1,5 +1,5 @@
 ---
-description: Reference for RunMat drawing files. Sheet formats and title blocks, standard, projected, section, detail, auxiliary and broken-out views, dimensions, hole callouts, GD&T frames from the part's PMI, surface finish and weld symbols, notes, balloons, and BOM, hole, revision, bend, weld and cut-list tables.
+description: Reference for RunMat drawing files. Sheet formats and title blocks, standard, projected, section, detail, auxiliary and broken-out views, dimensions, hole callouts, GD&T frames from the part's PMI, surface finish and weld symbols, wrapped notes and general notes, balloons, level marks, plan grids and door swings, and BOM, hole, revision, bend, weld and cut-list tables.
 keywords: [engineering drawing, 2D drawing, title block, section view, detail view, dimensions, GD&T, feature control frame, surface finish symbol, BOM table, hole table, revision table, cut list, third angle projection]
 ---
 # Drawing views and annotations
@@ -94,7 +94,7 @@ drawing bracket {
 
 ## Views
 
-`view <name> = <kind>(…, sheet, model, at, scale, display)`. Every view names its sheet, its model (`model = { part = bracket }`, `model = { assembly = drone, from = ".." }`), its position on the sheet in millimeters and its display (`visible_lines`, `hidden_lines` or `shaded`), and optionally its own scale. `exclude` leaves occurrences out of an assembly view, and `exploded` shows a named exploded state.
+`view <name> = <kind>(…, sheet, model, at, scale, display)`. Every view names its sheet, its model (`model = { part = bracket }`, `model = { assembly = drone, from = ".." }`, `model = { part = bracket, from = "../bracket.part" }`), its position on the sheet in millimeters and its display (`visible_lines`, `hidden_lines` or `shaded`), and optionally its own scale. `exclude` leaves occurrences out of an assembly view, and `exploded` shows a named exploded state.
 
 | Kind | Parameters | Shows |
 |---|---|---|
@@ -105,10 +105,39 @@ drawing bracket {
 | `auxiliary` | `from`, `edge`, `label` | a view perpendicular to a model edge |
 | `broken_out` | `from`, `boundary`, `depth` | material removed inside a boundary |
 
+A view's `from` names the folder that holds the design (`".."`) or the design's file (`"../bracket.part"`). With the file form, `part =` is optional, and the view shows the part that file declares. A drawing kept in a `drawings/` folder reaches the bracket one level up either way:
+
+```drawing file=drawings/bracket_shop.drawing
+runmat 0.7
+std 1
+
+drawing bracket_shop {
+    format a3 = {
+        size = { size = iso, name = A3 },
+        title_block = [{ label = "Sheet", source = { source = sheet_number } }]
+    }
+    sheet "1" = { format = a3, scale = [1, 1], projection = third_angle }
+    view front = standard(orientation = front, sheet = "1", model = { part = bracket, from = "../bracket.part" }, at = [150, 165], display = hidden_lines)
+    view top = standard(orientation = top, sheet = "1", model = { part = bracket, from = ".." }, at = [150, 80], display = hidden_lines)
+}
+```
+
 ```drawing fragment
 view a_a = section(from = front, plane = feature.body.face.start, label = A, sheet = "1", model = { part = bracket }, at = [100, 100], display = hidden_lines)
 view b = detail(from = a_a, center = feature.body.face.end, radius = 20 mm, label = B, sheet = "1", model = { part = bracket }, at = [300, 100], scale = [2, 1], display = hidden_lines)
 ```
+
+### Edit a view
+
+Edit view (`drawing.edit-view`, on a view's right-click menu) opens the selected view's properties in one panel and writes them into its `view` line:
+
+- **Scale:** `1:2`, `2:1`, or `sheet` to draw at the sheet's scale. A projected view that drew at its parent's scale changes with it, so views in projection keep one scale (ISO 5456-2).
+- **Orientation:** a standard view's orientation. A projected, section, detail or auxiliary view looks the way its parent sets, so change the parent instead.
+- **Display:** hidden lines removed (`visible_lines`), hidden lines visible (`hidden_lines`) or shaded.
+- **Label:** a section's, detail's or auxiliary view's letter, or the title printed under any other view (`title = "REAR ELEVATION"`). An empty label gives a view back the title its kind prints.
+- **Place at:** click the sheet to move the view's center there.
+
+The panel starts with the view's current values, and the sheet previews the edit while it is open. Dimensions and annotations name their view, so they move and scale with it. Undo and redo restore the view's line as it was.
 
 ## Annotations
 
@@ -122,37 +151,103 @@ view b = detail(from = a_a, center = feature.body.face.end, radius = 20 mm, labe
 | `datum_symbol`, `datum_target` | `label` | a datum symbol or target from the part's PMI |
 | `surface_finish` | `on` | the finish symbol of the face's `finish` |
 | `weld` | `on`, `symbol`, `size`, `all_around`, `field` | a weld symbol |
-| `note` | `text`, `leader` | text; `{part_number}`, `{revision}` and other `{property}` fields fill in |
+| `note` | `text`, `leader`, `width` | text; `{part_number}`, `{revision}` and other `{property}` fields fill in. The text wraps at spaces to `width` (a length on the sheet, such as `60 mm`), otherwise to the room it has; `\n` starts a new line |
 | `balloon` | `occurrence`, `table` | a balloon numbered by a BOM table |
 | `center_mark`, `centerline` | `on`, `between` | center marks and centerlines |
+| `level` | `label`, `on` or `datum`, `occurrence` | a level mark: a line from a face's or a datum plane's height to a target symbol, the label above the line and the elevation below it |
+| `grids` | `occurrence`, `datums`, `labels` | grid lines across a plan, each label in a bubble, and a row of dimensions between neighboring grids |
+| `door_swing` | `door`, `hinge`, `swing` | a door's leaf open 90° from its hinge and the quarter arc it sweeps |
 
 Annotations read PMI from the part instead of restating it: change the flatness tolerance in the `.part` and the frame on every drawing changes with it.
 
+### Annotations on assembly views
+
+On an assembly view, a reference names a face of one occurrence's part. A dimension lists the occurrence of each reference in `occurrences`, one path per reference and in the same order. A level mark names its face's occurrence in `occurrence`, or names a datum plane that occurrence publishes in `datum` (a skeleton's `second_floor`). The drawing measures each face where the assembly places that occurrence, so moving a wall in the assembly moves its dimension and changes the value.
+
+```drawing fragment
+annotation overall_ns = dimension(style = linear, references = [feature.top1.face.start, feature.top1.face.start], occurrences = [[{ name = framing }, { name = wall_a_l1 }], [{ name = framing }, { name = wall_d_l1 }]], view = first)
+annotation slab = level(label = "T.O. SLAB", on = feature.slab.face.end, occurrence = [{ name = foundation }, { name = slab }], view = south, at = [60, 253])
+annotation floor_2 = level(label = "2ND FLOOR", datum = second_floor, occurrence = [{ name = skeleton }], view = south)
+```
+
+A level mark prints the level's height above the model's origin in the sheet's units. In feet and inches the elevation always carries its feet: `EL. 0'-0"`, `EL. -0'-8"`, `EL. 10'-1 3/4"`.
+
+`grids` reads the datum planes an occurrence's part publishes (`publish grid_1 = datum(…)` in a skeleton) and pairs each with a label. Each grid line runs across the view as a chain line and ends in a bubble beyond the view's dimension rows. Grids measured left to right put their bubbles on the side the view's horizontal dimensions use; grids measured bottom to top use the vertical dimensions' side. The dimensions between neighboring grids join the view's dimension rows as a chain.
+
+`door_swing` draws from the door occurrence's own geometry. The leaf is the door's thinnest body across the wall (the slab, not the frame), and the leaf is as wide as that body. `hinge = start` hangs the leaf at the door's x = 0, `hinge = end` at the far end of the opening. `swing = positive` opens it toward the door's +y, `swing = negative` toward -y.
+
+```drawing fragment
+annotation grids_ew = grids(occurrence = [{ name = skeleton }], datums = [grid_1, grid_2, grid_3, grid_4, grid_5], labels = ["1", "2", "3", "4", "5"], view = first)
+annotation swing_d1 = door_swing(door = [{ name = envelope }, { name = d1_a_l1_2 }], hinge = start, swing = positive, view = first)
+```
+
 ## Tables
 
-`table <name> = <kind>(…, sheet, at)`:
+`table <name> = <kind>(…, sheet, at)`. `at` is the table's corner on the sheet when you place it by hand, `[0, 0]` included; leave it out and the table takes its standard place.
 
 | Kind | Lists |
 |---|---|
 | `bom(view, include_fasteners)` | the bill of materials of an assembly view, with item numbers the balloons use |
 | `hole(view, origin)` | every hole in a view with its position from an origin face, size and form |
 | `revision(rows)` | revisions: `rows = [{ rev = "B", description = "…", date = "2026-11-05", by = "NA" }]` |
+| `notes(rows, width)` | the general notes: a numbered list under "NOTES:", one note per row, each wrapping with a hanging indent in a column `width` wide (the title block's width when unset) |
 | `bend(view)` | the bends of a sheet-metal flat pattern |
 | `weld(view)` | the welds in a view |
 | `cut_list(view)` | a weldment's structural members, one row per group of identical members: item, quantity, profile, material, cut length and end angles |
 
 ```drawing fragment
-table bom = bom(view = front, include_fasteners, sheet = "1", at = [0, 0])
+table bom = bom(view = front, include_fasteners, sheet = "1")
 table revs = revision(rows = [{ rev = "A", description = "First release", date = "2026-11-05", by = "NA" }], sheet = "1", at = [300, 280])
 ```
+
+### General notes
+
+Sheet-wide notes go in one `notes` table, with one note per row. Write each note as one string; the sheet wraps it. Unless placed with `at`, the list sits on the title block's top edge and grows upward. A `{property}` field fills in from the model of the sheet's first view.
+
+```drawing fragment
+table notes = notes(
+    rows = [
+        "MATERIAL: {material}.",
+        "BREAK SHARP EDGES 0.2 TO 0.5 MM; DEBURR ALL HOLES BOTH SIDES.",
+        "GENERAL TOLERANCES: ISO 2768-mK WHERE NO INDIVIDUAL TOLERANCE IS SHOWN."
+    ],
+    sheet = "1"
+)
+```
+
+### Notes on the sheet
+
+Notes, tables and views never overprint each other, the title block or the border:
+
+- A note placed with `at` wraps to its `width`. Without a width, it wraps at the room to its right, up to the border, the title block or the next item.
+- A note with no room at its `at` moves to the nearest free spot, and the check warns: "Note n2 at [20, 30] has no room there: …".
+- A note or table that fits nowhere on the sheet stays where it was put, and the check warns with what to change: "Note n2 doesn't fit on the sheet: it needs 200 x 60 mm of free space …".
+
+The sheet sets note text in capitals, as ASME Y14.2 and ISO 3098 lettering expect, with filled `{property}` fields included: `MATERIAL: {material}.` prints `MATERIAL: ALUMINUM 6061.` for a part whose material is `Aluminum 6061`. A unit symbol written after a number keeps the case it was written in, so `3 mm` and `25kg` print as written. The file and the model's properties keep their own case.
+
+The sheet, the PDF and the DXF break notes at the same words. Each line is its own text entity in the DXF and its own line of text in the PDF.
 
 ## Laid out for you
 
 The Auto-drawing command (`drawing.auto`) writes a drawing for a part or an assembly: three orthographic views, a section through the first hole, overall dimensions, hole callouts and tables, at the largest scale that fits the chosen sheet (A4 to A2, ANSI B or D). Fasteners are left out of assembly views. Auto-balloon numbers an assembly view's occurrences against its BOM table. The result is an ordinary `.drawing` to edit.
 
+## Check a drawing
+
+Check drawing (`drawing.check`, on the Drawing tab) compiles the drawing, lays out its sheets and lists what it finds in the results under the sheet. Selecting a finding selects the view, annotation, table or sheet it names. The Standard field picks the scale rules: the sheets' own standard, ISO or ASME.
+
+| Rule | Finds |
+|---|---|
+| Reference | An annotation whose model references no longer resolve, such as a dimension to a face the part lost, and the drawing's own reference errors (an error). |
+| Model | A view whose model file is missing, doesn't compile or builds no solid, so the sheet draws no model lines for it and the view is out of date with its model (an error). |
+| Title block | An empty title-block field, such as a material the part doesn't set, and a title block without a title or an identification number (ISO 7200). |
+| Overlap | Views or tables that overlap each other, annotation texts drawn over each other, and what the layout reports: a view or table with no room, views closer than the standard gap, a projected view out of line with its parent. |
+| Scale | A sheet or view scale outside the preferred scales (ISO 5455: 1, 2 and 5 times a power of ten; inch ASME sheets also allow 1:4, 1:8 and 1:16, and feet-and-inches sheets the architectural scales 1:12 to 1:384), a projected view at a different scale from its parent, and a detail view no larger than its parent. |
+
+Errors list first, then warnings, then notes. A note is something the layout settled itself, such as a view it moved clear of the notes.
+
 ## Exports
 
-`runmat-design export bracket.drawing --format pdf` writes the sheets as PDF, and `--format dxf` or `dwg` as CAD drawings, one file per sheet (`--sheet <name>` for one). See [Import and export](/docs/mcad/import-export).
+`runmat design export bracket.drawing --format pdf` writes the sheets as PDF, and `--format dxf` or `dwg` as CAD drawings, one file per sheet (`--sheet <name>` for one). See [Import and export](/docs/mcad/import-export).
 
 ## Not yet built
 

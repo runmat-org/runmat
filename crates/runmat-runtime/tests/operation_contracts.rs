@@ -188,6 +188,25 @@ fn study_artifact_env_guard() -> MutexGuard<'static, ()> {
         .unwrap_or_else(|poisoned| poisoned.into_inner())
 }
 
+/// Run ids of stored nonlinear results that did not reach the full load or are not a
+/// completed, numerically acceptable physical solution. The artifact store is process-wide
+/// and other tests in this binary publish into it concurrently, so refusal tests check that
+/// no unconverged nonlinear result appeared rather than comparing the store's total count.
+fn stored_unconverged_nonlinear_run_ids() -> std::collections::BTreeSet<String> {
+    storage::list_run_metadata()
+        .expect("list published runs")
+        .into_iter()
+        .filter(|run| {
+            run.nonlinear_results.as_ref().is_some_and(|nonlinear| {
+                nonlinear.load_factors.last() != Some(&1.0)
+                    || run.run_status != RunStatus::Completed
+                    || !run.numerically_acceptable
+            })
+        })
+        .map(|run| run.run_id)
+        .collect()
+}
+
 fn sorted_object_keys(value: &Value) -> Vec<String> {
     let mut keys = value
         .as_object()
@@ -1852,7 +1871,7 @@ fn analysis_run_nonlinear_strict_iteration_cap_refuses_unconverged_publication()
     let _fea_admission = fea_admission_support::guard();
     {
         let (_mesh_root, model, options) = nonlinear_solid::fixture();
-        let published = storage::list_run_metadata().unwrap().len();
+        let unconverged_before = stored_unconverged_nonlinear_run_ids();
         let error = analysis_run_nonlinear_with_options_op(
             &model,
             ComputeBackend::Cpu,
@@ -1875,7 +1894,14 @@ fn analysis_run_nonlinear_strict_iteration_cap_refuses_unconverged_publication()
         assert_eq!(error.op_version, "fea.run_nonlinear/v1");
         assert_eq!(error.error_code, "RM.FEA.RUN_NONLINEAR.ASSEMBLY_FAILED");
         assert!(!error.retryable);
-        assert_eq!(storage::list_run_metadata().unwrap().len(), published);
+        let published: Vec<_> = stored_unconverged_nonlinear_run_ids()
+            .difference(&unconverged_before)
+            .cloned()
+            .collect();
+        assert!(
+            published.is_empty(),
+            "unconverged runs published: {published:?}"
+        );
     }
 }
 
@@ -1884,7 +1910,7 @@ fn analysis_run_nonlinear_quality_policy_cannot_publish_unconverged_physical_sol
     let _fea_admission = fea_admission_support::guard();
     {
         let (_mesh_root, model, options) = nonlinear_solid::fixture();
-        let published = storage::list_run_metadata().unwrap().len();
+        let unconverged_before = stored_unconverged_nonlinear_run_ids();
         let run_with_policy = |policy| {
             analysis_run_nonlinear_with_options_op(
                 &model,
@@ -1915,7 +1941,14 @@ fn analysis_run_nonlinear_quality_policy_cannot_publish_unconverged_physical_sol
             assert_eq!(error.error_code, "RM.FEA.RUN_NONLINEAR.ASSEMBLY_FAILED");
             assert!(!error.retryable);
         }
-        assert_eq!(storage::list_run_metadata().unwrap().len(), published);
+        let published: Vec<_> = stored_unconverged_nonlinear_run_ids()
+            .difference(&unconverged_before)
+            .cloned()
+            .collect();
+        assert!(
+            published.is_empty(),
+            "unconverged runs published: {published:?}"
+        );
     }
 }
 
@@ -2073,10 +2106,6 @@ fn analysis_trends_contract_is_v1_and_typed() {
         // Missing timing stays absent rather than becoming a fabricated zero sample.
         assert_eq!(nonlinear.median_solve_ms, None);
         assert_eq!(nonlinear.p95_solve_ms, None);
-        assert!(nonlinear.thermo_coupling_enabled_rate.is_none());
-        assert!(nonlinear.thermo_nonlinear_warn_rate.is_none());
-        assert!(nonlinear.thermo_spread_breach_rate.is_none());
-        assert!(nonlinear.thermo_heterogeneity_breach_rate.is_none());
     }
 }
 
@@ -2525,25 +2554,6 @@ fn analysis_results_by_run_id_contract_roundtrip() {
         assert_eq!(results.data.summary.time_end_s, None);
         assert_eq!(results.data.summary.max_transient_residual_norm, None);
         assert_eq!(results.data.summary.final_step_converged, None);
-        assert_eq!(results.data.summary.thermo_coupling_enabled, None);
-        assert_eq!(results.data.summary.thermo_coupling_fingerprint, None);
-        assert_eq!(
-            results.data.summary.thermo_constitutive_temperature_factor,
-            None
-        );
-        assert_eq!(results.data.summary.thermo_effective_modulus_scale, None);
-        assert_eq!(
-            results
-                .data
-                .summary
-                .thermo_constitutive_material_spread_ratio,
-            None
-        );
-        assert_eq!(
-            results.data.summary.thermo_assignment_heterogeneity_index,
-            None
-        );
-        assert_eq!(results.data.summary.thermo_nonlinear_severity, None);
     }
 }
 

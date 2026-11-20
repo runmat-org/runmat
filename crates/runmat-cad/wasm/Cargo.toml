@@ -1,6 +1,6 @@
 [package]
 name = "runmat-cad-wasm"
-version = "0.7.1"
+version = "0.7.2"
 edition = "2021"
 authors = ["Dystr Team"]
 license-file = "../../../LICENSE.md"
@@ -15,13 +15,16 @@ repository = "https://github.com/runmat-org/runmat"
 crate-type = ["rlib"]
 
 [dependencies]
-runmat-cad = { path = "..", version = "=0.7.1" }
+runmat-cad = { path = "..", version = "=0.7.2" }
 # Circuit boards placed in assemblies draw their 3D board model (`board_display`).
-runmat-circuit = { path = "../../runmat-circuit", version = "=0.7.1" }
+runmat-circuit = { path = "../../runmat-circuit", version = "=0.7.2" }
 runmat-design-syntax = { workspace = true }
 runmat-types = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
+# The study geometry's source-closure digest (exchange::study).
+sha2 = { workspace = true }
+hex = { workspace = true }
 wasm-bindgen = { version = "0.2", optional = true }
 
 [features]

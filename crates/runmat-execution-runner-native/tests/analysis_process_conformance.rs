@@ -188,7 +188,8 @@ async fn parent() {
     // the product. Capture the same finite host publication allowance rather
     // than accidentally testing numerical completion under an embedded default.
     runmat_runtime::analysis::configure_fea_runtime(runmat_runtime::analysis::FeaRuntimeConfig {
-        publication_staging_bytes: runmat_execution_runner_native::publication_staging_bytes(),
+        publication_staging_bytes: runmat_execution_runner_native::publication_staging_bytes()
+            .unwrap(),
         ..Default::default()
     })
     .unwrap();

@@ -15,7 +15,16 @@ pub fn analysis_document_study_result(
                 AnalysisResultsQuery::metadata_only(),
                 crate::operations::OperationContext::new(None, None),
             )
-            .map(|result| (step, result.data))
+            .map(|result| {
+                let mut data = result.data;
+                // The field behind the study's verdict comes first, ahead of declared outputs.
+                operations::move_fields_first(
+                    &mut data.field_descriptors,
+                    &operations::assessed_source_field_ids(&run.assessments, &step.run_id),
+                    |descriptor| descriptor.field_id.as_str(),
+                );
+                (step, data)
+            })
             .map_err(|error| error.message)
         })
         .collect::<Result<Vec<_>, _>>()?;
@@ -50,6 +59,7 @@ pub fn project_study_field_bindings(
                     step_id: step.procedure_step.step_id.clone(),
                     run_id: step.run_id.clone(),
                     descriptor: descriptor.clone(),
+                    render_topology: step.render_topology,
                 })
         })
         .collect()

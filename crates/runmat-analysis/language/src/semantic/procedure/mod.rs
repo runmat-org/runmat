@@ -1,5 +1,6 @@
 mod accuracy;
 mod assessment;
+mod display;
 mod header;
 mod initial_conditions;
 mod load_cases;
@@ -20,6 +21,9 @@ use runmat_meshing_core::MeshDefinition;
 use std::collections::BTreeMap;
 
 pub(crate) use output::{field_location, field_reference_type};
+pub use output::{
+    step_field_admission, step_published_fields, StepFieldRefusal, FIELD_LOCATION_CODE,
+};
 pub(crate) use study::symbol_key as resolve_symbol_key;
 pub(crate) use values::canonical_scalar;
 
@@ -33,6 +37,7 @@ pub fn lower_studies(
 ) -> BTreeMap<(LogicalSourcePath, FeaSymbolKey), AuthoredStudy> {
     let context = study::StudyLowering {
         bound,
+        declarations,
         models,
         geometries,
         meshes,

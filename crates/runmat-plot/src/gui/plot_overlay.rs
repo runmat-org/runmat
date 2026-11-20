@@ -5,7 +5,7 @@
 
 use crate::core::{plot_utils, PlotRenderer};
 use crate::geometry_scene::GeometrySceneScalarLegend;
-use crate::legend_text::{with_unit, LegendPrecision};
+use crate::legend_text::with_unit;
 use crate::overlay::cad_overlay::{CadOverlayActions, CadOverlayRenderInput, CadOverlayState};
 use crate::plots::TextStyle;
 use crate::styling::{ModernDarkTheme, PlotThemeConfig, ThemeVariant};
@@ -553,6 +553,14 @@ impl PlotOverlay {
                 x_h *= keep;
             }
         }
+        if has_x_label {
+            // The x label sits below the tick labels (`x_label_center_y`); a short axes gives
+            // up plot height for it rather than drawing the label over the ticks.
+            let need = Self::x_label_clearance(x_tick_label_height, scale)
+                + 2.0 * Self::x_label_half_height(scale)
+                - x_gap;
+            x_h = x_h.max(need.min((outer_h - title_h - title_gap - x_gap - 1.0).max(0.0)));
+        }
 
         let plot_rect = Rect::from_min_max(
             egui::pos2(outer.min.x + y_w, outer.min.y + title_h + title_gap),
@@ -877,7 +885,7 @@ impl PlotOverlay {
             (plot_area, None)
         };
         let (rows, cols) = plot_renderer.figure_axes_grid();
-        if rows * cols <= 1 {
+        if rows * cols <= 1 || plot_renderer.figure_axes_use_independent_layout() {
             (0..plot_renderer.figure_axes_count().max(1))
                 .map(|axes_index| {
                     let axes_outer =
@@ -1039,9 +1047,9 @@ impl PlotOverlay {
     }
 
     pub fn outer_plot_area_for_axes(available_rect: Rect, plot_renderer: &PlotRenderer) -> Rect {
-        let (rows, cols) = plot_renderer.figure_axes_grid();
-        let single_axes_is_3d = rows * cols <= 1 && Self::axes_is_3d(plot_renderer, 0);
-        if single_axes_is_3d || rows * cols > 1 {
+        let single_axes_is_3d =
+            plot_renderer.figure_axes_count() <= 1 && Self::axes_is_3d(plot_renderer, 0);
+        if single_axes_is_3d || plot_renderer.figure_requires_axes_layout() {
             available_rect
         } else {
             available_rect.shrink2(egui::vec2(8.0, 8.0))
@@ -1225,6 +1233,9 @@ impl PlotOverlay {
             .iter()
             .enumerate()
             .filter_map(|(index, rect)| {
+                if !renderer.figure_axes_is_live(index) {
+                    return None;
+                }
                 let mut camera = renderer.axes_camera(index)?.clone();
                 // The rendered viewport uses this axes rectangle, not the outer
                 // figure's aspect ratio. Rebuild the projection for the same
@@ -1285,8 +1296,10 @@ impl PlotOverlay {
         }
 
         let axes_count = plot_renderer.figure_axes_count().max(1);
-        if rows * cols > 1 || axes_count > 1 {
-            let rects = if rows * cols > 1 {
+        let axes_layout = plot_renderer.figure_requires_axes_layout();
+        if axes_layout {
+            let independent_layout = plot_renderer.figure_axes_use_independent_layout();
+            let rects = if rows * cols > 1 && !independent_layout {
                 self.compute_subplot_rects(
                     plot_area_rect,
                     rows,
@@ -1297,7 +1310,11 @@ impl PlotOverlay {
             } else {
                 vec![plot_area_rect; axes_count]
             };
-            let grid_cols = if rows * cols > 1 { cols } else { 0 };
+            let grid_cols = if rows * cols > 1 && !independent_layout {
+                cols
+            } else {
+                0
+            };
             let mut panel_layouts = self
                 .grid_panel_layouts(&rects, grid_cols, plot_renderer, config.font_scale)
                 .into_iter();
@@ -1321,6 +1338,9 @@ impl PlotOverlay {
                 let frame_rect =
                     Self::snap_rect_to_pixels(panel_layout.frame_rect, ui.ctx().pixels_per_point());
                 rendered_axes_rects.push(r);
+                if !plot_renderer.figure_axes_is_live(i) {
+                    continue;
+                }
                 log::debug!(
                     target: "runmat_plot.axes_layout",
                     "computed axes panel layout axes_index={} rows={} cols={} is_3d={} cell=({}, {})..({}, {}) frame=({}, {})..({}, {}) content=({}, {})..({}, {})",
@@ -1458,6 +1478,8 @@ impl PlotOverlay {
                     {
                         self.draw_x_label_in_rect(
                             ui,
+                            plot_renderer,
+                            i,
                             panel_layout.x_label_rect,
                             x_label,
                             config.font_scale,
@@ -1628,6 +1650,8 @@ impl PlotOverlay {
                 {
                     self.draw_x_label_in_rect(
                         ui,
+                        plot_renderer,
+                        0,
                         panel_layout.x_label_rect,
                         x_label,
                         config.font_scale,
@@ -1663,13 +1687,13 @@ impl PlotOverlay {
                 );
             }
         }
-        let centered_plot_rect = if rows * cols <= 1 && axes_count <= 1 {
+        let centered_plot_rect = if !axes_layout {
             self.panel_layout_for_axes(plot_area_rect, plot_renderer, 0, config.font_scale)
                 .plot_rect
         } else {
             plot_area_rect
         };
-        for (label, pos) in if rows * cols <= 1 && axes_count <= 1 {
+        for (label, pos) in if !axes_layout {
             plot_renderer.active_axes_pie_labels()
         } else {
             Vec::new()
@@ -1686,7 +1710,7 @@ impl PlotOverlay {
         }
 
         // Draw legend if enabled and entries available
-        if rows * cols <= 1 && axes_count <= 1 && plot_renderer.overlay_show_legend_for_axes(0) {
+        if !axes_layout && plot_renderer.overlay_show_legend_for_axes(0) {
             // Per-axes entries include each pie slice.
             self.draw_axes_legend(ui, centered_plot_rect, plot_renderer, 0, config.font_scale);
         }
@@ -1706,6 +1730,15 @@ impl PlotOverlay {
             ui.ctx(),
             centered_plot_rect,
             &annotations,
+            config.font_scale,
+        );
+        // Measured values sit on their dimension lines, which the renderer draws in the model.
+        let dimensions = plot_renderer
+            .geometry_screen_dimensions([centered_plot_rect.width(), centered_plot_rect.height()]);
+        self.cad_overlay.render_dimension_labels(
+            ui.ctx(),
+            centered_plot_rect,
+            &dimensions,
             config.font_scale,
         );
 
@@ -3282,7 +3315,7 @@ impl PlotOverlay {
         let panel = crate::scalar_legend::ScalarLegendPanel::for_plot(
             plot_rect.width(),
             scale,
-            legend.note.is_some(),
+            legend.note_lines(),
         );
         let scale = scale.max(0.75);
         let bar_height = panel.bar_height;
@@ -3358,7 +3391,7 @@ impl PlotOverlay {
                 color,
             );
         }
-        let precision = LegendPrecision::for_range(legend.minimum, legend.maximum);
+        let precision = legend.number_precision();
         ui.painter().text(
             bar_rect.left_bottom() + egui::vec2(0.0, 3.0 * scale),
             Align2::LEFT_TOP,
@@ -3387,22 +3420,101 @@ impl PlotOverlay {
                 Stroke::new(2.0 * scale, text_color),
             );
         }
+        // Lines under the range, bottom up: the note, then a fixed range's overflow lines, each
+        // led by a triangle in the end colour the overflowing values take.
+        let line = crate::scalar_legend::ScalarLegendPanel::LINE_POINTS * scale;
+        let mut bottom = rect.max.y;
         if let Some(note) = &legend.note {
             ui.painter().text(
-                rect.right_bottom(),
+                egui::pos2(rect.max.x, bottom),
                 Align2::RIGHT_BOTTOM,
                 note,
-                detail_font,
+                detail_font.clone(),
                 text_color,
             );
+            bottom -= line;
+        }
+        let overflows = [(legend.below, false), (legend.above, true)];
+        for (value, above) in overflows {
+            let Some(value) = value else {
+                continue;
+            };
+            let text = crate::legend_text::overflow_line(value, &legend.unit, above, precision);
+            let drawn = ui.painter().text(
+                egui::pos2(rect.max.x, bottom),
+                Align2::RIGHT_BOTTOM,
+                text,
+                detail_font.clone(),
+                text_color,
+            );
+            let size = 0.6 * panel.label_points;
+            let center = egui::pos2(drawn.min.x - 0.8 * size, drawn.center().y);
+            let (tip, base) = if above {
+                (-0.5 * size, 0.5 * size)
+            } else {
+                (0.5 * size, -0.5 * size)
+            };
+            ui.painter().add(egui::Shape::convex_polygon(
+                vec![
+                    center + egui::vec2(0.0, tip),
+                    center + egui::vec2(0.5 * size, base),
+                    center + egui::vec2(-0.5 * size, base),
+                ],
+                if above { stops[4] } else { stops[0] },
+                Stroke::new(1.0, text_color),
+            ));
+            bottom -= line;
         }
     }
 
-    fn draw_x_label_in_rect(&self, ui: &mut egui::Ui, rect: Rect, label: &str, scale: f32) {
+    /// How far below the plot box the x tick labels reach: they are centered `15 * scale`
+    /// below it, `tick_label_height` tall, plus a small gap.
+    fn x_label_clearance(tick_label_height: f32, scale: f32) -> f32 {
+        15.0 * scale + tick_label_height * 0.5 + 2.0 * scale
+    }
+
+    fn x_label_half_height(scale: f32) -> f32 {
+        // The 14 pt label font's line height is about 1.2 em.
+        14.0 * scale * 0.6
+    }
+
+    /// The x label's center: low in its band, and always below the axes' tick labels.
+    fn x_label_center_y(
+        &self,
+        plot_renderer: &PlotRenderer,
+        axes_index: usize,
+        rect: Rect,
+        scale: f32,
+    ) -> f32 {
+        let angle = plot_renderer.overlay_x_tick_label_rotation_for_axes(axes_index);
+        let width = self.estimate_x_axis_max_tick_label_width(plot_renderer, axes_index, scale);
+        let (_, tick_label_height) = Self::rotated_text_extent(width, 13.0 * scale, angle);
+        Self::x_label_center_in(rect, tick_label_height, scale)
+    }
+
+    fn x_label_center_in(rect: Rect, tick_label_height: f32, scale: f32) -> f32 {
+        let below_ticks = rect.min.y
+            + Self::x_label_clearance(tick_label_height, scale)
+            + Self::x_label_half_height(scale);
+        below_ticks.max(rect.max.y - rect.height() * 0.24)
+    }
+
+    fn draw_x_label_in_rect(
+        &self,
+        ui: &mut egui::Ui,
+        plot_renderer: &PlotRenderer,
+        axes_index: usize,
+        rect: Rect,
+        label: &str,
+        scale: f32,
+    ) {
         let scale = scale.max(0.75);
         let text_color = self.theme_text_color();
         ui.painter().text(
-            Pos2::new(rect.center().x, rect.max.y - rect.height() * 0.24),
+            Pos2::new(
+                rect.center().x,
+                self.x_label_center_y(plot_renderer, axes_index, rect, scale),
+            ),
             Align2::CENTER_CENTER,
             label,
             FontId::proportional(14.0 * scale),
@@ -3850,6 +3962,25 @@ mod positioned_axes_tests {
     use crate::core::Camera;
     use egui::{pos2, vec2, Rect};
     use glam::Vec3;
+
+    #[test]
+    fn the_x_label_sits_below_the_tick_labels_in_a_short_band() {
+        // A stacked time plot's bottom axes: a band squeezed to 30 px under the plot box.
+        let (scale, tick_h) = (1.0, 13.0);
+        let tick_bottom = 15.0 * scale + tick_h * 0.5;
+        let short = Rect::from_min_size(pos2(0.0, 100.0), vec2(400.0, 30.0));
+        let center = PlotOverlay::x_label_center_in(short, tick_h, scale);
+        let label_top = center - PlotOverlay::x_label_half_height(scale);
+        assert!(
+            label_top >= 100.0 + tick_bottom,
+            "label top {label_top} over ticks"
+        );
+
+        // A roomy band keeps the label where it always sat, low in the band.
+        let tall = Rect::from_min_size(pos2(0.0, 100.0), vec2(400.0, 60.0));
+        let center = PlotOverlay::x_label_center_in(tall, tick_h, scale);
+        assert_eq!(center, 160.0 - 60.0 * 0.24);
+    }
 
     #[test]
     fn default_plot_toolbar_preserves_full_available_width() {

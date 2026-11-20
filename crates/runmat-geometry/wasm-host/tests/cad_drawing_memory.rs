@@ -1,16 +1,15 @@
 //! Drawing compiles fit the browser CAD host's memory.
 //!
-//! The browser host links with a 512 MB memory ceiling (`-sMAXIMUM_MEMORY` in
-//! scripts/runtime/build-exact-cad-wasm.sh); an allocation past it aborts the CAD worker, and the
-//! editor with it. The camera drone's assembly drawing projects the whole drone in three views.
-//! These tests compile the drone's drawings the way the browser worker does
-//! (`call_framed`, meshes as bytes) and measure the Rust heap's peak during the compile.
+//! An allocation past the browser host's memory aborts the CAD worker, and the editor with it.
+//! The camera drone's assembly drawing projects the whole drone in three views. These tests
+//! compile the drone's drawings the way the browser worker does (`call_framed`, meshes as bytes)
+//! and measure the Rust heap's peak during the compile.
 //!
 //! The Rust heap is what a drawing compile controls: the parts it regenerates into the part
 //! cache, the display meshes as JSON values, the hidden-line models and the answer's text. The
-//! test holds its peak to three quarters of the ceiling and leaves the last quarter to OCCT's
-//! own allocations, which this allocator doesn't see, and to the host allocator's slack. Native
-//! pointers are twice the size of wasm32's, so the native peak overstates the host's.
+//! test holds its peak to [`PEAK_BYTES`], which leaves room for OCCT's own allocations (this
+//! allocator doesn't see them) and the host allocator's slack. Native pointers are twice the
+//! size of wasm32's, so the native peak overstates the host's.
 
 use std::alloc::{GlobalAlloc, Layout, System};
 use std::collections::BTreeMap;
@@ -53,22 +52,10 @@ unsafe impl GlobalAlloc for Counting {
 #[global_allocator]
 static ALLOC: Counting = Counting;
 
-/// The browser host's memory ceiling, `-sMAXIMUM_MEMORY` in build-exact-cad-wasm.sh.
-fn host_ceiling() -> usize {
-    let script = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("../../../scripts/runtime/build-exact-cad-wasm.sh");
-    let text = std::fs::read_to_string(&script).expect("build-exact-cad-wasm.sh");
-    let at = text
-        .find("-sMAXIMUM_MEMORY=")
-        .expect("the host build sets its memory ceiling")
-        + "-sMAXIMUM_MEMORY=".len();
-    text[at..]
-        .chars()
-        .take_while(char::is_ascii_digit)
-        .collect::<String>()
-        .parse()
-        .expect("a byte count")
-}
+/// The most a drawing compile's Rust heap may reach: 256 MB. The drone's assembly drawing peaks
+/// at about 190 MB (natively), so a regression past the margin fails here. The bound was three
+/// quarters of the browser host's former 512 MB ceiling; the drone's peak justifies a tighter one.
+const PEAK_BYTES: usize = 268_435_456;
 
 fn read_tree(dir: &std::path::Path, at: &str, all: &mut BTreeMap<String, String>) {
     for e in std::fs::read_dir(dir).into_iter().flatten().flatten() {
@@ -110,13 +97,12 @@ fn compile(path: &str, files: &BTreeMap<String, String>) -> (String, Vec<u8>, us
     (json, bytes, peak)
 }
 
-/// Every drone drawing compiles with no error and a heap peak within its share of the host's
-/// ceiling. `RUNMAT_DRAWING_DUMP=<dir>` writes each answer and its bytes there, so
+/// Every drone drawing compiles with no error and a heap peak within [`PEAK_BYTES`].
+/// `RUNMAT_DRAWING_DUMP=<dir>` writes each answer and its bytes there, so
 /// a change to the pipeline can be byte-compared.
 #[test]
 fn the_drone_drawings_compile_within_the_host_memory() {
     let files = drone();
-    let share = host_ceiling() / 4 * 3;
     let dump = std::env::var("RUNMAT_DRAWING_DUMP").ok();
     let mut over = Vec::new();
     for name in ["drone", "arm", "hinge_mount"] {
@@ -143,14 +129,13 @@ fn the_drone_drawings_compile_within_the_host_memory() {
             .filter(|d| d["severity"] == "error")
             .collect();
         assert!(errors.is_empty(), "{name}.drawing: {errors:?}");
-        if peak > share {
+        if peak > PEAK_BYTES {
             over.push(format!("{name}.drawing peaked at {} MB", peak >> 20));
         }
     }
     assert!(
         over.is_empty(),
-        "over the compile's {} MB share of the host's {} MB: {over:?}",
-        share >> 20,
-        host_ceiling() >> 20
+        "over the {} MB peak a compile may reach: {over:?}",
+        PEAK_BYTES >> 20
     );
 }

@@ -30,11 +30,11 @@
     },
     {
       "id": "design.tools.cli-check-mcad",
-      "title": "runmat-design check on parts, assemblies and drawings",
+      "title": "runmat check on parts, assemblies and drawings",
       "kind": "tooling",
       "area": "tooling",
       "status": "release",
-      "acceptance": "runmat-design check runs design.check on .part, .assembly and .drawing files, prints each diagnostic and exits 1 on any error.",
+      "acceptance": "runmat check runs design.check on .part, .assembly and .drawing files, prints each diagnostic and exits 1 on any error.",
       "landed_in": "0.7.1"
     },
     {
@@ -93,8 +93,9 @@
       "title": "Surface and shape analysis",
       "kind": "feature",
       "area": "mcad",
-      "status": "pending",
-      "acceptance": "Evaluate runs section, thickness, undercut, curvature, zebra and deviation analyses on a part in the Desktop and through design.inspect, coloring the model by result as draft analysis does."
+      "status": "release",
+      "acceptance": "Evaluate runs section, thickness, undercut, curvature, zebra and deviation analyses on a part in the Desktop and for the agent, coloring the model by the computed values.",
+      "landed_in": "0.7.2"
     },
     {
       "id": "design.fea.part-geometry",
@@ -133,8 +134,9 @@
       "title": "Imports from other electronics tools",
       "kind": "exchange",
       "area": "ecad",
-      "status": "pending",
-      "acceptance": "Clean-room readers for the other common tools' binary, text and JSON schematic and board formats write circuits and boards with part declarations and a report of what did not carry over, tested on an openly licensed corpus."
+      "status": "release",
+      "acceptance": "Clean-room readers for the other common tools' binary, text and JSON schematic and board formats write circuits and boards with part declarations and a report of what did not carry over, tested on an openly licensed corpus.",
+      "landed_in": "0.7.1"
     },
     {
       "id": "design.ecad.import.kicad-roundtrip",

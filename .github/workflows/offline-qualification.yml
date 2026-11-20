@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       source_ref:
-        description: Exact source commit to qualify
+        description: Reviewed full commit SHA at the selected workflow branch or tag
         required: true
         type: string
 
@@ -30,15 +30,28 @@ jobs:
       RUNMAT_ANALYSIS_ARTIFACT_ROOT: ${{ github.workspace }}/target/runmat-analysis-artifacts
       RUNMAT_FEA_ARTIFACT_ROOT: ${{ github.workspace }}/target/runmat-analysis-artifacts
     steps:
+      - name: Validate qualification source
+        shell: bash
+        env:
+          EXPECTED_SOURCE: ${{ inputs.source_ref }}
+        run: |
+          set -euo pipefail
+          if [[ ! "${EXPECTED_SOURCE}" =~ ^[0-9a-f]{40}$ || "${EXPECTED_SOURCE}" != "${GITHUB_SHA}" ]]; then
+            echo 'Select the branch or tag containing the reviewed commit and enter its full tip SHA.' >&2
+            exit 1
+          fi
       - uses: actions/checkout@v5
         with:
-          ref: ${{ inputs.source_ref || github.ref }}
+          ref: ${{ github.sha }}
+          persist-credentials: false
 
       - uses: actions-rs/toolchain@v1
         with:
           toolchain: 1.90.0
 
       - uses: Swatinem/rust-cache@v2
+        with:
+          prefix-key: offline-scientific-v2
 
       - name: Install Linux system dependencies (BLAS/LAPACK, ZMQ, OpenSSL)
         run: |
@@ -86,8 +99,6 @@ jobs:
       - name: Enforce thermo summary presence on thermo-gated branches
         if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master' || github.ref == 'refs/heads/release' || startsWith(github.ref, 'refs/heads/release/')
         env:
-          RUNMAT_VALIDATE_REQUIRE_THERMO_SUMMARY: "true"
-          RUNMAT_VALIDATE_REQUIRE_THERMO_FIELD_SUMMARY: "true"
           RUNMAT_VALIDATE_REQUIRE_ELECTRO_SUMMARY: "true"
           RUNMAT_VALIDATE_REQUIRE_PLASTIC_SUMMARY: "true"
           RUNMAT_VALIDATE_REQUIRE_CONTACT_SUMMARY: "true"

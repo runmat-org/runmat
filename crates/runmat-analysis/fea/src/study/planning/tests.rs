@@ -123,6 +123,7 @@ fn compiled_identity_includes_and_validates_the_public_output_contract() {
 fn compiled(model: runmat_analysis_core::AnalysisModel) -> CompiledAnalysisStudy {
     let properties = compile_property_map(&model, None).unwrap();
     CompiledAnalysisStudy {
+        displays: Vec::new(),
         module_path: "tests/planning.fea".into(),
         study_id: "planning".into(),
         study_inputs: Vec::new(),

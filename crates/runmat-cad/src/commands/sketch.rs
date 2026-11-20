@@ -131,13 +131,19 @@ pub(super) fn add(catalog: &mut Catalog) {
             pt("center", "Center"),
             length("major", "Major radius", 20.0),
             length("minor", "Minor radius", 10.0),
+            angle("angle", "Angle", 0.0),
+            pt("start", "Start").shown("type", &["partial"]),
+            pt("end", "End").shown("type", &["partial"]),
             qty("rho", "Rho", "ratio", Some(0.5)).shown("type", &["conic"]),
         ]),
         entity("sketch.point", "Point", "sketch-point", "point", "Place a sketch point.", vec![pt("at", "At")]),
         entity("sketch.text", "Text", "text", "text", "Place text that features can extrude or emboss.", vec![
             text("text", "Text", None),
-            text("font", "Font", Some("Inter")),
+            pt("at", "At"),
             length("height", "Height", 5.0),
+            angle("angle", "Angle", 0.0),
+            radio("font", "Font", &[("single_line", "Single line")]),
+            length("stroke", "Stroke", 0.75),
             pick("along", "Along curve", &[K::SketchEntity]).optional(),
         ]),
         cmd("sketch.construction", "Construction", "construction", S)
@@ -194,7 +200,7 @@ pub(super) fn add(catalog: &mut Catalog) {
         tool("sketch.transform", "Transform", "move", "transform", "Move, copy, rotate or scale entities.", vec![
             radio("type", "Type", &[("move", "Move"), ("copy", "Copy"), ("rotate", "Rotate"), ("scale", "Scale")]),
             picks("entities", "Entities", &[K::SketchEntity, K::SketchPoint]),
-            pt("base", "Base point"),
+            pt("base", "Base point").optional().help("Rotate and scale turn about it; the sketch origin when left empty"),
             offset("dx", "Delta X", 0.0).shown("type", &["move", "copy"]),
             offset("dy", "Delta Y", 0.0).shown("type", &["move", "copy"]),
             angle("angle", "Angle", 0.0).shown("type", &["rotate"]),
@@ -269,10 +275,11 @@ pub(super) fn add(catalog: &mut Catalog) {
             .when(sketching())
             .edit(view_action("sketch_display")),
         cmd("sketch.check", "Check sketch for feature", "check", S)
-            .desc("Check the sketch for a feature: open contours, overlaps, self-intersections.")
+            .desc("Check the sketch for a feature: open ends, branches, overlaps, crossings, closed loops and Revolve's axis.")
             .inputs(vec![choice("for", "Use", &[("extrude", "Extrude"), ("revolve", "Revolve"), ("sweep_path", "Sweep path"), ("loft_profile", "Loft profile")])])
-            .when(sketching())
-            .edit(check("sketch")),
+            // In the open sketch, or on a sketch selected in the Outline (its context menu).
+            .when(any(vec![sketching(), selected_one(&[K::Sketch])]))
+            .edit(analyze("sketch_check")),
         cmd("sketch.repair", "Repair sketch", "repair", S)
             .desc("Close small gaps and remove overlapping entities.")
             .inputs(vec![length("gap", "Close gaps up to", 0.05)])

@@ -52,7 +52,13 @@ where
     for index in 0..archive.len() {
         control.completed(1).await?;
         let mut entry = archive.by_index(index).map_err(map_zip_error)?;
-        let relative = safe_archive_path(entry.name())?;
+        let (relative, is_directory) = {
+            let name = entry.name().map_err(map_zip_error)?;
+            (
+                safe_archive_path(name.as_ref())?,
+                entry.is_dir() || name.ends_with('/') || name.ends_with('\\'),
+            )
+        };
         if relative.as_os_str().is_empty() {
             continue;
         }
@@ -65,7 +71,7 @@ where
         )
         .await?;
 
-        if entry.is_dir() || entry.name().ends_with('/') || entry.name().ends_with('\\') {
+        if is_directory {
             control.check_resource()?;
             provider.create_dir_all(&output_path).await.map_err(|err| {
                 unzip_error_with_source(
@@ -123,7 +129,7 @@ where
                     &UNZIP_ERROR_ZIP,
                     format!(
                         "unzip: unable to read archive entry '{}': {err}",
-                        entry.name()
+                        relative.display()
                     ),
                     err,
                 )

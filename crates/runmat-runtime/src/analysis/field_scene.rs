@@ -1,17 +1,14 @@
 //! Build a view from the persisted solver topology and one paged result field.
 //! The view is disposable; the run artifacts remain the source of truth.
 
-use super::render_tiles::{RenderViewRequest, RenderViewSelection, MAX_TRIANGLES_PER_TILE};
+use super::render_tiles::{RenderViewSelection, MAX_TRIANGLES_PER_TILE};
 use super::{
     analysis_field_page_by_run_id_op, storage, AnalysisFieldLocation, AnalysisFieldPageValues,
-    AnalysisFieldRequestOptions, AnalysisFieldSelection, AnalysisRenderMesh,
-    AnalysisRenderTopology,
+    AnalysisFieldRequestOptions, AnalysisFieldSelection, AnalysisRenderTopology,
 };
 use crate::operations::OperationContext;
 use glam::{Vec3, Vec4};
-use runmat_plot::core::{
-    AlphaMode, BoundingBox, DrawCall, Material, PipelineType, RenderData, Vertex,
-};
+use runmat_plot::core::{AlphaMode, DrawCall, Material, PipelineType, RenderData, Vertex};
 use runmat_plot::geometry_scene::{
     GeometrySceneCompleteness, GeometrySceneOverlay, GeometrySceneScalarLegend,
 };
@@ -30,8 +27,8 @@ struct FieldData {
     values: FieldValues,
     label: String,
     unit: String,
-    /// A mode shape: its amplitude is an arbitrary eigenvector normalization, not metres.
-    normalized: bool,
+    /// A mode shape's zero-based `Mode` ordinal; its amplitude is a normalization, not metres.
+    mode: Option<usize>,
     /// A nodal displacement (or displacement mode shape) that can displace the drawn shape.
     deforms: bool,
 }
@@ -122,7 +119,7 @@ impl FieldData {
             values: FieldValues::Inline(values),
             label: label.into(),
             unit: unit.into(),
-            normalized: false,
+            mode: None,
             deforms: location == AnalysisFieldLocation::Node && components == 3,
         }
     }
@@ -130,7 +127,7 @@ impl FieldData {
     /// The same values as a published mode shape (arbitrary normalization).
     #[cfg(test)]
     fn mode_shape(mut self) -> Self {
-        self.normalized = true;
+        self.mode = Some(0);
         self
     }
 }
@@ -163,17 +160,30 @@ fn page_real_values(values: AnalysisFieldPageValues) -> Vec<f64> {
     }
 }
 
+mod bodies;
 mod deformation;
 pub mod extrema;
+pub mod legend;
+pub mod regions;
+mod stats;
+use stats::SceneStats;
+mod approximation;
+pub use approximation::SurfaceApproximation;
+mod scene_error;
+mod view;
 pub mod volume;
+pub use scene_error::{FieldSceneError, RENDER_TOPOLOGY_MISSING_CODE};
+pub use view::build_scene_view;
 
 /// How [`build_scene`] draws the body's shape: `mode` is `"undeformed"`, `"true"` or
-/// `"exaggerated"`, `exaggeration` is the displacement factor (finite, 0 to 100), and
+/// `"exaggerated"`, `exaggeration` is the displacement factor (finite, 0 to 100) on the study's
+/// fixed `deformation` scale when it sets one (else on the automatic scale), and
 /// `show_undeformed_outline` overlays the undeformed outline.
 #[derive(Clone, Copy, Debug)]
 pub struct SceneShape<'a> {
     pub mode: &'a str,
     pub exaggeration: f64,
+    pub deformation: Option<f64>,
     pub show_undeformed_outline: bool,
 }
 
@@ -181,27 +191,27 @@ pub struct SceneShape<'a> {
 /// vector field of the same run, displaces it. Both are explicit selections of published
 /// fields (with their sample), so the caller decides from the field descriptors.
 ///
-/// `scalar_range` colors the field over a known range, such as the field's true extrema from
-/// [`extrema::field_extrema`]; without it the range is taken from the drawn surface.
-/// `solver_mesh` is the run's canonical solver mesh artifact: a run whose publication keeps no
-/// render tiles (frequency-sampled runs) is drawn from the boundary of that mesh, the same
-/// projection the tiles store.
+/// `solver_mesh` is the run's canonical solver mesh artifact: a run without render tiles
+/// (frequency-sampled runs) is drawn from its boundary, the projection the tiles store.
 ///
 /// `detail` [`SurfaceDetail::Corners`] draws each quadratic boundary face as one corner
 /// triangle (from the solver mesh), for a scene that must fit a payload budget; the returned
-/// [`SurfaceApproximation`] states what that leaves out.
+/// [`SurfaceApproximation`] states what that leaves out. `regions` tags each solved body's
+/// surface and leaves out or greys the bodies the study's display asks for.
 pub fn build_scene(
     run_id: &str,
     solver_mesh: Option<&str>,
     field: Option<&AnalysisFieldSelection>,
     deformation: Option<&AnalysisFieldSelection>,
-    scalar_range: Option<(f64, f64)>,
+    scale: legend::ScalarScale,
     shape: SceneShape<'_>,
+    regions: &regions::ViewRegions,
     detail: super::SurfaceDetail,
 ) -> Result<(GeometryScene, f64, SurfaceApproximation), String> {
     let SceneShape {
         mode: shape_mode,
         exaggeration,
+        deformation: fixed_deformation,
         show_undeformed_outline,
     } = shape;
     if !matches!(shape_mode, "undeformed" | "true" | "exaggerated") {
@@ -218,7 +228,7 @@ pub fn build_scene(
             })
             .transpose()?
             .and_then(|mesh| super::render_topology_from_solver_mesh_at(Some(&mesh), detail))
-            .ok_or_else(|| format!("FEA run '{run_id}' has no persisted render topology"))
+            .ok_or_else(|| FieldSceneError::render_topology_missing(run_id).to_string())
     };
     let (topology, dropped) = match detail {
         super::SurfaceDetail::Corners => load_from_solver_mesh(detail)?,
@@ -250,10 +260,12 @@ pub fn build_scene(
             ));
         }
     }
-    let stats = scalar_range.map(|range| SceneStats {
+    let stats = Some(SceneStats {
         element_count: topology.volume_element_count,
-        scalar_range: Some(range),
+        scale,
         automatic_scale: None,
+        fixed_deformation,
+        regions: regions.clone(),
     });
     let (scene, scale) = scene_from_topology_with_stats(
         run_id,
@@ -274,206 +286,6 @@ pub fn build_scene(
         scale,
     )?;
     Ok((scene, scale, approximation))
-}
-
-/// What a drawn surface leaves out of the solution on the boundary.
-#[derive(Debug, Clone, PartialEq, serde::Serialize)]
-pub struct SurfaceApproximation {
-    /// `full`: every boundary node is drawn where it is. `corners`: each quadratic face is one
-    /// triangle through its corners.
-    pub detail: &'static str,
-    /// Largest distance between a dropped midside node (as drawn, deformation included) and the
-    /// midpoint of the drawn edge, in metres.
-    pub position_error_m: f64,
-    /// Largest difference between the colored value at a dropped midside node and the linear
-    /// color drawn there; zero for element fields, absent without a field.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub value_error: Option<f64>,
-}
-
-impl SurfaceApproximation {
-    fn of_dropped(
-        detail: super::SurfaceDetail,
-        topology: &AnalysisRenderTopology,
-        dropped: &[[u32; 3]],
-        field: Option<&FieldData>,
-        deformation: Option<&FieldData>,
-        scale: f64,
-    ) -> Result<Self, String> {
-        let mut approximation = Self {
-            detail: match detail {
-                super::SurfaceDetail::Full => "full",
-                super::SurfaceDetail::Corners => "corners",
-            },
-            position_error_m: 0.0,
-            value_error: field.map(|_| 0.0),
-        };
-        let Some(mesh) = topology.meshes.first() else {
-            return Ok(approximation);
-        };
-        for &[a, b, midside] in dropped {
-            let drawn = |node: u32| {
-                deform_position(
-                    cast_position(mesh.vertices[node as usize]),
-                    Some(node as usize),
-                    deformation,
-                    scale,
-                )
-                .map(|p| p.map(f64::from))
-            };
-            let (pa, pb, pm) = (drawn(a)?, drawn(b)?, drawn(midside)?);
-            let gap = (0..3)
-                .map(|axis| (pm[axis] - 0.5 * (pa[axis] + pb[axis])).powi(2))
-                .sum::<f64>()
-                .sqrt();
-            approximation.position_error_m = approximation.position_error_m.max(gap);
-            if let Some(field) = field.filter(|field| field.location == AnalysisFieldLocation::Node)
-            {
-                let value = |node: u32| field_magnitude(field, node as usize, 1);
-                let error = (value(midside)? - 0.5 * (value(a)? + value(b)?)).abs();
-                if let Some(worst) = approximation.value_error.as_mut() {
-                    *worst = worst.max(error);
-                }
-            }
-        }
-        Ok(approximation)
-    }
-}
-
-/// Materialize only the LOD nodes chosen for this view. The returned scene is
-/// disposable; replacing it releases the previous view's geometry buffers.
-pub fn build_scene_view(
-    run_id: &str,
-    field_id: Option<&str>,
-    shape_mode: &str,
-    exaggeration: f64,
-    show_undeformed_outline: bool,
-    view: Option<RenderViewRequest>,
-) -> Result<(GeometryScene, f64, bool), String> {
-    if !matches!(shape_mode, "undeformed" | "true" | "exaggerated") {
-        return Err(format!("unknown FEA shape mode '{shape_mode}'"));
-    }
-    if !exaggeration.is_finite() || !(0.0..=100.0).contains(&exaggeration) {
-        return Err("FEA exaggeration must be finite and between 0 and 100".into());
-    }
-    let selection = storage::plan_render_view(run_id, view)?
-        .ok_or_else(|| format!("FEA run '{run_id}' has no persisted render topology"))?;
-    let mut meshes = Vec::with_capacity(selection.nodes.len());
-    for node in &selection.nodes {
-        let tile = storage::load_render_lod_node(run_id, node.mesh_index, node.node_index)?
-            .ok_or("FEA render LOD tile is missing")?;
-        meshes.push(AnalysisRenderMesh {
-            mesh_id: format!("{}:lod:{}", node.mesh_id, node.node_index),
-            vertices: tile.vertices,
-            triangles: tile.triangles,
-            regions: Vec::new(),
-            vertex_volume_node_indices: tile.vertex_volume_node_indices,
-            triangle_volume_element_indices: tile.triangle_volume_element_indices,
-        });
-    }
-    if meshes.is_empty() {
-        return Err("FEA run has no renderable surface mesh".into());
-    }
-    let topology = AnalysisRenderTopology {
-        schema_version: selection.topology_schema_version.clone(),
-        source: selection.source,
-        volume_element_count: selection.volume_element_count,
-        meshes,
-    };
-    let field = field_id
-        .map(|id| load_field(run_id, &AnalysisFieldSelection::new(id, None)))
-        .transpose()?;
-    let additional_deformation =
-        if shape_mode == "undeformed" || field.as_ref().is_some_and(|field| field.deforms) {
-            None
-        } else {
-            load_field(
-                run_id,
-                &AnalysisFieldSelection::new("structural.displacement", None),
-            )
-            .ok()
-        };
-    let deformation = field
-        .as_ref()
-        .filter(|field| field.deforms)
-        .or(additional_deformation.as_ref())
-        .filter(|field| field.location == AnalysisFieldLocation::Node && field.components >= 3);
-    let stats = SceneStats::from_selection(&selection, field.as_ref(), deformation);
-    if field.is_some() && stats.scalar_range.is_none() {
-        return Err("the selected field has no persisted global plot range".into());
-    }
-    if shape_mode == "exaggerated" && deformation.is_some() && stats.automatic_scale.is_none() {
-        return Err("the displacement field has no persisted deformation range".into());
-    }
-    let (mut scene, scale) = scene_from_topology_with_stats(
-        run_id,
-        &topology,
-        field.as_ref(),
-        deformation,
-        shape_mode,
-        exaggeration,
-        show_undeformed_outline,
-        Some(stats),
-    )?;
-    let mut model_bounds = BoundingBox::default();
-    let bounds = selection.model_bounds;
-    model_bounds.expand_by_box(&BoundingBox::new(
-        Vec3::from_array(bounds[0].map(|value| value as f32)),
-        Vec3::from_array(bounds[1].map(|value| value as f32)),
-    ));
-    model_bounds.expand_by_box(&scene.bounds);
-    scene.bounds = model_bounds;
-    if let Some(overlay) = scene.overlay.as_mut() {
-        overlay.mesh_count = selection.mesh_count;
-        overlay.status = if selection.exact {
-            GeometrySceneCompleteness::Complete
-        } else {
-            GeometrySceneCompleteness::BoundedPreview
-        };
-        overlay.quality_label = (!selection.exact).then(|| "Adaptive mesh detail".into());
-    }
-    Ok((scene, scale, selection.exact))
-}
-
-struct SceneStats {
-    element_count: usize,
-    scalar_range: Option<(f64, f64)>,
-    automatic_scale: Option<f64>,
-}
-
-impl SceneStats {
-    fn from_selection(
-        selection: &RenderViewSelection,
-        field: Option<&FieldData>,
-        deformation: Option<&FieldData>,
-    ) -> Self {
-        let scalar_range = field.and_then(|field| {
-            selection
-                .field_summaries
-                .iter()
-                .find(|summary| summary.field_id == field.label)
-                .map(|summary| (summary.minimum, summary.maximum))
-        });
-        let [minimum, maximum] = selection.model_bounds;
-        let diagonal = (0..3)
-            .map(|axis| (maximum[axis] - minimum[axis]).powi(2))
-            .sum::<f64>()
-            .sqrt();
-        let automatic_scale = deformation.and_then(|field| {
-            selection
-                .field_summaries
-                .iter()
-                .find(|summary| summary.field_id == field.label)
-                .map(|summary| {
-                    deformation::automatic_scale(diagonal, summary.maximum, field.normalized)
-                })
-        });
-        Self {
-            element_count: selection.volume_element_count,
-            scalar_range,
-            automatic_scale,
-        }
-    }
 }
 
 fn load_field(run_id: &str, selection: &AnalysisFieldSelection) -> Result<FieldData, String> {
@@ -502,7 +314,7 @@ fn load_field(run_id: &str, selection: &AnalysisFieldSelection) -> Result<FieldD
     let mut cache = FieldPageCache::default();
     cache.order.push_back(0);
     cache.pages.insert(0, first);
-    let normalized = deformation::is_mode_shape(descriptor);
+    let mode = deformation::mode_index(descriptor);
     let deforms = deformation::displaces(descriptor);
     Ok(FieldData {
         location: descriptor.location,
@@ -515,7 +327,7 @@ fn load_field(run_id: &str, selection: &AnalysisFieldSelection) -> Result<FieldD
         },
         label: field_id.to_string(),
         unit: descriptor.unit.clone().unwrap_or_default(),
-        normalized,
+        mode,
         deforms,
     })
 }
@@ -523,6 +335,8 @@ fn load_field(run_id: &str, selection: &AnalysisFieldSelection) -> Result<FieldD
 mod geometry;
 use geometry::*;
 
+#[cfg(test)]
+mod region_tests;
 #[cfg(test)]
 mod tests;
 
@@ -574,14 +388,48 @@ pub fn use_result_view_edges(scene: &mut GeometryScene) {
 
 /// Edges where adjacent surface triangles meet at more than `crease_degrees`, plus edges with
 /// a single adjacent triangle (open boundary loops), taken across every surface chunk so tile
-/// seams are not mistaken for boundaries.
+/// seams are not mistaken for boundaries. Each solved body's edges are its own chunk, carrying
+/// the body's owner and region so hiding or isolating the body takes its edges too; a
+/// translucent (context) body draws no edges.
 pub fn append_feature_edges(scene: &mut GeometryScene, crease_degrees: f32) {
+    let mut owners: Vec<Vec<String>> = Vec::new();
+    for chunk in &scene.chunks {
+        if !owners.contains(&chunk.owner_node_ids) {
+            owners.push(chunk.owner_node_ids.clone());
+        }
+    }
+    for owner in owners {
+        let surfaces = scene.chunks.iter().filter(|chunk| {
+            chunk.owner_node_ids == owner
+                && chunk.render_data.pipeline_type == PipelineType::Triangles
+                && chunk.render_data.material.alpha_mode != AlphaMode::Blend
+        });
+        let Some(mut edge_chunk) = feature_edge_chunk(surfaces, crease_degrees) else {
+            continue;
+        };
+        if let Some(region) = owner.first() {
+            edge_chunk.chunk_id = format!("feature-edges:{region}");
+            let segments = (edge_chunk.vertices.len() / 2) as u32;
+            edge_chunk.segment_regions =
+                vec![runmat_plot::geometry_scene::GeometrySceneRegion::new(
+                    region.clone(),
+                    None,
+                    None,
+                    vec![runmat_plot::geometry_scene::GeometrySceneTriangleRange::new(0, segments)],
+                )];
+        }
+        edge_chunk.owner_node_ids = owner;
+        scene.chunks.push(edge_chunk);
+    }
+}
+
+fn feature_edge_chunk<'a>(
+    surfaces: impl Iterator<Item = &'a GeometrySceneChunk>,
+    crease_degrees: f32,
+) -> Option<GeometrySceneChunk> {
     type Key = [u32; 3];
     let mut edges: HashMap<(Key, Key), (Vertex, Vertex, Vec<Vec3>)> = HashMap::new();
-    for chunk in &scene.chunks {
-        if chunk.render_data.pipeline_type != PipelineType::Triangles {
-            continue;
-        }
+    for chunk in surfaces {
         let indices = chunk
             .indices
             .clone()
@@ -631,7 +479,7 @@ pub fn append_feature_edges(scene: &mut GeometryScene, crease_degrees: f32) {
         vertices.extend([start, end]);
     }
     if vertices.is_empty() {
-        return;
+        return None;
     }
     let vertex_count = vertices.len();
     let mut edge_chunk = GeometrySceneChunk::from_render_data(
@@ -657,7 +505,7 @@ pub fn append_feature_edges(scene: &mut GeometryScene, crease_degrees: f32) {
         },
     );
     edge_chunk.label = Some("Feature edges".into());
-    scene.chunks.push(edge_chunk);
+    Some(edge_chunk)
 }
 
 fn append_full_mesh_edges(scene: &mut GeometryScene) {
@@ -729,6 +577,23 @@ fn append_full_mesh_edges(scene: &mut GeometryScene) {
         edge_chunk.mesh_id = chunk.mesh_id.clone();
         edge_chunk.label = Some("Solver mesh edges".into());
         edge_chunk.owner_node_ids = chunk.owner_node_ids.clone();
+        // A solved body's edges carry its region, so hiding the body hides them.
+        if let [region] = chunk.regions.as_slice() {
+            if region.tag.as_deref() == Some(regions::BODY_REGION_TAG) {
+                edge_chunk.segment_regions =
+                    vec![runmat_plot::geometry_scene::GeometrySceneRegion::new(
+                        region.region_id.clone(),
+                        None,
+                        None,
+                        vec![
+                            runmat_plot::geometry_scene::GeometrySceneTriangleRange::new(
+                                0,
+                                (vertex_count / 2) as u32,
+                            ),
+                        ],
+                    )];
+            }
+        }
         edge_chunks.push(edge_chunk);
     }
     scene.chunks.extend(edge_chunks);

@@ -75,7 +75,7 @@ impl<'a, 'b> Run<'a, 'b> {
         let p = |s: &str| format!("{}{}", prefix, s);
         Ok(match e {
             Extent::Blind { distance } => {
-                let d = self.value(id, &p("distance"), distance, Dimension::LENGTH)?;
+                let d = self.arg(id, "extrude", &p("distance"), distance)?;
                 End {
                     at: base + dir * d,
                     bound: PrismBound::Blind,
@@ -108,7 +108,7 @@ impl<'a, 'b> Run<'a, 'b> {
                 offset,
                 beyond,
             } => {
-                let o = self.value(id, &p("offset"), offset, Dimension::LENGTH)?;
+                let o = self.arg(id, "extrude", &p("offset"), offset)?;
                 let o = if *beyond { o } else { -o };
                 self.up_to_face(i, id, &p("up_to"), face, o, frame, dir, ops)?
             }
@@ -161,7 +161,7 @@ impl<'a, 'b> Run<'a, 'b> {
                 let r = self.single(i, id, &p("up_to"), body, Some(TopoKind::Body))?;
                 let b = r.entities().iter().next().expect("one").body as usize;
                 let o = match offset {
-                    Some(o) => self.value(id, &p("offset"), o, Dimension::LENGTH)?,
+                    Some(o) => self.arg(id, "extrude", &p("offset"), o)?,
                     None => 0.0,
                 };
                 End {
@@ -253,6 +253,18 @@ impl<'a, 'b> Run<'a, 'b> {
         Ok((profile, Some(h)))
     }
 
+    /// Whether a sketch profile's sketch is drawn on a face (`sketch s on feature.body.face.end`):
+    /// its plane's normal then points out of the body, as a face profile's does.
+    fn sketch_on_face(&self, p: &ProfileSource) -> bool {
+        let Some(sketch) = p.sketch() else {
+            return false;
+        };
+        matches!(
+            self.doc.feature(&sketch.sketch).map(|f| &f.kind),
+            Some(FeatureKind::Sketch(s)) if matches!(s.plane, PlaneRef::Face { .. })
+        )
+    }
+
     /// The names a profile's side faces take: by its sketch, or by the feature for a face.
     pub(super) fn profile_naming(id: &FeatureId, p: &ProfileSource) -> FeatureId {
         p.sketch()
@@ -268,9 +280,10 @@ impl<'a, 'b> Run<'a, 'b> {
     ) -> Result<Compiled, Halt> {
         let (mut profile, face) = self.profile_source(i, id, "profile", &e.profile)?;
         let (combine, combine_ops) = self.mode_operands(i, id, &e.mode)?;
-        // A face extrudes out of its body to add or make a body, and into it to remove or
-        // intersect.
-        let inward = face.is_some() && matches!(combine, Combine::Cut | Combine::Intersect);
+        // A profile on a face (the face itself, or a sketch drawn on it) extrudes out of its body
+        // to add or make a body, and into it to remove or intersect. `reverse` turns either.
+        let on_face = face.is_some() || self.sketch_on_face(&e.profile);
+        let inward = on_face && matches!(combine, Combine::Cut | Combine::Intersect);
         let dir = if e.reverse != inward { -1.0 } else { 1.0 };
         let mut ops = Operands {
             combine: combine_ops,
@@ -283,7 +296,7 @@ impl<'a, 'b> Run<'a, 'b> {
         let shift = match &e.from {
             ExtrudeFrom::SketchPlane => 0.0,
             ExtrudeFrom::Offset { distance } => {
-                self.value(id, "from.distance", distance, Dimension::LENGTH)?
+                self.arg(id, "extrude", "from.distance", distance)?
             }
             ExtrudeFrom::Vertex { vertex } => {
                 let w = self.point(i, id, "from", vertex)?;
@@ -310,7 +323,7 @@ impl<'a, 'b> Run<'a, 'b> {
         let base = 0.0;
         let (start, end, start_bound, end_bound) = match (&e.extent, &e.second) {
             (Extent::Symmetric { distance }, None) => {
-                let d = self.value(id, "distance", distance, Dimension::LENGTH)?;
+                let d = self.arg(id, "extrude", "distance", distance)?;
                 (
                     base - d / 2.0,
                     base + d / 2.0,
@@ -409,7 +422,7 @@ impl<'a, 'b> Run<'a, 'b> {
         v: &ValueExpr,
         outward: bool,
     ) -> Result<f64, Halt> {
-        let a = self.value(id, param, v, Dimension::ANGLE)?;
+        let a = self.arg(id, "extrude", param, v)?;
         if a.abs() >= 89f64.to_radians() {
             return Err(self.error(
                 id,
@@ -426,7 +439,7 @@ impl<'a, 'b> Run<'a, 'b> {
     }
 
     fn thin_wall(&mut self, id: &FeatureId, t: &ThinWall) -> Result<ThinWallSpec, Halt> {
-        let a = self.value(id, "thin.thickness", &t.thickness, Dimension::LENGTH)?;
+        let a = self.arg(id, "extrude", "thin.thickness", &t.thickness)?;
         let (inside, outside) = match t.side {
             ThinSide::One => (a, 0.0),
             ThinSide::Other => (0.0, a),
@@ -441,10 +454,7 @@ impl<'a, 'b> Run<'a, 'b> {
                         Vec::new(),
                     ));
                 };
-                (
-                    a,
-                    self.value(id, "thin.second_thickness", b, Dimension::LENGTH)?,
-                )
+                (a, self.arg(id, "extrude", "thin.second_thickness", b)?)
             }
         };
         if inside + outside <= 0.0 {
@@ -457,7 +467,7 @@ impl<'a, 'b> Run<'a, 'b> {
             ));
         }
         let cap = match &t.cap_ends {
-            Some(c) => Some(self.value(id, "thin.cap_ends", c, Dimension::LENGTH)?),
+            Some(c) => Some(self.arg(id, "extrude", "thin.cap_ends", c)?),
             None => None,
         };
         Ok(ThinWallSpec {
@@ -480,7 +490,7 @@ impl<'a, 'b> Run<'a, 'b> {
         v: &Option<ValueExpr>,
     ) -> Result<Option<f64>, Halt> {
         match v {
-            Some(x) => Ok(Some(self.value(id, param, x, Dimension::LENGTH)?)),
+            Some(x) => Ok(Some(self.arg(id, "hole", param, x)?)),
             None => Ok(None),
         }
     }
@@ -546,7 +556,7 @@ impl<'a, 'b> Run<'a, 'b> {
                 modelled = *m;
                 thread_depth = self.opt_len(id, "form.thread_depth", td)?;
                 if let Some(a) = near_countersink {
-                    let a = self.value(id, "form.near_countersink", a, Dimension::ANGLE)?;
+                    let a = self.arg(id, "hole", "form.near_countersink", a)?;
                     countersink = Some((t.major * 1.1, a));
                 }
                 let d = t.tap_drill;
@@ -594,7 +604,7 @@ impl<'a, 'b> Run<'a, 'b> {
                     .opt_len(id, "form.diameter", diameter)?
                     .or(table.map(|t| t.0));
                 let a = match angle {
-                    Some(a) => Some(self.value(id, "form.angle", a, Dimension::ANGLE)?),
+                    Some(a) => Some(self.arg(id, "hole", "form.angle", a)?),
                     None => table.map(|t| t.1).or(Some(if inch {
                         82f64.to_radians()
                     } else {
@@ -622,16 +632,16 @@ impl<'a, 'b> Run<'a, 'b> {
             counterbore: cb,
         } = &h.form
         {
-            let l = self.value(id, "form.length", length, Dimension::LENGTH)?;
+            let l = self.arg(id, "hole", "form.length", length)?;
             let a = match angle {
-                Some(a) => self.value(id, "form.angle", a, Dimension::ANGLE)?,
+                Some(a) => self.arg(id, "hole", "form.angle", a)?,
                 None => 0.0,
             };
             slot = Some((l, a));
             if let Some((d, k)) = cb {
                 counterbore = Some((
-                    self.value(id, "form.counterbore.diameter", d, Dimension::LENGTH)?,
-                    self.value(id, "form.counterbore.depth", k, Dimension::LENGTH)?,
+                    self.arg(id, "hole", "form.counterbore.diameter", d)?,
+                    self.arg(id, "hole", "form.counterbore.depth", k)?,
                 ));
             }
         }
@@ -660,7 +670,7 @@ impl<'a, 'b> Run<'a, 'b> {
         }
         let (end, depth) = match &h.end {
             HoleEnd::Blind { depth } => {
-                let d = self.value(id, "end.depth", depth, Dimension::LENGTH)?;
+                let d = self.arg(id, "hole", "end.depth", depth)?;
                 (HoleDepth::Blind { depth: d }, Some(d))
             }
             HoleEnd::ThroughAll => (HoleDepth::ThroughAll, None),
@@ -686,9 +696,7 @@ impl<'a, 'b> Run<'a, 'b> {
             }
         };
         let drill_point = match (&h.drill_point, &end) {
-            (Some(a), HoleDepth::Blind { .. }) => {
-                Some(self.value(id, "drill_point", a, Dimension::ANGLE)?)
-            }
+            (Some(a), HoleDepth::Blind { .. }) => Some(self.arg(id, "hole", "drill_point", a)?),
             _ => None,
         };
         // Thread length: as given; blind holes stop one and a half pitches short of the drill
@@ -868,7 +876,7 @@ impl<'a, 'b> Run<'a, 'b> {
             FilletProfile::Circular => BlendProfile::Circular,
             FilletProfile::Curvature => BlendProfile::Curvature,
             FilletProfile::Conic { rho } => {
-                let r = self.value(id, "profile.rho", rho, Dimension::DIMENSIONLESS)?;
+                let r = self.arg(id, "fillet", "profile.rho", rho)?;
                 if !(0.0..1.0).contains(&r) || r == 0.0 {
                     return Err(self.error(
                         id,
@@ -890,21 +898,11 @@ impl<'a, 'b> Run<'a, 'b> {
         fl: &Fillet,
     ) -> Result<Compiled, Halt> {
         let set = self.blend_edges(i, id, "edges", &fl.edges)?;
-        let radius = self.value(id, "radius", &fl.radius, Dimension::LENGTH)?;
+        let radius = self.arg(id, "fillet", "radius", &fl.radius)?;
         let mut variable = Vec::new();
         for (k, r) in fl.variable.iter().enumerate() {
-            let t = self.value(
-                id,
-                &format!("variable[{}].at", k),
-                &r.at,
-                Dimension::DIMENSIONLESS,
-            )?;
-            let v = self.value(
-                id,
-                &format!("variable[{}].radius", k),
-                &r.radius,
-                Dimension::LENGTH,
-            )?;
+            let t = self.arg(id, "fillet", &format!("variable[{}].at", k), &r.at)?;
+            let v = self.arg(id, "fillet", &format!("variable[{}].radius", k), &r.radius)?;
             if !(0.0..=1.0).contains(&t) || v <= 0.0 {
                 return Err(self.error(
                     id,
@@ -931,11 +929,11 @@ impl<'a, 'b> Run<'a, 'b> {
             let h = *r.entities().iter().next().expect("one");
             distances.push((
                 h,
-                self.value(
+                self.arg(
                     id,
+                    "fillet",
                     &format!("setbacks[{}].distance", k),
                     &s.distance,
-                    Dimension::LENGTH,
                 )?,
             ));
         }
@@ -1007,7 +1005,7 @@ impl<'a, 'b> Run<'a, 'b> {
     ) -> Result<Compiled, Halt> {
         let (operands, mut sets) =
             self.face_sets(i, id, &[("first", &f.first), ("second", &f.second)])?;
-        let radius = self.value(id, "radius", &f.radius, Dimension::LENGTH)?;
+        let radius = self.arg(id, "face_fillet", "radius", &f.radius)?;
         let profile = self.blend_profile(id, &f.profile)?;
         let second = sets.pop().expect("two");
         let first = sets.pop().expect("two");
@@ -1064,7 +1062,7 @@ impl<'a, 'b> Run<'a, 'b> {
         id: &FeatureId,
         c: &Chamfer,
     ) -> Result<Compiled, Halt> {
-        let len = |s: &mut Self, p: &str, v: &ValueExpr| s.value(id, p, v, Dimension::LENGTH);
+        let len = |s: &mut Self, p: &str, v: &ValueExpr| s.arg(id, "chamfer", p, v);
         if let ChamferForm::Vertex { distances } = &c.form {
             let set = self.list(i, id, "edges", &c.edges, Some(TopoKind::Vertex))?;
             let mut d = [0.0; 3];
@@ -1103,7 +1101,7 @@ impl<'a, 'b> Run<'a, 'b> {
             }
             ChamferForm::DistanceAngle { distance, angle } => {
                 let d = len(self, "form.distance", distance)?;
-                let a = self.value(id, "form.angle", angle, Dimension::ANGLE)?;
+                let a = self.arg(id, "chamfer", "form.angle", angle)?;
                 if a <= 0.0 || a >= std::f64::consts::FRAC_PI_2 {
                     return Err(self.error(
                         id,
@@ -1156,17 +1154,17 @@ impl<'a, 'b> Run<'a, 'b> {
             self.list(i, id, "open_faces", &s.open_faces, Some(TopoKind::Face))?
         };
         on_body(self, &faces, "open_faces")?;
-        let thickness = self.value(id, "thickness", &s.thickness, Dimension::LENGTH)?;
+        let thickness = self.arg(id, "shell", "thickness", &s.thickness)?;
         let mut per_face = Vec::new();
         for (k, ft) in s.faces.iter().enumerate() {
             let p = format!("faces[{}].faces", k);
             let set = self.list(i, id, &p, &ft.faces, Some(TopoKind::Face))?;
             on_body(self, &set, &p)?;
-            let t = self.value(
+            let t = self.arg(
                 id,
+                "shell",
                 &format!("faces[{}].thickness", k),
                 &ft.thickness,
-                Dimension::LENGTH,
             )?;
             if t <= 0.0 {
                 return Err(self.error(
@@ -1204,7 +1202,7 @@ impl<'a, 'b> Run<'a, 'b> {
             neutral.z = scale(neutral.z, -1.0);
             neutral.x = scale(neutral.x, -1.0);
         }
-        let angle = self.value(id, "angle", &d.angle, Dimension::ANGLE)?;
+        let angle = self.arg(id, "draft", "angle", &d.angle)?;
         let operands = Self::bodies_of(&set);
         let faces = Self::operand_entities(&set, &operands);
         let edges = d.kind.edges();

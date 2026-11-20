@@ -36,17 +36,15 @@ pub fn pack_truecolor_vertices(
     let x_buffer = axis_storage_buffer(emission, "image-x", &inputs.x_axis, inputs.scalar)?;
     let y_buffer = axis_storage_buffer(emission, "image-y", &inputs.y_axis, inputs.scalar)?;
     let vertex_count = inputs.rows as u64 * inputs.cols as u64;
-    let output_buffer = runmat_accelerate_api::WgpuBufferOwner::new(device.create_buffer(
-        &wgpu::BufferDescriptor {
-            label: Some("image-gpu-vertices"),
-            size: vertex_count * std::mem::size_of::<Vertex>() as u64,
-            usage: wgpu::BufferUsages::STORAGE
-                | wgpu::BufferUsages::VERTEX
-                | wgpu::BufferUsages::COPY_DST
-                | wgpu::BufferUsages::COPY_SRC,
-            mapped_at_creation: false,
-        },
-    ));
+    let output_buffer = emission.own_buffer(device.create_buffer(&wgpu::BufferDescriptor {
+        label: Some("image-gpu-vertices"),
+        size: vertex_count * std::mem::size_of::<Vertex>() as u64,
+        usage: wgpu::BufferUsages::STORAGE
+            | wgpu::BufferUsages::VERTEX
+            | wgpu::BufferUsages::COPY_DST
+            | wgpu::BufferUsages::COPY_SRC,
+        mapped_at_creation: false,
+    }));
     let uniforms = ImageUniforms {
         rows: inputs.rows,
         cols: inputs.cols,

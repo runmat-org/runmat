@@ -275,6 +275,7 @@ impl ScenePlot {
                 instances: Vec::new(),
                 lod_pixels: None,
                 packed: None,
+                owner_node_ids: Vec::new(),
                 visible: mesh.is_visible(),
             },
             PlotElement::Line3(line) => {

@@ -12,7 +12,6 @@ use crate::plots::{
 };
 use glam::Vec4;
 use log::trace;
-use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 #[path = "figure/axes_reset.rs"]
 mod axes_reset;
@@ -33,6 +32,9 @@ mod limits;
 mod preparation;
 #[path = "figure/persistence_projection/mod.rs"]
 mod persistence_projection;
+#[path = "figure/axes_grid_cell.rs"]
+mod axes_grid_cell;
+pub use axes_grid_cell::AxesGridCell;
 pub use limits::{
     display_bounds_3d, positive_log_bounds, resolve_axis_bounds, AxisLimitAxis, AxisLimitMethod,
 };
@@ -130,14 +132,6 @@ pub struct TextStyle {
     pub vertical_alignment: Option<String>,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct AxesGridCell {
-    pub rows: u32,
-    pub columns: u32,
-    pub index: u32,
-}
-
 impl Default for TextStyle {
     fn default() -> Self {
         Self {
@@ -220,6 +214,9 @@ impl LegendStyle {
 
 #[derive(Debug, Clone, Default)]
 pub struct AxesMetadata {
+    /// A retired slot keeps other axes indices stable and can be reused by a
+    /// later construction. Runtime retires the slot's external receivers too.
+    pub retired: bool,
     pub colormap_length: usize,
     pub y_direction: YDirection,
     pub axes_kind: AxesKind,
@@ -621,6 +618,7 @@ impl Figure {
     pub fn ensure_axes(&mut self, axes_index: usize) {
         self.ensure_axes_metadata_capacity(axes_index + 1);
         if let Some(meta) = self.axes_metadata.get_mut(axes_index) {
+            meta.retired = false;
             meta.axes_kind = AxesKind::Cartesian;
             meta.overlay_parent = None;
         }
@@ -628,7 +626,35 @@ impl Figure {
     }
 
     pub fn axes_metadata(&self, axes_index: usize) -> Option<&AxesMetadata> {
-        self.axes_metadata.get(axes_index)
+        self.axes_metadata
+            .get(axes_index)
+            .filter(|metadata| !metadata.retired)
+    }
+
+    pub fn axes_is_live(&self, axes_index: usize) -> bool {
+        self.axes_metadata(axes_index).is_some()
+    }
+
+    /// Retire a layout slot without rebasing surviving axes. The registry
+    /// transaction must retire its child and axes receivers before reuse.
+    pub fn retire_axes(&mut self, axes_index: usize) {
+        if !self.axes_is_live(axes_index) {
+            return;
+        }
+        self.clear_axes(axes_index);
+        let mut metadata = self.inherited_axes_metadata();
+        metadata.retired = true;
+        self.axes_metadata[axes_index] = metadata;
+        self.axes_grid_cells[axes_index] = None;
+        if self.active_axes_index == axes_index {
+            self.active_axes_index = self
+                .axes_metadata
+                .iter()
+                .position(|axes| !axes.retired)
+                .unwrap_or(0);
+            self.sync_legacy_fields_from_active_axes();
+        }
+        self.dirty = true;
     }
 
     /// A 2D axes' automatic limits from its data extent, by its limit method, as MATLAB's
@@ -668,7 +694,9 @@ impl Figure {
             return (x, y);
         }
         let axis = |(lo, hi): (f64, f64), explicit: Option<(f64, f64)>, log: bool, method| {
-            if explicit.is_some() || log || !(lo.is_finite() && hi.is_finite() && lo < hi) {
+            // A flat series (lo == hi) still autoscales: resolve_axis_bounds pads it around its
+            // value, so a constant trace draws mid-axes instead of on a zero-height range.
+            if explicit.is_some() || log || !(lo.is_finite() && hi.is_finite() && lo <= hi) {
                 (lo, hi)
             } else {
                 resolve_axis_bounds(lo, hi, None, method)
@@ -684,6 +712,73 @@ impl Figure {
         self.axes_grid_cells.get(axes_index).copied().flatten()
     }
 
+    /// Axes with their own layout must be placed against the figure, rather
+    /// than positioned a second time inside the current uniform-grid cell.
+    pub fn axes_use_independent_layout(&self) -> bool {
+        self.axes_grid_cells
+            .iter()
+            .enumerate()
+            .any(|(index, cell)| self.axes_is_live(index) && cell.is_some())
+            || self
+                .axes_metadata
+                .iter()
+                .any(|axes| !axes.retired && axes.position_explicit)
+    }
+
+    pub fn set_axes_grid_cell(
+        &mut self,
+        axes_index: usize,
+        cell: AxesGridCell,
+    ) -> Result<(), String> {
+        let position = cell
+            .normalized_position()
+            .ok_or_else(|| "axes grid-cell metadata is invalid".to_string())?;
+        self.ensure_axes_metadata_capacity(axes_index + 1);
+        self.axes_grid_cells[axes_index] = Some(cell);
+        let metadata = &mut self.axes_metadata[axes_index];
+        metadata.position_explicit = false;
+        metadata.position = position;
+        metadata.units = "normalized".into();
+        self.dirty = true;
+        Ok(())
+    }
+
+    /// Find the live axes that owns this layout. An overlay inherits its
+    /// parent's layout until it receives an explicit position or grid cell.
+    pub fn axes_layout_owner(&self, axes_index: usize) -> Option<usize> {
+        let mut index = axes_index;
+        for _ in 0..self.axes_metadata.len() {
+            let metadata = self.axes_metadata(index)?;
+            if metadata.position_explicit || self.axes_grid_cell(index).is_some() {
+                return Some(index);
+            }
+            if let Some(parent) = metadata.overlay_parent {
+                index = parent;
+            } else {
+                return Some(index);
+            }
+        }
+        None
+    }
+
+    /// Resolve a per-axes or legacy uniform-grid cell without changing its
+    /// serialized identity. Overlay axes inherit their parent's grid region.
+    pub fn resolved_axes_grid_cell(&self, axes_index: usize) -> Option<AxesGridCell> {
+        let index = self.axes_layout_owner(axes_index)?;
+        if self.axes_metadata(index)?.position_explicit {
+            return None;
+        }
+        if let Some(cell) = self.axes_grid_cell(index) {
+            return Some(cell);
+        }
+        let cell = AxesGridCell::single(
+            self.axes_rows.try_into().ok()?,
+            self.axes_cols.try_into().ok()?,
+            index.try_into().ok()?,
+        );
+        cell.is_valid().then_some(cell)
+    }
+
     pub(crate) fn restore_axes_grid_cells(
         &mut self,
         cells: Vec<Option<AxesGridCell>>,
@@ -692,11 +787,7 @@ impl Figure {
             return Err("axes grid-cell metadata exceeds the axes count".into());
         }
         for cell in cells.iter().flatten() {
-            let count = cell
-                .rows
-                .checked_mul(cell.columns)
-                .ok_or_else(|| "axes grid-cell dimensions overflow".to_string())?;
-            if cell.rows == 0 || cell.columns == 0 || cell.index >= count {
+            if !cell.is_valid() {
                 return Err("axes grid-cell metadata is invalid".into());
             }
         }
@@ -1313,7 +1404,7 @@ impl Figure {
     }
 
     pub fn ensure_overlay_axes(&mut self, parent_axes_index: usize) -> usize {
-        let parent = parent_axes_index.min(self.total_axes().saturating_sub(1));
+        let parent = parent_axes_index.min(self.axes_count().saturating_sub(1));
         if let Some((index, _)) = self
             .axes_metadata
             .iter()
@@ -1329,6 +1420,7 @@ impl Figure {
             if let Some(meta) = self.axes_metadata.get_mut(index) {
                 *meta = parent_meta;
                 meta.overlay_parent = Some(parent);
+                meta.position_explicit = false;
                 meta.y_axis_location = "right".into();
                 meta.y_limits = None;
                 meta.y_ticks = None;
@@ -1340,7 +1432,7 @@ impl Figure {
                 meta.minor_grid_enabled = false;
             }
         }
-        self.axes_grid_cells[index] = self.axes_grid_cells.get(parent).copied().flatten();
+        self.axes_grid_cells[index] = None;
         self.dirty = true;
         index
     }
@@ -1410,7 +1502,7 @@ impl Figure {
             if self
                 .axes_metadata
                 .get(axes_index)
-                .is_some_and(|meta| meta.overlay_parent.is_some())
+                .is_some_and(|meta| meta.retired || meta.overlay_parent.is_some())
             {
                 self.clear_axes(axes_index);
                 self.axes_metadata[axes_index] = self.inherited_axes_metadata();
@@ -1592,7 +1684,7 @@ impl Figure {
     }
 
     pub fn set_all_axes_color_order(&mut self, colors: Vec<Vec4>) {
-        let total_axes = self.total_axes().max(1);
+        let total_axes = self.axes_count();
         self.ensure_axes_metadata_capacity(total_axes);
         for axes_index in 0..total_axes {
             if let Some(meta) = self.axes_metadata.get_mut(axes_index) {
@@ -2037,6 +2129,13 @@ impl Figure {
                 continue;
             }
             let axes_index = self.plot_axes_indices.get(plot_idx).copied().unwrap_or(0);
+            if self
+                .axes_metadata
+                .get(axes_index)
+                .is_some_and(|metadata| metadata.retired)
+            {
+                continue;
+            }
             let axes_view_bounds = axes_view_bounds
                 .and_then(|bounds| bounds.get(axes_index).copied())
                 .flatten();
@@ -2213,7 +2312,7 @@ impl Figure {
     }
 
     fn reference_base_bounds_by_axes(&mut self) -> Vec<Option<BoundingBox>> {
-        let axes_count = self.total_axes().max(1);
+        let axes_count = self.axes_count();
         let mut bounds: Vec<Option<BoundingBox>> = vec![None; axes_count];
         for (plot_idx, plot) in self.plots.iter_mut().enumerate() {
             if !plot.is_visible() || matches!(plot, PlotElement::ReferenceLine(_)) {
@@ -2225,6 +2324,13 @@ impl Figure {
                 .copied()
                 .unwrap_or(0)
                 .min(axes_count - 1);
+            if self
+                .axes_metadata
+                .get(axes_index)
+                .is_some_and(|metadata| metadata.retired)
+            {
+                continue;
+            }
             let plot_bounds = plot.bounds();
             bounds[axes_index] = Some(match bounds[axes_index] {
                 None => plot_bounds,
@@ -3099,6 +3205,30 @@ mod tests {
         assert_eq!(
             equal.auto_axes_bounds_2d(0, (1.0, 2.0), (-123.0, -66.0)).1,
             (-123.0, -66.0)
+        );
+    }
+
+    #[test]
+    fn a_flat_line_autoscales_to_a_padded_range_around_its_value() {
+        // A steady speed: 660 everywhere draws mid-axes on whole ticks, not on an empty range.
+        let mut figure = Figure::new();
+        figure.add_line_plot(LinePlot::new(vec![0.0, 2.0], vec![660.0, 660.0]).unwrap());
+        let (x, y) = figure.auto_axes_bounds_2d(0, (0.0, 2.0), (660.0, 660.0));
+        assert_eq!(x, (0.0, 2.0));
+        assert_eq!(y, (620.0, 700.0));
+
+        // Zero gets a range of its own.
+        let mut zero = Figure::new();
+        zero.add_line_plot(LinePlot::new(vec![0.0, 2.0], vec![0.0, 0.0]).unwrap());
+        let (_, y) = zero.auto_axes_bounds_2d(0, (0.0, 2.0), (0.0, 0.0));
+        assert!(y.0 < 0.0 && y.1 > 0.0, "{y:?}");
+
+        // Explicit limits still win.
+        let mut limited = figure.clone();
+        limited.set_axes_limits(0, None, Some((0.0, 1000.0)));
+        assert_eq!(
+            limited.auto_axes_bounds_2d(0, (0.0, 2.0), (660.0, 660.0)).1,
+            (660.0, 660.0)
         );
     }
 

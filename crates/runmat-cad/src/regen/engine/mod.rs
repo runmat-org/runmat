@@ -8,12 +8,14 @@
 mod references;
 mod inputs;
 mod compile;
+mod conversions;
 mod apply;
 mod blend_edges;
 mod sketch_status;
+mod pieces;
 mod profiles;
-pub(crate) use profiles::profile_loops;
 use profiles::*;
+pub(crate) use profiles::{curve_segment, profile_loops, segment_samples};
 
 use crate::diagnostics::{
     describe_ref_problem_in, describe_wait_in, Cause, DiagCode, DiagnosticReport, Repair, Severity,
@@ -46,7 +48,7 @@ use crate::regen::deps::DependencyGraph;
 use crate::regen::hash::{chain, CacheKey, KeyInputs};
 use crate::regen::kernel::*;
 use crate::sketch_solver::SketchSolver;
-use crate::units::{Dimension, UnitAuthority};
+use crate::units::{Dimension, Units};
 use crate::value::{DynamicValueEvaluator, Evaluator, ValueEnv, ValueExpr};
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
@@ -59,8 +61,12 @@ mod sheet;
 
 pub struct RegenContext<'a> {
     pub kernel: &'a dyn CadKernel,
+    /// The kernel's display tessellation, when it has one: a sketch's converted entities (Use
+    /// edges) read the model's edges and faces through it. Without one they keep their
+    /// written position.
+    pub tessellator: Option<&'a dyn crate::regen::kernel::Tessellator>,
     pub solver: &'a dyn SketchSolver,
-    pub units: &'a dyn UnitAuthority,
+    pub units: &'a Units,
     pub dynamic: &'a dyn DynamicValueEvaluator,
     pub lock: Option<&'a LockSection>,
     pub catalog: Option<&'a dyn PublishedCatalog>,
@@ -589,6 +595,7 @@ fn regenerate_unexpanded(
         failed: count(FeatureWork::Failed),
         duration_nanos: whole.elapsed(meter),
     });
+    pieces::report_split_bodies(&run.st, &mut run.diags);
     let mut result = RegenResult {
         configuration: req.configuration.clone(),
         values: values.clone(),

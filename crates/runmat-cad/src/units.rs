@@ -1,117 +1,22 @@
-//! The unit seam.
+//! Units in `.part`, `.assembly` and `.drawing` files.
 //!
-//! RunMat has one unit authority (`runmat-types::physical`, reached through the `.fea` registry).
-//! This crate does not build a second one. It keeps a minimal dimension type for checking and a
-//! [`UnitAuthority`] trait; the real registry is adapted to the trait later. [`StubUnits`] covers
-//! the handful of kinds and symbols the design-layer tests need, and nothing more.
+//! RunMat has one unit authority, `runmat-types::physical`: its registry parses every unit
+//! expression (`mm`, `kg/m^3`, `50 mil`), its dimensions check every value, and its
+//! [`unit_mismatch_message`](runmat_types::physical::unit_mismatch_message) writes every
+//! wrong-unit message. [`Units`] is this crate's handle on it, and [`Dimension`] is its
+//! dimension descriptor. A value's dimension travels to the Desktop as the design catalog's wire
+//! form (`{ base, angle }`, see [`wire`]).
 
+pub use runmat_types::physical::DynamicDimension as Dimension;
+use runmat_types::physical::{
+    parse_unit_expecting, parse_unit_expression, QuantityKind, UnitDefinition,
+};
+use runmat_types::PhysicalDimension;
 use serde::{Deserialize, Serialize};
 use std::fmt;
 
-/// Exponents over the eight SI-style bases the authority uses (length, mass, time, current,
-/// temperature, amount, luminous intensity, information), plus a separate angle power, matching
-/// `runmat-types::physical::PhysicalDimension`'s layout so the adapter is a field copy.
-#[derive(
-    Clone, Copy, Debug, Default, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize,
-)]
-pub struct Dimension {
-    pub base: [i8; 8],
-    pub angle: i8,
-}
-
-impl Dimension {
-    pub const DIMENSIONLESS: Dimension = Dimension {
-        base: [0; 8],
-        angle: 0,
-    };
-    pub const LENGTH: Dimension = Dimension {
-        base: [1, 0, 0, 0, 0, 0, 0, 0],
-        angle: 0,
-    };
-    pub const MASS: Dimension = Dimension {
-        base: [0, 1, 0, 0, 0, 0, 0, 0],
-        angle: 0,
-    };
-    pub const ANGLE: Dimension = Dimension {
-        base: [0; 8],
-        angle: 1,
-    };
-    pub const AREA: Dimension = Dimension {
-        base: [2, 0, 0, 0, 0, 0, 0, 0],
-        angle: 0,
-    };
-
-    pub fn multiply(self, other: Dimension) -> Dimension {
-        let mut base = [0i8; 8];
-        for (i, b) in base.iter_mut().enumerate() {
-            *b = self.base[i] + other.base[i];
-        }
-        Dimension {
-            base,
-            angle: self.angle + other.angle,
-        }
-    }
-
-    pub fn divide(self, other: Dimension) -> Dimension {
-        let mut base = [0i8; 8];
-        for (i, b) in base.iter_mut().enumerate() {
-            *b = self.base[i] - other.base[i];
-        }
-        Dimension {
-            base,
-            angle: self.angle - other.angle,
-        }
-    }
-
-    pub fn power(self, exponent: i8) -> Dimension {
-        let mut base = [0i8; 8];
-        for (i, b) in base.iter_mut().enumerate() {
-            *b = self.base[i] * exponent;
-        }
-        Dimension {
-            base,
-            angle: self.angle * exponent,
-        }
-    }
-
-    pub fn is_dimensionless(self) -> bool {
-        self == Dimension::DIMENSIONLESS
-    }
-}
-
-impl fmt::Display for Dimension {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        const NAMES: [&str; 8] = ["L", "M", "T", "I", "Θ", "N", "J", "B"];
-        let mut wrote = false;
-        for (i, e) in self.base.iter().enumerate() {
-            if *e != 0 {
-                if wrote {
-                    f.write_str("·")?;
-                }
-                if *e == 1 {
-                    write!(f, "{}", NAMES[i])?;
-                } else {
-                    write!(f, "{}^{}", NAMES[i], e)?;
-                }
-                wrote = true;
-            }
-        }
-        if self.angle != 0 {
-            if wrote {
-                f.write_str("·")?;
-            }
-            write!(f, "angle^{}", self.angle)?;
-            wrote = true;
-        }
-        if !wrote {
-            f.write_str("1")?;
-        }
-        Ok(())
-    }
-}
-
-/// A quantity kind's catalog name (`length`, `angle`, `mass_density`). Equal dimension does not
-/// mean equal kind; the authority decides compatibility.
+/// A quantity kind's name as a design file writes it (`length`, `angle`, `mass_density`).
+/// Equal dimension does not mean equal kind; the authority decides compatibility.
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 #[serde(transparent)]
 pub struct QuantityKindId(pub String);
@@ -128,80 +33,146 @@ impl fmt::Display for QuantityKindId {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-pub struct KindInfo {
-    pub id: QuantityKindId,
-    pub dimension: Dimension,
-    /// The canonical SI unit symbol used in messages.
-    pub si_symbol: String,
-}
+/// The unit authority as the design layer reads it: `runmat-types::physical`'s registry and
+/// quantity catalog.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct Units;
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-pub struct UnitInfo {
-    pub symbol: String,
-    pub dimension: Dimension,
-    /// Multiply a value in this unit by `scale` to get SI.
-    pub scale: f64,
-}
-
-/// What the design layer needs from the unit authority.
-pub trait UnitAuthority {
-    /// Look a quantity kind up by its catalog name.
-    fn kind(&self, name: &QuantityKindId) -> Option<KindInfo>;
-    /// Parse a unit expression as written after a number (`mm`, `kg/m^3`).
-    fn unit(&self, expression: &str) -> Option<UnitInfo>;
-    /// A fingerprint of the catalog; it joins regeneration cache keys.
-    fn fingerprint(&self) -> String;
-}
-
-/// A deliberately small stand-in for the `.fea` registry: length, area, angle, mass,
-/// dimensionless and count. It parses single symbols only.
-#[derive(Clone, Debug, Default)]
-pub struct StubUnits;
-
-impl UnitAuthority for StubUnits {
-    fn kind(&self, name: &QuantityKindId) -> Option<KindInfo> {
-        let (dimension, si) = match name.0.as_str() {
-            "length" | "distance" => (Dimension::LENGTH, "m"),
-            "area" => (Dimension::AREA, "m^2"),
-            "angle" => (Dimension::ANGLE, "rad"),
-            "mass" => (Dimension::MASS, "kg"),
-            "dimensionless" | "real" | "count" | "integer" => (Dimension::DIMENSIONLESS, "1"),
-            _ => return None,
+impl Units {
+    /// The dimension a quantity kind name declares: any catalog kind by its snake-case name
+    /// (`length`, `force`, `mass_density`), plus the design vocabulary's `distance` (a length)
+    /// and the plain-number kinds `real`, `count` and `integer`.
+    pub fn kind(&self, name: &QuantityKindId) -> Option<Dimension> {
+        let kind = match name.0.as_str() {
+            "distance" => QuantityKind::Length,
+            "dimensionless" | "real" | "count" | "integer" => QuantityKind::Dimensionless,
+            other => serde_json::from_value(serde_json::Value::String(other.to_owned())).ok()?,
         };
-        Some(KindInfo {
-            id: name.clone(),
-            dimension,
-            si_symbol: si.to_owned(),
-        })
+        Some(Dimension::quantity_type(kind))
     }
 
-    fn unit(&self, expression: &str) -> Option<UnitInfo> {
-        let (dimension, scale) = match expression {
-            "m" => (Dimension::LENGTH, 1.0),
-            "mm" => (Dimension::LENGTH, 1e-3),
-            // Surface roughness (Ra) and fine tolerances read in micrometres.
-            "um" | "µm" => (Dimension::LENGTH, 1e-6),
-            "cm" => (Dimension::LENGTH, 1e-2),
-            "in" => (Dimension::LENGTH, 0.0254),
-            "ft" => (Dimension::LENGTH, 0.3048),
-            "m^2" => (Dimension::AREA, 1.0),
-            "mm^2" => (Dimension::AREA, 1e-6),
-            "rad" => (Dimension::ANGLE, 1.0),
-            "deg" => (Dimension::ANGLE, std::f64::consts::PI / 180.0),
-            "kg" => (Dimension::MASS, 1.0),
-            "gram" => (Dimension::MASS, 1e-3),
-            "1" | "" => (Dimension::DIMENSIONLESS, 1.0),
-            _ => return None,
-        };
-        Some(UnitInfo {
-            symbol: expression.to_owned(),
-            dimension,
-            scale,
-        })
+    /// A unit expression as written after a number (`mm`, `kg/m^3`, `deg`). `1` and an empty
+    /// unit are a plain number.
+    pub fn unit(&self, expression: &str) -> Option<UnitDefinition> {
+        match expression.trim() {
+            "" | "1" => UnitDefinition::try_new(PhysicalDimension::DIMENSIONLESS, 1.0, 0.0).ok(),
+            written => parse_unit_expression(written).ok(),
+        }
     }
 
-    fn fingerprint(&self) -> String {
-        "runmat-cad/stub-units/3".to_owned()
+    /// [`Units::unit`] where the value must measure `expected`: where a mass is expected, `g`
+    /// is the gram (`0.35 g`), and elsewhere standard gravity.
+    pub fn unit_expecting(&self, expression: &str, expected: Dimension) -> Option<UnitDefinition> {
+        match expression.trim() {
+            "" | "1" => self.unit(expression),
+            written => parse_unit_expecting(written, expected.dimension()).ok(),
+        }
+    }
+
+    /// A fingerprint of the registry; it joins regeneration cache keys.
+    pub fn fingerprint(&self) -> String {
+        "runmat-types/physical/1".to_owned()
+    }
+}
+
+/// The dimension of a unit definition, without a semantic kind.
+pub fn dimension_of(unit: &UnitDefinition) -> Dimension {
+    Dimension::from_unit(*unit)
+}
+
+/// A dimension on the wire: the design catalog's `{ base: [8 exponents], angle }`
+/// ([`runmat_design_commands::Dimension`]), which the Desktop reads. Use with
+/// `#[serde(with = "crate::units::wire")]`.
+pub mod wire {
+    use super::Dimension;
+    use runmat_design_commands::Dimension as Wire;
+    use serde::{Deserialize, Deserializer, Serialize, Serializer};
+
+    pub fn to_wire(dimension: Dimension) -> Wire {
+        Wire::from(dimension)
+    }
+
+    pub fn from_wire(wire: Wire) -> Dimension {
+        wire.to_physical()
+    }
+
+    pub fn serialize<S: Serializer>(dimension: &Dimension, s: S) -> Result<S::Ok, S::Error> {
+        to_wire(*dimension).serialize(s)
+    }
+
+    pub fn deserialize<'de, D: Deserializer<'de>>(d: D) -> Result<Dimension, D::Error> {
+        Wire::deserialize(d).map(from_wire)
+    }
+
+    /// The same, for an optional dimension.
+    pub mod option {
+        use super::{from_wire, to_wire, Dimension, Wire};
+        use serde::{Deserialize, Deserializer, Serialize, Serializer};
+
+        pub fn serialize<S: Serializer>(
+            dimension: &Option<Dimension>,
+            s: S,
+        ) -> Result<S::Ok, S::Error> {
+            dimension.map(to_wire).serialize(s)
+        }
+
+        pub fn deserialize<'de, D: Deserializer<'de>>(d: D) -> Result<Option<Dimension>, D::Error> {
+            Option::<Wire>::deserialize(d).map(|w| w.map(from_wire))
+        }
+    }
+}
+
+/// A written length in millimetres: a quantity in any length unit the catalog knows (`mm`, `in`,
+/// `ft`, …) or a bare number, which is millimetres. None for anything else.
+pub fn length_mm(v: &crate::value::ValueExpr) -> Option<f64> {
+    match v {
+        crate::value::ValueExpr::Quantity { value, unit } => {
+            let info = Units.unit(unit)?;
+            (dimension_of(&info) == Dimension::LENGTH).then_some(value * info.scale() * 1000.0)
+        }
+        crate::value::ValueExpr::Number { value } => Some(*value),
+        _ => None,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn reads_kinds_and_units_from_the_one_authority() {
+        let units = Units;
+        assert_eq!(
+            units.kind(&QuantityKindId::new("distance")),
+            Some(Dimension::LENGTH)
+        );
+        assert_eq!(
+            units.kind(&QuantityKindId::new("angle")),
+            Some(Dimension::ANGLE)
+        );
+        assert_eq!(
+            units.kind(&QuantityKindId::new("count")),
+            Some(Dimension::DIMENSIONLESS)
+        );
+        assert!(units.kind(&QuantityKindId::new("force")).is_some());
+        assert!(units.kind(&QuantityKindId::new("no_such_kind")).is_none());
+        let mil = units.unit("mil").unwrap();
+        assert_eq!(dimension_of(&mil), Dimension::LENGTH);
+        assert!((mil.scale() - 2.54e-5).abs() < 1e-18);
+        assert_eq!(dimension_of(&units.unit("deg").unwrap()), Dimension::ANGLE);
+        assert!(units.unit("furlong").is_none());
+    }
+
+    #[test]
+    fn dimensions_keep_the_catalog_wire_form() {
+        let json = serde_json::to_value(wire::to_wire(Dimension::ANGLE)).unwrap();
+        assert_eq!(
+            json,
+            serde_json::json!({ "base": [0, 0, 0, 0, 0, 0, 0, 0], "angle": 1 })
+        );
+        assert_eq!(
+            wire::from_wire(wire::to_wire(Dimension::LENGTH)),
+            Dimension::LENGTH
+        );
     }
 }

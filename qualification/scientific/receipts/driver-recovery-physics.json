@@ -3,13 +3,37 @@
   "cohort": "driver-recovery-physics",
   "policy_sha256": "eeab2d440d501db5062b1302e786dd0680fa4bf1065d061bfe57f6691b7a233b",
   "measured": {
-    "source_revision": "67e7985cd2d7b4978b9ed6312713da97b148a6a3",
-    "exit_code": 0,
+    "source_revision": "dac88251baaa60d5834296cbce89c727092da233",
+    "target": "linux-x86_64",
+    "hardware": "GCP N1 highmem-16 (design-build-0717), Intel Xeon, 16 vCPU and 104 GiB RAM",
+    "toolchain": "rustc 1.90.0 (1159e78c4 2025-09-14)",
+    "command": [
+      "cargo",
+      "test",
+      "--locked",
+      "--offline",
+      "--release",
+      "--all-features",
+      "-p",
+      "runmat-execution-runner-native",
+      "--lib",
+      "remote::driver_replacement_tests::",
+      "--",
+      "--test-threads=1"
+    ],
+    "profile": {
+      "release": true,
+      "debug": 0,
+      "incremental": false,
+      "rust_test_nocapture": true
+    },
+    "log_sha256": "83deedab2658669dc580823633b828136755a56156dd9eff67219ed1b56698a4",
+    "log_location": "design-build-0717:/home/nallana/runs/f-receipts-0717/driver-recovery-physics.tests.log (copy: runmat-acc-2 design-coord/release/evidence/receipts-dac88251ba/linux-0717)",
     "passed": 18,
     "failed": 0,
     "ignored": 0,
-    "filtered_out": 464,
-    "test_seconds": 1625.63,
+    "filtered_out": 471,
+    "exit_code": 0,
     "case_names": [
       "remote::driver_replacement_tests::active_analysis_attempt_retries_after_actual_driver_replacement",
       "remote::driver_replacement_tests::actual_driver_restarts_from_server_checkpoint_on_a_different_worker",
@@ -30,70 +54,63 @@
       "remote::driver_replacement_tests::restored_analysis_retry_observes_cancellation_before_publication",
       "remote::driver_replacement_tests::thermal::authored_matrix_variants_typecheck_with_explicit_physical_loads"
     ],
-    "log_sha256": "8b986093598f4f214911dc7834fb0085b59f604f6fa63fde4f89732577788ac8",
-    "log_location": "gh-linux-20260327-125436:/home/nallana/rm1293/logs/consolidated-67e7985cd2-physics.driver-recovery-physics.log",
-    "artifacts": [
-      {
-        "sha256": "cf36dc59e30a495ee9345c841f92dc19742530d41437765ad07310a4af5ad11b",
-        "bytes": 572364368,
-        "location": "gh-linux-20260327-125436:/home/nallana/rm1293/logs/consolidated-67e7985cd2-physics-artifacts/driver-recovery-physics",
-        "executed_path": "/home/nallana/rm1293/targets/release/deps/runmat_execution_runner_native-255843cfc32d581f"
-      }
-    ],
-    "command": [
-      "cargo",
-      "test",
-      "--locked",
-      "--offline",
-      "--release",
-      "--all-features",
-      "-p",
-      "runmat-execution-runner-native",
-      "--lib",
-      "remote::driver_replacement_tests::",
-      "--",
-      "--test-threads=1"
-    ],
-    "target": "linux-x86_64",
-    "hardware": "GCP N1 highmem-16, Intel Xeon, 16 vCPU and 104 GiB RAM",
-    "toolchain": "rustc 1.90.0 (1159e78c4 2025-09-14)",
-    "profile": {
-      "release": true,
-      "debug": 0,
-      "strip": "symbols",
-      "cargo_build_jobs": 8,
-      "incremental": false
-    },
     "selected_filter": "remote::driver_replacement_tests::",
     "inputs": {
-      "sha256": "ba994ecda5890f03352b0d1d658b4eae17c1363da19add65f5dd359cfbe99ce2",
-      "files": 26117,
+      "sha256": "82e3f3ef00d70b90678b39c575d9e94442cc2cbae2cbcd0077890c46639851fc",
+      "files": 26448,
       "encoding": "git-mode-type-blob-path-tuples-v1"
     },
+    "artifacts": [
+      {
+        "sha256": "6d1643a1f9f87e1f95db6eb9469b435d78fb2465c9f15a117cb38741bd809f70",
+        "location": "design-build-0717:/home/nallana/targets/q2-receipts/release/deps/runmat_execution_runner_native-b7d01d0be62f9980"
+      }
+    ],
+    "test_seconds": 1800.01,
     "source_verification": {
       "status": "verified",
-      "root": "/home/nallana/rm1293/candidates/settings-r964-linux",
-      "revision": "67e7985cd2d7b4978b9ed6312713da97b148a6a3",
-      "files": 27272,
-      "before_and_after": true
+      "revision": "dac88251baaa60d5834296cbce89c727092da233",
+      "files": 27660,
+      "before_and_after": true,
+      "checks": [
+        {
+          "revision": "dac88251baaa60d5834296cbce89c727092da233",
+          "host": "design-build-0717",
+          "tracked_files": 27660,
+          "differing": 0,
+          "diff_lines": [],
+          "checked_at": "2026-11-19T23:52:54Z",
+          "method": "git archive of the revision vs the receipt source tree, rsync -rlpcni (checksums, tracked files only)"
+        },
+        {
+          "revision": "dac88251baaa60d5834296cbce89c727092da233",
+          "host": "design-build-0717",
+          "tracked_files": 27660,
+          "differing": 0,
+          "diff_lines": [],
+          "checked_at": "2026-11-20T03:38:10Z",
+          "method": "git archive of the revision vs the receipt source tree, rsync -rlpcni (checksums, tracked files only)"
+        }
+      ]
     },
-    "source_scope": "All 27,272 canonical source files match the frozen consolidated snapshot before and after the required authored, recovery and bounded exact-kernel cohorts. Retained executables have byte-verified copies. Credentials and .env files are excluded from the source transfer."
+    "source_scope": "All 27,660 tracked source files of dac88251ba matched the receipt tree before the run (checksum sync) and after it (checksum dry-run, 0 differing)."
   },
+  "scope": "Fresh 0.7.2 combined-qualification run on the frozen candidate dac88251ba (GCP N1 highmem-16 (design-build-0717), Intel Xeon, 16 vCPU and 104 GiB RAM). The tests run the driver by re-spawning their own test executable, which is the listed artifact. They spawn no runmat CLI.",
   "conservation": {
     "measured_inputs": {
-      "sha256": "ba994ecda5890f03352b0d1d658b4eae17c1363da19add65f5dd359cfbe99ce2",
-      "files": 26117,
+      "sha256": "82e3f3ef00d70b90678b39c575d9e94442cc2cbae2cbcd0077890c46639851fc",
+      "files": 26448,
       "encoding": "git-mode-type-blob-path-tuples-v1"
     },
     "accepted_inputs": {
-      "sha256": "55f884d6cb44d49c880e97e043a427c54be4a91e9d00a6ab8874ac7cf6f03a06",
-      "files": 26117,
+      "sha256": "3e8870de46a03715aacaa8ef0b57a056df50e263427bc1e52ccce5cd5932db3d",
+      "files": 26449,
       "encoding": "git-mode-type-blob-path-tuples-v1"
     },
-    "reason": "Conserves the existing scientific measurements across release-publication metadata changes. The only scientific input changes remove publish=false from two required Rust libraries. Package versions, dependencies, features, targets, implementation source, numerical inputs and thresholds are unchanged. Rate-limit retry handling and release scheduling are publication tooling, not simulation execution. This review is not a rerun of scientific or performance measurements.",
+    "reason": "Conserves the fresh 0.7.2 scientific measurements on dac88251ba across G132 24074bbb35: pure move of analysis_authoring_workflow, analysis_procedure_ids, analysis_output_operation_ids, analysis_language_reference_paths into contracts/authoring_catalog.rs, re-exported at the same path; no behaviour change; debt ceiling file lowered 2467\u21922442; FEA OK 2026-11-20. Every line removed from contracts.rs is in the new module; the only other lines are the mod line, the re-export, the module doc comment, its import and one test import. scripts/development/fea-module-size-debt.json is not a scientific input. Solver arithmetic, model inputs, dependencies, features and thresholds are unchanged. This review is not a rerun of the scientific or performance measurements.",
     "review": {
-      "path": "qualification/scientific/reviews/publication-metadata-20261113-driver-recovery-physics.json",
-      "sha256": "bcd3a32babb0f24a9e9a8013140059b039621702634c97396145a05dba9df37a"
+      "path": "qualification/scientific/reviews/g132-authoring-catalog-move-20261120-driver-recovery-physics.json",
+      "sha256": "9dab970d2bdb356960ea36c61e5aa2dadac43210a21b4b41df85b4ad946e5f3c"
     }
   }
 }

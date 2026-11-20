@@ -41,7 +41,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::rc::Rc;
 
 /// Changes when a projection's output changes for the same input (the line format, thinning).
-pub const PROJECTION_VERSION: &str = "view-lines-1";
+pub const PROJECTION_VERSION: &str = "view-lines-2";
 
 /// Regenerated parts kept for the next stage's compile.
 const KEPT_PARTS: usize = 4;
@@ -407,7 +407,7 @@ mod tests {
         assert!(
             note.iter().any(|p| p["shape"]["text"]
                 .as_str()
-                .is_some_and(|t| t.contains("MATERIAL: Aluminum. MARK BR-100."))),
+                .is_some_and(|t| t.contains("MATERIAL: ALUMINUM. MARK BR-100."))),
             "{note:?}"
         );
 

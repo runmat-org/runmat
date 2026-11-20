@@ -301,3 +301,37 @@ fn borrowed_snapshot_preserves_regions_disconnected_cells_and_rejected_transacti
         snapshot
     );
 }
+
+#[test]
+fn working_topology_stays_within_its_forecast() {
+    // A jittered lattice: enough points for multi-level B-trees in every index.
+    let mut nodes = Vec::new();
+    let mut state = 0x9e37_79b9_7f4a_7c15_u64;
+    for index in 0..1_000u32 {
+        let mut jitter = || {
+            state ^= state << 13;
+            state ^= state >> 7;
+            state ^= state << 17;
+            (state % 1_000) as f64 * 1.0e-4
+        };
+        let mut identity = [0u8; 32];
+        identity[..4].copy_from_slice(&(index + 1).to_be_bytes());
+        nodes.push(DelaunayVolumeNode::explicit(
+            StableDigest::from_bytes(identity),
+            [
+                f64::from(index % 10) + jitter(),
+                f64::from(index / 10 % 10) + jitter(),
+                f64::from(index / 100) + jitter(),
+            ],
+        ));
+    }
+    let topology = crate::cdt::build_delaunay_volume_point_set(
+        nodes,
+        crate::cdt::DelaunayPointSetOptions::default(),
+        &NeverCancelled,
+    )
+    .unwrap();
+    let (nodes, tetrahedra) = (topology.nodes.len(), topology.tetrahedra.len());
+    let mutation = TopologyMutation::from_canonical(topology);
+    assert!(mutation.resident_bytes() <= TopologyMutation::forecast_bytes(nodes, tetrahedra));
+}

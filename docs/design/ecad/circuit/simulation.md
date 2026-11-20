@@ -70,4 +70,4 @@ sensor.circuit: measure filter.settled = 0.999877 V (pass)
 
 ## Running
 
-`design.simulate` runs a section from the agent, and `runmat-design check` runs every section and fails on a measure outside its spec. Part models come from the part (its `spice` field) or from the section's `model` statements; SPICE libraries in other common dialects read in, with their sweep and measure lines reported as warnings, since the section states its own analyses and measures.
+`design.simulate` runs a section from the agent, and `runmat check` runs every section and fails on a measure outside its spec. Part models come from the part (its `spice` field) or from the section's `model` statements; SPICE libraries in other common dialects read in, with their sweep and measure lines reported as warnings, since the section states its own analyses and measures.

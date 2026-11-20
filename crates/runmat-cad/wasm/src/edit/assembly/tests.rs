@@ -1,6 +1,6 @@
 //! Assembly commands from the canvas: each writes the smallest text change, and the edited
 //! assembly compiles, solves and places the components where the command says.
-use super::frames::{face_frame, Frame, FrameKind};
+use super::frames::{edge_frame, face_frame, Frame, FrameKind};
 use crate::edit::edit_json;
 use crate::runtime::{compile_assembly, Files};
 use serde_json::{json, Value};
@@ -11,9 +11,9 @@ const BLOCK: &str = "runmat 0.7\nstd 1\n\npart block {\n    sketch s1 on origin.
 
 const PIN: &str = "runmat 0.7\nstd 1\n\npart pin {\n    sketch s1 on origin.xy {\n        c1 = circle(center = [0 mm, 0 mm], radius = 5 mm)\n    }\n    feature body = extrude(profile = sketch.s1, distance = 30 mm)\n    output pin = { body = feature.body.body }\n    region rim : edge = { select = [edges_between(feature.body.face.side(s1.c1), feature.body.face.end)], expect = at_least_one }\n    publish rim = region(region = rim)\n}\n";
 
-const RIG: &str = "runmat 0.7\nstd 1\n\nassembly rig {\n    use part plate as plate\n    use part block as block {\n        placement = { placement = offset, offset = { translation = [30 mm, 10 mm, 40 mm] } }\n    }\n    use part pin as pin {\n        placement = { placement = offset, offset = { translation = [60 mm, 30 mm, 25 mm] } }\n    }\n    use part pin as pin2 {\n        placement = { placement = offset, offset = { translation = [10 mm, 70 mm, 0 mm] } }\n    }\n}\n";
+pub(super) const RIG: &str = "runmat 0.7\nstd 1\n\nassembly rig {\n    use part plate as plate\n    use part block as block {\n        placement = { placement = offset, offset = { translation = [30 mm, 10 mm, 40 mm] } }\n    }\n    use part pin as pin {\n        placement = { placement = offset, offset = { translation = [60 mm, 30 mm, 25 mm] } }\n    }\n    use part pin as pin2 {\n        placement = { placement = offset, offset = { translation = [10 mm, 70 mm, 0 mm] } }\n    }\n}\n";
 
-fn files() -> Files {
+pub(super) fn files() -> Files {
     [
         ("/p/plate.part", PLATE),
         ("/p/block.part", BLOCK),
@@ -37,12 +37,12 @@ fn remember(path: &str, text: &str) {
     }
 }
 
-struct Compiled {
-    index: Value,
-    display: Value,
+pub(super) struct Compiled {
+    pub(super) index: Value,
+    pub(super) display: Value,
 }
 
-fn compile(text: &str) -> Compiled {
+pub(super) fn compile(text: &str) -> Compiled {
     let (index, display, problems) = compile_assembly("/p/rig.assembly", text, &files())
         .unwrap_or_else(|d| panic!("doesn't compile: {d:?}\n{text}"));
     let errors: Vec<_> = problems.iter().filter(|d| d.severity == "error").collect();
@@ -51,7 +51,7 @@ fn compile(text: &str) -> Compiled {
 }
 
 impl Compiled {
-    fn uuid(&self, path: &str) -> String {
+    pub(super) fn uuid(&self, path: &str) -> String {
         self.index["occurrences"]
             .as_array()
             .unwrap()
@@ -63,7 +63,7 @@ impl Compiled {
             .to_owned()
     }
 
-    fn occurrence(&self, path: &str) -> &Value {
+    pub(super) fn occurrence(&self, path: &str) -> &Value {
         let uuid = self.uuid(path);
         self.display["occurrences"]
             .as_array()
@@ -73,7 +73,7 @@ impl Compiled {
             .unwrap()
     }
 
-    fn transform(&self, path: &str) -> Vec<f64> {
+    pub(super) fn transform(&self, path: &str) -> Vec<f64> {
         self.occurrence(path)["transform"]
             .as_array()
             .unwrap()
@@ -83,7 +83,7 @@ impl Compiled {
     }
 
     /// The pick ID of the face on `path` whose frame `test` accepts.
-    fn face(&self, path: &str, test: impl Fn(&Frame) -> bool) -> String {
+    pub(super) fn face(&self, path: &str, test: impl Fn(&Frame) -> bool) -> String {
         let prototype = self.occurrence(path)["prototype"].as_u64().unwrap() as usize;
         let body = &self.display["prototypes"][prototype]["part"]["bodies"][0];
         let face = body["faces"]
@@ -101,7 +101,27 @@ impl Compiled {
     }
 }
 
-fn run(text: &str, request: Value) -> String {
+impl Compiled {
+    /// The pick ID of the edge on `path` whose frame `test` accepts.
+    pub(super) fn edge(&self, path: &str, test: impl Fn(&Frame) -> bool) -> String {
+        let prototype = self.occurrence(path)["prototype"].as_u64().unwrap() as usize;
+        let body = &self.display["prototypes"][prototype]["part"]["bodies"][0];
+        let edge = body["edges"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|e| edge_frame(e).is_some_and(|frame| test(&frame)))
+            .unwrap_or_else(|| panic!("no such edge on {path}"));
+        format!(
+            "occurrence:{}/edge:{}:{}",
+            self.uuid(path),
+            body["index"],
+            edge["index"]
+        )
+    }
+}
+
+pub(super) fn run(text: &str, request: Value) -> String {
     let out: Value = serde_json::from_str(&edit_json(
         "/p/rig.assembly",
         text,
@@ -116,10 +136,10 @@ fn run(text: &str, request: Value) -> String {
     out["files"][0]["text"].as_str().unwrap().to_owned()
 }
 
-fn top(f: &Frame) -> bool {
+pub(super) fn top(f: &Frame) -> bool {
     f.kind == FrameKind::Plane && f.z[2] > 0.99
 }
-fn bottom(f: &Frame) -> bool {
+pub(super) fn bottom(f: &Frame) -> bool {
     f.kind == FrameKind::Plane && f.z[2] < -0.99
 }
 fn side(f: &Frame) -> bool {
@@ -129,7 +149,7 @@ fn round(f: &Frame) -> bool {
     f.kind == FrameKind::Axis
 }
 
-fn mate(text: &str, kind: &str, first: String, second: String, extra: Value) -> String {
+pub(super) fn mate(text: &str, kind: &str, first: String, second: String, extra: Value) -> String {
     let mut values = json!({ "type": kind, "first": [first], "second": [second] });
     for (k, v) in extra.as_object().unwrap() {
         values[k] = v.clone();

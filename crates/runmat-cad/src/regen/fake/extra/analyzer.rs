@@ -97,6 +97,13 @@ impl crate::evaluate::GeometryAnalyzer for FakeKernel {
             R::Zebra => super::analysis::zebra(bodies),
             R::Deviation => super::analysis::deviation(bodies),
             R::Undercut { pull } => super::analysis::undercut(bodies, *pull),
+            // A grid solid has no curve geometry or tolerances to check.
+            R::Check { .. } | R::FaceArea { .. } | R::SurfaceField { .. } => {
+                Err(KernelError::NotSupported {
+                    what: "a geometry check, face area or surface field on the grid test kernel"
+                        .into(),
+                })
+            }
         }
     }
 }

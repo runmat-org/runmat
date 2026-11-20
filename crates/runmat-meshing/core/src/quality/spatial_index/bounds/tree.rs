@@ -39,6 +39,17 @@ pub(in crate::quality::spatial_index) fn key(bounds: Aabb3) -> [u8; 24] {
     result
 }
 
+impl<T> Node<T> {
+    pub(in crate::quality::spatial_index) fn resident_bytes(&self) -> u64 {
+        [&self.left, &self.right]
+            .into_iter()
+            .flatten()
+            .fold(crate::resident_bytes::arc_bytes::<Self>(), |sum, child| {
+                sum.saturating_add(child.resident_bytes())
+            })
+    }
+}
+
 impl<T: Ord + Clone> Node<T> {
     #[cfg(test)]
     pub(super) fn assert_balanced(&self) -> usize {

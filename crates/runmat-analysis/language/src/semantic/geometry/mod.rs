@@ -1,3 +1,4 @@
+mod authored_names;
 mod command;
 mod cross_section;
 mod feature;
@@ -131,13 +132,7 @@ fn definition(
             error(declaration, file_span, message, diagnostics);
             return None;
         };
-        if inspection
-            .facts
-            .capabilities
-            .contains(&GeometryInspectionCapability::PersistentIds)
-        {
-            check_authored_names(declaration, &regions, inspection, diagnostics);
-        }
+        authored_names::check(declaration, &regions, inspection, diagnostics);
         imported_source(declaration, inspection, diagnostics)?
     } else if let Some(statements) = construct {
         if declaration.source.is_some() {
@@ -210,6 +205,7 @@ fn imported_source(
     Some(GeometryDefinitionSource::Imported(Box::new(
         ImportedGeometryDefinition {
             preview_extent_m: inspection.facts.preview_extent_m,
+            preview_measure: inspection.facts.preview_measure.clone(),
             // Authored units are authoritative over a different file declaration, which the
             // evidence keeps as provenance.
             unit_evidence: match units {
@@ -258,75 +254,6 @@ fn imported_interfaces(
 }
 
 /// A `select name` must match a name the inspected source carries for that role.
-fn check_authored_names(
-    declaration: &CheckedFeaDeclaration,
-    regions: &[GeometryRegionDefinition],
-    inspection: &CheckedGeometryInspection,
-    diagnostics: &mut Vec<FeaDiagnostic>,
-) {
-    for region in regions {
-        let GeometryRegionSelector::Name(name) = &region.selector else {
-            continue;
-        };
-        let role = match region.role {
-            GeometryRegionRole::Vertex => "vertex",
-            GeometryRegionRole::Edge => "edge",
-            GeometryRegionRole::Face => "face",
-            GeometryRegionRole::Solid | GeometryRegionRole::Cell => "solid",
-        };
-        let roles = if role == "vertex" {
-            "vertices".to_string()
-        } else {
-            format!("{role}s")
-        };
-        let available = inspection
-            .facts
-            .authored_names
-            .get(role)
-            .map(Vec::as_slice)
-            .unwrap_or_default();
-        let matches = available
-            .iter()
-            .filter(|candidate| *candidate == name)
-            .count();
-        if matches > 1 && region.cardinality == GeometryRegionCardinality::ExactlyOne {
-            error(
-                declaration,
-                declaration.span,
-                format!(
-                    "region `{}` selects {role} name \"{name}\", which {matches} {roles} in `{}` carry; it expects exactly_one (name each entity uniquely in the CAD file, or use expect one_or_more)",
-                    region.region_id, inspection.source_path
-                ),
-                diagnostics,
-            );
-            continue;
-        }
-        if matches > 0 {
-            continue;
-        }
-        let mut available = available.to_vec();
-        available.dedup();
-        let message = if available.is_empty() {
-            format!(
-                "region `{}` selects {role} name \"{name}\", but `{}` names no {roles}",
-                region.region_id, inspection.source_path
-            )
-        } else {
-            format!(
-                "region `{}` selects {role} name \"{name}\", which `{}` does not carry; named {roles}: {}",
-                region.region_id,
-                inspection.source_path,
-                available
-                    .iter()
-                    .map(|candidate| format!("\"{candidate}\""))
-                    .collect::<Vec<_>>()
-                    .join(", ")
-            )
-        };
-        error(declaration, declaration.span, message, diagnostics);
-    }
-}
-
 fn named_block<'a>(
     statements: &'a [CheckedFeaStatement],
     name: &str,
@@ -710,7 +637,7 @@ fn imported_file(statements: &[CheckedFeaStatement]) -> Option<&CheckedExpressio
 fn source_format(path: &str) -> Option<GeometrySourceFormat> {
     let extension = path.rsplit_once('.')?.1.to_ascii_lowercase();
     Some(match extension.as_str() {
-        "step" | "stp" => GeometrySourceFormat::Step,
+        "step" | "stp" | "part" | "assembly" => GeometrySourceFormat::Step,
         "iges" | "igs" => GeometrySourceFormat::Iges,
         "brep" => GeometrySourceFormat::Brep,
         _ => return None,

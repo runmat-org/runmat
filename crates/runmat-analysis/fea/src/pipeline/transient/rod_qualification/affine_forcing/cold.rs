@@ -161,8 +161,6 @@ fn cold_parity(quadratic: bool, damped: bool) {
         connector_force_snapshots,
         connector_stored_energy_snapshots,
         relative_energy_balance_error_snapshots,
-        electro_thermal_temperature_snapshots,
-        electro_thermal_thermal_residual_snapshots,
     );
     assert_eq!(recovered.residual_norms, uninterrupted.residual_norms);
     assert_eq!(

@@ -7,7 +7,7 @@ use runmat_cad::diagnostics::DiagCode;
 use runmat_cad::ids::{FilePath, PropertyName};
 use runmat_cad::model::items::{Link, LinkKind, LocalItem, Property, PropertyScope, PropertyValue};
 use runmat_cad::props::*;
-use runmat_cad::units::StubUnits;
+use runmat_cad::units::Units;
 use runmat_cad::value::{Evaluator, NoDynamicValues, ValueExpr};
 use runmat_rules as rules;
 
@@ -55,7 +55,7 @@ fn tree() -> (MemorySource, ResolvedAssembly) {
     src.add_assembly(top);
     let ctx = ResolveContext {
         source: &src,
-        units: &StubUnits,
+        units: &Units,
         dynamic: &NoDynamicValues,
         lock: None,
         catalog: None,
@@ -86,7 +86,7 @@ impl Measurements for Masses {
 
 fn ev() -> Evaluator<'static> {
     Evaluator {
-        units: &StubUnits,
+        units: &Units,
         dynamic: &NoDynamicValues,
     }
 }
@@ -148,7 +148,7 @@ fn p01_schemas_type_scope_and_release_requirements() {
             kind: "part",
             properties: props,
         }];
-        validate_properties(&schema, &sites, &StubUnits, &ev(), release)
+        validate_properties(&schema, &sites, &Units, &ev(), release)
     };
     let r = run(&good, false);
     assert!(r.errors().next().is_none(), "{:?}", r);

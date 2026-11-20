@@ -31,9 +31,12 @@ pub(super) struct ConvergedVolumeQuality {
     pub(super) lifecycle_counts: (u64, u64),
 }
 
+#[derive(Clone, Copy)]
 pub(super) struct QualityExecution<'a> {
     pub(super) cancellation: &'a dyn MeshingCancellationSignal,
     pub(super) observer: &'a dyn super::quality_replay::VolumeQualityObserver,
+    /// The run's memory authority; `None` charges nothing (tests and diagnostic replay).
+    pub(super) memory: Option<&'a dyn runmat_geometry_core::GeometryEvaluationControl>,
 }
 #[cfg(test)]
 impl<'a> QualityExecution<'a> {
@@ -41,6 +44,7 @@ impl<'a> QualityExecution<'a> {
         Self {
             cancellation,
             observer: &super::quality_replay::NoopQualityObserver,
+            memory: None,
         }
     }
 }
@@ -57,6 +61,7 @@ pub(super) fn converge_volume_quality(
     let QualityExecution {
         cancellation,
         observer,
+        memory,
     } = execution;
     if quality.worst_refinement_tetrahedron.is_none()
         && quality.worst_optimization_tetrahedron.is_none()
@@ -88,6 +93,15 @@ pub(super) fn converge_volume_quality(
         quality_options: options.quality,
         fixed_node_identities,
     };
+    // The provenance stays live through convergence; the canonical input is live while the
+    // working state is built from it.
+    let mut charge = super::residency::ResidentCharge::new(memory);
+    let retained = super::residency::provenance_bytes(&provenance);
+    charge.hold(
+        retained
+            .saturating_add(super::residency::topology_bytes(&topology))
+            .saturating_add(super::residency::quality_bytes(&quality)),
+    )?;
     let mut state = WorkingState::new(
         topology,
         quality,
@@ -113,6 +127,7 @@ pub(super) fn converge_volume_quality(
     // when their neighborhood changed.
     let mut rejected = crate::cdt::volume_sliver::RejectedCompleteRelocations::default();
     loop {
+        charge.cover_working(&state, &quality_mutations, retained)?;
         let refinement = if state
             .quality()
             .worst(QualityObjective::Refinement)
@@ -128,6 +143,7 @@ pub(super) fn converge_volume_quality(
                 .map_err(refinement_error)?
             {
                 WorkingRefinementProgress::Accepted(inserted) => {
+                    runmat_meshing_core::work_count::add_volume_points(inserted.len() as u64);
                     remaining_refinement =
                         remaining_refinement.saturating_sub(inserted.len() as u64);
                     quality_mutations.extend(
@@ -174,6 +190,7 @@ pub(super) fn converge_volume_quality(
         match schedule.next(refinement, repair_step, converged) {
             Next::Continue => {}
             Next::Finish => {
+                charge.cover_handoff(&state, &quality_mutations, retained)?;
                 let (topology, quality) = state
                     .finish(options.sliver, cancellation)
                     .map_err(|failure| sliver_error(failure.into()))?;

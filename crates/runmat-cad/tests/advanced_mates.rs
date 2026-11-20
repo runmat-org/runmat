@@ -6,11 +6,11 @@ use runmat_cad::assembly::source::*;
 use runmat_cad::assembly::*;
 use runmat_cad::ids::{FilePath, PublishName};
 use runmat_cad::model::datum::Frame;
-use runmat_cad::units::StubUnits;
+use runmat_cad::units::Units;
 use runmat_cad::value::{NoDynamicValues, ValueExpr};
 
 fn run(src: &MemorySource) -> ResolvedAssembly {
-    let (units, dynamic) = (StubUnits, NoDynamicValues);
+    let (units, dynamic) = (Units, NoDynamicValues);
     let ctx = ResolveContext {
         source: src,
         units: &units,

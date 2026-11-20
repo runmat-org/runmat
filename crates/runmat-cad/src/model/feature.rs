@@ -45,7 +45,8 @@ pub enum BodyMode {
     /// A new body.
     #[default]
     New,
-    /// Union with `targets` (empty: every body at this point in the history).
+    /// Union with `targets` (empty: every body at this point in the history; the part's first
+    /// body feature, with no body to add to, makes the first body as `New` does).
     Add {
         #[serde(default)]
         targets: Vec<Reference>,
@@ -1045,6 +1046,42 @@ impl FeatureKind {
                             ptrs.push(radius);
                         }
                         G::Spline { points, .. } => points.iter().for_each(|p| pe(&mut ptrs, p)),
+                        G::Ellipse {
+                            center,
+                            major,
+                            minor,
+                            angle,
+                            start,
+                            end,
+                        } => {
+                            pe(&mut ptrs, center);
+                            ptrs.push(major);
+                            ptrs.push(minor);
+                            ptrs.extend(angle.iter());
+                            start
+                                .iter()
+                                .chain(end.iter())
+                                .for_each(|p| pe(&mut ptrs, p));
+                        }
+                        G::Text {
+                            at,
+                            height,
+                            angle,
+                            stroke,
+                            ..
+                        } => {
+                            pe(&mut ptrs, at);
+                            ptrs.push(height);
+                            ptrs.extend(angle.iter());
+                            ptrs.extend(stroke.iter());
+                        }
+                    }
+                    if let Some(crate::model::sketch::SketchProjection::OffsetOnSurface {
+                        distance,
+                        ..
+                    }) = &e.projected
+                    {
+                        ptrs.push(distance);
                     }
                 }
                 for c in &s.constraints {
@@ -1053,6 +1090,8 @@ impl FeatureKind {
                         | K::Length { value, .. }
                         | K::Radius { value, .. }
                         | K::Diameter { value, .. }
+                        | K::MajorRadius { value, .. }
+                        | K::MinorRadius { value, .. }
                         | K::Angle { value, .. } => ptrs.push(value),
                         K::Limit { min, max, .. } => {
                             ptrs.push(min);
@@ -1124,8 +1163,12 @@ impl FeatureKind {
             }
         }
         fn axis<'a>(out: &mut Vec<(String, &'a Reference)>, name: &str, a: &'a AxisRef) {
-            if let AxisRef::Edge { edge: r } | AxisRef::Face { face: r } = a {
-                out.push((name.to_owned(), r));
+            match a {
+                AxisRef::Edge { edge: r } | AxisRef::Face { face: r } => {
+                    out.push((name.to_owned(), r))
+                }
+                AxisRef::Normal { plane: p } => plane(out, name, p),
+                _ => {}
             }
         }
         fn point<'a>(out: &mut Vec<(String, &'a Reference)>, name: &str, p: &'a PointRef) {
@@ -1137,7 +1180,24 @@ impl FeatureKind {
             list(out, "targets", m.targets());
         }
         match self {
-            FeatureKind::Sketch(s) => plane(&mut out, "on", &s.plane),
+            FeatureKind::Sketch(s) => {
+                use crate::model::sketch::SketchProjection as P;
+                plane(&mut out, "on", &s.plane);
+                for e in &s.entities {
+                    let name = format!("entities.{}.from", e.id.0);
+                    match &e.projected {
+                        Some(P::Project { edge }) => out.push((name, edge)),
+                        Some(P::Silhouette { face, .. } | P::Intersection { face, .. }) => {
+                            out.push((name, face))
+                        }
+                        Some(P::OffsetOnSurface { edge, face, .. }) => {
+                            out.push((name.clone(), edge));
+                            out.push((format!("{name}.face"), face));
+                        }
+                        Some(P::Published { .. }) | None => {}
+                    }
+                }
+            }
             FeatureKind::Plane(p) => match p {
                 PlaneDef::Offset { base, .. } => plane(&mut out, "base", base),
                 PlaneDef::Angle { base, axis: a, .. } => {
@@ -1253,8 +1313,10 @@ impl FeatureKind {
             }
         }
         fn axis(out: &mut Vec<FeatureId>, a: &AxisRef) {
-            if let AxisRef::Datum { datum: d } = a {
-                datum(out, d);
+            match a {
+                AxisRef::Datum { datum: d } => datum(out, d),
+                AxisRef::Normal { plane: p } => plane(out, p),
+                _ => {}
             }
         }
         fn point(out: &mut Vec<FeatureId>, p: &PointRef) {

@@ -18,6 +18,7 @@ use super::{lower, values};
 
 pub(super) struct StudyLowering<'a> {
     pub bound: &'a BoundFeaProgram,
+    pub declarations: &'a BTreeMap<(LogicalSourcePath, FeaSymbolKey), CheckedFeaDeclaration>,
     pub models: &'a BTreeMap<(LogicalSourcePath, FeaSymbolKey), AuthoredModel>,
     pub geometries: &'a BTreeMap<(LogicalSourcePath, FeaSymbolKey), GeometryDefinition>,
     pub meshes: &'a BTreeMap<(LogicalSourcePath, FeaSymbolKey), MeshDefinition>,
@@ -101,10 +102,21 @@ pub(super) fn lower(
         runmat_geometry_core::GeometryDefinitionSource::CrossSection(section) => Some(section),
         _ => None,
     };
-    let outputs =
-        super::output::lower_outputs(context.bound, declaration, cross_section, diagnostics);
+    let outputs = super::output::lower_outputs(
+        context.bound,
+        &sequence.steps,
+        declaration,
+        cross_section,
+        diagnostics,
+    );
     reject_formulation_setting(declaration, diagnostics);
     let assessments = super::assessment::lower_assessments(context.bound, declaration, diagnostics);
+    let displays = super::display::lower_displays(
+        &super::display::AuthoredUnitSources::of(context.declarations, declaration, &model_closure),
+        &outputs,
+        &sequence.steps,
+        diagnostics,
+    );
     match runmat_analysis_core::attach_authored_outputs(&outputs, &mut sequence) {
         Ok(()) => {}
         Err(error) => lower::error(
@@ -141,6 +153,7 @@ pub(super) fn lower(
         inputs,
         outputs,
         assessments,
+        displays,
         sequence,
     };
     if let Err(error) = study.validate(model, geometry_definition) {

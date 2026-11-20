@@ -14,7 +14,8 @@ use crate::core::fea::FeaDocumentAnalysis;
 use crate::core::position::position_to_offset;
 use crate::core::project::ProjectContext;
 use crate::core::workspace::{
-    merge_workspace_symbols, workspace_symbols_from_documents, workspace_symbols_with_project,
+    merge_workspace_symbols, path_to_uri, uri_to_path, workspace_symbols_from_documents,
+    workspace_symbols_with_project,
 };
 use log::{debug, info};
 use runmat_config::runtime::{ConfigLoader, LanguageCompatMode};
@@ -24,16 +25,17 @@ use tower_lsp::jsonrpc::Result as RpcResult;
 use tower_lsp::lsp_types::notification::Notification;
 use tower_lsp::lsp_types::{
     CompletionOptions, CompletionParams, CompletionResponse, DidChangeConfigurationParams,
-    DidChangeTextDocumentParams, DidCloseTextDocumentParams, DidOpenTextDocumentParams,
-    DidSaveTextDocumentParams, DocumentFormattingParams, DocumentSymbolParams,
-    DocumentSymbolResponse, GotoDefinitionParams, GotoDefinitionResponse, Hover, HoverParams,
-    HoverProviderCapability, InitializeParams, InitializeResult, InitializedParams, Location,
-    MessageType, OneOf, PositionEncodingKind, ReferenceParams, SemanticTokensOptions,
-    SemanticTokensParams, SemanticTokensResult, SemanticTokensServerCapabilities,
-    ServerCapabilities, ServerInfo, SignatureHelp, SignatureHelpOptions, SignatureHelpParams,
-    TextDocumentContentChangeEvent, TextDocumentIdentifier, TextDocumentPositionParams,
-    TextDocumentSyncCapability, TextDocumentSyncKind, TextEdit, Url,
-    WorkspaceFoldersServerCapabilities, WorkspaceServerCapabilities, WorkspaceSymbolParams,
+    DidChangeTextDocumentParams, DidChangeWorkspaceFoldersParams, DidCloseTextDocumentParams,
+    DidOpenTextDocumentParams, DidSaveTextDocumentParams, DocumentFormattingParams,
+    DocumentSymbolParams, DocumentSymbolResponse, GotoDefinitionParams, GotoDefinitionResponse,
+    Hover, HoverParams, HoverProviderCapability, InitializeParams, InitializeResult,
+    InitializedParams, Location, MessageType, OneOf, PositionEncodingKind, ReferenceParams,
+    SemanticTokensOptions, SemanticTokensParams, SemanticTokensResult,
+    SemanticTokensServerCapabilities, ServerCapabilities, ServerInfo, SignatureHelp,
+    SignatureHelpOptions, SignatureHelpParams, TextDocumentContentChangeEvent,
+    TextDocumentIdentifier, TextDocumentPositionParams, TextDocumentSyncCapability,
+    TextDocumentSyncKind, TextEdit, Url, WorkspaceFoldersServerCapabilities,
+    WorkspaceServerCapabilities, WorkspaceSymbolParams,
 };
 use tower_lsp::{async_trait, Client, LanguageServer};
 
@@ -228,10 +230,7 @@ impl RunMatLanguageServer {
         let (text, source_name) = {
             let state = self.state.read().await;
             let doc = state.documents.get(uri)?;
-            let source_name = uri
-                .to_file_path()
-                .ok()
-                .and_then(|path| path.to_str().map(str::to_string));
+            let source_name = uri_to_path(uri).and_then(|path| path.to_str().map(str::to_string));
             (doc.text.clone(), source_name)
         };
         let analysis =
@@ -246,7 +245,7 @@ impl RunMatLanguageServer {
             let doc = state.documents.get_mut(uri)?;
             doc.analysis = Some(analysis.clone());
             if let Some(cache) = state.project_cache.as_mut() {
-                if let Ok(path) = uri.to_file_path() {
+                if let Some(path) = uri_to_path(uri) {
                     if cache.files.contains_key(&path) {
                         cache.files.insert(
                             path,
@@ -297,7 +296,7 @@ impl RunMatLanguageServer {
             let mut state = self.state.write().await;
             state.documents.remove(uri);
             if let Some(cache) = state.project_cache.as_mut() {
-                if let Ok(path) = uri.to_file_path() {
+                if let Some(path) = uri_to_path(uri) {
                     cache.files.remove(&path);
                 }
             }
@@ -376,7 +375,7 @@ impl RunMatLanguageServer {
             {
                 let mut updated = cache;
                 for (uri, text, analysis) in open_docs {
-                    if let Ok(path) = uri.to_file_path() {
+                    if let Some(path) = uri_to_path(&uri) {
                         updated.files.insert(
                             path,
                             CachedProjectDoc {
@@ -397,9 +396,7 @@ impl RunMatLanguageServer {
         let open_doc_by_path = open_docs
             .iter()
             .filter_map(|(uri, text, analysis)| {
-                uri.to_file_path()
-                    .ok()
-                    .map(|path| (path, (uri.clone(), text.clone(), analysis.clone())))
+                uri_to_path(uri).map(|path| (path, (uri.clone(), text.clone(), analysis.clone())))
             })
             .collect::<HashMap<_, _>>();
 
@@ -420,7 +417,7 @@ impl RunMatLanguageServer {
                     .ok()?;
             let source_name = source_file.to_str();
             let analysis = analyze_document_with_compat_and_source(&text, compat_mode, source_name);
-            let uri = Url::from_file_path(source_file).ok()?;
+            let uri = path_to_uri(source_file)?;
             files.insert(
                 source_file.clone(),
                 CachedProjectDoc {
@@ -455,9 +452,7 @@ fn symmetric_diff_symbols(
 }
 
 fn uri_file_path_string(uri: &Url) -> Option<String> {
-    uri.to_file_path()
-        .ok()
-        .and_then(|path| path.to_str().map(str::to_owned))
+    uri_to_path(uri).and_then(|path| path.to_str().map(str::to_owned))
 }
 
 fn symbol_name_under_cursor(
@@ -565,6 +560,9 @@ impl LanguageServer for RunMatLanguageServer {
                 }),
             ),
             document_formatting_provider: Some(OneOf::Left(true)),
+            code_action_provider: Some(tower_lsp::lsp_types::CodeActionProviderCapability::Simple(
+                true,
+            )),
             completion_provider: Some(CompletionOptions {
                 resolve_provider: Some(false),
                 trigger_characters: None,
@@ -826,6 +824,9 @@ impl LanguageServer for RunMatLanguageServer {
     ) -> RpcResult<Option<SignatureHelp>> {
         let uri = params.text_document_position_params.text_document.uri;
         let position = params.text_document_position_params.position;
+        if let Some(design) = self.design_of(&uri).await {
+            return Ok(design.signature_help(&position));
+        }
 
         let (text, analysis, fea_analysis) = {
             let state = self.state.read().await;
@@ -881,6 +882,25 @@ impl LanguageServer for RunMatLanguageServer {
 
         let tokens = semantic_tokens_full(&text, &analysis);
         Ok(tokens.map(SemanticTokensResult::Tokens))
+    }
+
+    /// Quick fixes: units of the expected kind for a wrong-unit value, in every language.
+    async fn code_action(
+        &self,
+        params: tower_lsp::lsp_types::CodeActionParams,
+    ) -> RpcResult<Option<tower_lsp::lsp_types::CodeActionResponse>> {
+        let uri = params.text_document.uri;
+        if let Some(design) = self.design_of(&uri).await {
+            return Ok(Some(design.code_actions(params.range)));
+        }
+        let (text, fea_analysis) = {
+            let state = self.state.read().await;
+            match state.documents.get(&uri) {
+                Some(doc) => (doc.text.clone(), doc.fea_analysis.clone()),
+                None => return Ok(None),
+            }
+        };
+        Ok(fea_analysis.map(|analysis| analysis.code_actions(&uri, &text, params.range)))
     }
 
     async fn formatting(
@@ -1006,6 +1026,17 @@ impl LanguageServer for RunMatLanguageServer {
         )))
     }
 
+    /// The client added or removed workspace folders: `.fea` studies resolve their relative
+    /// paths within the new roots, so every open study is checked again.
+    async fn did_change_workspace_folders(&self, params: DidChangeWorkspaceFoldersParams) {
+        {
+            let mut state = self.state.write().await;
+            apply_workspace_folder_change(&mut state.workspace_roots, &params);
+            state.project_cache = None;
+        }
+        fea::reanalyze_open_documents(self).await;
+    }
+
     async fn did_change_configuration(&self, params: DidChangeConfigurationParams) {
         let Some(mode) = parse_compat_mode(&params.settings) else {
             debug!("Ignoring configuration update without a valid language.compat value");
@@ -1058,13 +1089,13 @@ fn compat_mode_from_workspace(params: &InitializeParams) -> Option<LanguageCompa
 fn workspace_roots(params: &InitializeParams) -> Vec<PathBuf> {
     let mut roots = Vec::new();
     if let Some(root_uri) = &params.root_uri {
-        if let Ok(path) = root_uri.to_file_path() {
+        if let Some(path) = uri_to_path(root_uri) {
             roots.push(path);
         }
     }
     if let Some(folders) = &params.workspace_folders {
         for folder in folders {
-            if let Ok(path) = folder.uri.to_file_path() {
+            if let Some(path) = uri_to_path(&folder.uri) {
                 if !roots.contains(&path) {
                     roots.push(path);
                 }
@@ -1072,6 +1103,24 @@ fn workspace_roots(params: &InitializeParams) -> Vec<PathBuf> {
         }
     }
     roots
+}
+
+fn apply_workspace_folder_change(
+    roots: &mut Vec<PathBuf>,
+    params: &DidChangeWorkspaceFoldersParams,
+) {
+    for folder in &params.event.removed {
+        if let Some(path) = uri_to_path(&folder.uri) {
+            roots.retain(|root| root != &path);
+        }
+    }
+    for folder in &params.event.added {
+        if let Some(path) = uri_to_path(&folder.uri) {
+            if !roots.contains(&path) {
+                roots.push(path);
+            }
+        }
+    }
 }
 
 fn compat_label(mode: CompatMode) -> &'static str {

@@ -1,147 +1,16 @@
 use super::super::*;
-use runmat_analysis_fea::results::observation::SeriesReductionPayload;
 
 mod acoustic_frequency;
+mod field_inventory;
+pub(crate) use field_inventory::{
+    analysis_run_field_ids, collect_analysis_result_fields, visit_analysis_result_fields,
+    visit_analysis_result_fields_mut,
+};
+mod field_order;
+pub(crate) use field_order::{
+    assessed_source_field_ids, move_fields_first, result_field_inventory,
+};
 mod structural_frequency;
-
-macro_rules! visit_analysis_result_fields {
-    ($run_result:expr, $as_ref:ident, [$($borrow:tt)*], $visit:expr) => {{
-        for field in $($borrow)* $run_result.run.fields {
-            $visit(field);
-        }
-        for observation in $($borrow)* $run_result.run.observations {
-            $visit($($borrow)* observation.field);
-        }
-        for reduction in $($borrow)* $run_result.run.series_reductions {
-            match $($borrow)* reduction.payload {
-                SeriesReductionPayload::Values { field, .. } => $visit(field),
-                SeriesReductionPayload::Envelope {
-                    minimum, maximum, ..
-                } => {
-                    $visit(minimum);
-                    $visit(maximum);
-                }
-            }
-        }
-        if let Some(modal) = $run_result.modal_results.$as_ref() {
-            for field in $($borrow)* modal.mode_shapes {
-                $visit(field);
-            }
-        }
-        if let Some(buckling) = $run_result.buckling_results.$as_ref() {
-            for fields in [
-                $($borrow)* buckling.mode_shapes,
-                $($borrow)* buckling.rotation_mode_shapes,
-            ] {
-                for field in fields {
-                    $visit(field);
-                }
-            }
-        }
-        if let Some(thermal) = $run_result.thermal_results.$as_ref() {
-            for fields in [
-                $($borrow)* thermal.temperature_snapshots,
-                $($borrow)* thermal.temperature_gradient_snapshots,
-                $($borrow)* thermal.heat_flux_snapshots,
-                $($borrow)* thermal.energy_storage_rate_snapshots,
-                $($borrow)* thermal.interface_temperature_snapshots,
-            ] {
-                for field in fields {
-                    $visit(field);
-                }
-            }
-        }
-        if let Some(transient) = $run_result.transient_results.$as_ref() {
-            for fields in [
-                $($borrow)* transient.displacement_snapshots,
-                $($borrow)* transient.rotation_snapshots,
-                $($borrow)* transient.velocity_snapshots,
-                $($borrow)* transient.angular_velocity_snapshots,
-                $($borrow)* transient.acceleration_snapshots,
-                $($borrow)* transient.angular_acceleration_snapshots,
-                $($borrow)* transient.strain_snapshots,
-                $($borrow)* transient.stress_snapshots,
-                $($borrow)* transient.strain_energy_density_snapshots,
-                $($borrow)* transient.von_mises_snapshots,
-                $($borrow)* transient.kinetic_energy_snapshots,
-                $($borrow)* transient.strain_energy_snapshots,
-                $($borrow)* transient.residual_norm_snapshots,
-                $($borrow)* transient.reaction_force_snapshots,
-                $($borrow)* transient.reaction_moment_snapshots,
-                $($borrow)* transient.external_work_snapshots,
-                $($borrow)* transient.support_work_snapshots,
-                $($borrow)* transient.damping_dissipation_snapshots,
-                $($borrow)* transient.energy_balance_residual_snapshots,
-                $($borrow)* transient.relative_energy_balance_error_snapshots,
-                $($borrow)* transient.electro_thermal_temperature_snapshots,
-                $($borrow)* transient.electro_thermal_thermal_residual_snapshots,
-            ] {
-                for field in fields {
-                    $visit(field);
-                }
-            }
-        }
-        if let Some(nonlinear) = $run_result.nonlinear_results.$as_ref() {
-            for fields in [
-                $($borrow)* nonlinear.displacement_snapshots,
-                $($borrow)* nonlinear.rotation_snapshots,
-                $($borrow)* nonlinear.von_mises_snapshots,
-                $($borrow)* nonlinear.plastic_strain_snapshots,
-                $($borrow)* nonlinear.equivalent_plastic_strain_snapshots,
-                $($borrow)* nonlinear.contact_pressure_snapshots,
-                $($borrow)* nonlinear.contact_gap_snapshots,
-                $($borrow)* nonlinear.load_factor_snapshots,
-                $($borrow)* nonlinear.residual_norm_snapshots,
-                $($borrow)* nonlinear.thermo_mechanical_temperature_snapshots,
-                $($borrow)* nonlinear.thermo_mechanical_thermal_strain_snapshots,
-                $($borrow)* nonlinear.thermo_mechanical_thermal_stress_snapshots,
-                $($borrow)* nonlinear.thermo_mechanical_displacement_snapshots,
-                $($borrow)* nonlinear.thermo_mechanical_von_mises_snapshots,
-                $($borrow)* nonlinear.thermo_mechanical_coupling_residual_snapshots,
-                $($borrow)* nonlinear.electro_thermal_temperature_snapshots,
-                $($borrow)* nonlinear.electro_thermal_thermal_residual_snapshots,
-            ] {
-                for field in fields {
-                    $visit(field);
-                }
-            }
-        }
-    }};
-}
-
-pub(crate) fn visit_analysis_result_fields(
-    run_result: &AnalysisRunResult,
-    mut visit: impl FnMut(&AnalysisField),
-) {
-    visit_analysis_result_fields!(run_result, as_ref, [&], visit);
-}
-
-pub(crate) fn visit_analysis_result_fields_mut(
-    run_result: &mut AnalysisRunResult,
-    mut visit: impl FnMut(&mut AnalysisField),
-) {
-    visit_analysis_result_fields!(run_result, as_mut, [& mut], visit);
-}
-
-pub(crate) fn collect_analysis_result_fields(run_result: &AnalysisRunResult) -> Vec<AnalysisField> {
-    let mut fields = Vec::new();
-    let mut seen = HashSet::new();
-    visit_analysis_result_fields(run_result, |field| {
-        push_analysis_result_field(&mut fields, &mut seen, field);
-    });
-    fields
-}
-
-fn push_analysis_result_field(
-    fields: &mut Vec<AnalysisField>,
-    seen: &mut HashSet<String>,
-    field: &AnalysisField,
-) {
-    if !seen.insert(field.field_id.clone()) {
-        return;
-    }
-    fields.push(field.clone());
-}
 
 fn filter_analysis_fields_by_indices(
     fields: &[AnalysisField],
@@ -153,13 +22,6 @@ fn filter_analysis_fields_by_indices(
     indices
         .iter()
         .filter_map(|index| fields.get(*index).cloned())
-        .collect()
-}
-
-pub(crate) fn analysis_run_field_ids(run_result: &AnalysisRunResult) -> Vec<String> {
-    collect_analysis_result_fields(run_result)
-        .into_iter()
-        .map(|field| field.field_id)
         .collect()
 }
 
@@ -177,8 +39,10 @@ fn analysis_results_op_with_field_inventory(
     context: OperationContext,
     field_inventory: Option<Vec<AnalysisField>>,
 ) -> Result<OperationEnvelope<AnalysisResultsData>, OperationErrorEnvelope> {
+    // A stored run's inventory was put in result order when it was published, while the run
+    // still held its observations; metadata reads no longer do.
     let mut collected_fields =
-        field_inventory.unwrap_or_else(|| collect_analysis_result_fields(run_result));
+        field_inventory.unwrap_or_else(|| result_field_inventory(run_result));
 
     if !query.include_fields.is_empty() {
         let mut filtered = Vec::new();
@@ -358,78 +222,6 @@ fn analysis_results_op_with_field_inventory(
         )
     };
 
-    let thermo_coupling_enabled =
-        diagnostic_metric_bool(&run_result.run.diagnostics, "FEA_TM_COUPLING", "enabled");
-    let thermo_coupling_fingerprint = diagnostic_metric_u64(
-        &run_result.run.diagnostics,
-        "FEA_TM_COUPLING",
-        "coupling_fingerprint",
-    );
-    let thermo_constitutive_temperature_factor = diagnostic_metric(
-        &run_result.run.diagnostics,
-        "FEA_TM_COUPLING",
-        "constitutive_temperature_factor",
-    );
-    let thermo_effective_modulus_scale = diagnostic_metric(
-        &run_result.run.diagnostics,
-        "FEA_TM_COUPLING",
-        "effective_modulus_scale",
-    );
-    let thermo_constitutive_material_spread_ratio = diagnostic_metric(
-        &run_result.run.diagnostics,
-        "FEA_TM_COUPLING",
-        "constitutive_material_spread_ratio",
-    );
-    let thermo_assignment_heterogeneity_index = diagnostic_metric(
-        &run_result.run.diagnostics,
-        "FEA_TM_COUPLING",
-        "assignment_heterogeneity_index",
-    );
-    let thermo_region_delta_count = diagnostic_metric(
-        &run_result.run.diagnostics,
-        "FEA_TM_COUPLING",
-        "region_delta_count",
-    );
-    let thermo_spatial_coverage_ratio = diagnostic_metric(
-        &run_result.run.diagnostics,
-        "FEA_TM_COUPLING",
-        "spatial_coverage_ratio",
-    );
-    let thermo_nonlinear_severity = diagnostic_metric(
-        &run_result.run.diagnostics,
-        "FEA_TM_NONLINEAR",
-        "severity_peak",
-    )
-    .or_else(|| diagnostic_metric(&run_result.run.diagnostics, "FEA_TM_NONLINEAR", "severity"));
-    let electro_thermal_coupling_enabled =
-        diagnostic_metric_bool(&run_result.run.diagnostics, "FEA_ET_COUPLING", "enabled");
-    let electro_thermal_coupling_fingerprint = diagnostic_metric_u64(
-        &run_result.run.diagnostics,
-        "FEA_ET_COUPLING",
-        "coupling_fingerprint",
-    );
-    let electro_joule_heating_scale = diagnostic_metric(
-        &run_result.run.diagnostics,
-        "FEA_ET_COUPLING",
-        "joule_heating_scale",
-    );
-    let electro_conductivity_spread_ratio = diagnostic_metric(
-        &run_result.run.diagnostics,
-        "FEA_ET_COUPLING",
-        "conductivity_spread_ratio",
-    );
-    let electro_transient_severity = diagnostic_metric(
-        &run_result.run.diagnostics,
-        "FEA_ET_TRANSIENT",
-        "severity_peak",
-    )
-    .or_else(|| diagnostic_metric(&run_result.run.diagnostics, "FEA_ET_TRANSIENT", "severity"));
-    let electro_nonlinear_severity = diagnostic_metric(
-        &run_result.run.diagnostics,
-        "FEA_ET_NONLINEAR",
-        "severity_peak",
-    )
-    .or_else(|| diagnostic_metric(&run_result.run.diagnostics, "FEA_ET_NONLINEAR", "severity"));
     let plastic_nonlinear_severity = diagnostic_metric(
         &run_result.run.diagnostics,
         "FEA_PLASTIC_NONLINEAR",
@@ -748,21 +540,6 @@ fn analysis_results_op_with_field_inventory(
         nonlinear_iteration_spike_count,
         nonlinear_convergence_stall_count,
         nonlinear_backtrack_burst_count,
-        thermo_coupling_enabled,
-        thermo_coupling_fingerprint,
-        thermo_constitutive_temperature_factor,
-        thermo_effective_modulus_scale,
-        thermo_constitutive_material_spread_ratio,
-        thermo_assignment_heterogeneity_index,
-        thermo_region_delta_count,
-        thermo_spatial_coverage_ratio,
-        thermo_nonlinear_severity,
-        electro_thermal_coupling_enabled,
-        electro_thermal_coupling_fingerprint,
-        electro_joule_heating_scale,
-        electro_conductivity_spread_ratio,
-        electro_transient_severity,
-        electro_nonlinear_severity,
         plastic_nonlinear_severity,
         plastic_nonlinear_severity_mean,
         plastic_load_realization_ratio,
@@ -961,14 +738,6 @@ fn analysis_results_op_with_field_inventory(
                     .filter_map(|index| transient.dynamic_balance_snapshots.get(*index).cloned())
                     .collect();
                 let mut residual_norms = Vec::with_capacity(query.transient_snapshot_indices.len());
-                let electro_thermal_temperature_snapshots = filter_analysis_fields_by_indices(
-                    &transient.electro_thermal_temperature_snapshots,
-                    &query.transient_snapshot_indices,
-                );
-                let electro_thermal_thermal_residual_snapshots = filter_analysis_fields_by_indices(
-                    &transient.electro_thermal_thermal_residual_snapshots,
-                    &query.transient_snapshot_indices,
-                );
 
                 for &index in &query.transient_snapshot_indices {
                     let time_point = transient.time_points_s.get(index).copied().ok_or_else(|| {
@@ -1220,8 +989,6 @@ fn analysis_results_op_with_field_inventory(
                     energy_balance_residual_snapshots,
                     relative_energy_balance_error_snapshots,
                     dynamic_balance_snapshots,
-                    electro_thermal_temperature_snapshots,
-                    electro_thermal_thermal_residual_snapshots,
                     residual_norms,
                     integration_method: transient.integration_method,
                 })

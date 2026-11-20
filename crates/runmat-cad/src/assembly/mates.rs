@@ -15,7 +15,8 @@
 
 use crate::assembly::model::*;
 use crate::assembly::resolve::{
-    InstancePlan, MateOutcome, MateStatus, NodeId, NodeOrigin, PoseStatus, Resolver,
+    InstancePlan, MateBody, MateOutcome, MateRows, MateStatus, MateSystem, NodeId, NodeOrigin,
+    PoseStatus, Resolver,
 };
 use crate::diagnostics::{DiagCode, Repair, Severity, Site, Subject};
 use crate::metering::{Stopwatch, UsageEvent};
@@ -223,6 +224,9 @@ impl<'a, 'b> Resolver<'a, 'b> {
         let determined = self.solve_pass(node, &pass1_members, &first, &BTreeSet::new());
         self.apply_instances(&plans);
         if !second.is_empty() {
+            if let Some(kept) = self.mate_system.as_mut().filter(|_| node == 0) {
+                kept.held_pass = second.iter().map(|m| m.def.name.clone()).collect();
+            }
             let mut hold: BTreeSet<NodeId> = determined;
             hold.extend(instances.iter().copied());
             self.solve_pass(node, &members, &second, &hold);
@@ -319,6 +323,7 @@ impl<'a, 'b> Resolver<'a, 'b> {
             }
         }
         let mut owner_of: BTreeMap<rc::ConstraintId, usize> = BTreeMap::new();
+        let mut mate_ends: BTreeMap<usize, (rc::EntityId, rc::EntityId)> = BTreeMap::new();
         let mut touched: BTreeSet<NodeId> = BTreeSet::new();
         for (mi, m) in mates.iter().enumerate() {
             // Each side's body and its frame on that body.
@@ -381,6 +386,7 @@ impl<'a, 'b> Resolver<'a, 'b> {
                 .map(|(e, local)| sys.connector(*e, to_frame(local)).expect("a body"))
                 .collect();
             let (a, b) = (ends[0], ends[1]);
+            mate_ends.insert(mi, (a, b));
             let built = match problem {
                 Some(p) => Err(p),
                 None => self.mate_constraints(&m.def.kind, a, b, &m.env, aux),
@@ -432,7 +438,60 @@ impl<'a, 'b> Resolver<'a, 'b> {
             }
         }
         let watch = Stopwatch::start(self.meter);
-        let report = rc::solve(&sys, &self.req.solve_options);
+        // A drag pulls a point of its top-level component toward the target as a soft goal: a
+        // free handle body, ball-jointed to the grabbed point, is what the drag moves.
+        let drag = self.req.drag.as_ref().filter(|_| root == 0).and_then(|d| {
+            let m = *members.iter().find(|&&m| {
+                let n = &self.nodes[m as usize];
+                n.parent == Some(0) && n.segment.name == d.occurrence && !grounded.contains(&m)
+            })?;
+            let at = scope_pose[&m].apply(d.grab);
+            let grabbed = sys
+                .connector(body[&m], to_frame(&Transform::translation(d.grab)))
+                .ok()?;
+            let handle = sys.body(to_frame(&Transform::translation(at)));
+            let held = sys.connector(handle, rc::Frame::IDENTITY).ok()?;
+            let c = sys
+                .constrain(rc::Constraint::Mate(rc::Mate::Ball {
+                    a: grabbed,
+                    b: held,
+                }))
+                .ok()?;
+            internal.insert(c);
+            Some(rc::DragRequest::body_position(&sys, handle, d.to))
+        });
+        let report = match &drag {
+            Some(request) => rc::drag(&sys, request, &self.req.solve_options),
+            None => rc::solve(&sys, &self.req.solve_options),
+        };
+        if root == 0 && hold.is_empty() && self.req.keep_mate_system {
+            self.mate_system = Some(Box::new(MateSystem {
+                values: report.values.clone(),
+                bodies: members
+                    .iter()
+                    .map(|&m| MateBody {
+                        node: m,
+                        entity: body[&m],
+                        ground: grounded.contains(&m),
+                    })
+                    .collect(),
+                mates: mate_ends
+                    .iter()
+                    .map(|(&mi, &(a, b))| MateRows {
+                        name: mates[mi].def.name.clone(),
+                        constraints: owner_of
+                            .iter()
+                            .filter(|(_, &o)| o == mi)
+                            .map(|(&c, _)| c)
+                            .collect(),
+                        a,
+                        b,
+                    })
+                    .collect(),
+                held_pass: Vec::new(),
+                system: sys.clone(),
+            }));
+        }
         self.meter.record(&UsageEvent::MateSolve {
             assembly: self
                 .asm

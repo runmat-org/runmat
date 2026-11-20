@@ -130,6 +130,7 @@ pub(super) async fn run_driver<D: PublicationChainDriver>(
             model.sequence = AnalysisSequence::from_steps("isolated-thermal", vec![step]);
         }
         let compiled = CompiledAnalysisStudy {
+            displays: Vec::new(),
             module_path: "conformance/thermal.fea".into(),
             study_id: "thermal".into(),
             study_inputs: Vec::new(),
@@ -219,6 +220,9 @@ pub(super) async fn run_driver<D: PublicationChainDriver>(
             program: prepared.program.clone(),
             inputs: prepared.inputs.clone(),
             resource_plan: prepared.resource_plan.clone(),
+            sample_output_bytes: prepared.sample_output_bytes,
+            result_import_bytes: prepared.result_import_bytes,
+            result_typed_bytes: prepared.result_typed_bytes,
         };
         foreign.resource_plan.input.phase =
             runmat_analysis_fea::planning::resource::FeaResourcePhase::ThermalSolve(

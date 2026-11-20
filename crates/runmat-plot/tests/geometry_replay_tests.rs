@@ -36,14 +36,12 @@ fn geometry_replay_preserves_field_colors_edges_and_legend() {
         vertex_count: 3,
         triangle_count: 1,
         progress_percent: None,
-        scalar_legend: Some(GeometrySceneScalarLegend {
-            label: "Stress".into(),
-            unit: "Pa".into(),
-            minimum: 0.0,
-            maximum: 177.0,
-            limit: None,
-            note: None,
-        }),
+        scalar_legend: Some(GeometrySceneScalarLegend::of_data(
+            "Stress".into(),
+            "Pa".into(),
+            0.0,
+            177.0,
+        )),
         region_count: 0,
         mapped_region_count: 0,
         assembly_nodes: vec![],
@@ -95,6 +93,7 @@ fn malformed_saved_edges_are_rejected() {
             segment_regions: Vec::new(),
             instances: Vec::new(),
             lod_pixels: None,
+            owner_node_ids: Vec::new(),
         });
     assert!(saved.into_geometry_scene("invalid", 1).is_err());
 }

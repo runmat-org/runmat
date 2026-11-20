@@ -196,55 +196,48 @@ impl Field {
     }
 }
 
+/// A named quantity with the unit its field shows by default. The dimension comes from the unit
+/// authority (`runmat-types::physical`) by parsing that unit, so a field and the compiler agree.
 pub fn quantity_spec(name: &str) -> QuantitySpec {
-    let (dimension, unit) = match name {
-        "length" => (Dimension::LENGTH, "mm"),
-        "angle" => (Dimension::ANGLE, "deg"),
-        "mass" => (Dimension::MASS, "kg"),
-        "area" => (Dimension::AREA, "mm^2"),
-        "ratio" => (Dimension::DIMENSIONLESS, ""),
-        "scale" => (Dimension::DIMENSIONLESS, ""),
-        "time" => (time(), "s"),
-        "density" => (Dimension::MASS.divide(Dimension::LENGTH.power(3)), "kg/m^3"),
-        "force" => (force(), "N"),
-        "torque" => (force().multiply(Dimension::LENGTH), "N*m"),
-        "speed" => (Dimension::LENGTH.divide(time()), "mm/s"),
-        "angular_speed" => (Dimension::ANGLE.divide(time()), "rpm"),
-        "stiffness" => (force().divide(Dimension::LENGTH), "N/mm"),
-        "voltage" => (voltage(), "V"),
-        "power" => (voltage().multiply(current()), "W"),
-        "current" => (current(), "A"),
-        "resistance" => (voltage().divide(current()), "ohm"),
-        "frequency" => (Dimension::DIMENSIONLESS.divide(time()), "Hz"),
-        "temperature" => (temperature(), "degC"),
+    let unit = match name {
+        "length" => "mm",
+        // Surface roughness (Ra, Rz), in micrometres as finishes are written.
+        "roughness" => "um",
+        "angle" => "deg",
+        "mass" => "kg",
+        "area" => "mm^2",
+        "ratio" | "scale" => "",
+        "time" => "s",
+        "density" => "kg/m^3",
+        "force" => "N",
+        "torque" => "N*m",
+        "speed" => "mm/s",
+        "angular_speed" => "rpm",
+        "stiffness" => "N/mm",
+        // A spring and damper on a revolute mate (Basic motion), and a damper on a slider.
+        "rotational_stiffness" => "N*m/rad",
+        "torsional_damping" => "N*m*s/rad",
+        "damping" => "N*s/m",
+        "voltage" => "V",
+        "power" => "W",
+        "current" => "A",
+        "resistance" => "ohm",
+        "frequency" => "Hz",
+        "temperature" => "degC",
         other => panic!("no quantity named {other}"),
+    };
+    let dimension = if unit.is_empty() {
+        Dimension::DIMENSIONLESS
+    } else {
+        let definition = runmat_types::physical::parse_unit_expression(unit)
+            .unwrap_or_else(|e| panic!("`{unit}` for {name}: {e}"));
+        runmat_types::physical::DynamicDimension::from_unit(definition).into()
     };
     QuantitySpec {
         name: name.to_owned(),
         dimension,
         unit: unit.to_owned(),
     }
-}
-
-fn time() -> Dimension {
-    Dimension::TIME
-}
-fn current() -> Dimension {
-    Dimension::CURRENT
-}
-fn temperature() -> Dimension {
-    Dimension::TEMPERATURE
-}
-fn force() -> Dimension {
-    Dimension::MASS
-        .multiply(Dimension::LENGTH)
-        .divide(time().power(2))
-}
-fn voltage() -> Dimension {
-    force()
-        .multiply(Dimension::LENGTH)
-        .divide(time())
-        .divide(current())
 }
 
 /// A physical value with a default, in the quantity's display unit.

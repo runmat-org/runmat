@@ -99,7 +99,7 @@ pub use super::solve_policy::{
 const RESOURCE_PREFIX: &[u8] = b"runmat-fea-resource-plan/v1\0";
 pub const RESOURCE_PLAN_MAX_ENCODED_BYTES: u64 = 64 * 1024;
 const RESOURCE_LIMITS: CanonicalLimits = CanonicalLimits::new(64 * 1024, 8_192, 65_536, 64);
-pub const RESOURCE_ESTIMATION_MODEL_REVISION: u16 = 111;
+pub const RESOURCE_ESTIMATION_MODEL_REVISION: u16 = 113;
 
 #[derive(Clone, Copy, Debug, Default, Eq, Ord, PartialEq, PartialOrd, Serialize, Deserialize)]
 #[serde(transparent)]
@@ -367,6 +367,9 @@ pub struct ResourceBreakdown {
     pub workspace_bytes: ByteCount,
     pub preconditioner_bytes: ByteCount,
     pub factorization_bytes: ByteCount,
+    /// The solver's own copy of the operator it proves and solves, beside the assembled one,
+    /// and on the factor path the fill-reducing ordering's graph.
+    pub operator_preparation_bytes: ByteCount,
     pub constraint_bytes: ByteCount,
     pub phase_resident_bytes: ByteCount,
     pub phase_scratch_bytes: ByteCount,

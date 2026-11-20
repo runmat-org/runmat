@@ -25,9 +25,9 @@ pub struct DruImport {
 fn len_of(s: &str) -> Option<Coord> {
     let t = s.trim();
     let q = if t.chars().last().is_some_and(|c| c.is_ascii_digit()) {
-        runmat_rules::parse_quantity(&format!("{t}mm"), &runmat_rules::BuiltinUnits)
+        runmat_rules::parse_quantity(&format!("{t}mm"), &crate::units::RegistryUnits)
     } else {
-        runmat_rules::parse_quantity(t, &runmat_rules::BuiltinUnits)
+        runmat_rules::parse_quantity(t, &crate::units::RegistryUnits)
     }
     .ok()?;
     Some((q.value * 1e9).round() as Coord)

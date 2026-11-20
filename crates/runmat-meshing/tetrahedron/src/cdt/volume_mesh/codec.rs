@@ -203,13 +203,15 @@ fn decode_with_limits(
             .into_mesh(options, cancellation, expansion, policy.allocations)
             .map_err(invalid_mesh)?
     };
-    validate_delaunay_volume_mesh(
+    // An admitted decode charges validation's scratch to the same authority as the mesh.
+    super::validation::validate_charged(
         topology,
         surface,
         metric_request,
         &mesh,
         options,
         cancellation,
+        policy.allocations,
     )
     .map_err(invalid_mesh)?;
     Ok(mesh)
@@ -270,7 +272,8 @@ fn invalid_mesh(error: super::DelaunayVolumeMeshError) -> DelaunayVolumeMeshCode
             super::DelaunayVolumeMeshErrorKind::Cancelled => {
                 DelaunayVolumeMeshCodecErrorKind::Cancelled
             }
-            super::DelaunayVolumeMeshErrorKind::ResourceLimit => {
+            super::DelaunayVolumeMeshErrorKind::ResourceLimit
+            | super::DelaunayVolumeMeshErrorKind::MemoryBudgetExceeded { .. } => {
                 DelaunayVolumeMeshCodecErrorKind::ResourceLimit
             }
             _ => DelaunayVolumeMeshCodecErrorKind::InvalidMesh,

@@ -188,16 +188,7 @@ impl FeaDocumentAnalysis {
     pub(super) fn logical_uri(&self, path: &LogicalSourcePath) -> Option<Url> {
         let physical_path =
             runmat_runtime::analysis::physical_source_path(&self.source_root, path).ok()?;
-        #[cfg(not(target_arch = "wasm32"))]
-        {
-            Url::from_file_path(physical_path).ok()
-        }
-        #[cfg(target_arch = "wasm32")]
-        {
-            let mut uri = Url::parse("file:///").ok()?;
-            uri.set_path(physical_path.to_str()?);
-            Some(uri)
-        }
+        crate::core::workspace::path_to_uri(&physical_path)
     }
 
     fn logical_span(&self, path: &LogicalSourcePath, span: Span) -> Option<Range> {

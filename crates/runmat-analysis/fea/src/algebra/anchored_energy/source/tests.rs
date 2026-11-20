@@ -153,7 +153,7 @@ fn retained_source_cannot_be_hidden_inside_the_original_operator_workspace() {
     let EnergyVerdict::Verified(proof) = captured.prove(&matrix, &prescribed, 1.).unwrap() else {
         panic!("the complete grounded source must certify its assembled operator")
     };
-    assert!(proof.resident_bytes() > envelope.energy_resident_limit());
+    assert!(proof.resident_bytes() > envelope.energy_entry_resident_bytes());
     assert!(proof.resident_bytes() <= demand.resident_bytes());
     assert!(proof.scalar_operations() <= demand.scalar_operations());
     assert!(proof.lower_bound() > 0. && proof.lower_bound() <= 100.);

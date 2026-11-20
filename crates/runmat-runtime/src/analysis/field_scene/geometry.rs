@@ -1,4 +1,8 @@
 //! Build disposable scene geometry from exact persisted topology and paged fields.
+use super::bodies::{
+    body_groups, triangle_corner_samples, triangle_samples, CONTEXT_COLOR, UNCOLORED,
+};
+use super::regions::RegionDraw;
 use super::*;
 #[cfg(test)]
 pub(super) fn scene_from_topology(
@@ -32,21 +36,19 @@ pub(super) fn scene_from_topology_with_stats(
     show_undeformed_outline: bool,
     stats: Option<SceneStats>,
 ) -> Result<(GeometryScene, f64), String> {
+    let stats = stats.unwrap_or_else(|| SceneStats {
+        element_count: topology.volume_element_count,
+        ..SceneStats::default()
+    });
     let deformation_scale = match (shape_mode, deformation) {
         ("true", Some(_)) => 1.0,
-        ("exaggerated", Some(field)) => {
-            let automatic_scale = match stats.as_ref().and_then(|stats| stats.automatic_scale) {
-                Some(scale) => scale,
-                None => automatic_deformation_scale(topology, field)?,
-            };
-            automatic_scale * exaggeration
-        }
+        ("exaggerated", Some(field)) => match stats.exaggerated_scale(exaggeration) {
+            Some(scale) => scale,
+            None => automatic_deformation_scale(topology, field)? * exaggeration,
+        },
         _ => 0.0,
     };
-    let element_count = stats
-        .as_ref()
-        .map(|stats| stats.element_count)
-        .unwrap_or(topology.volume_element_count);
+    let element_count = stats.element_count;
     let element_stride = if let Some(field) =
         field.filter(|field| field.location == AnalysisFieldLocation::Element)
     {
@@ -61,35 +63,41 @@ pub(super) fn scene_from_topology_with_stats(
     } else {
         1
     };
-    let mut minimum = stats
-        .as_ref()
-        .and_then(|stats| stats.scalar_range)
-        .map_or(f64::INFINITY, |range| range.0);
+    // Each triangle is drawn as its body's region asks; only field-coloured triangles count
+    // toward the extremes.
+    let draws: Vec<Vec<RegionDraw>> = topology
+        .meshes
+        .iter()
+        .map(|mesh| {
+            (0..mesh.triangles.len())
+                .map(|triangle| {
+                    stats.regions.draw_of_element(
+                        mesh.triangle_volume_element_indices
+                            .get(triangle)
+                            .copied()
+                            .flatten(),
+                    )
+                })
+                .collect()
+        })
+        .collect();
+    let mut minimum = stats.scale.extremes.map_or(f64::INFINITY, |range| range.0);
     let mut maximum = stats
-        .as_ref()
-        .and_then(|stats| stats.scalar_range)
+        .scale
+        .extremes
         .map_or(f64::NEG_INFINITY, |range| range.1);
     let mut sample_count = 0_usize;
     if let Some(field) = field {
-        for mesh in &topology.meshes {
-            match field.location {
-                AnalysisFieldLocation::Node => {
-                    for index in mesh.vertex_volume_node_indices.iter().flatten() {
-                        let sample = field_magnitude(field, *index, 1)?;
-                        minimum = minimum.min(sample);
-                        maximum = maximum.max(sample);
-                        sample_count += 1;
-                    }
+        for (mesh, draws) in topology.meshes.iter().zip(&draws) {
+            for (index, triangle) in mesh.triangles.iter().enumerate() {
+                if draws[index] != RegionDraw::Field {
+                    continue;
                 }
-                AnalysisFieldLocation::Element => {
-                    for index in mesh.triangle_volume_element_indices.iter().flatten() {
-                        let sample = field_magnitude(field, *index, element_stride)?;
-                        minimum = minimum.min(sample);
-                        maximum = maximum.max(sample);
-                        sample_count += 1;
-                    }
+                for sample in triangle_samples(mesh, field, index, triangle, element_stride)? {
+                    minimum = minimum.min(sample);
+                    maximum = maximum.max(sample);
+                    sample_count += 1;
                 }
-                _ => unreachable!(),
             }
         }
         if sample_count == 0 {
@@ -99,84 +107,73 @@ pub(super) fn scene_from_topology_with_stats(
             ));
         }
     }
+    // A study's fixed range colours the field and clips; otherwise the extremes do.
+    let fixed = stats.scale.fixed;
+    let (extremes, (minimum, maximum)) = ((minimum, maximum), fixed.unwrap_or((minimum, maximum)));
+    let bodies = stats.regions.bodies.as_deref();
     let mut chunks = Vec::new();
     let mut vertex_count = 0usize;
     let mut triangle_count = 0usize;
-    for mesh in &topology.meshes {
-        for (batch_index, triangles) in mesh.triangles.chunks(MAX_TRIANGLES_PER_TILE).enumerate() {
-            let mut vertices = Vec::with_capacity(triangles.len() * 3);
-            for (local_index, triangle) in triangles.iter().enumerate() {
-                let triangle_index = batch_index * MAX_TRIANGLES_PER_TILE + local_index;
-                let positions = triangle.map(|index| mesh.vertices.get(index as usize));
-                let [Some(a), Some(b), Some(c)] = positions else {
-                    return Err(format!(
-                        "render topology '{}' contains an invalid triangle",
-                        mesh.mesh_id
-                    ));
-                };
-                let positions = [a, b, c].map(|position| cast_position(*position));
-                let deformed = [0, 1, 2].map(|corner| {
-                    let node = mesh
-                        .vertex_volume_node_indices
-                        .get(triangle[corner] as usize)
-                        .copied()
-                        .flatten();
-                    deform_position(positions[corner], node, deformation, deformation_scale)
-                });
-                let [first, second, third] = deformed;
-                let deformed = [first?, second?, third?];
-                let normal = (Vec3::from_array(deformed[1]) - Vec3::from_array(deformed[0]))
-                    .cross(Vec3::from_array(deformed[2]) - Vec3::from_array(deformed[0]))
-                    .normalize_or_zero()
-                    .to_array();
-                for corner in 0..3 {
-                    let sample = if let Some(field) = field {
-                        let entity = match field.location {
-                            AnalysisFieldLocation::Node => mesh
-                                .vertex_volume_node_indices
-                                .get(triangle[corner] as usize)
-                                .copied()
-                                .flatten(),
-                            AnalysisFieldLocation::Element => mesh
-                                .triangle_volume_element_indices
-                                .get(triangle_index)
-                                .copied()
-                                .flatten(),
-                            _ => None,
-                        };
-                        entity
-                            .map(|index| field_magnitude(field, index, element_stride))
-                            .transpose()?
-                    } else {
-                        None
+    for (mesh, draws) in topology.meshes.iter().zip(&draws) {
+        for group in body_groups(mesh, draws, bodies) {
+            for (batch_index, triangles) in
+                group.triangles.chunks(MAX_TRIANGLES_PER_TILE).enumerate()
+            {
+                let mut vertices = Vec::with_capacity(triangles.len() * 3);
+                for &triangle_index in triangles {
+                    let triangle = &mesh.triangles[triangle_index];
+                    let positions = triangle.map(|index| mesh.vertices.get(index as usize));
+                    let [Some(a), Some(b), Some(c)] = positions else {
+                        return Err(format!(
+                            "render topology '{}' contains an invalid triangle",
+                            mesh.mesh_id
+                        ));
                     };
-                    let color = sample
-                        .map(|value| scalar_color(value, minimum, maximum))
-                        .unwrap_or([0.66, 0.73, 0.83, 1.0]);
-                    vertices.push(Vertex {
-                        position: deformed[corner],
-                        color,
-                        normal,
-                        tex_coords: [0.0, 0.0],
+                    let positions = [a, b, c].map(|position| cast_position(*position));
+                    let deformed = [0, 1, 2].map(|corner| {
+                        let node = mesh
+                            .vertex_volume_node_indices
+                            .get(triangle[corner] as usize)
+                            .copied()
+                            .flatten();
+                        deform_position(positions[corner], node, deformation, deformation_scale)
                     });
+                    let [first, second, third] = deformed;
+                    let deformed = [first?, second?, third?];
+                    let normal = (Vec3::from_array(deformed[1]) - Vec3::from_array(deformed[0]))
+                        .cross(Vec3::from_array(deformed[2]) - Vec3::from_array(deformed[0]))
+                        .normalize_or_zero()
+                        .to_array();
+                    let samples = match field.filter(|_| group.draw == RegionDraw::Field) {
+                        Some(field) => Some(triangle_corner_samples(
+                            mesh,
+                            field,
+                            triangle_index,
+                            triangle,
+                            element_stride,
+                        )?),
+                        None => None,
+                    };
+                    for corner in 0..3 {
+                        let color = match (group.draw, samples) {
+                            (RegionDraw::Context, _) => CONTEXT_COLOR,
+                            (_, Some(samples)) => samples[corner]
+                                .map(|value| scalar_color(value, minimum, maximum))
+                                .unwrap_or(UNCOLORED),
+                            (_, None) => UNCOLORED,
+                        };
+                        vertices.push(Vertex {
+                            position: deformed[corner],
+                            color,
+                            normal,
+                            tex_coords: [0.0, 0.0],
+                        });
+                    }
+                    triangle_count += 1;
                 }
-                triangle_count += 1;
+                vertex_count += vertices.len();
+                chunks.push(group.chunk(mesh, batch_index, vertices));
             }
-            vertex_count += vertices.len();
-            let indices = (0..vertices.len() as u32).collect();
-            let material = Material {
-                albedo: Vec4::ONE,
-                double_sided: true,
-                ..Material::default()
-            };
-            let mut chunk = GeometrySceneChunk::indexed_triangles(
-                format!("{}:surface:{batch_index}", mesh.mesh_id),
-                vertices,
-                indices,
-                material,
-            );
-            chunk.mesh_id = Some(mesh.mesh_id.clone());
-            chunks.push(chunk);
         }
     }
     if chunks.is_empty() {
@@ -203,19 +200,23 @@ pub(super) fn scene_from_topology_with_stats(
         vertex_count,
         triangle_count,
         progress_percent: None,
-        scalar_legend: field.map(|field| GeometrySceneScalarLegend {
-            label: if element_stride > 1 {
-                format!("{} mean magnitude", field.label)
-            } else if field.components > 1 {
-                format!("{} magnitude", field.label)
-            } else {
-                field.label.clone()
-            },
-            unit: field.unit.clone(),
-            minimum,
-            maximum,
-            limit: None,
-            note: None,
+        scalar_legend: field.map(|field| {
+            let mut legend = GeometrySceneScalarLegend::of_data(
+                if element_stride > 1 {
+                    format!("{} mean magnitude", field.label)
+                } else if field.components > 1 {
+                    format!("{} magnitude", field.label)
+                } else {
+                    field.label.clone()
+                },
+                field.unit.clone(),
+                minimum,
+                maximum,
+            );
+            if fixed.is_some() {
+                super::legend::mark_fixed_range(&mut legend, extremes);
+            }
+            legend
         }),
         region_count: 0,
         mapped_region_count: 0,
@@ -223,6 +224,9 @@ pub(super) fn scene_from_topology_with_stats(
         regions: Vec::new(),
         warnings: Vec::new(),
     });
+    if let Some(overlay) = scene.overlay.as_mut() {
+        super::bodies::summarize(overlay, &scene.chunks, &stats.regions);
+    }
     Ok((scene, deformation_scale))
 }
 
@@ -329,7 +333,7 @@ pub(super) fn automatic_deformation_scale(
     Ok(super::deformation::automatic_scale(
         diagonal,
         max_displacement,
-        field.normalized,
+        field.mode.is_some(),
     ))
 }
 

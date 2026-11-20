@@ -287,3 +287,38 @@ fn inconsistent_inputs_outputs_and_overflow_fail_closed() {
     assert!(add(u64::MAX, 1).is_err());
     assert!(mul(u64::MAX, 2).is_err());
 }
+
+/// The planned reservation covers the solve's measured peak heap with a bounded margin. The
+/// allocation counter is per thread, and the plan runs serially, so it sees the whole solve.
+#[test]
+fn reservation_covers_the_measured_solve_within_its_band() {
+    use crate::topology::measure_test_allocations as measured;
+    for (order, cells) in [(ElementOrder::Tet4, 12), (ElementOrder::Tet10, 6)] {
+        let workload = workload(StaticElectricalEquation::Electrostatics);
+        let mesh = mesh(order, cells);
+        let plan = build_electrical_static_resource_plan(&workload, &mesh, facts(&workload, &mesh))
+            .unwrap();
+        let FeaResourceDemand::ElectricalStatic(demand) = &plan.input.demand else {
+            panic!("wrong physics demand")
+        };
+        let (result, _, peak) = measured(|| workload.execute_with_resource_plan(&mesh, &plan));
+        result.unwrap();
+        let reserved = demand.numerical_reservation_bytes.0;
+        eprintln!(
+            "electrostatics {order:?} {cells}: nodes {} elements {} measured peak {peak} B, reserved {reserved} B, ratio {:.2}",
+            mesh.topology.nodes.len(),
+            mesh.topology.volume_elements.len(),
+            reserved as f64 / peak as f64
+        );
+        assert!(
+            peak as u64 <= reserved,
+            "{order:?}: peak {peak} above {reserved}"
+        );
+        // Measured 2026-11-15: 4.6x (Tet4) and 3.6x (Tet10); the reservation was 15x and 20x
+        // while the local-energy proof charged a dense-graph bound and 512 B per element pair.
+        assert!(
+            reserved <= 6 * peak as u64,
+            "{order:?}: reservation {reserved} exceeds six times the measured peak {peak}"
+        );
+    }
+}

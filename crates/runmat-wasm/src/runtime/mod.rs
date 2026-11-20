@@ -9,6 +9,8 @@ pub(crate) mod execution;
 pub(crate) mod filesystem;
 #[cfg(not(feature = "graphics-replay"))]
 pub(crate) mod gpu;
+#[cfg(not(feature = "graphics-replay"))]
+pub(crate) mod heap;
 // Shared with the full host; playback does not install execution stream callbacks.
 #[cfg_attr(feature = "graphics-replay", allow(dead_code))]
 pub(crate) mod logging;

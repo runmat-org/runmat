@@ -75,7 +75,7 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y cmake libhdf5-dev libopenblas-dev liblapack-dev libzmq3-dev pkg-config libssl-dev
           npm ci --prefix bindings/ts
-      - name: Build embedded-AOT native product without OCCT
+      - name: Build native CLI and separate AOT runtime without OCCT
         shell: bash
         run: |
           set -euo pipefail
@@ -88,12 +88,14 @@ jobs:
           root=artifacts/builtin-example-closure/products/native
           source_revision="$(git rev-parse HEAD)"
           node scripts/runtime/stage-builtin-example-product.mjs \
-            --binary target/release/runmat --destination "$root/product" --executable-name runmat
+            --binary target/release/runmat --destination "$root/product" --executable-name runmat \
+            --aot-runtime-pack target/release/runmat-aot-runtime.zip
           node scripts/runtime/verify-builtin-examples.mjs artifacts \
-            --product native-cli --profile embedded-aot --source-revision "$source_revision" \
-            --root "$root/product" --entrypoint runmat-binary=runmat --output "$root/artifacts.json"
+            --product native-cli --profile distributed-aot --source-revision "$source_revision" \
+            --root "$root/product" --entrypoint runmat-binary=runmat \
+            --entrypoint compile-runtime-pack=runmat-aot-runtime.zip --output "$root/artifacts.json"
           node scripts/distribution/accept-native-product.mjs "$root/artifacts.json" "$root/acceptance.json"
-          node -e 'const fs=require("node:fs"); const root=process.argv[1]; const receipt=JSON.parse(fs.readFileSync(root+"/acceptance.json")); fs.writeFileSync(root+"/embedded-aot.product-probe.json",JSON.stringify(receipt.results.at(-1),null,2)+"\n");' "$root"
+          node -e 'const fs=require("node:fs"); const root=process.argv[1]; const receipt=JSON.parse(fs.readFileSync(root+"/acceptance.json")); fs.writeFileSync(root+"/distributed-aot.product-probe.json",JSON.stringify(receipt.results.at(-1),null,2)+"\n");' "$root"
       - name: Retain native probe diagnostics
         if: always()
         uses: actions/upload-artifact@v4
@@ -226,7 +228,7 @@ jobs:
             --results-dir artifacts/builtin-example-closure/result-artifacts \
             --artifact-manifest artifacts/builtin-example-closure/products/native/artifacts.json \
             --artifact-manifest artifacts/builtin-example-closure/products/browser/artifacts.json \
-            --product-probe artifacts/builtin-example-closure/products/native/embedded-aot.product-probe.json \
+            --product-probe artifacts/builtin-example-closure/products/native/distributed-aot.product-probe.json \
             --report-dir artifacts/builtin-example-closure/report \
             --output artifacts/builtin-example-closure/reconciliation.json
       - uses: actions/upload-artifact@v4

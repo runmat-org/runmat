@@ -2,7 +2,7 @@
 use crate::{
     analysis_task_pool::{
         execute_governed_analysis_task, AnalysisTaskBatchPolicy, AnalysisTaskPool,
-        LocalAnalysisTaskPool, PreparedAnalysisTask,
+        AnalysisWorkflowClock, LocalAnalysisTaskPool, PreparedAnalysisTask,
     },
     NativeExecutionError, NativeExecutionResult, NativeProgramSession,
 };
@@ -43,7 +43,7 @@ pub(crate) async fn execute_with_pool(
     task: &PreparedFluidTransientTask,
     policy: FluidTransientBlockExecutionPolicy,
 ) -> NativeExecutionResult<CompletedFluidTransientBlockExecution> {
-    let started = std::time::Instant::now();
+    let workflow_clock = AnalysisWorkflowClock::start(pool);
     let scope = pool.scope_id();
     let placement = pool.pool_id();
     let (executed, accounting) = execute_governed_analysis_task(
@@ -80,8 +80,7 @@ pub(crate) async fn execute_with_pool(
     .map_err(protocol)?;
     let original = import_fluid_transient_checkpoint(pool, executed.response.clone(), task)
         .map_err(protocol)?;
-    let wall_millis = u64::try_from(started.elapsed().as_millis())
-        .map_err(|_| protocol("fluid block observed wall interval overflowed"))?;
+    let wall_millis = workflow_clock.wall_millis(pool)?;
     let usage = PlannedResourceUsageGraph::from_execution(
         &task.resource_plan,
         &executed.evidence,

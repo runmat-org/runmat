@@ -7,7 +7,7 @@ use runmat_cad::model::*;
 use runmat_cad::refs::*;
 use runmat_cad::regen::*;
 use runmat_cad::sketch_solver::ExplicitSketchSolver;
-use runmat_cad::units::StubUnits;
+use runmat_cad::units::Units;
 use runmat_cad::value::{InputDecl, NoDynamicValues, ValueExpr};
 
 pub fn mm(v: f64) -> ValueExpr {
@@ -42,6 +42,7 @@ pub fn polygon(
                     end: PointExpr::Coords { x: x1, y: y1 },
                 },
                 construction: false,
+                projected: None,
             }
         })
         .collect();
@@ -194,7 +195,7 @@ pub type TestKernel = crate::kernel_under_test::KernelUnderTest;
 pub struct Env {
     pub kernel: TestKernel,
     pub solver: ExplicitSketchSolver,
-    pub units: StubUnits,
+    pub units: Units,
     pub dynamic: NoDynamicValues,
     pub lock: Option<LockSection>,
     pub catalog: Option<MemoryCatalog>,
@@ -206,7 +207,7 @@ impl Env {
         Env {
             kernel: TestKernel::new(),
             solver: ExplicitSketchSolver,
-            units: StubUnits,
+            units: Units,
             dynamic: NoDynamicValues,
             lock: None,
             catalog: None,
@@ -217,6 +218,7 @@ impl Env {
     pub fn ctx(&self) -> RegenContext<'_> {
         RegenContext {
             kernel: &self.kernel,
+            tessellator: Some(&self.kernel),
             solver: &self.solver,
             units: &self.units,
             dynamic: &self.dynamic,

@@ -172,6 +172,11 @@ pub struct RuleRow {
     pub values: BTreeMap<String, String>,
     /// `io.circuit:120..168`.
     pub source: String,
+    /// The Rules panel's values for this rule (`kind`, `applies`, `value`, `priority`,
+    /// `name`), so editing it starts from what it writes; absent for a rule the panel doesn't
+    /// write (a match group, the limits).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub form: Option<BTreeMap<String, String>>,
 }
 
 /// A placed pad, with its rule-driven clearance and where it came from.
@@ -232,6 +237,10 @@ pub struct FootprintRow {
     pub rotation: f64,
     pub side: String,
     pub locked: bool,
+    /// `x`, `y` and `rotation` as the file writes them in another unit (`3.5 in`), for
+    /// Properties to show as written.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub written: BTreeMap<String, String>,
     /// Courtyard rings, closed, in board coordinates.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub courtyard: Vec<Vec<crate::display::Xy>>,
@@ -549,6 +558,7 @@ pub fn add_board_reusing(
                 .map(|(k, v)| (k.clone(), rule_value_display(v)))
                 .collect(),
             source: r.source.to_string(),
+            form: rule_form(r),
         }
     }));
     // Designators for parts whose package doesn't name them, placed once for the whole board
@@ -576,6 +586,7 @@ pub fn add_board_reusing(
             }
             .to_owned(),
             locked: f.locked,
+            written: f.written.current(f),
         }
     };
     let footprints = board
@@ -702,6 +713,41 @@ pub fn add_board_reusing(
     });
 }
 
+/// The Rules panel's values for `r` when the panel writes rules like it: one kind's property
+/// (a via's drill with its diameter), against everything when it is a clearance.
+fn rule_form(r: &crate::board_rules::RuleSpec) -> Option<BTreeMap<String, String>> {
+    use crate::board_rules::{props, RULE_KINDS};
+    let decl = |p: &str| r.decls.iter().find(|(k, _)| k == p).map(|(_, v)| v);
+    let (kind, value) = match r.decls.as_slice() {
+        [(p, v)] => {
+            let kind = RULE_KINDS.iter().find(|(_, q)| q == p)?.0;
+            let text = match (kind, v) {
+                ("impedance", RuleValue::Num(z)) => format!("{} ohm", trim(*z)),
+                _ => rule_value_display(v),
+            };
+            (kind, text)
+        }
+        [_, _] => match (decl(props::VIA_DRILL), decl(props::VIA_DIAMETER)) {
+            (Some(RuleValue::Len(d)), Some(RuleValue::Len(o))) => {
+                ("via", format!("{} mm/{} mm", trim(mm(*d)), trim(mm(*o))))
+            }
+            _ => return None,
+        },
+        _ => return None,
+    };
+    let pair = crate::board_rules::is_pair_property(RULE_KINDS.iter().find(|(k, _)| *k == kind)?.1);
+    if pair != r.other.is_some() || r.other.as_deref().is_some_and(|o| o != "*") {
+        return None;
+    }
+    Some(BTreeMap::from([
+        ("kind".to_owned(), kind.to_owned()),
+        ("applies".to_owned(), r.selector.clone()),
+        ("value".to_owned(), value),
+        ("priority".to_owned(), r.priority.to_string()),
+        ("name".to_owned(), r.id.clone()),
+    ]))
+}
+
 /// The board's `limits` as the first rule: the values every other rule falls back to, at
 /// their text in the layout, or RunMat's default rule set when the layout writes none.
 fn limits_row(l: &crate::layout::FabLimits) -> RuleRow {
@@ -745,6 +791,7 @@ fn limits_row(l: &crate::layout::FabLimits) -> RuleRow {
             })
             .collect(),
         source,
+        form: None,
     }
 }
 

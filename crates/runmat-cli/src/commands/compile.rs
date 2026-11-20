@@ -16,6 +16,7 @@ pub struct CompileRequest {
     pub file: PathBuf,
     pub output: Option<PathBuf>,
     pub optimization: AotOptLevel,
+    pub install_aot_runtime: bool,
     pub policy: AotPolicy,
     pub explain_link: bool,
     pub link_plan_json: Option<PathBuf>,
@@ -36,6 +37,7 @@ pub async fn execute(
         file,
         output,
         optimization,
+        install_aot_runtime,
         policy,
         explain_link,
         link_plan_json,
@@ -62,11 +64,7 @@ pub async fn execute(
     let runtime = if selected_paths.is_some() {
         None
     } else {
-        Some(runmat_aot::archive::embedded_runtime_archive()?.ok_or_else(|| {
-            anyhow::anyhow!(
-                "this RunMat build does not contain a native compile runtime; rebuild it with scripts/build-runmat-with-aot-runtime.sh (or the Windows PowerShell equivalent)"
-            )
-        })?)
+        Some(super::aot::resolve(install_aot_runtime, cli.offline || cli.frozen).await?)
     };
     let policy = match policy {
         AotPolicy::NativeSpecialized => runmat_aot::compile::CompilationPolicy::NativeSpecialized,
@@ -194,7 +192,7 @@ pub async fn execute(
             },
         );
     }
-    let runtime = runtime.expect("pure compile route has an embedded runtime");
+    let runtime = runtime.expect("pure compile route has an admitted runtime");
     let program_link_plan = runmat_aot::compile::build_program_link_plan_with_interop(
         &unit, &runtime, policy, interop,
     )?;

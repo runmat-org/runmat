@@ -40,15 +40,36 @@ impl PreparedStudyPublication {
         W: serde::Serialize + Send + 'static,
         N: serde::Serialize + Send + 'static,
     {
-        completion.published.data.assessments = super::assessment::evaluate_with_source(
-            manifest.compiled(),
-            &completion.published.data,
-            &manifest.compiled().assessments,
-            super::assessment::AssessmentEvaluationLimits::default(),
-            crate::interrupt::is_cancelled,
-            &completion.staging,
-        )
-        .map_err(failure::assessment_failure)?;
+        use runmat_analysis_fea::progress::trace;
+        let assess = trace::StudyStep::Assess.span();
+        let assessments = assess.in_scope(|| {
+            super::assessment::evaluate_with_source(
+                manifest.compiled(),
+                &completion.published.data,
+                &manifest.compiled().assessments,
+                super::assessment::AssessmentEvaluationLimits::default(),
+                crate::interrupt::is_cancelled,
+                &completion.staging,
+            )
+        });
+        let assessments = match assessments {
+            Ok(assessments) => {
+                let passed = assessments
+                    .iter()
+                    .filter(|report| {
+                        report.result.status == runmat_analysis_core::AssessmentStatus::Passed
+                    })
+                    .count();
+                trace::finish(&assess, &trace::assess_result(passed, assessments.len()));
+                assessments
+            }
+            Err(error) => {
+                trace::finish(&assess, &error.to_string());
+                return Err(failure::assessment_failure(error));
+            }
+        };
+        drop(assess);
+        completion.published.data.assessments = assessments;
         completion
             .staging
             .admit_manifest_copy(&completion.published.data)?;

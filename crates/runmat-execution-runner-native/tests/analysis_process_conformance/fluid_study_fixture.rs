@@ -66,6 +66,7 @@ pub(super) async fn cold_fixture(
         geometry: geometry_policy(),
     };
     let compiled = CompiledAnalysisStudy {
+        displays: Vec::new(),
         module_path: format!("qualification/{identity}.fea"),
         study_id: identity.into(),
         study_inputs: Vec::new(),

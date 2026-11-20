@@ -363,8 +363,7 @@ impl<'a> MaxwellDiscretization<'a> {
                     let flux = curl.map(|value| value.times_i() / omega);
                     let magnetic =
                         flux.map(|value| value / law.permeability_h_per_m.canonical_value());
-                    // The generator field's displacement current is neglected (driven
-                    // conductors satisfy omega eps / sigma <= 1e-3).
+                    // Generator displacement current is neglected: omega eps / sigma <= 1e-3.
                     let displacement =
                         edge_field.map(|value| value * law.permittivity_f_per_m.canonical_value());
                     let conduction =
@@ -516,13 +515,14 @@ pub(super) fn solve(
     input: &MaxwellInput,
     tolerance: f64,
     plan: &MaxwellSystemPlan,
+    workspace: runmat_sparse_solvers::direct::DirectWorkspacePolicy,
 ) -> Result<MaxwellResponse, MaxwellError> {
     if !tolerance.is_finite() || tolerance <= 0.0 || tolerance >= 1.0 {
         return Err(invalid("relative residual target"));
     }
     let system = MaxwellDiscretization::new(mesh, input, plan)?;
     let (entries, rhs) = system.assemble()?;
-    let solved = sparse_direct::solve_complex(system.dimension(), &entries, &rhs)
+    let solved = sparse_direct::solve_complex(system.dimension(), &entries, &rhs, workspace)
         .map_err(|error| MaxwellError::NotConverged(error.to_string()))?;
     let solution: Vec<ComplexPhasor> = solved
         .solution

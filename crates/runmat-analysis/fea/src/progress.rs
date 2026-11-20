@@ -5,7 +5,7 @@ use std::sync::{atomic::AtomicBool, Arc};
 use runmat_execution::identity::AttemptId;
 use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum FeaProgressPhase {
     GeometryLoad,
@@ -249,6 +249,19 @@ impl runmat_canonical_codec::CanonicalCodecControl for FeaCancellationToken {
 
 #[cfg(test)]
 mod control_tests;
+
+pub mod counter;
+pub mod meshing;
+pub mod rate;
+pub mod relay;
+pub mod solver;
+pub mod trace;
+
+pub use counter::CountReporter;
+pub use rate::ProgressRateLimiter;
+#[cfg(not(target_arch = "wasm32"))]
+pub use relay::HeartbeatGuard;
+pub use relay::ProgressRelay;
 
 /// Wall-clock phase measurement exported as one tracing completion event
 /// (`target = "runmat_fea::phase"`, fields `phase`, `elapsed_ms`, `threads`).

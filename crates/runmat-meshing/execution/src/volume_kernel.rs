@@ -17,7 +17,7 @@ mod options;
 #[cfg(test)]
 mod tests;
 
-use error::{invalid_input, map_codec_error, map_volume_error, volume_failure};
+use error::{invalid_input, map_codec_error, volume_failure};
 pub(crate) use options::volume_options;
 
 use crate::{
@@ -155,6 +155,9 @@ impl ExactVolumeKernel {
             "volume construction started; encoded input released"
         );
         let construction_started = runmat_time::Instant::now();
+        // Construction charges its working mesh to this same authority; a refusal names the
+        // whole stage's requirement: what was held before construction plus what it needed.
+        let held_before_construction = cancellation.usage().live_allocation_bytes;
         let observer = diagnostic::Observer {
             store: cache,
             binding: runmat_meshing_tetrahedron::cdt::VolumeQualityBinding {
@@ -172,6 +175,7 @@ impl ExactVolumeKernel {
             options,
             &cancellation,
             &observer,
+            &cancellation,
         )
         .map_err(|error| {
             match observer
@@ -181,8 +185,22 @@ impl ExactVolumeKernel {
                 .take()
             {
                 Some(failure) => error::map_diagnostic_error(failure),
-                None => map_volume_error(error),
+                None => {
+                    error::map_construction_error(error, held_before_construction, &cancellation)
+                }
             }
+        })?;
+        // The finished mesh stays charged until its inventories are released below.
+        let mesh_storage = runmat_geometry_core::GeometryAllocationReservation::new(
+            &cancellation,
+            mesh.resident_bytes(),
+        )
+        .map_err(|failure| {
+            error::memory_refusal(
+                held_before_construction.saturating_add(mesh.resident_bytes()),
+                cancellation.maximum_allocation_bytes(),
+                &failure.reason,
+            )
         })?;
         drop(surface);
         drop(surface_storage);
@@ -238,7 +256,6 @@ impl ExactVolumeKernel {
         entity_counts.insert("volume_mutations".into(), mutation_count);
         entity_counts.insert("encoded_surface_bytes".into(), surface_encoded_bytes);
         entity_counts.insert("encoded_volume_bytes".into(), encoded.len() as u64);
-        entity_counts.insert("construction_memory_measurement_unavailable".into(), 1);
         entity_counts.insert(
             "encoding_preparation_requested_bytes".into(),
             preparation_bytes,
@@ -254,6 +271,7 @@ impl ExactVolumeKernel {
         // Numeric construction and independent encoding validation have finished.
         // Publication hashing/chunking retain only encoded output and counters.
         drop(mesh);
+        drop(mesh_storage);
         // Retain exactly the owned wire bytes through publication, releasing
         // temporary encoding workspace before hashing and chunk transport.
         encoding_storage.retain_bytes(encoded.capacity() as u64);
@@ -268,9 +286,9 @@ impl ExactVolumeKernel {
             estimated_work: element_count,
             node_count,
             element_count,
-            // Encoded lengths are not a construction resident-memory high water
-            // mark. The native process guard reports physical memory separately.
-            peak_memory_bytes: 0,
+            // The high-water mark of every charge this stage held: the surface input, the
+            // construction's working mesh, the finished mesh and the encoding workspace.
+            peak_memory_bytes: cancellation.usage().allocation_bytes,
             iterations: mutation_count,
             entity_counts,
             ..MeshingStageCheckpoint::default()

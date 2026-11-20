@@ -1,3 +1,8 @@
+---
+description: How an execution declaration places a .fea study on local, parallel or distributed workers, with memory per worker, fan-out, cooperative and resilience policies.
+keywords: [.fea execution policy, parallel execution, distributed execution, memory per worker, fan-out, resilience policy, cluster placement]
+doc_type: language-reference
+---
 # Parallel and distributed execution
 
 Execution policy is optional. A local study with no resource constraints does not need an

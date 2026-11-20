@@ -347,6 +347,12 @@ impl WgpuEmission<'_> {
         &self.access.inner.queue
     }
 
+    /// Own a buffer made on this emission's device, recording the device on the owner (see
+    /// [`crate::WgpuBufferOwner::on_device`]).
+    pub fn own_buffer(&self, buffer: wgpu::Buffer) -> crate::WgpuBufferOwner {
+        crate::WgpuBufferOwner::on_device(buffer, self.access)
+    }
+
     pub fn create_initialized_buffer(
         &self,
         descriptor: &wgpu::util::BufferInitDescriptor<'_>,

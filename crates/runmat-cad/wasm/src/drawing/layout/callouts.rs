@@ -11,43 +11,13 @@
 use super::marks::{line, mark, unit};
 use super::solver::{nearest_free, place, BoxR, Class, Request, Spot};
 use super::views::{ViewPlan, CENTER_OVERRUN};
-use super::{floats, placed_at, xy, Ctx, Prim, Std, Xy};
+use super::{floats, notes, placed_at, xy, Ctx, Prim, Std, Xy};
 use serde_json::Value;
 
-/// A notes block's box with its top-left corner at `at`: the first line full height, the
-/// rest 0.8 of it, 1.7 heights apart.
-fn notes_box(st: &Std, at: Xy, t: &str) -> BoxR {
-    let lines: Vec<&str> = t.split('\n').collect();
-    let w = lines
-        .iter()
-        .enumerate()
-        .map(|(i, l)| Std::text_width(l, if i == 0 { st.text } else { st.text * 0.8 }))
-        .fold(0.0, f64::max);
-    BoxR::new(
-        at[0],
-        at[1] - lines.len() as f64 * st.text * 1.7 - st.text * 0.3,
-        at[0] + w,
-        at[1],
-    )
-}
-
-fn notes_block(st: &Std, id: &str, at: Xy, t: &str) -> Vec<Prim> {
-    t.split('\n')
-        .enumerate()
-        .map(|(i, l)| {
-            mark(
-                id,
-                "note",
-                super::marks::text(
-                    at[0],
-                    at[1] - (i + 1) as f64 * st.text * 1.7,
-                    l,
-                    if i == 0 { st.text } else { st.text * 0.8 },
-                    "start",
-                ),
-            )
-        })
-        .collect()
+/// A leadered note's lines: its text wrapped to its `width`, else to a leader note's column.
+fn leader_note_lines(st: &Std, kind: &Value, t: &str) -> Vec<String> {
+    let width = notes::width_of(kind).unwrap_or(notes::LEADER_WIDTH);
+    notes::wrap(t, st.text, Some(width))
 }
 
 fn frame_size(st: &Std, cells: &[&str]) -> Xy {
@@ -68,10 +38,26 @@ pub fn reserve_manual(ctx: &mut Ctx<'_>) {
             continue;
         }
         let Some(at) = placed_at(a) else { continue };
-        let id = format!("annotation:{}", a["id"].as_str().unwrap_or(""));
-        let t = ctx.text_of(a["id"].as_str().unwrap_or(""));
+        let aid = a["id"].as_str().unwrap_or("").to_owned();
+        let id = format!("annotation:{aid}");
+        let t = ctx.text_of(&aid);
         let b = match a["kind"]["annotation"].as_str() {
-            Some("note") => notes_box(&ctx.std, at, &t),
+            Some("note") if a["kind"]["leader"].is_null() => {
+                // A plain note placed by hand belongs to its view's area (a room name on a
+                // plan), so it keeps other views and callouts away but never pushes its own
+                // view off its spot. It wraps to the room it has, or moves where it fits.
+                let owner = format!("view:{}", a["view"].as_str().unwrap_or(""));
+                let width = notes::width_of(&a["kind"]);
+                // Checked as itself, so two notes of one view keep clear of each other.
+                let (spot, block) = notes::fit(ctx, &id, &aid, Some(at), at, &t, width);
+                ctx.occ.add(block.box_at(spot), &owner, Class::Text);
+                ctx.note_spots.insert(id, (spot, block));
+                continue;
+            }
+            Some("note") => {
+                ctx.std
+                    .leader_lines_box(at, true, &leader_note_lines(&ctx.std, &a["kind"], &t))
+            }
             Some("gdt") => {
                 let cells: Vec<&str> = t.split('|').collect();
                 let [w, h] = frame_size(&ctx.std, &cells);
@@ -126,6 +112,10 @@ pub fn draw(ctx: &mut Ctx<'_>, views: &[ViewPlan]) {
                 || style == "diameter"
                     && super::dims::side_on_diameter(ctx.data, &aid, v).is_some())
         {
+            continue;
+        }
+        // Grids, level marks and door swings are drawn as building marks (plan_marks.rs).
+        if matches!(what, "grids" | "level" | "door_swing") {
             continue;
         }
         let id = format!("annotation:{aid}");
@@ -423,19 +413,18 @@ pub fn draw(ctx: &mut Ctx<'_>, views: &[ViewPlan]) {
                     "weld" => weld_text(kind),
                     _ => t.replace('\n', " "),
                 };
-                if what == "note" {
-                    if let Some(at) = manual {
-                        ctx.out.placed.insert(id.clone(), at);
-                        let prims = notes_block(&st, &id, at, &t);
-                        let b = notes_box(&st, at, &t);
-                        // `at` is a sheet position (mm from the sheet's lower left): a note past
-                        // the sheet's edge doesn't print.
-                        let [w, h] = ctx.size;
-                        if b.x0 < 0.0 || b.y0 < 0.0 || b.x1 > w || b.y1 > h {
-                            ctx.finding("note_off_sheet", &aid, format!("Note {aid} at [{:.0}, {:.0}] runs off the {w:.0} x {h:.0} mm sheet; `at` is a sheet position in mm from the lower left", at[0], at[1]));
-                        }
-                        register(ctx, &id, &prims, b);
-                        ctx.push(prims);
+                // A leadered note wraps to its width under the shoulder.
+                let lines = if what == "note" {
+                    leader_note_lines(&st, kind, &t)
+                } else {
+                    vec![label_text.clone()]
+                };
+                // A note placed by hand is a block of text at the spot fitted before the views;
+                // a leadered one placed by hand keeps its leader, with its elbow at `at`.
+                if what == "note" && kind["leader"].is_null() {
+                    if let Some((spot, block)) = ctx.note_spots.get(&id).cloned() {
+                        let owner = id.clone();
+                        notes::draw_block(ctx, &id, &owner, spot, &block);
                         continue;
                     }
                 }
@@ -461,7 +450,18 @@ pub fn draw(ctx: &mut Ctx<'_>, views: &[ViewPlan]) {
                         } else {
                             0.0
                         };
-                        let tip_of = on_rim(c, rim);
+                        // A note's leader ends just inside the face it names, at the point
+                        // nearest its label, so leaders to stacked layers don't cross.
+                        let area = if what == "note" {
+                            face_box(ctx, v, &aid)
+                        } else {
+                            None
+                        };
+                        let rim_tip = on_rim(c, rim);
+                        let tip_of = move |e: Xy| match &area {
+                            Some(b) => inside_nearest(b, e),
+                            None => rim_tip(e),
+                        };
                         let stacked: Vec<(String, Vec<String>)> = under
                             .get(&aid)
                             .into_iter()
@@ -474,7 +474,7 @@ pub fn draw(ctx: &mut Ctx<'_>, views: &[ViewPlan]) {
                             })
                             .collect();
                         let stack = |e: Xy, right: bool| -> Vec<BoxR> {
-                            let tw = Std::text_width(&label_text, st.text);
+                            let tw = st.leader_lines_box(e, right, &lines).w() - 4.0;
                             let mut y = e[1] - st.text * 0.75 - 0.5;
                             stacked
                                 .iter()
@@ -495,20 +495,25 @@ pub fn draw(ctx: &mut Ctx<'_>, views: &[ViewPlan]) {
                         let label = |e: Xy, right: bool| {
                             stack(e, right)
                                 .iter()
-                                .fold(st.leader_box(e, right, &label_text), |b, f| b.union(f))
+                                .fold(st.leader_lines_box(e, right, &lines), |b, f| b.union(f))
                         };
                         let spot = match manual {
                             Some(at) => Some(Spot {
                                 elbow: at,
                                 right: at[0] >= c[0],
-                                label: st.leader_box(at, at[0] >= c[0], &label_text),
+                                label: st.leader_lines_box(at, at[0] >= c[0], &lines),
                             }),
                             None => solve(ctx, v, &id, c, &label, &tip_of),
                         };
                         let Some(spot) = spot else { continue };
                         ctx.out.placed.insert(id.clone(), spot.elbow);
-                        let prims =
-                            st.leader(&id, tip_of(spot.elbow), spot.elbow, spot.right, &label_text);
+                        let prims = st.leader_lines(
+                            &id,
+                            tip_of(spot.elbow),
+                            spot.elbow,
+                            spot.right,
+                            &lines,
+                        );
                         register(ctx, &id, &prims, spot.label);
                         ctx.push(prims);
                         for ((g, cells), b) in stacked.iter().zip(stack(spot.elbow, spot.right)) {
@@ -525,11 +530,49 @@ pub fn draw(ctx: &mut Ctx<'_>, views: &[ViewPlan]) {
                             });
                         }
                     }
-                    None => free_note(ctx, v, &id, &t),
+                    None => {
+                        // A note with no leader and no spot: in the free space nearest its
+                        // view's lower left.
+                        let g = v.geom_box();
+                        let width = notes::width_of(kind);
+                        let (spot, block) =
+                            notes::fit(ctx, &id, &aid, None, [g.x0, g.y0], &t, width);
+                        notes::draw_block(ctx, &id, &id, spot, &block);
+                    }
                 }
             }
         }
     }
+}
+
+/// The sheet box (mm) of the face an annotation points at, from its extent; `None` when it has
+/// none or shows edge-on.
+fn face_box(ctx: &Ctx<'_>, v: &ViewPlan, aid: &str) -> Option<BoxR> {
+    let e = &ctx.data["extents"][aid][0];
+    let (lo, hi) = (floats(&e[0]), floats(&e[1]));
+    if lo.len() != 3 || hi.len() != 3 {
+        return None;
+    }
+    let mut b: Option<BoxR> = None;
+    for x in [lo[0], hi[0]] {
+        for y in [lo[1], hi[1]] {
+            for z in [lo[2], hi[2]] {
+                let p = v.model_to_sheet([x, y, z]);
+                let q = BoxR::new(p[0], p[1], p[0], p[1]);
+                b = Some(b.map_or(q, |b| b.union(&q)));
+            }
+        }
+    }
+    b.filter(|b| b.w() > 1e-6 && b.h() > 1e-6)
+}
+
+/// The point of `b` nearest `p`, kept a little inside it (a quarter of its size, at most 3 mm).
+fn inside_nearest(b: &BoxR, p: Xy) -> Xy {
+    let (ix, iy) = ((b.w() * 0.25).min(3.0), (b.h() * 0.25).min(3.0));
+    [
+        p[0].clamp(b.x0 + ix, b.x1 - ix),
+        p[1].clamp(b.y0 + iy, b.y1 - iy),
+    ]
 }
 
 /// The two ends (sheet mm) of an annotation's planar reference where the view shows it edge-on,
@@ -709,33 +752,6 @@ fn solve(
         });
     }
     spot
-}
-
-/// A note with no leader and no spot: in the free space nearest its view's lower left.
-fn free_note(ctx: &mut Ctx<'_>, v: &ViewPlan, id: &str, t: &str) {
-    let st = ctx.std.clone();
-    let probe = notes_box(&st, [0.0, 0.0], t);
-    let g = v.geom_box();
-    let preferred = [g.x0 + probe.w() / 2.0, g.y0 - probe.h()];
-    let b = nearest_free(
-        &ctx.occ,
-        id,
-        [probe.w(), probe.h()],
-        preferred,
-        2.0,
-        1.0,
-        &|_| true,
-    )
-    .unwrap_or(BoxR::new(
-        g.x1 + 6.0,
-        g.y0,
-        g.x1 + 6.0 + probe.w(),
-        g.y0 + probe.h(),
-    ));
-    ctx.out.placed.insert(id.to_owned(), [b.x0, b.y1]);
-    let prims = notes_block(&st, id, [b.x0, b.y1], t);
-    register(ctx, id, &prims, b);
-    ctx.push(prims);
 }
 
 /// A hole's drawn radius (sheet mm) when `p` is on its axis in the view: the smallest circle

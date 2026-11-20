@@ -18,6 +18,9 @@
 use super::{SparsePattern, SparsePatternError};
 use crate::planning::resource::LocalExecutionPlan;
 
+mod ordered_map;
+pub use ordered_map::ordered_map_range;
+
 /// Marks a local degree of freedom that does not enter the global system (e.g. eliminated).
 pub const SKIPPED_DOF: u32 = u32::MAX;
 
@@ -206,32 +209,6 @@ pub fn within_local_plan<R: Send>(
     } else {
         runmat_cpu_execution::with_cpu_pool(threads, work)
     }
-}
-
-/// `work(0..count)` in canonical order on the installed admitted pool (serial without one).
-/// Each item is computed independently, so results never depend on the thread count.
-pub fn ordered_map_range<R: Send>(count: usize, work: impl Fn(usize) -> R + Sync + Send) -> Vec<R> {
-    const CHUNK: usize = 1024;
-    if count <= CHUNK || runmat_cpu_execution::current_threads() == 1 {
-        return (0..count).map(work).collect();
-    }
-    let ranges = (0..count.div_ceil(CHUNK))
-        .map(|chunk| chunk * CHUNK..((chunk + 1) * CHUNK).min(count))
-        .collect::<Vec<_>>();
-    let usage = runmat_simulation_usage::UsageContext::capture();
-    let progress = crate::progress::capture_fea_progress_context();
-    let chunks = runmat_cpu_execution::ordered_map(&ranges, |range| {
-        let _usage = usage
-            .as_ref()
-            .map(runmat_simulation_usage::UsageContext::enter);
-        let _progress = crate::progress::replace_fea_progress_context(progress.clone());
-        range.clone().map(&work).collect::<Vec<_>>()
-    });
-    let mut results = Vec::with_capacity(count);
-    for chunk in chunks {
-        results.extend(chunk);
-    }
-    results
 }
 
 /// Element -> global DOF incidence, in canonical element order.
@@ -816,6 +793,7 @@ where
     let mut order: Vec<u32> = Vec::new();
     let mut value_offsets: Vec<usize> = Vec::with_capacity(batch_elements + 1);
     let mut lists: Vec<Vec<(u32, u32)>> = vec![Vec::new(); part_count];
+    let progress = crate::progress::CountReporter::assembly(element_count as u64);
 
     while let Some(block) = cursor.next_block() {
         let batch_start = block.start;
@@ -862,6 +840,7 @@ where
                         shape,
                     )
                     .await?;
+                progress.add(1);
                 let local_order = &mut order[order_cursor..order_cursor + n];
                 for (index, slot) in local_order.iter_mut().enumerate() {
                     *slot = index as u32;
@@ -925,6 +904,7 @@ where
                         value_cursor += len;
                         order_cursor += n;
                     }
+                    progress.add(task.elements.len() as u64);
                 });
                 for task in &mut tasks {
                     if let Some((element, error)) = task.failure.take() {
@@ -1135,6 +1115,7 @@ where
             .complete(block)
             .expect("cursor block was returned immediately before execution");
     }
+    progress.finish();
     Ok(AssembledElements {
         matrices,
         vectors,

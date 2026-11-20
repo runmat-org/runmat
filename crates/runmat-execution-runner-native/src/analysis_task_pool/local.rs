@@ -101,6 +101,10 @@ impl AnalysisTaskPool for LocalAnalysisTaskPool {
                 if responses[index].is_some() {
                     continue;
                 }
+                crate::local_progress::forward_analysis_progress(
+                    self.session.progress_observer(),
+                    task.drain_progress(),
+                );
                 if let Some(completion) = task.try_completion() {
                     if completion.delivery_result().is_err() && cancellation_started.is_none() {
                         self.session.cancel(CancellationReason::ParentScope);

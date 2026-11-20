@@ -1,9 +1,9 @@
 use crate::runtime::compile_part;
 use serde_json::{json, Value};
 
-const PLATE: &str = "runmat 0.7\nstd 1\n\npart plate {\n    sketch s1 on origin.xy {\n        l1 = line(start = [0 mm, 0 mm], end = [40 mm, 0 mm])\n        l2 = line(start = [40 mm, 0 mm], end = [40 mm, 20 mm])\n        l3 = line(start = [40 mm, 20 mm], end = [0 mm, 20 mm])\n        l4 = line(start = [0 mm, 20 mm], end = [0 mm, 0 mm])\n    }\n    feature body = extrude(profile = sketch.s1, distance = 5 mm)\n}\n";
+pub(super) const PLATE: &str = "runmat 0.7\nstd 1\n\npart plate {\n    sketch s1 on origin.xy {\n        l1 = line(start = [0 mm, 0 mm], end = [40 mm, 0 mm])\n        l2 = line(start = [40 mm, 0 mm], end = [40 mm, 20 mm])\n        l3 = line(start = [40 mm, 20 mm], end = [0 mm, 20 mm])\n        l4 = line(start = [0 mm, 20 mm], end = [0 mm, 0 mm])\n    }\n    feature body = extrude(profile = sketch.s1, distance = 5 mm)\n}\n";
 
-fn run(text: &str, command: &str, values: Value) -> Value {
+pub(super) fn run(text: &str, command: &str, values: Value) -> Value {
     let request = json!({ "command": command, "values": values }).to_string();
     serde_json::from_str(&crate::edit::edit_json(
         "/p/plate.part",
@@ -14,7 +14,7 @@ fn run(text: &str, command: &str, values: Value) -> Value {
     .unwrap()
 }
 
-fn applied(text: &str, command: &str, values: Value) -> String {
+pub(super) fn applied(text: &str, command: &str, values: Value) -> String {
     let out = run(text, command, values);
     assert_eq!(out["ok"], true, "{out}");
     let text = out["files"][0]["text"].as_str().unwrap().to_owned();
@@ -23,7 +23,7 @@ fn applied(text: &str, command: &str, values: Value) -> String {
 }
 
 /// The lines of `after` that `before` doesn't have.
-fn added(before: &str, after: &str) -> Vec<String> {
+pub(super) fn added(before: &str, after: &str) -> Vec<String> {
     after
         .lines()
         .filter(|l| !before.lines().any(|b| b == *l))
@@ -135,6 +135,27 @@ fn drawing_tools_write_entities_into_the_open_sketch() {
             .count(),
         2
     );
+    // A hexagon: six lines in a closed chain, all equal, its first corner on +x.
+    let hex = applied(
+        PLATE,
+        "sketch.polygon",
+        json!({ "sketch": "s1", "sides": 6, "center": { "x": 20, "y": 20 }, "radius": 5, "fit": "inscribed", "rotation": 0 }),
+    );
+    let new = added(PLATE, &hex);
+    assert_eq!(
+        new.iter().filter(|l| l.contains("= line(")).count(),
+        6,
+        "{new:?}"
+    );
+    assert_eq!(
+        new.iter().filter(|l| l.contains("constrain equal")).count(),
+        5,
+        "{new:?}"
+    );
+    assert!(
+        new.iter().any(|l| l.contains("start = [25 mm, 20 mm]")),
+        "{new:?}"
+    );
     // A circle, a slot (two lines, two arcs, tangent and equal), a point.
     let circle = applied(
         PLATE,
@@ -166,14 +187,14 @@ fn drawing_tools_write_entities_into_the_open_sketch() {
     // A tool the sketch dispatcher has no code for says so and marks the call, so the command
     // registry's build check finds it.
     crate::edit::take_unhandled();
-    let spline = run(PLATE, "sketch.spline", json!({ "sketch": "s1" }));
-    assert_eq!(spline["ok"], false);
+    let unknown = run(PLATE, "sketch.no-such-tool", json!({ "sketch": "s1" }));
+    assert_eq!(unknown["ok"], false);
     assert!(
-        spline["message"]
+        unknown["message"]
             .as_str()
             .unwrap()
             .contains("has no handler"),
-        "{spline}"
+        "{unknown}"
     );
     assert!(crate::edit::take_unhandled());
 }
@@ -298,6 +319,16 @@ fn extend_runs_a_line_end_to_the_next_curve() {
     assert!(
         down.contains("l5 = line(start = [20 mm, 0 mm], end = [20 mm, 12 mm])"),
         "{down}"
+    );
+    // Picked without a click (the panel or the Outline): the end with the nearer curve goes.
+    let nearer = applied(
+        &text,
+        "sketch.extend",
+        json!({ "sketch": "s1", "entities": ["sketch.s1.l5"] }),
+    );
+    assert!(
+        nearer.contains("l5 = line(start = [20 mm, 0 mm], end = [20 mm, 12 mm])"),
+        "{nearer}"
     );
     let none = run(
         &text.replace(
@@ -558,4 +589,201 @@ fn an_angle_that_clashes_is_a_conflict_and_leaves_the_rectangle_where_it_was() {
             .collect()
     };
     assert_eq!(points(&after), points(&before));
+}
+
+#[test]
+fn a_spline_runs_through_the_picked_points_and_closes_on_request() {
+    // Through a snapped corner and two clicked points.
+    let open = applied(
+        PLATE,
+        "sketch.spline",
+        json!({ "sketch": "s1", "type": "through_points", "points": [
+            { "x": 0, "y": 20, "of": "l3.end" }, { "x": 10, "y": 30 }, { "x": 30, "y": 25 }
+        ] }),
+    );
+    let new = added(PLATE, &open);
+    assert_eq!(new.len(), 1, "{new:?}");
+    assert!(new[0].contains("sp1 = spline("), "{new:?}");
+    assert!(
+        new[0].contains("l3.end") && new[0].contains("30 mm"),
+        "{new:?}"
+    );
+    // Canvas picks of sketch points, closed.
+    let closed = applied(
+        PLATE,
+        "sketch.spline",
+        json!({ "sketch": "s1", "points": ["sketch.s1.l1.start", "sketch.s1.l2.start", "sketch.s1.l3.start"], "closed": true }),
+    );
+    let new = added(PLATE, &closed);
+    assert!(
+        new.iter()
+            .any(|l| l.contains("spline(") && l.contains("closed")),
+        "{new:?}"
+    );
+    // One point, or a type the sketch model lacks, says why.
+    let short = run(
+        PLATE,
+        "sketch.spline",
+        json!({ "sketch": "s1", "points": [{ "x": 1, "y": 1 }] }),
+    );
+    assert_eq!(short["ok"], false, "{short}");
+    let control = run(
+        PLATE,
+        "sketch.spline",
+        json!({ "sketch": "s1", "type": "control_points" }),
+    );
+    assert!(
+        control["message"]
+            .as_str()
+            .unwrap()
+            .contains("control-point splines"),
+        "{control}"
+    );
+}
+
+#[test]
+fn delete_on_a_picked_line_keeps_the_points_other_lines_took_from_it() {
+    let text = applied(
+        PLATE,
+        "sketch.line",
+        json!({ "sketch": "s1", "start": { "x": 40, "y": 20, "of": "l2.end" }, "end": { "x": 60, "y": 20 } }),
+    );
+    let request = json!({ "command": "part.delete", "selection": ["sketch.s1.l2"] }).to_string();
+    let out: Value = serde_json::from_str(&crate::edit::edit_json(
+        "/p/plate.part",
+        &text,
+        &Default::default(),
+        &request,
+    ))
+    .unwrap();
+    assert_eq!(out["ok"], true, "{out}");
+    let after = out["files"][0]["text"].as_str().unwrap();
+    assert!(!after.contains("l2 = line("), "{after}");
+    assert!(!after.contains("l2.end"), "{after}");
+    assert!(
+        after.contains("l5 = line(start = [40 mm, 20 mm]")
+            || after.contains("= line(start = [40 mm, 20 mm], end = [60 mm"),
+        "{after}"
+    );
+}
+
+/// The polygon and text forms take their centre or anchor as a picked sketch point (the Outline
+/// or the view), as the clicked tools do.
+#[test]
+fn a_polygon_centres_on_a_picked_sketch_point() {
+    let text = applied(
+        PLATE,
+        "sketch.polygon",
+        json!({ "sketch": "s1", "sides": 6, "radius": 5, "center": ["sketch.s1.l2.end"] }),
+    );
+    assert!(added(PLATE, &text).len() >= 6, "{text}");
+    let text = applied(
+        PLATE,
+        "sketch.text",
+        json!({ "sketch": "s1", "text": "AB", "height": 5, "at": ["sketch.s1.l1.start"] }),
+    );
+    assert!(text.contains("text(text = \"AB\", at = l1.start"), "{text}");
+}
+
+/// Construction runs at once on what is selected: the editor's selection reaches the tool.
+#[test]
+fn construction_toggles_the_selected_curve() {
+    let request = json!({ "command": "sketch.construction", "values": { "sketch": "s1" }, "selection": ["sketch.s1.l1"] }).to_string();
+    let out: Value = serde_json::from_str(&crate::edit::edit_json(
+        "/p/plate.part",
+        PLATE,
+        &Default::default(),
+        &request,
+    ))
+    .unwrap();
+    assert_eq!(out["ok"], true, "{out}");
+    assert!(
+        out["files"][0]["text"]
+            .as_str()
+            .unwrap()
+            .contains("end = [40 mm, 0 mm], construction)"),
+        "{out}"
+    );
+}
+
+/// A point field takes a point of the model as well as a sketch point: the origin from the
+/// Outline, a click on the sketch plane (`point(x mm, y mm, z mm)`) or a vertex. Each lands
+/// where it sits seen straight onto the sketch plane.
+#[test]
+fn a_point_field_takes_the_origin_a_clicked_point_or_a_vertex() {
+    let text = applied(
+        PLATE,
+        "sketch.polygon",
+        json!({ "sketch": "s1", "sides": 4, "radius": 5, "center": ["origin:point"] }),
+    );
+    assert!(
+        text.contains("[5 mm, 0 mm]") && text.contains("[0 mm, 5 mm]"),
+        "{text}"
+    );
+    let text = applied(
+        PLATE,
+        "sketch.circle",
+        json!({ "sketch": "s1", "type": "center", "center": ["point(10 mm, 5 mm, 0 mm)"], "radius": 3 }),
+    );
+    assert!(
+        added(PLATE, &text)
+            .iter()
+            .any(|l| l.contains("circle(center = [10 mm, 5 mm], radius = 3 mm)")),
+        "{text}"
+    );
+    let text = applied(
+        PLATE,
+        "sketch.text",
+        json!({ "sketch": "s1", "text": "AB", "height": 5, "at": ["origin:point"] }),
+    );
+    assert!(
+        text.contains("text(text = \"AB\", at = [0 mm, 0 mm]"),
+        "{text}"
+    );
+    // On Front (x along the model's z, y along its x), a clicked point reads in the sketch's axes.
+    let front = applied(PLATE, "part.sketch", json!({ "plane": "origin:front" }));
+    let text = applied(
+        &front,
+        "sketch.point",
+        json!({ "sketch": "sketch1", "at": ["point(3 mm, 0 mm, 7 mm)"] }),
+    );
+    assert!(
+        added(&front, &text)
+            .iter()
+            .any(|l| l.contains("point(at = [7 mm, 3 mm])")),
+        "{text}"
+    );
+    // A vertex of the plate's body, on a sketch on the top plane.
+    let compiled = compile_part("/p/plate.part", PLATE).unwrap();
+    let display = serde_json::to_value(&compiled.display).unwrap();
+    let vertex = display["bodies"][0]["vertices"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|v| v["reference"].is_string() && v["point"][2].as_f64().unwrap() > 0.004)
+        .unwrap_or_else(|| panic!("no top vertex: {display}"))
+        .clone();
+    let [x, y] = [0, 1].map(|i| (vertex["point"][i].as_f64().unwrap() * 1000.0).round());
+    let text = applied(
+        PLATE,
+        "sketch.point",
+        json!({ "sketch": "s1", "at": [vertex["reference"].as_str().unwrap()] }),
+    );
+    assert!(
+        added(PLATE, &text)
+            .iter()
+            .any(|l| l.contains(&format!("point(at = [{x} mm, {y} mm])"))),
+        "{text}"
+    );
+}
+
+/// A pick that names no point is refused as before, with the field's prompt.
+#[test]
+fn a_point_field_refuses_a_pick_that_names_no_point() {
+    let out = run(
+        PLATE,
+        "sketch.polygon",
+        json!({ "sketch": "s1", "sides": 4, "radius": 5, "center": ["origin:top"] }),
+    );
+    assert_eq!(out["ok"], false, "{out}");
 }

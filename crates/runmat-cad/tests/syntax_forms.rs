@@ -541,6 +541,7 @@ fn edits_on_the_surface_forms_change_only_what_they_must() {
                 radius: mm(2.0),
             },
             construction: false,
+            projected: None,
         });
         Ok(())
     })
@@ -757,6 +758,7 @@ fn adding_or_removing_a_sketch_line_changes_only_that_line() {
             radius: mm(2.0),
         },
         construction: false,
+        projected: None,
     };
     // Added after the last entity, at its indentation; the comments stay.
     let change = edit::edit_part(PLATE, "plate.part", |d| {

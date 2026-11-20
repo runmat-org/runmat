@@ -3302,8 +3302,6 @@ fn validate_transient_result(run: &AnalysisRunResult) -> Result<(), String> {
         &transient.strain_energy_density_snapshots,
         &transient.von_mises_snapshots,
         &transient.reaction_moment_snapshots,
-        &transient.electro_thermal_temperature_snapshots,
-        &transient.electro_thermal_thermal_residual_snapshots,
     ];
     if optional_fields.iter().any(|history| {
         !history.is_empty()
@@ -4371,21 +4369,6 @@ pub(super) fn run_fixture(
     let mut gpu_solver_prepared_build_ms = None;
     let mut gpu_solver_solve_ms = None;
     let mut gpu_solver_fallback_apply_count = None;
-    let mut thermo_coupling_enabled = None;
-    let mut thermo_coupling_fingerprint = None;
-    let mut thermo_constitutive_temperature_factor = None;
-    let mut thermo_effective_modulus_scale = None;
-    let mut thermo_constitutive_material_spread_ratio = None;
-    let mut thermo_assignment_heterogeneity_index = None;
-    let mut thermo_region_delta_count = None;
-    let mut thermo_spatial_coverage_ratio = None;
-    let mut thermo_nonlinear_severity = None;
-    let mut electro_thermal_coupling_enabled = None;
-    let mut electro_thermal_coupling_fingerprint = None;
-    let mut electro_joule_heating_scale = None;
-    let mut electro_conductivity_spread_ratio = None;
-    let mut electro_transient_severity = None;
-    let mut electro_nonlinear_severity = None;
     let mut plastic_nonlinear_severity = None;
     let mut plastic_nonlinear_severity_mean = None;
     let mut plastic_load_realization_ratio = None;
@@ -4473,21 +4456,6 @@ pub(super) fn run_fixture(
                     gpu_solver_prepared_build_ms,
                     gpu_solver_solve_ms,
                     gpu_solver_fallback_apply_count,
-                    thermo_coupling_enabled,
-                    thermo_coupling_fingerprint,
-                    thermo_constitutive_temperature_factor,
-                    thermo_effective_modulus_scale,
-                    thermo_constitutive_material_spread_ratio,
-                    thermo_assignment_heterogeneity_index,
-                    thermo_region_delta_count,
-                    thermo_spatial_coverage_ratio,
-                    thermo_nonlinear_severity,
-                    electro_thermal_coupling_enabled,
-                    electro_thermal_coupling_fingerprint,
-                    electro_joule_heating_scale,
-                    electro_conductivity_spread_ratio,
-                    electro_transient_severity,
-                    electro_nonlinear_severity,
                     plastic_nonlinear_severity,
                     plastic_nonlinear_severity_mean,
                     plastic_load_realization_ratio,
@@ -8025,21 +7993,6 @@ pub(super) fn run_fixture(
                                 gpu_solver_prepared_build_ms,
                                 gpu_solver_solve_ms,
                                 gpu_solver_fallback_apply_count,
-                                thermo_coupling_enabled,
-                                thermo_coupling_fingerprint,
-                                thermo_constitutive_temperature_factor,
-                                thermo_effective_modulus_scale,
-                                thermo_constitutive_material_spread_ratio,
-                                thermo_assignment_heterogeneity_index,
-                                thermo_region_delta_count,
-                                thermo_spatial_coverage_ratio,
-                                thermo_nonlinear_severity,
-                                electro_thermal_coupling_enabled,
-                                electro_thermal_coupling_fingerprint,
-                                electro_joule_heating_scale,
-                                electro_conductivity_spread_ratio,
-                                electro_transient_severity,
-                                electro_nonlinear_severity,
                                 plastic_nonlinear_severity,
                                 plastic_nonlinear_severity_mean,
                                 plastic_load_realization_ratio,
@@ -8106,41 +8059,6 @@ pub(super) fn run_fixture(
                     {
                         failures.push("fea.results contract version mismatch".to_string());
                     }
-                    thermo_coupling_enabled = gpu_results.data.summary.thermo_coupling_enabled;
-                    thermo_coupling_fingerprint =
-                        gpu_results.data.summary.thermo_coupling_fingerprint;
-                    thermo_constitutive_temperature_factor = gpu_results
-                        .data
-                        .summary
-                        .thermo_constitutive_temperature_factor;
-                    thermo_effective_modulus_scale =
-                        gpu_results.data.summary.thermo_effective_modulus_scale;
-                    thermo_constitutive_material_spread_ratio = gpu_results
-                        .data
-                        .summary
-                        .thermo_constitutive_material_spread_ratio;
-                    thermo_assignment_heterogeneity_index = gpu_results
-                        .data
-                        .summary
-                        .thermo_assignment_heterogeneity_index;
-                    thermo_region_delta_count = gpu_results.data.summary.thermo_region_delta_count;
-                    thermo_spatial_coverage_ratio =
-                        gpu_results.data.summary.thermo_spatial_coverage_ratio;
-                    thermo_nonlinear_severity = gpu_results.data.summary.thermo_nonlinear_severity;
-                    electro_thermal_coupling_enabled =
-                        gpu_results.data.summary.electro_thermal_coupling_enabled;
-                    electro_thermal_coupling_fingerprint = gpu_results
-                        .data
-                        .summary
-                        .electro_thermal_coupling_fingerprint;
-                    electro_joule_heating_scale =
-                        gpu_results.data.summary.electro_joule_heating_scale;
-                    electro_conductivity_spread_ratio =
-                        gpu_results.data.summary.electro_conductivity_spread_ratio;
-                    electro_transient_severity =
-                        gpu_results.data.summary.electro_transient_severity;
-                    electro_nonlinear_severity =
-                        gpu_results.data.summary.electro_nonlinear_severity;
                     plastic_nonlinear_severity =
                         gpu_results.data.summary.plastic_nonlinear_severity;
                     plastic_nonlinear_severity_mean =
@@ -8441,21 +8359,6 @@ pub(super) fn run_fixture(
                                     gpu_solver_prepared_build_ms,
                                     gpu_solver_solve_ms,
                                     gpu_solver_fallback_apply_count,
-                                    thermo_coupling_enabled,
-                                    thermo_coupling_fingerprint,
-                                    thermo_constitutive_temperature_factor,
-                                    thermo_effective_modulus_scale,
-                                    thermo_constitutive_material_spread_ratio,
-                                    thermo_assignment_heterogeneity_index,
-                                    thermo_region_delta_count,
-                                    thermo_spatial_coverage_ratio,
-                                    thermo_nonlinear_severity,
-                                    electro_thermal_coupling_enabled,
-                                    electro_thermal_coupling_fingerprint,
-                                    electro_joule_heating_scale,
-                                    electro_conductivity_spread_ratio,
-                                    electro_transient_severity,
-                                    electro_nonlinear_severity,
                                     plastic_nonlinear_severity,
                                     plastic_nonlinear_severity_mean,
                                     plastic_load_realization_ratio,
@@ -8578,21 +8481,6 @@ pub(super) fn run_fixture(
         gpu_solver_prepared_build_ms,
         gpu_solver_solve_ms,
         gpu_solver_fallback_apply_count,
-        thermo_coupling_enabled,
-        thermo_coupling_fingerprint,
-        thermo_constitutive_temperature_factor,
-        thermo_effective_modulus_scale,
-        thermo_constitutive_material_spread_ratio,
-        thermo_assignment_heterogeneity_index,
-        thermo_region_delta_count,
-        thermo_spatial_coverage_ratio,
-        thermo_nonlinear_severity,
-        electro_thermal_coupling_enabled,
-        electro_thermal_coupling_fingerprint,
-        electro_joule_heating_scale,
-        electro_conductivity_spread_ratio,
-        electro_transient_severity,
-        electro_nonlinear_severity,
         plastic_nonlinear_severity,
         plastic_nonlinear_severity_mean,
         plastic_load_realization_ratio,

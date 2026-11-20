@@ -42,12 +42,17 @@ use std::collections::{BTreeMap, BTreeSet};
 mod annotate;
 mod autoroute;
 mod board_study;
+mod component_cmds;
+mod context_edit;
 mod coupled;
 pub mod delta;
 mod edit;
 mod fabrication;
 mod kicad;
 mod library_edit;
+mod net_length;
+mod placement;
+mod rule_edit;
 mod picks;
 pub mod libraries;
 pub mod modules;
@@ -82,6 +87,10 @@ pub struct Diagnostic {
     /// `error`, `warning` or `info`.
     pub severity: String,
     pub message: String,
+    /// What raised it, when a rule has a code (`circuit.value.unit`: a value's unit measures
+    /// something other than what its field needs).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub code: Option<String>,
 }
 
 impl Diagnostic {
@@ -96,17 +105,22 @@ impl Diagnostic {
             end,
             severity: "error".into(),
             message,
+            code: None,
         }
     }
 
     fn syntax(path: &str, text: &str, d: &FeaSyntaxDiagnostic) -> Self {
-        Self::error(
+        let mut out = Self::error(
             path,
             Some(text),
             d.span.start,
             d.span.end,
             d.message.clone(),
-        )
+        );
+        if d.kind == runmat_design_syntax::FeaSyntaxDiagnosticKind::UnitMismatch {
+            out.code = Some("circuit.value.unit".into());
+        }
+        out
     }
 }
 
@@ -211,6 +225,42 @@ pub fn is_layout(path: &str) -> bool {
 /// `io.circuit` → `io.circuit.layout`.
 pub fn layout_path_for(circuit: &str) -> String {
     format!("{}{LAYOUT_SUFFIX}", stem(circuit))
+}
+
+/// The board command that starts a circuit's board: Outline on a circuit with no layout writes
+/// the circuit's first `.circuit.layout` with the outline in it.
+pub(super) const STARTS_BOARD: &str = "board.outline";
+
+/// The layout a circuit's first board starts from: the circuit it lays out and an empty board,
+/// in the form the starter files take (`runmat 0.7`, `std 1`).
+pub(super) fn starter_layout(circuit_name: &str) -> String {
+    format!("runmat 0.7\nstd 1\n\nuse circuit {circuit_name}\n\nlayout {circuit_name} {{\n}}\n")
+}
+
+/// Runs `run` with the starter layout beside the circuit, then turns the layout's change into
+/// the creation of that file: its whole text, written as a new file the host refuses to
+/// overwrite.
+pub(super) fn with_starter_layout<F>(
+    files: &Files,
+    layout_path: &str,
+    circuit_name: &str,
+    run: F,
+) -> Result<EditOutput, EditError>
+where
+    F: FnOnce(&Files) -> Result<EditOutput, EditError>,
+{
+    let mut with_layout = files.clone();
+    with_layout.insert(layout_path.to_owned(), starter_layout(circuit_name));
+    let mut out = run(&with_layout)?;
+    for change in out.files.iter_mut().filter(|c| c.path == layout_path) {
+        change.edits = vec![Utf16Edit {
+            start: 0,
+            end: 0,
+            text: change.text.clone(),
+        }];
+        change.reprinted = true;
+    }
+    Ok(out)
 }
 
 /// `io.circuit` → `io.circuit.lock`.
@@ -899,6 +949,7 @@ pub fn check(path: &str, text: &str, files: &Files, options: &CompileOptions) ->
             end: utf16_offset(text, finding.source.end as usize),
             severity: severity.into(),
             message: format!("{} ({})", finding.message, finding.code),
+            code: None,
         });
     }
     if let Some(layout) = project.layout.as_ref().filter(|l| l.path == path) {

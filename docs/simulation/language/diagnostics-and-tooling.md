@@ -1,3 +1,8 @@
+---
+description: How runmat check, runmat plan and the language server report .fea diagnostics, inspect the logical plan, and rename study symbols and imported functions safely.
+keywords: [.fea diagnostics, runmat check, runmat plan, language server, rename symbol, logical plan]
+doc_type: language-reference
+---
 # Diagnostics and tooling
 
 The parser, semantic compiler, CLI, and language server use the same `.fea` frontend. An editor
@@ -41,11 +46,11 @@ diagnostics. Planning is a separate command.
 `runmat check` accepts `.fea` files as well as `.m` files and prints located diagnostics in the
 same form for both: the code and message, the `file:line:column` location, the source line with its
 leading indentation removed, a caret underline with a label, and a summary line. A unit mismatch
-names what the value must measure, what was found, and the expected SI unit:
+names what the value must measure, an example SI unit, and what the authored unit measures:
 
 ```text
 $ runmat check cantilever.fea
-error[fea.semantic.model]: traction must be force per area, found N
+error[fea.semantic.model]: traction needs a unit of force per area such as Pa; N measures force
  --> cantilever.fea:28:48
    |
 28 | traction on geometry.beam.region.tip = [0, 0, -100000] N

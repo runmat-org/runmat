@@ -3,7 +3,7 @@
 
 mod common;
 use common::*;
-use runmat_cad::index::{build_index, to_json, PartIndex, INDEX_FORMAT_VERSION};
+use runmat_cad::index::{build_index, to_json, FileState, PartIndex, INDEX_FORMAT_VERSION};
 use runmat_cad::model::*;
 use runmat_cad::refs::*;
 use runmat_cad::value::ValueExpr;
@@ -156,6 +156,8 @@ fn d03_index_shape_and_version() {
     let r = env.regen(&d);
     let idx = build_index(&d, &r, None);
     assert_eq!(idx.format_version, INDEX_FORMAT_VERSION);
+    // The index says what kind of part it is: a machined block is a written part.
+    assert_eq!(idx.file_state, FileState::Written);
     assert_eq!(idx.features.len(), d.features.len());
     assert_eq!(idx.parts.len(), 1);
     assert!(idx.parts[0].ok);
@@ -169,7 +171,8 @@ fn d03_index_shape_and_version() {
     // References carry a display form and the structured value.
     let round = idx.features.iter().find(|f| f.id.0 == "round").unwrap();
     assert!(round.references[0].display.contains("edges_between"));
-    assert!(json.contains("\"format_version\": 2"));
+    assert!(json.contains("\"format_version\": 3"));
+    assert!(json.contains("\"file_state\": \"written\""));
 }
 
 #[test]

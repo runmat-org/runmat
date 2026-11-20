@@ -103,7 +103,7 @@ impl<'a, 'b> Resolver<'a, 'b> {
         summary: &DefinitionSummary,
         file: &FilePath,
         site: &Site,
-    ) -> Result<ConfigKey, (DiagCode, String)> {
+    ) -> Result<ConfigKey, SelectionError> {
         match sel {
             ConfigurationSelection::Default => Ok(ConfigKey::default()),
             ConfigurationSelection::Named { name } => {
@@ -119,9 +119,20 @@ impl<'a, 'b> Resolver<'a, 'b> {
                 }
                 let mut inputs = BTreeMap::new();
                 let mut kinds = BTreeMap::new();
+                let mut display = BTreeMap::new();
                 for (name, expr) in values {
-                    let si = self.typed_input(name, expr, env, summary)?;
-                    inputs.insert(name.clone(), si);
+                    // A wrong unit underlines the input's value (`input.thickness = 3 deg`).
+                    let q =
+                        self.typed_input(name, expr, env, summary)
+                            .map_err(|(code, message)| SelectionError {
+                                param: (code == DiagCode::ValueUnit).then(|| name.0.clone()),
+                                code,
+                                message,
+                            })?;
+                    inputs.insert(name.clone(), q.si);
+                    if let Some(written) = crate::value::written_literal(expr, &q) {
+                        display.insert(name.clone(), written);
+                    }
                     if let Some((_, kind)) = summary.inputs.iter().find(|(n, _)| n == name) {
                         kinds.insert(name.clone(), kind.clone());
                     }
@@ -130,6 +141,7 @@ impl<'a, 'b> Resolver<'a, 'b> {
                     name: base.clone(),
                     inputs,
                     kinds,
+                    display,
                 })
             }
             ConfigurationSelection::Switch { cases, otherwise } => {
@@ -173,7 +185,7 @@ impl<'a, 'b> Resolver<'a, 'b> {
         expr: &ValueExpr,
         env: &ValueEnv,
         s: &DefinitionSummary,
-    ) -> Result<f64, (DiagCode, String)> {
+    ) -> Result<crate::value::Quantity, (DiagCode, String)> {
         let Some((_, kind)) = s.inputs.iter().find(|(n, _)| n == name) else {
             return Err((
                 DiagCode::AsmInputType,
@@ -188,18 +200,22 @@ impl<'a, 'b> Resolver<'a, 'b> {
         };
         let q = self
             .ev()
-            .eval(expr, env)
+            .eval_expecting(expr, env, info)
             .map_err(|e| (DiagCode::AsmInputType, format!("input `{}`: {}", name, e)))?;
-        if q.dimension != info.dimension {
+        if q.dimension != info {
+            // The one wrong-unit diagnostic every design language reports.
             return Err((
-                DiagCode::AsmInputType,
-                format!(
-                    "input `{}` of `{}` is a {} ({}), found {}",
-                    name, s.definition, info.id, info.si_symbol, q.dimension
-                ),
+                DiagCode::ValueUnit,
+                crate::value::unit_mismatch_text(
+                    Some(name.0.as_str()),
+                    info,
+                    q.dimension,
+                    &crate::value::Written::of(expr),
+                )
+                .message,
             ));
         }
-        Ok(q.si)
+        Ok(q)
     }
 
     /// The overrides of a sub-assembly's inputs from its configuration key.
@@ -218,8 +234,14 @@ impl<'a, 'b> Resolver<'a, 'b> {
         }
         for (name, si) in &key.inputs {
             if let Some(decl) = doc.inputs.iter().find(|i| &i.name == name) {
-                if let Some(info) = self.ctx.units.kind(&decl.kind) {
-                    overrides.insert(name.clone(), ValueExpr::qty(*si, &info.si_symbol));
+                if let Some(dimension) = self.ctx.units.kind(&decl.kind) {
+                    let unit = crate::value::si_symbol(dimension);
+                    let value = if unit.is_empty() {
+                        ValueExpr::number(*si)
+                    } else {
+                        ValueExpr::qty(*si, unit)
+                    };
+                    overrides.insert(name.clone(), value);
                 }
             }
         }
@@ -227,4 +249,22 @@ impl<'a, 'b> Resolver<'a, 'b> {
     }
 
     // ------------------------------------------------------------------ composition
+}
+
+/// Why an occurrence's configuration selection failed: the code and message, and for a wrong
+/// unit the input whose value the diagnostic underlines.
+pub(super) struct SelectionError {
+    pub code: DiagCode,
+    pub message: String,
+    pub param: Option<String>,
+}
+
+impl From<(DiagCode, String)> for SelectionError {
+    fn from((code, message): (DiagCode, String)) -> Self {
+        Self {
+            code,
+            message,
+            param: None,
+        }
+    }
 }

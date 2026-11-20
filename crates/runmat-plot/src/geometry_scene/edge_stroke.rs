@@ -10,6 +10,11 @@ use crate::core::{DrawCall, PipelineType, RenderData, Vertex};
 /// Edge widths at or below this many CSS px draw as plain GPU lines.
 pub const HAIRLINE_WIDTH_PX: f32 = 1.0;
 
+/// The width model views draw feature edges and silhouettes at, in CSS px: the Desktop's CAD
+/// and FEA views, and saved geometry images (posters), so a poster's edges match its live view.
+/// The stroke shader scales it by the target's pixels per point.
+pub const VIEW_EDGE_WIDTH_PX: f32 = 1.25;
+
 /// Whether `render_data` is a line item that draws as a stroke at `width_px`.
 pub fn widens(render_data: &RenderData, width_px: Option<f32>) -> bool {
     (width_px.is_some_and(|w| w.is_finite() && w > HAIRLINE_WIDTH_PX)

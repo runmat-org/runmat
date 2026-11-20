@@ -24,6 +24,9 @@ for (const shell of ["bash", "pwsh"]) {
 const fs = require('node:fs'), path = require('node:path');
 const args = process.argv.slice(2);
 fs.appendFileSync(process.env.PROFILE_TEST_LOG, JSON.stringify(args) + '\\n');
+if (args[0] !== 'build' && (process.env.RUNMAT_AOT_RUNTIME_ARCHIVE || process.env.RUNMAT_AOT_RUNTIME_MANIFEST)) {
+  throw new Error('archive and host-packer phases must not inherit a previous embedded runtime');
+}
 const option = name => args[args.indexOf(name) + 1];
 if (args[0] === 'rustc') {
   const profile = option('--profile'), target = args.includes('--target') ? option('--target') : '${host}';
@@ -32,7 +35,10 @@ if (args[0] === 'rustc') {
   fs.writeFileSync(path.join(out, 'librunmat_aot_runtime.a'), 'archive');
   console.log('note: native-static-libs: -lc');
 } else if (args[0] === 'run') {
-  for (const name of ['--payload-out', '--manifest-out', '--notices-out']) fs.writeFileSync(option(name), 'fixture');
+  for (const name of ['--payload-out', '--manifest-out', '--notices-out', '--pack-out', '--pack-manifest-out']) fs.writeFileSync(option(name), 'fixture');
+} else if (args[0] === 'build') {
+  if (process.env.RUNMAT_AOT_RUNTIME_ARCHIVE) throw new Error('the CLI must not embed an archive');
+  if (fs.readFileSync(process.env.RUNMAT_AOT_RUNTIME_MANIFEST, 'utf8') !== 'fixture') throw new Error('the CLI must pin the pack manifest');
 }
 `;
         for (const [name, source] of [["cargo", cargo], ["rustc", `#!/usr/bin/env node
@@ -48,7 +54,9 @@ console.log(process.argv.includes('-vV') ? 'rustc test\\nhost: ${host}' : 'libru
         const env = { ...process.env, PATH: `${bin}${path.delimiter}${process.env.PATH}`,
           RUSTC: path.join(bin, process.platform === "win32" ? "rustc.cmd" : "rustc"),
           CARGO_TARGET_DIR: path.join(dir, "target"), RUNMAT_BUILD_TARGET: host,
-          RUNMAT_BUILD_PROFILE: "release", PROFILE_TEST_LOG: log, TMPDIR: path.join(dir, "tmp") };
+          RUNMAT_BUILD_PROFILE: "release", PROFILE_TEST_LOG: log, TMPDIR: path.join(dir, "tmp"),
+          RUNMAT_AOT_RUNTIME_ARCHIVE: path.join(dir, "previous.payload"),
+          RUNMAT_AOT_RUNTIME_MANIFEST: path.join(dir, "previous.json") };
         // Node passes only one case-insensitive PATH entry to Windows children.
         if (process.platform === "win32") {
           for (const key of Object.keys(env)) if (key !== "PATH" && key.toUpperCase() === "PATH") delete env[key];
@@ -67,6 +75,10 @@ console.log(process.argv.includes('-vV') ? 'rustc test\\nhost: ${host}' : 'libru
           assert.equal(call[call.indexOf("--target") + 1], host);
         }
         assert.equal(calls[1][calls[1].indexOf("--bin") + 1], "runmat-aot-pack");
+        const output = path.join(env.CARGO_TARGET_DIR, host, profile === "dev" ? "debug" : profile);
+        for (const name of ["runmat-aot-runtime.zip", "runmat-aot-runtime.json"]) {
+          assert.equal(readFileSync(path.join(output, name), "utf8"), "fixture");
+        }
       } finally {
         rmSync(dir, { recursive: true, force: true });
       }

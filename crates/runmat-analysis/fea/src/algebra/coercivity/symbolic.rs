@@ -42,6 +42,8 @@ pub(crate) struct CoercivityWorkEnvelope {
     /// Graph-count budgets of the anchored local-energy proof (independent of factorization).
     energy_operation_limit: u64,
     energy_resident_limit: u64,
+    /// Entries of the symmetrized pattern, `2 |E| + n`.
+    entries: u64,
 }
 
 /// Local-energy proof budgets from the undirected graph size: work ≤ 1024 (n + |E|) + n and
@@ -74,9 +76,17 @@ impl CoercivityWorkEnvelope {
             u64::try_from(estimate.dimension).map_err(|_| CoercivityError::WorkOverflow)?;
         let (energy_operation_limit, energy_resident_limit) =
             energy_limits(dimension, edges).ok_or(CoercivityError::WorkOverflow)?;
+        let entries = edges
+            .checked_mul(2)
+            .and_then(|entries| entries.checked_add(dimension))
+            .ok_or(CoercivityError::WorkOverflow)?;
+        entries
+            .checked_mul(crate::algebra::anchored_energy::ENTRY_RESIDENT_BYTES)
+            .ok_or(CoercivityError::WorkOverflow)?;
         Ok(Self {
             energy_operation_limit,
             energy_resident_limit,
+            entries,
             dimension,
             factor_nonzero_limit: with_headroom(estimate.factor_entries)
                 .ok_or(CoercivityError::WorkOverflow)?,
@@ -118,6 +128,16 @@ impl CoercivityWorkEnvelope {
     }
     pub(crate) fn energy_resident_limit(self) -> u64 {
         self.energy_resident_limit
+    }
+    /// Entries of the symmetrized pattern, `2 |E| + n` (both triangles and the diagonal): an
+    /// upper bound on the stored entries of the pattern.
+    pub(crate) fn entry_count(self) -> u64 {
+        self.entries
+    }
+    /// One outward interval per stored entry: the operator-sized storage of the anchored
+    /// local-energy proof (the derivation checked this product).
+    pub(crate) fn energy_entry_resident_bytes(self) -> u64 {
+        self.entries * crate::algebra::anchored_energy::ENTRY_RESIDENT_BYTES
     }
 }
 

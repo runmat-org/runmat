@@ -267,9 +267,11 @@ pub fn build_electrical_static_resource_plan(
     let metadata = profile_serialized(&workload.model, LIMITS)
         .map_err(invalid)?
         .materialization_resident_bytes_estimate;
-    // Physical, normalized and constrained K coexist: three CSR copies of at most `support`
-    // entries (value and column index) plus row offsets.
-    let matrices = add(mul(support, 64)?, mul(add(nodes, 1)?, 24)?)?;
+    // Physical, normalized and constrained K coexist: three CSR copies of at most the
+    // distinct support entries (value and column index) plus row offsets. `support` counts
+    // repeated element pairs and bounds only the contribution stream.
+    let entries = envelope.entry_count();
+    let matrices = add(mul(entries, 64)?, mul(add(nodes, 1)?, 24)?)?;
     // Gauge/component lists, lifting/RHS, PCG temporaries, residual, potentials, physical flux,
     // terminal node vectors/ownership maps and result validation scratch.
     let vectors = add(
@@ -319,7 +321,7 @@ pub fn build_electrical_static_resource_plan(
         .resources
         .resident_byte_budget()
         .min(prepared.machine_memory_bytes);
-    let iterative = iterative_solve_bytes(nodes, support)?;
+    let iterative = iterative_solve_bytes(nodes, entries)?;
     let direct = electrical_direct_solve(
         persistent,
         &envelope,

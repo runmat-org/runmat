@@ -10,7 +10,7 @@ import { digestObject, partitionBucket, sha256 } from "./identity.mjs";
 import { buildInventory, validateInventory } from "./inventory.mjs";
 import { buildExecutionMatrix, validateExecutionMatrix } from "./execution-matrix.mjs";
 import { buildPlan, PLAN_SCHEMA, TOPOLOGY_SCHEMA, validatePlan } from "./plan.mjs";
-import { buildProductProbe, DESKTOP_HOST_PROTOCOL_PROBE, NATIVE_EMBEDDED_AOT_PROBE, runDesktopHostProtocolProbe, runNativeEmbeddedAotProbe, validateProductProbe } from "./product-probe.mjs";
+import { buildProductProbe, DESKTOP_HOST_PROTOCOL_PROBE, NATIVE_EMBEDDED_AOT_PROBE, NATIVE_DISTRIBUTED_AOT_PROBE, runDesktopHostProtocolProbe, runNativeEmbeddedAotProbe, runNativeAotProbe, validateProductProbe } from "./product-probe.mjs";
 import { stageNativeProduct } from "./product-staging.mjs";
 import { NOTICE_FILE_NAME, thirdPartyNoticeBytes } from "../../distribution/third-party-notices.cjs";
 import { reconcileShardResults, validateReconciliation } from "./reconcile.mjs";
@@ -20,6 +20,49 @@ import { probeNativeRuntimeFeatures } from "./runtime-feature-probe.mjs";
 
 const SOURCE = "0123456789abcdef0123456789abcdef01234567";
 const RUNNER = sha256("runner");
+
+test("distributed AOT evidence binds the separate pack and requires installation before offline compile", { skip: process.platform === "win32" }, () => {
+    // This executable is a protocol fixture. Real pack admission and native
+    // linking are separate Rust/product qualification requirements.
+    const directory = mkdtempSync(join(tmpdir(), "runmat-distributed-aot-protocol-"));
+    try {
+        const compiler = join(directory, "runmat");
+        const pack = join(directory, "pack.zip");
+        const trace = join(directory, "installed");
+        writeFileSync(pack, "pack fixture");
+        writeFakeCompiler(compiler, false);
+        const compileBody = readFileSync(compiler, "utf8");
+        writeFileSync(compiler, `#!/bin/sh
+set -eu
+test "$1" = --offline
+if [ "$2" = aot ]; then
+  test "$3" = install
+  test "$4" = --from
+  test "$(cat "$5")" = 'pack fixture'
+  printf installed > "$RUNMAT_TEST_INSTALL_TRACE"
+  exit 0
+fi
+test -f "$RUNMAT_TEST_INSTALL_TRACE"
+${compileBody}`);
+        const product = join(directory, "product");
+        stageNativeProduct({ binary: compiler, destination: product, aotRuntimePack: pack });
+        const manifestPath = join(directory, "manifest.json");
+        const fields = { product: "native-cli", artifactProfile: "distributed-aot", sourceRevision: SOURCE,
+            manifestPath, root: product, entrypoints: { "runmat-binary": "runmat", "compile-runtime-pack": "runmat-aot-runtime.zip" } };
+        const manifest = buildArtifactManifestFromTree(fields);
+        assert.throws(() => buildArtifactManifestFromTree({ ...fields, entrypoints: { "runmat-binary": "runmat" } }));
+        const probe = runNativeAotProbe({ artifactManifest: manifest, artifactManifestPath: manifestPath,
+            sourceRevision: SOURCE, environment: { ...process.env, RUNMAT_TEST_INSTALL_TRACE: trace } });
+        assert.equal(probe.probeKind, NATIVE_DISTRIBUTED_AOT_PROBE);
+        assert.equal(probe.result.status, "passed");
+        validateProductProbe(probe, { artifactManifest: manifest, artifactManifestPath: manifestPath, verifyFiles: true });
+        assert.throws(() => runNativeEmbeddedAotProbe({ artifactManifest: manifest }));
+        writeFileSync(join(product, "runmat-aot-runtime.zip"), "changed pack");
+        assert.throws(() => validateArtifactManifest(manifest, { verifyFiles: true, manifestPath }));
+    } finally {
+        rmSync(directory, { recursive: true, force: true });
+    }
+});
 
 test("inventory identities are order-independent and retain documentation-only examples", () => {
     const first = buildInventory(exportFixture(), inventoryOptions());
@@ -102,7 +145,7 @@ test("plans use stable hash buckets and cover every execution identity exactly o
     const plan = buildPlan(inventory, topology);
     validatePlan(plan, inventory);
     assert.equal(plan.schema, PLAN_SCHEMA);
-    assert.deepEqual(plan.products.find((product) => product.kind === "native-cli")?.requiredProbes, [NATIVE_EMBEDDED_AOT_PROBE]);
+    assert.deepEqual(plan.products.find((product) => product.kind === "native-cli")?.requiredProbes, [NATIVE_DISTRIBUTED_AOT_PROBE]);
     assert.deepEqual(plan.products.find((product) => product.kind === "browser-wasm")?.requiredProbes, []);
     for (const lane of plan.lanes) {
         for (const shard of lane.shards) {
@@ -683,12 +726,13 @@ function desktopBuiltinFixture() {
 function artifactDefinitions() {
     return [
         buildArtifactManifest({
-            product: "native-cli", artifactProfile: "embedded-aot", sourceRevision: SOURCE,
+            product: "native-cli", artifactProfile: "distributed-aot", sourceRevision: SOURCE,
             layout: { kind: "recursive-tree", root: "native-product" },
-            entrypoints: [{ role: "runmat-binary", path: "runmat" }],
+            entrypoints: [{ role: "runmat-binary", path: "runmat" }, { role: "compile-runtime-pack", path: "runmat-aot-runtime.zip" }],
             files: [
                 { path: "runmat", size: 6, sha256: sha256("native") },
-                { path: "runmat_runtime.dll", size: 7, sha256: sha256("runtime") }
+                { path: "runmat_runtime.dll", size: 7, sha256: sha256("runtime") },
+                { path: "runmat-aot-runtime.zip", size: 4, sha256: sha256("pack") }
             ]
         }),
         buildArtifactManifest({
@@ -720,6 +764,7 @@ function withVerifiedArtifacts(callback) {
         mkdirSync(join(directory, "native-product"));
         writeFileSync(join(directory, "native-product", "runmat"), "native");
         writeFileSync(join(directory, "native-product", "runmat_runtime.dll"), "runtime");
+        writeFileSync(join(directory, "native-product", "runmat-aot-runtime.zip"), "pack");
         writeFileSync(join(directory, "runmat.js"), "js");
         writeFileSync(join(directory, "runmat.wasm"), "wasm");
         const artifactManifests = definitions.map((manifest) => {
@@ -738,9 +783,9 @@ function successfulNativeProbe(artifact) {
     return buildProductProbe({
         sourceRevision: SOURCE,
         product: "native-cli",
-        artifactProfile: "embedded-aot",
+        artifactProfile: artifact.artifactProfile,
         artifactManifestDigest: artifact.artifactManifestDigest,
-        probeKind: NATIVE_EMBEDDED_AOT_PROBE,
+        probeKind: artifact.artifactProfile === "distributed-aot" ? NATIVE_DISTRIBUTED_AOT_PROBE : NATIVE_EMBEDDED_AOT_PROBE,
         vectorDigest: sha256("disp(2 + 3);\n"),
         result: {
             kind: "compile-and-execute",

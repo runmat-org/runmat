@@ -12,6 +12,7 @@ use super::{
 
 #[test]
 fn filesystem_host_checks_a_complete_constructed_study() {
+    let _filesystem = runmat_filesystem::provider_override_lock();
     let temporary = tempdir().unwrap();
     let source = r#"
 geometry part {
@@ -55,6 +56,7 @@ study static {
 
 #[test]
 fn source_check_returns_canonical_typed_objects_and_source_locations() {
+    let _filesystem = runmat_filesystem::provider_override_lock();
     let temporary = tempdir().unwrap();
     let source = r#"
 geometry bracket {
@@ -189,6 +191,7 @@ study static {
 
 #[test]
 fn source_overlay_checks_unsaved_root_without_mutating_the_filesystem() {
+    let _filesystem = runmat_filesystem::provider_override_lock();
     let temporary = tempdir().unwrap();
     let imported = temporary.path().join("materials.fea");
     let imported_source = r#"material steel {
@@ -275,6 +278,7 @@ study static {
 
 #[test]
 fn prepared_source_reports_exact_deduplicated_runmat_function_requests() {
+    let _filesystem = runmat_filesystem::provider_override_lock();
     let temporary = tempdir().unwrap();
     let path = temporary.path().join("main.fea");
     fs::write(&path, "this saved source is intentionally invalid\n").unwrap();
@@ -312,6 +316,7 @@ import function impactPulse from \"./signals.m\"\n";
 
 #[test]
 fn prepared_dependency_closure_keeps_unavailable_import_targets() {
+    let _filesystem = runmat_filesystem::provider_override_lock();
     let temporary = tempdir().unwrap();
     let path = temporary.path().join("main.fea");
     let prepared = prepare_fea_sources_in_root(temporary.path(), &path, &[(
@@ -325,6 +330,7 @@ fn prepared_dependency_closure_keeps_unavailable_import_targets() {
 
 #[test]
 fn source_check_status_distinguishes_invalid_and_incomplete_facts() {
+    let _filesystem = runmat_filesystem::provider_override_lock();
     let temporary = tempdir().unwrap();
     let path = temporary.path().join("main.fea");
     fs::write(&path, "this is not FEA source\n").unwrap();
@@ -352,6 +358,7 @@ fn source_check_status_distinguishes_invalid_and_incomplete_facts() {
 
 #[test]
 fn runnable_root_selection_is_typed_and_requires_disambiguation() {
+    let _filesystem = runmat_filesystem::provider_override_lock();
     let temporary = tempdir().unwrap();
     let path = temporary.path().join("main.fea");
     let source = r#"
@@ -426,6 +433,7 @@ study second {
 
 #[test]
 fn sweeps_own_their_study_root_but_preserve_explicit_study_selection() {
+    let _filesystem = runmat_filesystem::provider_override_lock();
     let temporary = tempdir().unwrap();
     let path = temporary.path().join("main.fea");
     let study = r#"
@@ -508,6 +516,7 @@ sweep envelope over study.response {{
 
 #[test]
 fn immutable_snapshot_discovers_modules_and_geometry_before_checking() {
+    let _filesystem = runmat_filesystem::provider_override_lock();
     let temporary = tempdir().unwrap();
     let root_path = LogicalSourcePath::new("main.fea").unwrap();
     let root = super::FeaSourceSnapshotBuilder::source_module(
@@ -577,6 +586,7 @@ geometry bracket {
 
 #[test]
 fn filesystem_host_confines_imports_to_the_declared_root() {
+    let _filesystem = runmat_filesystem::provider_override_lock();
     let temporary = tempdir().unwrap();
     let source_root = temporary.path().join("project");
     fs::create_dir(&source_root).unwrap();
@@ -600,6 +610,7 @@ fn filesystem_host_confines_imports_to_the_declared_root() {
 
 #[test]
 fn filesystem_host_retains_normalized_ap242_exchange_facts() {
+    let _filesystem = runmat_filesystem::provider_override_lock();
     let temporary = tempdir().unwrap();
     let geometry_path = temporary.path().join("part.step");
     fs::write(
@@ -635,8 +646,95 @@ fn filesystem_host_retains_normalized_ap242_exchange_facts() {
     );
 }
 
+// With the exact geometry backend a STEP file's face names are checked: a misspelled name is
+// refused with the names the file carries, and a correct one checks. Without the backend the
+// names are unknown, and each `select name` region gets a located diagnostic saying so.
+#[test]
+fn select_name_on_a_step_file_is_checked_or_flagged_unconfirmed() {
+    let _filesystem = runmat_filesystem::provider_override_lock();
+    let temporary = tempdir().unwrap();
+    fs::write(
+        temporary.path().join("bar.step"),
+        include_bytes!("../../../../runmat-geometry/io/tests/fixtures/named-faces.step"),
+    )
+    .unwrap();
+    let check = |name: &str| {
+        let path = temporary.path().join("main.fea");
+        let source = format!(
+            "geometry bar {{ file = \"./bar.step\"\n    region support : face {{ select name \"{name}\"; expect exactly_one }}\n}}\n"
+        );
+        check_fea_source_in_root(temporary.path(), &path, source).unwrap()
+    };
+    let misspelled = check("Fixed face");
+    let messages = misspelled
+        .diagnostics
+        .iter()
+        .map(|diagnostic| diagnostic.message.as_str())
+        .collect::<Vec<_>>();
+    #[cfg(feature = "occt-native")]
+    {
+        assert!(
+            messages.contains(
+                &"region `support` selects face name \"Fixed face\", which `bar.step` does not carry; named faces: \"Fixed end\", \"Loaded end\""
+            ),
+            "{messages:#?}"
+        );
+        let admitted = check("Fixed end");
+        assert!(
+            !admitted.diagnostics.iter().any(|diagnostic| {
+                diagnostic.message.contains("Fixed end")
+                    || diagnostic.code == "fea.semantic.geometry_names_unconfirmed"
+            }),
+            "{:#?}",
+            admitted.diagnostics
+        );
+    }
+    #[cfg(not(feature = "occt-native"))]
+    assert!(
+        misspelled.diagnostics.iter().any(|diagnostic| {
+            diagnostic.code == "fea.semantic.geometry_names_unconfirmed"
+                && diagnostic.location.is_some()
+                && diagnostic.message.contains("\"Fixed face\"")
+                && diagnostic
+                    .message
+                    .contains("cannot be confirmed without the exact geometry backend")
+        }),
+        "{messages:#?}"
+    );
+}
+
+// The exact backend reads no names from a mesh file: a `select name` region on it is flagged
+// at the geometry as unconfirmed instead of passing silently.
+#[test]
+fn select_name_on_a_mesh_file_is_flagged_unconfirmed() {
+    let _filesystem = runmat_filesystem::provider_override_lock();
+    let temporary = tempdir().unwrap();
+    fs::write(
+        temporary.path().join("tetra.obj"),
+        b"v 0 0 0\nv 1 0 0\nv 0 1 0\nv 0 0 1\nf 1 2 3\nf 1 4 2\nf 1 3 4\nf 2 4 3\n",
+    )
+    .unwrap();
+    let path = temporary.path().join("main.fea");
+    let checked = check_fea_source_in_root(
+        temporary.path(),
+        &path,
+        "geometry tetra { file = \"./tetra.obj\"; units = m\n    region base : face { select name \"base\"; expect exactly_one }\n}\n",
+    )
+    .unwrap();
+    assert!(
+        checked.diagnostics.iter().any(|diagnostic| {
+            diagnostic.code == "fea.semantic.geometry_names_unconfirmed"
+                && diagnostic.location.is_some()
+                && diagnostic.message.contains("\"base\"")
+        }),
+        "{:#?}",
+        checked.diagnostics
+    );
+}
+
 #[test]
 fn checked_study_realizes_shared_case_membership_without_duplicate_actions() {
+    let _filesystem = runmat_filesystem::provider_override_lock();
     let temporary = tempdir().unwrap();
     let source = r#"
 geometry part {

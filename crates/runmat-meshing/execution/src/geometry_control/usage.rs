@@ -5,6 +5,8 @@ use std::sync::atomic::AtomicU64;
 pub(crate) struct GeometryUsageCounters {
     pub(super) allocation_bytes: AtomicU64,
     pub(super) peak_allocation_bytes: AtomicU64,
+    /// The largest whole-stage requirement (live plus requested) that this stage refused.
+    pub(super) refused_allocation_bytes: AtomicU64,
     pub(super) search_work: AtomicU64,
     pub(super) iterations: AtomicU64,
     /// Geometry search work observed at the latest exact-geometry probe of this stage.

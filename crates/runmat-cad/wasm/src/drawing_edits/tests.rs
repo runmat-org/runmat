@@ -309,6 +309,28 @@ fn a_drawing_is_built_by_hand_from_an_empty_sheet() {
     assert!(b
         .try_run("table.revision", json!({ "rev": "B" }), &[])
         .is_err());
+    // General notes: the first run adds the list, each later run a numbered note.
+    assert_eq!(
+        b.run("table.notes", json!({ "text": "BREAK SHARP EDGES." }), &[]),
+        "Added general notes notes"
+    );
+    assert_eq!(
+        b.run(
+            "table.notes",
+            json!({ "text": "MATERIAL: {material}." }),
+            &[]
+        ),
+        "Added note 2 to notes"
+    );
+    assert!(b
+        .try_run("table.notes", json!({ "text": " " }), &[])
+        .is_err());
+    assert!(
+        b.text.contains("table notes = notes(")
+            && b.text.find("BREAK SHARP EDGES.") < b.text.find("MATERIAL: {material}."),
+        "{}",
+        b.text
+    );
     assert!(
         b.try_run("table.bom", json!({ "view": ["view:front"] }), &[])
             .is_err(),
@@ -456,7 +478,27 @@ fn items_move_align_relabel_and_delete_with_what_is_drawn_from_them() {
     );
     // A table the sheet placed moves from where the layout put it: the revision table's
     // top-right corner at the frame's (A3: 410, 287).
-    assert_eq!(d.tables[0].at, [420.0, 282.0]);
+    assert_eq!(d.tables[0].at, Some([420.0, 282.0]));
+    // A table moved by hand to the sheet's corner stays there.
+    b.run(
+        "drawing.move",
+        json!({ "dx": -420, "dy": -282 }),
+        &["table:revisions"],
+    );
+    assert_eq!(b.document().tables[0].at, Some([0.0, 0.0]));
+    assert!(b.text.contains("at = [0, 0]"), "{}", b.text);
+    let placed = b.compiled()["projection"]["data"]["layouts"]
+        .as_object()
+        .unwrap()
+        .values()
+        .find_map(|l| l["placed"].get("table:revisions").cloned())
+        .unwrap();
+    assert_eq!(placed, json!([0.0, 0.0]));
+    b.run(
+        "drawing.move",
+        json!({ "dx": 420, "dy": 282 }),
+        &["table:revisions"],
+    );
     // An annotation the sheet placed takes the point it is moved to.
     b.run(
         "drawing.move",
@@ -539,4 +581,47 @@ fn sheet_picks_parse_as_the_desktop_names_them() {
     assert_eq!((view.as_deref(), text.as_str()), (Some("top"), HOLE));
     assert!(parse_pick("point:x,1").is_err());
     assert!(parse_pick("not a reference (").is_err());
+}
+
+/// Standard 3 view on an empty sheet: the views land where the layout keeps them, so the new
+/// sheet has no findings (the starter's spacing once left two "view moved" notes on Sheet 1).
+#[test]
+fn standard_three_view_leaves_no_layout_findings() {
+    // The Desktop's UI flows draw this 80 x 50 x 10 mm plate.
+    const PLATE: &str = "runmat 0.7\nstd 1\n\npart plate {\n    sketch sketch1 on origin.xy {\n        l1 = line(start = [0 mm, 0 mm], end = [80 mm, 0 mm])\n        l2 = line(start = [80 mm, 0 mm], end = [80 mm, 50 mm])\n        l3 = line(start = [80 mm, 50 mm], end = [0 mm, 50 mm])\n        l4 = line(start = [0 mm, 50 mm], end = [0 mm, 0 mm])\n    }\n    feature extrude1 = extrude(profile = sketch.sketch1, distance = 10 mm)\n}\n";
+    for (model, scale, projection) in [
+        ("plate.part", "1:2", "third"),
+        ("bracket.part", "1:2", "third"),
+        ("bracket.part", "1:1", "third"),
+        ("bracket.part", "1:2", "first"),
+    ] {
+        let mut b = Bench::new();
+        b.files.insert("/p/plate.part".to_owned(), PLATE.to_owned());
+        b.run(
+            "drawing.standard-3",
+            json!({ "model": model, "scale": scale, "projection": projection }),
+            &[],
+        );
+        // The projected views draw at the front view's scale, as projected views do.
+        let d = b.document();
+        let front = d.view("front").unwrap().scale;
+        assert_eq!(
+            d.view("top").unwrap().scale,
+            front,
+            "{model} {scale}: top's scale"
+        );
+        assert_eq!(
+            d.view("right").unwrap().scale,
+            front,
+            "{model} {scale}: right's scale"
+        );
+        let out = b.compiled();
+        let sheet = &out["projection"]["data"]["layouts"]["1"];
+        assert_eq!(
+            sheet["findings"],
+            json!([]),
+            "{model} {scale} {projection}: findings on a new sheet\n{}",
+            b.text
+        );
+    }
 }

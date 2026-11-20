@@ -2,8 +2,8 @@
 //!
 //! A drawing sheet draws the layout the compile made (`layouts`, runmat-cad-wasm
 //! `drawing::layout`), the one the Desktop's sheet draws: the frame with its zones, the title
-//! block (a block, inserted once), each view's visible edges (`VISIBLE`, continuous) and hidden
-//! edges (`HIDDEN`, dashed), center marks and lines (`CENTER`), section hatching (`HATCH`),
+//! block (a block, inserted once), each view's visible edges (`VISIBLE`, continuous), hidden
+//! edges (`HIDDEN`, dashed) and tangent edges (`TANGENT`, thin continuous), center marks and lines (`CENTER`), section hatching (`HATCH`),
 //! view labels, linear dimensions as dimension entities (`DIMENSIONS`), the callouts on their
 //! leaders and the notes (`NOTES`), and the tables (`TABLES`). A flat pattern carries its
 //! outline at 1:1 (`OUTLINE`), bend lines with their notes, and its overall width and height as
@@ -31,6 +31,7 @@ fn layer(name: &str, color: i16, linetype: &str) -> Layer {
 fn layer_of(p: &Value, dimension: bool) -> &'static str {
     match p["style"].as_str().unwrap_or("") {
         "visible" | "thick" => "VISIBLE",
+        "tangent" => "TANGENT",
         "hidden" | "benddown" => "HIDDEN",
         "center" | "bendup" => "CENTER",
         "hatch" => "HATCH",
@@ -177,6 +178,7 @@ pub(super) fn drawing_sheet(
             layer("FRAME", 7, "CONTINUOUS"),
             layer("VISIBLE", 7, "CONTINUOUS"),
             layer("HIDDEN", 8, "DASHED"),
+            layer("TANGENT", 8, "CONTINUOUS"),
             layer("CENTER", 4, "CENTER"),
             layer("HATCH", 8, "CONTINUOUS"),
             layer("DIMENSIONS", 3, "CONTINUOUS"),
@@ -220,7 +222,12 @@ pub(super) fn drawing_sheet(
             continue;
         }
         let id = p["id"].as_str().unwrap_or("");
-        let dim = dim_ids.iter().position(|d| d == id);
+        // A dimension's block holds its lines, arrows and figures. A center line under the same
+        // id (a plan's grid line beside its row of dimensions) keeps its own layer and line type.
+        let dim = dim_ids
+            .iter()
+            .position(|d| d == id)
+            .filter(|_| !matches!(style, "center" | "bendup"));
         let layer = layer_of(p, dim.is_some());
         for shape in shapes_of(p) {
             match dim {

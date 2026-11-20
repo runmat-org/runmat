@@ -138,6 +138,11 @@ pub enum SolveResourcePolicy {
         admission: SolverAdmissionResourcePolicy,
         /// Peak retained index plus construction cursors for scoped affine Tᵀ application.
         transpose_index_bytes_upper_bound: ByteCount,
+        /// The operator the solve proves and solves, held beside the assembled stiffness: its
+        /// identity-constrained copy (direct elimination) or the affine-reduced operator with
+        /// the planned reduced support it was scattered into. A proving factorization adds the
+        /// fill-reducing ordering's graph, which stays resident through numeric factorization.
+        preparation_bytes_upper_bound: ByteCount,
         path: StaticSolvePath,
     },
     DirectFactorization {
@@ -209,6 +214,16 @@ impl SolveResourcePolicy {
                 transpose_index_bytes_upper_bound,
                 ..
             } => *transpose_index_bytes_upper_bound,
+            _ => ByteCount(0),
+        }
+    }
+
+    pub(crate) fn preparation_bytes_upper_bound(&self) -> ByteCount {
+        match self {
+            Self::Iterative {
+                preparation_bytes_upper_bound,
+                ..
+            } => *preparation_bytes_upper_bound,
             _ => ByteCount(0),
         }
     }

@@ -12,8 +12,8 @@ rigid-wall and positive real impedance boundaries. The public typed `.fea` execu
 connect that entry end to end. The older **reduced acoustic Helmholtz graph** remains separately
 identified as a proxy; it is not the canonical FE formulation.
 
-The [canonical acoustic qualification record](../qualification/canonical-acoustic.md) states
-the independent references, supported library envelope and outstanding gates.
+The [acoustics validation page](../validation/acoustic.md) lists the independent reference
+checks, their tolerances and their latest results.
 
 ## What acoustic equation is represented?
 

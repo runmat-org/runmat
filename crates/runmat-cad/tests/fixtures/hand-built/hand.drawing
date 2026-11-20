@@ -137,15 +137,13 @@ drawing bracket {
         view = top,
         origin = feature.body.face.side(s1.l4),
         spec = { features = [h] },
-        sheet = "1",
-        at = [0, 0]
+        sheet = "1"
     )
     table revisions = revision(
         rows = [
             { rev = A, description = "Initial release", date = "2026-11-06" },
             { rev = B, description = "Hole to H7" }
         ],
-        sheet = "1",
-        at = [0, 0]
+        sheet = "1"
     )
 }

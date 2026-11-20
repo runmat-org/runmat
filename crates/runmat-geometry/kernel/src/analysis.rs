@@ -28,6 +28,112 @@ pub enum AnalysisRequest {
     Deviation,
     /// Faces that cannot release along the pull.
     Undercut { pull: [f64; 3] },
+    /// Check geometry: invalid faces, edges and vertices, open edges, edges shorter than
+    /// `short_edge` (m), edge and vertex gaps (tolerances) above `gap` (m), and, when `strict`,
+    /// self-intersecting faces. Also reports the smallest radius of curvature and the largest
+    /// edge and vertex gaps.
+    Check {
+        short_edge: f64,
+        gap: f64,
+        strict: bool,
+    },
+    /// Area properties of planar faces of one body (indices), in one plane, as one region.
+    FaceArea { faces: Vec<u32> },
+    /// A quantity at points over faces of one body (each point projected onto its face's
+    /// surface): what thickness, curvature and zebra color the model by.
+    SurfaceField {
+        quantity: FieldQuantity,
+        faces: Vec<FacePoints>,
+    },
+}
+
+/// What [`AnalysisRequest::SurfaceField`] measures at each point.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum FieldQuantity {
+    /// The wall thickness: the distance into the body along the inward normal to the next
+    /// face (m).
+    Thickness,
+    /// The principal curvatures (1/m), positive where the face is convex.
+    Curvature,
+    /// The outward normal only (zebra stripes).
+    Normal,
+}
+
+/// Points on one face (by index in the body's summary), metres.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct FacePoints {
+    pub face: u32,
+    pub points: Vec<[f64; 3]>,
+}
+
+/// One point of a surface field: where it lies on the face, the outward unit normal there, and
+/// the quantity's values (thickness in `a`; curvature's smaller principal curvature in `a`, the
+/// larger in `b`). `None` where the kernel could not place the point or measure there (a ray
+/// that leaves the body, a degenerate point).
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct FieldPoint {
+    pub point: Option<[f64; 3]>,
+    pub normal: Option<[f64; 3]>,
+    pub a: Option<f64>,
+    pub b: Option<f64>,
+}
+
+/// A planar region's area properties for unit density: what [`AnalysisRequest::FaceArea`]
+/// answers.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct FaceArea {
+    pub area: f64,
+    pub centroid: [f64; 3],
+    /// ∫ (|r|² E − r rᵀ) dA about the centroid, rows.
+    pub inertia: [[f64; 3]; 3],
+    /// The plane's normal (the first face's, outward).
+    pub normal: [f64; 3],
+}
+
+/// What a geometry check found.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum CheckProblem {
+    /// The shell or solid's structure (orientation, closure), with no face, edge or vertex at
+    /// fault.
+    InvalidBody,
+    InvalidFace,
+    InvalidEdge,
+    InvalidVertex,
+    SelfIntersectingFace,
+    /// An edge of a solid with one face: the solid is open there.
+    OpenEdge,
+    /// `value`: the edge's length (m).
+    ShortEdge,
+    /// `value`: the edge's tolerance (m), the gap its curve leaves to its faces.
+    EdgeGap,
+    /// `value`: the vertex's tolerance (m).
+    VertexGap,
+    /// The body's smallest radius of curvature (m), on the face named. Not a problem: a fact
+    /// the check reports.
+    SmallestRadius,
+    /// The largest edge tolerance (m). A fact.
+    LargestEdgeGap,
+    /// The largest vertex tolerance (m). A fact.
+    LargestVertexGap,
+}
+
+/// The entity a finding is on, by index in the body's summary.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case", tag = "kind", content = "index")]
+pub enum CheckEntity {
+    Body,
+    Face(u32),
+    Edge(u32),
+    Vertex(u32),
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct CheckFinding {
+    pub problem: CheckProblem,
+    pub entity: CheckEntity,
+    pub value: Option<f64>,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -70,12 +176,31 @@ pub enum EdgeContinuity {
 pub enum AnalysisResult {
     MassProperties(MassProperties),
     SectionProperties(SectionProperties),
-    Thickness { faces: Vec<FaceValue> },
+    Thickness {
+        faces: Vec<FaceValue>,
+    },
     Draft(DraftReport),
-    Curvature { faces: Vec<FaceValue> },
-    Zebra { edges: Vec<(u32, EdgeContinuity)> },
-    Deviation { max: f64, rms: f64 },
-    Undercut { faces: Vec<u32> },
+    Curvature {
+        faces: Vec<FaceValue>,
+    },
+    Zebra {
+        edges: Vec<(u32, EdgeContinuity)>,
+    },
+    Deviation {
+        max: f64,
+        rms: f64,
+    },
+    Undercut {
+        faces: Vec<u32>,
+    },
+    Check {
+        findings: Vec<CheckFinding>,
+    },
+    FaceArea(FaceArea),
+    /// Per face of the request, its points in order.
+    SurfaceField {
+        faces: Vec<Vec<FieldPoint>>,
+    },
 }
 
 /// The kernel seam for geometry analyses. A kernel that cannot run one returns

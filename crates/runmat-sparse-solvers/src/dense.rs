@@ -88,30 +88,41 @@ pub fn symmetric_eigen(a: &[f64], n: usize) -> SolverResult<(Vec<f64>, Vec<f64>)
     Ok((values, vectors))
 }
 
-/// In-place dense Cholesky `A = L Lᵀ` (lower triangle of the column-major input overwritten).
+/// In-place dense Cholesky `A = L Lᵀ` (lower triangle of the column-major input overwritten;
+/// the strict upper triangle is left as it was).
+///
+/// The factorizations this crate makes are small: multigrid coarse grids of at most 400 rows
+/// and smoother blocks. A right-looking column sweep over the contiguous columns factors them
+/// in place and allocates nothing, so the caller's reservation of the `n²` matrix is its whole
+/// memory. The blocked BLAS path adds a packing buffer sized from the host's cache geometry,
+/// which no admission can derive from the problem: 132 MiB for a coarse grid of at most 400
+/// rows on a host with a 33 MiB L3 cache.
 pub fn cholesky_in_place(a: &mut [f64], n: usize) -> SolverResult<()> {
     assert_eq!(a.len(), n * n);
-    let req = faer::linalg::cholesky::llt::factor::cholesky_in_place_scratch::<f64>(
-        n,
-        faer::Par::Seq,
-        Default::default(),
-    );
-    let mut buffer =
-        faer::dyn_stack::MemBuffer::try_new(req).map_err(|_| SolverError::OutOfMemory {
-            bytes: req.size_bytes() as u64,
-        })?;
-    faer::linalg::cholesky::llt::factor::cholesky_in_place(
-        MatMut::from_column_major_slice_mut(a, n, n),
-        Default::default(),
-        faer::Par::Seq,
-        faer::dyn_stack::MemStack::new(&mut buffer),
-        Default::default(),
-    )
-    .map_err(|error| match error {
-        faer::linalg::cholesky::llt::factor::LltError::NonPositivePivot { index } => {
-            SolverError::NotPositiveDefinite { pivot: index }
+    for j in 0..n {
+        let (done, rest) = a.split_at_mut((j + 1) * n);
+        let column = &mut done[j * n..];
+        let pivot = column[j];
+        if !(pivot > 0.0 && pivot.is_finite()) {
+            return Err(SolverError::NotPositiveDefinite { pivot: j });
         }
-    })?;
+        let diagonal = pivot.sqrt();
+        column[j] = diagonal;
+        for value in &mut column[j + 1..] {
+            *value /= diagonal;
+        }
+        // Update the trailing lower triangle: A(i, k) -= L(i, j) L(k, j) for i >= k > j.
+        let column = &done[j * n..];
+        for (offset, target) in rest.chunks_exact_mut(n).enumerate() {
+            let k = j + 1 + offset;
+            let factor = column[k];
+            if factor != 0.0 {
+                for (entry, &l) in target[k..].iter_mut().zip(&column[k..]) {
+                    *entry -= l * factor;
+                }
+            }
+        }
+    }
     Ok(())
 }
 

@@ -1,6 +1,6 @@
 //! Tables placed by hand: a BOM from an assembly view, a hole table from an origin, the
-//! revision table (each run adds a revision row), a flat pattern's bend table and a weldment's
-//! cut list. A table lands at the `at` point pick, else in its standard place (a BOM on the
+//! revision table (each run adds a revision row), the general notes (each run adds a note), a
+//! flat pattern's bend table and a weldment's cut list. A table lands at the `at` point pick, else in its standard place (a BOM on the
 //! title block, the revision table top right).
 
 use super::*;
@@ -29,6 +29,7 @@ pub fn edit(
         "table.bom",
         "table.hole",
         "table.revision",
+        "table.notes",
         "table.bend",
         "table.cut-list",
     ]
@@ -38,10 +39,7 @@ pub fn edit(
     }
     Some((|| {
         let mut d = Drawing::open(path, text_, files)?;
-        let at = points(values, "at")?
-            .into_iter()
-            .next()
-            .unwrap_or([0.0, 0.0]);
+        let at = points(values, "at")?.into_iter().next();
         let picked_view = |d: &Drawing, field: &str| -> Result<String, EditFailure> {
             let v =
                 view_pick(values, field)?.ok_or_else(|| model("pick the view the table lists"))?;
@@ -156,6 +154,41 @@ pub fn edit(
                             at,
                         });
                         format!("Added revision table {name} at revision {rev}")
+                    }
+                }
+            }
+            "table.notes" => {
+                let note = text(values, "text", "").trim().to_owned();
+                if note.is_empty() {
+                    return Err(model("write the note"));
+                }
+                let sheet = d.sheet()?;
+                let existing = d
+                    .document
+                    .tables
+                    .iter_mut()
+                    .filter(|t| t.sheet == sheet)
+                    .find_map(|t| match &mut t.kind {
+                        TableKind::Notes { rows, .. } => Some((t.name.clone(), rows)),
+                        _ => None,
+                    });
+                match existing {
+                    Some((name, rows)) => {
+                        rows.push(note);
+                        format!("Added note {} to {name}", rows.len())
+                    }
+                    None => {
+                        let name = fresh(&d.document, "notes");
+                        d.document.tables.push(DrawingTable {
+                            name: name.clone(),
+                            sheet,
+                            kind: TableKind::Notes {
+                                rows: vec![note],
+                                width: None,
+                            },
+                            at,
+                        });
+                        format!("Added general notes {name}")
                     }
                 }
             }

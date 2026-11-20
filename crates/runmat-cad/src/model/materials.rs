@@ -1,7 +1,8 @@
 //! Material densities for mass properties, matched by the words in a material's name
 //! (`material.aluminum_7075`, `steel_300m`, `prepreg_carbon`), most specific first.
 //!
-//! A part can state its own density as a property (`density = 1450 kg/m^3` on its output) for a
+//! A part can state its own density as a property (`properties = [{ name = density, value =
+//! { type = quantity, value = 1450 kg/m^3 } }]` on its output) for a
 //! material this table doesn't know or a lumped body (a battery, a potted module); that value
 //! wins ([`part_density`]). Values are nominal room-temperature densities in kg/m³.
 
@@ -144,6 +145,12 @@ pub fn library_label(material: &str) -> Option<&'static str> {
 
 /// The density (kg/m³) of a material by its name, when this table knows it.
 pub fn material_density(material: &str) -> Option<f64> {
+    first_match(material, DENSITIES)
+}
+
+/// The value of the first table entry with a key in `material`'s name: a key with an underscore
+/// anywhere in the name, any other key as a whole word (`eps` is not in `steps`).
+fn first_match<T: Copy>(material: &str, table: &[(&[&str], T)]) -> Option<T> {
     let name = material
         .strip_prefix("material.")
         .unwrap_or(material)
@@ -152,7 +159,7 @@ pub fn material_density(material: &str) -> Option<f64> {
         .split(|c: char| !c.is_alphanumeric())
         .filter(|w| !w.is_empty())
         .collect();
-    DENSITIES.iter().find_map(|(keys, density)| {
+    table.iter().find_map(|(keys, value)| {
         keys.iter()
             .any(|k| {
                 if k.contains('_') {
@@ -161,12 +168,114 @@ pub fn material_density(material: &str) -> Option<f64> {
                     words.contains(k)
                 }
             })
-            .then_some(*density)
+            .then_some(*value)
     })
 }
 
+/// The section lining a cut through a material draws (ASME Y14.2 section-lining symbols, and
+/// the architectural material symbols for building materials).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SectionSymbol {
+    /// 45° lines, evenly spaced: cast iron, and any material without its own symbol.
+    #[default]
+    General,
+    /// 45° lines in pairs.
+    Steel,
+    /// Stippling with small triangles of aggregate.
+    Concrete,
+    /// Wood across the grain: diagonals corner to corner.
+    Wood,
+    /// Batt and loose-fill insulation: a row of loops across the cavity.
+    Insulation,
+    /// Rigid board insulation: 45° lines both ways.
+    RigidInsulation,
+    /// Gypsum board and plaster: fine stippling.
+    Gypsum,
+    /// Earth and compacted fill: short strokes in groups of three, alternating direction.
+    Earth,
+}
+
+/// (keys, symbol): the first entry with a key in the material name wins; insulation before the
+/// fibre and foam words it shares, plaster before the cement words.
+const SECTION_SYMBOLS: &[(&[&str], SectionSymbol)] = &[
+    (
+        &[
+            "batt",
+            "loose_fill",
+            "glass_wool",
+            "mineral_wool",
+            "rock_wool",
+            "cellulose",
+        ],
+        SectionSymbol::Insulation,
+    ),
+    (
+        &["xps", "eps", "polystyrene", "polyiso", "foam_board"],
+        SectionSymbol::RigidInsulation,
+    ),
+    (
+        &["gypsum", "drywall", "stucco", "plaster", "cement_plaster"],
+        SectionSymbol::Gypsum,
+    ),
+    (&["concrete", "grout", "mortar"], SectionSymbol::Concrete),
+    (
+        &[
+            "earth",
+            "soil",
+            "gravel",
+            "crushed_stone",
+            "aggregate",
+            "backfill",
+        ],
+        SectionSymbol::Earth,
+    ),
+    (
+        &[
+            "lumber",
+            "wood",
+            "douglas_fir",
+            "hem_fir",
+            "spf",
+            "pine",
+            "oak",
+            "birch",
+            "plywood",
+            "osb",
+            "oriented_strand",
+            "lvl",
+            "lsl",
+            "glulam",
+            "i_joist",
+            "timber",
+        ],
+        SectionSymbol::Wood,
+    ),
+    (
+        &[
+            "steel",
+            "stainless",
+            "iron",
+            "rebar",
+            "s235",
+            "s275",
+            "s355",
+            "a36",
+        ],
+        SectionSymbol::Steel,
+    ),
+];
+
+/// The section lining for a cut through `material` (a library id such as
+/// `material.douglas_fir_lumber`); [`SectionSymbol::General`] for a material without its own.
+pub fn section_symbol(material: Option<&str>) -> SectionSymbol {
+    material
+        .and_then(|m| first_match(m, SECTION_SYMBOLS))
+        .unwrap_or(SectionSymbol::General)
+}
+
 /// Where a part's density came from.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum DensitySource {
     /// The part's own `density` property.
@@ -176,31 +285,51 @@ pub enum DensitySource {
 }
 
 /// A part output's density (kg/m³) and where it came from: its `density` property (a quantity
-/// in kg/m³, g/cm³ or a bare number in kg/m³), else its material.
-pub fn part_density(output: &PartOutput) -> Option<(f64, DensitySource)> {
-    let stated = output
+/// in kg/m³, g/cm³ or a bare number in kg/m³), else its material from the table.
+///
+/// There is no default density. When neither gives one, the `Err` says why, naming the material
+/// it looked for, so mass properties report the mass as unknown instead of guessing it.
+pub fn part_density(output: &PartOutput) -> Result<(f64, DensitySource), String> {
+    if let Some(property) = output
         .properties
         .iter()
         .find(|p| p.name.as_str() == "density")
-        .and_then(|p| match &p.value {
+    {
+        let stated = match &property.value {
             PropertyValue::Quantity(ValueExpr::Quantity { value, unit }) => {
                 match unit.replace(' ', "").as_str() {
-                    "kg/m^3" | "kg/m3" => Some(*value),
-                    "g/cm^3" | "g/cm3" => Some(value * 1000.0),
-                    _ => None,
+                    "kg/m^3" | "kg/m3" => Ok(*value),
+                    "g/cm^3" | "g/cm3" => Ok(value * 1000.0),
+                    other => Err(format!(
+                        "its `density` property is in {other}; write it in kg/m^3 or g/cm^3"
+                    )),
                 }
             }
-            PropertyValue::Quantity(ValueExpr::Number { value }) => Some(*value),
-            _ => None,
-        });
-    if let Some(d) = stated {
-        return Some((d, DensitySource::Property));
+            PropertyValue::Quantity(ValueExpr::Number { value }) => Ok(*value),
+            _ => Err("its `density` property is not a number in kg/m^3 or g/cm^3".to_owned()),
+        }?;
+        if !(stated.is_finite() && stated > 0.0) {
+            return Err(format!(
+                "its `density` property is {stated} kg/m^3; a density is more than zero"
+            ));
+        }
+        return Ok((stated, DensitySource::Property));
     }
-    output
-        .material
-        .as_ref()
-        .and_then(|m| material_density(m.as_str()))
-        .map(|d| (d, DensitySource::Material))
+    let material = output.material.as_ref().map(|m| m.as_str());
+    match material.and_then(material_density) {
+        Some(d) => Ok((d, DensitySource::Material)),
+        None => Err(no_density_reason(material)),
+    }
+}
+
+/// Why a part with `material` (or none) has no density.
+pub fn no_density_reason(material: Option<&str>) -> String {
+    match material {
+        Some(m) => format!(
+            "no density is known for material `{m}`; pick a library material or give the part a `density` property"
+        ),
+        None => "it has no material and no `density` property".to_owned(),
+    }
 }
 
 #[cfg(test)]
@@ -225,6 +354,48 @@ mod tests {
         assert_eq!(material_density("material.xps_foam"), Some(35.0));
     }
 
+    /// The first output of a one-line part with `output` written as given.
+    fn output(fields: &str) -> PartOutput {
+        let text = format!(
+            "runmat 0.7\nstd 1\n\npart p {{\n    sketch s on origin.xy {{\n        c = circle(center = [0 mm, 0 mm], radius = 5 mm)\n    }}\n    feature b = extrude(profile = sketch.s, distance = 10 mm)\n    output p = {{ body = feature.b.body{fields} }}\n}}\n"
+        );
+        let parsed = crate::syntax::parse_part("p.part", &text);
+        let document = parsed.document.expect("parses");
+        document.parts.into_iter().next().expect("one output")
+    }
+
+    #[test]
+    fn a_part_density_is_never_assumed() {
+        assert_eq!(
+            part_density(&output(", material = \"material.aluminum\"")),
+            Ok((2700.0, DensitySource::Material))
+        );
+        assert_eq!(
+            part_density(&output(", material = \"material.unobtainium\"")),
+            Err("no density is known for material `material.unobtainium`; pick a library material or give the part a `density` property".to_owned())
+        );
+        assert_eq!(
+            part_density(&output("")),
+            Err("it has no material and no `density` property".to_owned())
+        );
+        // A stated density wins over the material, in kg/m³ or g/cm³.
+        assert_eq!(
+            part_density(&output(", material = \"material.unobtainium\", properties = [{ name = density, value = { type = quantity, value = 1.5 g/cm^3 } }]")),
+            Ok((1500.0, DensitySource::Property))
+        );
+        // A density in a unit mass properties don't read is unknown, not skipped for the
+        // material's.
+        let odd = part_density(&output(", material = \"material.steel\", properties = [{ name = density, value = { type = quantity, value = 0.28 lb/in^3 } }]"));
+        assert!(
+            odd.as_ref().is_err_and(|e| e.contains("lb/in^3")),
+            "{odd:?}"
+        );
+        let zero = part_density(&output(
+            ", properties = [{ name = density, value = { type = quantity, value = 0 kg/m^3 } }]",
+        ));
+        assert!(zero.is_err(), "{zero:?}");
+    }
+
     #[test]
     fn every_library_material_has_a_density_and_a_color() {
         for (name, label) in LIBRARY {
@@ -242,5 +413,30 @@ mod tests {
         }
         assert_eq!(material_density("material.stainless_304"), Some(7950.0));
         assert_eq!(library_label("unobtainium"), None);
+    }
+
+    #[test]
+    fn a_cut_draws_its_materials_section_symbol() {
+        use super::{section_symbol, SectionSymbol::*};
+        for (material, symbol) in [
+            ("material.concrete", Concrete),
+            ("material.douglas_fir_lumber", Wood),
+            ("material.osb", Wood),
+            ("material.engineered_lumber_i_joist", Wood),
+            ("material.fiberglass_batt", Insulation),
+            ("material.glass_wool_loose_fill", Insulation),
+            ("material.xps_foam", RigidInsulation),
+            ("material.gypsum_board", Gypsum),
+            ("material.stucco_brown_coat", Gypsum),
+            ("material.steel_1018", Steel),
+            ("material.galvanized_steel", Steel),
+            ("material.crushed_stone_gravel", Earth),
+            ("material.asphalt_saturated_kraft_wrb", General),
+            ("material.copper_insulated", General),
+            ("material.aluminum_6061_t6", General),
+        ] {
+            assert_eq!(section_symbol(Some(material)), symbol, "{material}");
+        }
+        assert_eq!(section_symbol(None), General);
     }
 }

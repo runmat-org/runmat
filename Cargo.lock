@@ -721,11 +721,12 @@ dependencies = [
 
 [[package]]
 name = "atoi_simd"
-version = "0.17.0"
+version = "0.18.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8ad17c7c205c2c28b527b9845eeb91cf1b4d008b438f98ce0e628227a822758e"
+checksum = "f3cdb3708a128e559a30fb830e8a77a5022ee6902806925c216658652b452a44"
 dependencies = [
  "debug_unsafe",
+ "rustversion",
 ]
 
 [[package]]
@@ -1147,9 +1148,9 @@ checksum = "8ae3f5d315924270530207e2a68396c3cc547f6dca3fbdca317cfb1a51edb593"
 
 [[package]]
 name = "calamine"
-version = "0.35.0"
+version = "0.37.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8822fe6253ca47aa5ad9a3be09f6fe7cd20c6a74e41b0aa42e8f4e3d523508df"
+checksum = "c9ca341b94bc4b29e08970b1a03914fad2dfe177e2ecb67fcd6de9046004aafb"
 dependencies = [
  "atoi_simd",
  "byteorder",
@@ -1158,7 +1159,7 @@ dependencies = [
  "encoding_rs",
  "fast-float2",
  "log",
- "quick-xml",
+ "quick-xml 0.42.0",
  "serde",
  "zip",
 ]
@@ -1294,9 +1295,9 @@ checksum = "fd16c4719339c4530435d38e511904438d07cce7950afa3718a84ac36c10e89e"
 
 [[package]]
 name = "cfg_aliases"
-version = "0.2.1"
+version = "0.2.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "613afe47fcd5fac7ccf1db93babcb082c5994d996f20b8b159f2ad1658eb5724"
+checksum = "f079e83a288787bcd14a6aea84cee5c87a67c5a3e660c30f557a3d24761b3527"
 
 [[package]]
 name = "chrono"
@@ -1546,6 +1547,15 @@ dependencies = [
  "getrandom 0.2.17",
  "once_cell",
  "tiny-keccak",
+]
+
+[[package]]
+name = "constant_time_eq"
+version = "0.6.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9eb6feb175df65d0a3ccd3e73484e940d0ac664e8034f0519fd49a93db3071d9"
+dependencies = [
+ "rustversion",
 ]
 
 [[package]]
@@ -3602,9 +3612,11 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "300e883d756b2e4ec94e02791f39b04b522276138852cfc41d9fb7e904106099"
 dependencies = [
  "cfg-if",
+ "js-sys",
  "libc",
  "r-efi 6.0.0",
  "rand_core 0.10.1",
+ "wasm-bindgen",
 ]
 
 [[package]]
@@ -5349,7 +5361,7 @@ dependencies = [
  "arrayvec",
  "bit-set",
  "bitflags 2.13.0",
- "cfg_aliases 0.2.1",
+ "cfg_aliases 0.2.2",
  "codespan-reporting 0.11.1",
  "hexf-parse",
  "indexmap 2.14.0",
@@ -5622,6 +5634,18 @@ dependencies = [
  "bitflags 2.13.0",
  "cfg-if",
  "cfg_aliases 0.1.1",
+ "libc",
+]
+
+[[package]]
+name = "nix"
+version = "0.32.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "77730ed34f01f4990cb2ea67fec715ecebc6fab9a6396cf83c5529b13f581bdc"
+dependencies = [
+ "bitflags 2.13.0",
+ "cfg-if",
+ "cfg_aliases 0.2.2",
  "libc",
 ]
 
@@ -7119,9 +7143,18 @@ version = "0.39.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "cdcc8dd4e2f670d309a5f0e83fe36dfdc05af317008fea29144da1a2ac858e5e"
 dependencies = [
- "encoding_rs",
  "memchr",
  "tokio",
+]
+
+[[package]]
+name = "quick-xml"
+version = "0.42.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "41b1177fdf999d2321d3fb46ff47159d9c1fb9ad66a4879f8c50a0b504615e9b"
+dependencies = [
+ "encoding_rs",
+ "memchr",
 ]
 
 [[package]]
@@ -7131,7 +7164,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b9e20a958963c291dc322d98411f541009df2ced7b5a4f2bd52337638cfccf20"
 dependencies = [
  "bytes",
- "cfg_aliases 0.2.1",
+ "cfg_aliases 0.2.2",
  "pin-project-lite",
  "quinn-proto",
  "quinn-udp",
@@ -7173,7 +7206,7 @@ version = "0.5.14"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "addec6a0dcad8a8d96a771f815f0eaf55f9d1805756410b39f5fa81332574cbd"
 dependencies = [
- "cfg_aliases 0.2.1",
+ "cfg_aliases 0.2.2",
  "libc",
  "once_cell",
  "socket2 0.6.4",
@@ -7633,7 +7666,7 @@ checksum = "4e27ee8bb91ca0adcf0ecb116293afa12d393f9c2b9b9cd54d33e8078fe19839"
 
 [[package]]
 name = "runmat"
-version = "0.7.1"
+version = "0.7.2"
 dependencies = [
  "anyhow",
  "atty",
@@ -7726,7 +7759,7 @@ dependencies = [
 
 [[package]]
 name = "runmat-accelerate"
-version = "0.7.1"
+version = "0.7.2"
 dependencies = [
  "anyhow",
  "ash",
@@ -7774,7 +7807,7 @@ dependencies = [
 
 [[package]]
 name = "runmat-accelerate-api"
-version = "0.7.1"
+version = "0.7.2"
 dependencies = [
  "anyhow",
  "ash",
@@ -7792,7 +7825,7 @@ dependencies = [
 
 [[package]]
 name = "runmat-analysis-core"
-version = "0.7.1"
+version = "0.7.2"
 dependencies = [
  "runmat-geometry-core",
  "runmat-types",
@@ -7804,7 +7837,7 @@ dependencies = [
 
 [[package]]
 name = "runmat-analysis-distributed"
-version = "0.7.1"
+version = "0.7.2"
 dependencies = [
  "faer 0.24.4",
  "runmat-simulation-usage",
@@ -7813,7 +7846,7 @@ dependencies = [
 
 [[package]]
 name = "runmat-analysis-execution"
-version = "0.7.1"
+version = "0.7.2"
 dependencies = [
  "runmat-analysis-core",
  "runmat-analysis-fea",
@@ -7837,7 +7870,7 @@ dependencies = [
 
 [[package]]
 name = "runmat-analysis-fea"
-version = "0.7.1"
+version = "0.7.2"
 dependencies = [
  "anyhow",
  "futures",
@@ -7866,7 +7899,7 @@ dependencies = [
 
 [[package]]
 name = "runmat-analysis-language"
-version = "0.7.1"
+version = "0.7.2"
 dependencies = [
  "hex",
  "runmat-analysis-core",
@@ -7885,7 +7918,7 @@ dependencies = [
 
 [[package]]
 name = "runmat-analysis-qualification"
-version = "0.7.1"
+version = "0.7.2"
 dependencies = [
  "serde",
  "serde_json",
@@ -7893,7 +7926,7 @@ dependencies = [
 
 [[package]]
 name = "runmat-aot"
-version = "0.7.1"
+version = "0.7.2"
 dependencies = [
  "anyhow",
  "ar_archive_writer",
@@ -7921,12 +7954,13 @@ dependencies = [
  "target-lexicon 0.12.16",
  "tempfile",
  "thiserror 1.0.69",
+ "zip",
  "zstd",
 ]
 
 [[package]]
 name = "runmat-aot-runtime"
-version = "0.7.1"
+version = "0.7.2"
 dependencies = [
  "runmat-accelerate",
  "runmat-accelerate-api",
@@ -7955,7 +7989,7 @@ dependencies = [
 
 [[package]]
 name = "runmat-async"
-version = "0.7.1"
+version = "0.7.2"
 dependencies = [
  "miette",
  "runmat-execution",
@@ -7965,7 +7999,7 @@ dependencies = [
 
 [[package]]
 name = "runmat-build-identity"
-version = "0.7.1"
+version = "0.7.2"
 dependencies = [
  "hex",
  "sha2 0.10.9",
@@ -7974,7 +8008,7 @@ dependencies = [
 
 [[package]]
 name = "runmat-builtins"
-version = "0.7.1"
+version = "0.7.2"
 dependencies = [
  "hex",
  "inventory",
@@ -7993,7 +8027,7 @@ dependencies = [
 
 [[package]]
 name = "runmat-cad"
-version = "0.7.1"
+version = "0.7.2"
 dependencies = [
  "hex",
  "runmat-constraint",
@@ -8002,6 +8036,7 @@ dependencies = [
  "runmat-geometry-kernel",
  "runmat-rules",
  "runmat-types",
+ "schemars",
  "serde",
  "serde_json",
  "sha2 0.11.0",
@@ -8010,20 +8045,22 @@ dependencies = [
 
 [[package]]
 name = "runmat-cad-wasm"
-version = "0.7.1"
+version = "0.7.2"
 dependencies = [
+ "hex",
  "runmat-cad",
  "runmat-circuit",
  "runmat-design-syntax",
  "runmat-types",
  "serde",
  "serde_json",
+ "sha2 0.11.0",
  "wasm-bindgen",
 ]
 
 [[package]]
 name = "runmat-canonical-codec"
-version = "0.7.1"
+version = "0.7.2"
 dependencies = [
  "minicbor",
  "runmat-build-identity",
@@ -8033,7 +8070,7 @@ dependencies = [
 
 [[package]]
 name = "runmat-circuit"
-version = "0.7.1"
+version = "0.7.2"
 dependencies = [
  "gerber_parser",
  "runmat-design-commands",
@@ -8047,7 +8084,7 @@ dependencies = [
 
 [[package]]
 name = "runmat-circuit-sim"
-version = "0.7.1"
+version = "0.7.2"
 dependencies = [
  "rayon",
  "runmat-simulation-usage",
@@ -8055,7 +8092,7 @@ dependencies = [
 
 [[package]]
 name = "runmat-circuit-spice"
-version = "0.7.1"
+version = "0.7.2"
 dependencies = [
  "libloading 0.8.9",
  "runmat-circuit",
@@ -8067,7 +8104,7 @@ dependencies = [
 
 [[package]]
 name = "runmat-circuit-wasm"
-version = "0.7.1"
+version = "0.7.2"
 dependencies = [
  "runmat-circuit",
  "runmat-circuit-sim",
@@ -8080,7 +8117,7 @@ dependencies = [
 
 [[package]]
 name = "runmat-clarabel"
-version = "0.7.1"
+version = "0.7.2"
 dependencies = [
  "amd",
  "blas",
@@ -8117,7 +8154,7 @@ dependencies = [
 
 [[package]]
 name = "runmat-config"
-version = "0.7.1"
+version = "0.7.2"
 dependencies = [
  "anyhow",
  "clap",
@@ -8137,7 +8174,7 @@ dependencies = [
 
 [[package]]
 name = "runmat-constraint"
-version = "0.7.1"
+version = "0.7.2"
 dependencies = [
  "serde",
  "serde_json",
@@ -8145,7 +8182,7 @@ dependencies = [
 
 [[package]]
 name = "runmat-core"
-version = "0.7.1"
+version = "0.7.2"
 dependencies = [
  "allocator-api2",
  "anyhow",
@@ -8206,7 +8243,7 @@ dependencies = [
 
 [[package]]
 name = "runmat-cpu-execution"
-version = "0.7.1"
+version = "0.7.2"
 dependencies = [
  "rayon",
  "runmat-build-identity",
@@ -8214,17 +8251,18 @@ dependencies = [
 
 [[package]]
 name = "runmat-design-commands"
-version = "0.7.1"
+version = "0.7.2"
 dependencies = [
  "runmat-cad",
  "runmat-circuit",
+ "runmat-types",
  "serde",
  "serde_json",
 ]
 
 [[package]]
 name = "runmat-design-syntax"
-version = "0.7.1"
+version = "0.7.2"
 dependencies = [
  "hex",
  "runmat-types",
@@ -8236,7 +8274,7 @@ dependencies = [
 
 [[package]]
 name = "runmat-design-tools"
-version = "0.7.1"
+version = "0.7.2"
 dependencies = [
  "base64 0.22.1",
  "futures",
@@ -8263,17 +8301,8 @@ dependencies = [
 ]
 
 [[package]]
-name = "runmat-design-tools-wasm"
-version = "0.7.1"
-dependencies = [
- "runmat-design-tools",
- "serde_json",
- "wasm-bindgen",
-]
-
-[[package]]
 name = "runmat-execution"
-version = "0.7.1"
+version = "0.7.2"
 dependencies = [
  "base64 0.22.1",
  "ed25519-dalek",
@@ -8290,7 +8319,7 @@ dependencies = [
 
 [[package]]
 name = "runmat-execution-artifact"
-version = "0.7.1"
+version = "0.7.2"
 dependencies = [
  "aes-gcm 0.10.3",
  "getrandom 0.2.17",
@@ -8315,7 +8344,7 @@ dependencies = [
 
 [[package]]
 name = "runmat-execution-runner"
-version = "0.7.1"
+version = "0.7.2"
 dependencies = [
  "futures",
  "runmat-execution",
@@ -8327,7 +8356,7 @@ dependencies = [
 
 [[package]]
 name = "runmat-execution-runner-native"
-version = "0.7.1"
+version = "0.7.2"
 dependencies = [
  "async-trait",
  "base64 0.22.1",
@@ -8398,7 +8427,7 @@ dependencies = [
 
 [[package]]
 name = "runmat-execution-transport-native"
-version = "0.7.1"
+version = "0.7.2"
 dependencies = [
  "async-trait",
  "base64 0.22.1",
@@ -8426,11 +8455,11 @@ dependencies = [
 
 [[package]]
 name = "runmat-extension-abi"
-version = "0.7.1"
+version = "0.7.2"
 
 [[package]]
 name = "runmat-fea-admission-native"
-version = "0.7.1"
+version = "0.7.2"
 dependencies = [
  "anyhow",
  "chrono",
@@ -8446,7 +8475,7 @@ dependencies = [
 
 [[package]]
 name = "runmat-fea-source"
-version = "0.7.1"
+version = "0.7.2"
 dependencies = [
  "runmat-analysis-core",
  "runmat-analysis-language",
@@ -8460,7 +8489,7 @@ dependencies = [
 
 [[package]]
 name = "runmat-filesystem"
-version = "0.7.1"
+version = "0.7.2"
 dependencies = [
  "async-trait",
  "axum 0.7.9",
@@ -8478,6 +8507,7 @@ dependencies = [
  "runmat-time",
  "runmat-workspace-contracts",
  "serde",
+ "serde-wasm-bindgen",
  "serde_json",
  "sha2 0.11.0",
  "tempfile",
@@ -8485,6 +8515,7 @@ dependencies = [
  "url",
  "uuid",
  "wasm-bindgen",
+ "wasm-bindgen-futures",
  "wasm-bindgen-test",
  "web-sys",
  "windows-sys 0.61.2",
@@ -8492,7 +8523,7 @@ dependencies = [
 
 [[package]]
 name = "runmat-gc"
-version = "0.7.1"
+version = "0.7.2"
 dependencies = [
  "allocator-api2",
  "hashbrown 0.16.1",
@@ -8513,11 +8544,11 @@ dependencies = [
 
 [[package]]
 name = "runmat-gc-api"
-version = "0.7.1"
+version = "0.7.2"
 
 [[package]]
 name = "runmat-gc-miri-tests"
-version = "0.7.1"
+version = "0.7.2"
 dependencies = [
  "runmat-builtins",
  "runmat-gc",
@@ -8526,7 +8557,7 @@ dependencies = [
 
 [[package]]
 name = "runmat-geometry-core"
-version = "0.7.1"
+version = "0.7.2"
 dependencies = [
  "hex",
  "runmat-build-identity",
@@ -8540,7 +8571,7 @@ dependencies = [
 
 [[package]]
 name = "runmat-geometry-fixtures"
-version = "0.7.1"
+version = "0.7.2"
 dependencies = [
  "runmat-geometry-core",
  "runmat-types",
@@ -8548,7 +8579,7 @@ dependencies = [
 
 [[package]]
 name = "runmat-geometry-io"
-version = "0.7.1"
+version = "0.7.2"
 dependencies = [
  "anyhow",
  "base64 0.22.1",
@@ -8573,7 +8604,7 @@ dependencies = [
 
 [[package]]
 name = "runmat-geometry-kernel"
-version = "0.7.1"
+version = "0.7.2"
 dependencies = [
  "serde",
  "serde_json",
@@ -8582,7 +8613,7 @@ dependencies = [
 
 [[package]]
 name = "runmat-geometry-ops"
-version = "0.7.1"
+version = "0.7.2"
 dependencies = [
  "delaunator",
  "runmat-build-identity",
@@ -8594,10 +8625,11 @@ dependencies = [
 
 [[package]]
 name = "runmat-geometry-wasm-host"
-version = "0.7.1"
+version = "0.7.2"
 dependencies = [
  "base64 0.22.1",
  "runmat-analysis-execution",
+ "runmat-analysis-fea",
  "runmat-cad",
  "runmat-cad-wasm",
  "runmat-design-tools",
@@ -8613,7 +8645,7 @@ dependencies = [
 
 [[package]]
 name = "runmat-hir"
-version = "0.7.1"
+version = "0.7.2"
 dependencies = [
  "hex",
  "runmat-builtins",
@@ -8629,7 +8661,7 @@ dependencies = [
 
 [[package]]
 name = "runmat-java"
-version = "0.7.1"
+version = "0.7.2"
 dependencies = [
  "futures",
  "hex",
@@ -8644,7 +8676,7 @@ dependencies = [
 
 [[package]]
 name = "runmat-jit"
-version = "0.7.1"
+version = "0.7.2"
 dependencies = [
  "anyhow",
  "cranelift-codegen",
@@ -8672,7 +8704,7 @@ dependencies = [
 
 [[package]]
 name = "runmat-lexer"
-version = "0.7.1"
+version = "0.7.2"
 dependencies = [
  "logos",
  "runmat-design-syntax",
@@ -8682,7 +8714,7 @@ dependencies = [
 
 [[package]]
 name = "runmat-logging"
-version = "0.7.1"
+version = "0.7.2"
 dependencies = [
  "chrono",
  "futures-channel",
@@ -8711,7 +8743,7 @@ dependencies = [
 
 [[package]]
 name = "runmat-lsp"
-version = "0.7.1"
+version = "0.7.2"
 dependencies = [
  "env_logger",
  "futures",
@@ -8750,7 +8782,7 @@ dependencies = [
 
 [[package]]
 name = "runmat-macros"
-version = "0.7.1"
+version = "0.7.2"
 dependencies = [
  "inventory",
  "proc-macro2",
@@ -8763,11 +8795,11 @@ dependencies = [
 
 [[package]]
 name = "runmat-meshing"
-version = "0.7.1"
+version = "0.7.2"
 
 [[package]]
 name = "runmat-meshing-core"
-version = "0.7.1"
+version = "0.7.2"
 dependencies = [
  "minicbor",
  "num-bigint",
@@ -8787,7 +8819,7 @@ dependencies = [
 
 [[package]]
 name = "runmat-meshing-curve"
-version = "0.7.1"
+version = "0.7.2"
 dependencies = [
  "runmat-build-identity",
  "runmat-canonical-codec",
@@ -8803,7 +8835,7 @@ dependencies = [
 
 [[package]]
 name = "runmat-meshing-execution"
-version = "0.7.1"
+version = "0.7.2"
 dependencies = [
  "futures",
  "libc",
@@ -8831,7 +8863,7 @@ dependencies = [
 
 [[package]]
 name = "runmat-meshing-size"
-version = "0.7.1"
+version = "0.7.2"
 dependencies = [
  "runmat-build-identity",
  "runmat-geometry-core",
@@ -8843,7 +8875,7 @@ dependencies = [
 
 [[package]]
 name = "runmat-meshing-surface"
-version = "0.7.1"
+version = "0.7.2"
 dependencies = [
  "minicbor",
  "runmat-build-identity",
@@ -8862,7 +8894,7 @@ dependencies = [
 
 [[package]]
 name = "runmat-meshing-tetrahedron"
-version = "0.7.1"
+version = "0.7.2"
 dependencies = [
  "hex",
  "minicbor",
@@ -8885,7 +8917,7 @@ dependencies = [
 
 [[package]]
 name = "runmat-mex"
-version = "0.7.1"
+version = "0.7.2"
 dependencies = [
  "anyhow",
  "libloading 0.8.9",
@@ -8906,7 +8938,7 @@ dependencies = [
 
 [[package]]
 name = "runmat-mir"
-version = "0.7.1"
+version = "0.7.2"
 dependencies = [
  "runmat-builtins",
  "runmat-hir",
@@ -8918,7 +8950,7 @@ dependencies = [
 
 [[package]]
 name = "runmat-native-codegen"
-version = "0.7.1"
+version = "0.7.2"
 dependencies = [
  "cranelift",
  "cranelift-codegen",
@@ -8943,7 +8975,7 @@ dependencies = [
 
 [[package]]
 name = "runmat-native-executor"
-version = "0.7.1"
+version = "0.7.2"
 dependencies = [
  "allocator-api2",
  "futures",
@@ -8963,7 +8995,7 @@ dependencies = [
 
 [[package]]
 name = "runmat-native-ffi"
-version = "0.7.1"
+version = "0.7.2"
 dependencies = [
  "hex",
  "libffi",
@@ -8981,7 +9013,7 @@ dependencies = [
 
 [[package]]
 name = "runmat-node-agent"
-version = "0.7.1"
+version = "0.7.2"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -9014,7 +9046,7 @@ dependencies = [
 
 [[package]]
 name = "runmat-package"
-version = "0.7.1"
+version = "0.7.2"
 dependencies = [
  "base64 0.22.1",
  "chrono",
@@ -9038,7 +9070,7 @@ dependencies = [
 
 [[package]]
 name = "runmat-package-cache"
-version = "0.7.1"
+version = "0.7.2"
 dependencies = [
  "base64 0.22.1",
  "futures",
@@ -9054,7 +9086,7 @@ dependencies = [
 
 [[package]]
 name = "runmat-package-cache-native"
-version = "0.7.1"
+version = "0.7.2"
 dependencies = [
  "aes-gcm 0.10.3",
  "base64 0.22.1",
@@ -9081,7 +9113,7 @@ dependencies = [
 
 [[package]]
 name = "runmat-parser"
-version = "0.7.1"
+version = "0.7.2"
 dependencies = [
  "runmat-design-syntax",
  "runmat-lexer",
@@ -9091,7 +9123,7 @@ dependencies = [
 
 [[package]]
 name = "runmat-plot"
-version = "0.7.1"
+version = "0.7.2"
 dependencies = [
  "bytemuck",
  "egui",
@@ -9126,7 +9158,7 @@ dependencies = [
 
 [[package]]
 name = "runmat-process-host"
-version = "0.7.1"
+version = "0.7.2"
 dependencies = [
  "hmac 0.12.1",
  "libc",
@@ -9144,7 +9176,7 @@ dependencies = [
 
 [[package]]
 name = "runmat-python"
-version = "0.7.1"
+version = "0.7.2"
 dependencies = [
  "futures",
  "libloading 0.8.9",
@@ -9158,11 +9190,11 @@ dependencies = [
 
 [[package]]
 name = "runmat-rules"
-version = "0.7.1"
+version = "0.7.2"
 
 [[package]]
 name = "runmat-runtime"
-version = "0.7.1"
+version = "0.7.2"
 dependencies = [
  "accelerate-src",
  "allocator-api2",
@@ -9211,7 +9243,7 @@ dependencies = [
  "parquet",
  "pin-project-lite",
  "pollster 0.3.0",
- "quick-xml",
+ "quick-xml 0.39.4",
  "regex",
  "reqwest 0.12.28",
  "runmat-accelerate",
@@ -9221,6 +9253,7 @@ dependencies = [
  "runmat-analysis-language",
  "runmat-async",
  "runmat-builtins",
+ "runmat-cad-wasm",
  "runmat-canonical-codec",
  "runmat-clarabel",
  "runmat-cpu-execution",
@@ -9259,6 +9292,7 @@ dependencies = [
  "thiserror 1.0.69",
  "tokio",
  "tracing",
+ "tracing-subscriber",
  "url",
  "uuid",
  "wasm-bindgen",
@@ -9272,7 +9306,7 @@ dependencies = [
 
 [[package]]
 name = "runmat-runtime-integration-tests"
-version = "0.7.1"
+version = "0.7.2"
 dependencies = [
  "futures",
  "inventory",
@@ -9286,7 +9320,7 @@ dependencies = [
 
 [[package]]
 name = "runmat-server-client"
-version = "0.7.1"
+version = "0.7.2"
 dependencies = [
  "anyhow",
  "base64 0.22.1",
@@ -9321,7 +9355,7 @@ dependencies = [
 
 [[package]]
 name = "runmat-simulation-usage"
-version = "0.7.1"
+version = "0.7.2"
 dependencies = [
  "serde",
  "serde_json",
@@ -9329,7 +9363,7 @@ dependencies = [
 
 [[package]]
 name = "runmat-sparse-accelerate"
-version = "0.7.1"
+version = "0.7.2"
 dependencies = [
  "pollster 0.3.0",
  "runmat-accelerate",
@@ -9339,7 +9373,7 @@ dependencies = [
 
 [[package]]
 name = "runmat-sparse-solvers"
-version = "0.7.1"
+version = "0.7.2"
 dependencies = [
  "faer 0.24.4",
  "libc",
@@ -9349,11 +9383,12 @@ dependencies = [
  "runmat-cpu-execution",
  "runmat-simulation-usage",
  "thiserror 1.0.69",
+ "tracing",
 ]
 
 [[package]]
 name = "runmat-static-analysis"
-version = "0.7.1"
+version = "0.7.2"
 dependencies = [
  "runmat-builtins",
  "runmat-execution",
@@ -9372,7 +9407,7 @@ dependencies = [
 
 [[package]]
 name = "runmat-telemetry"
-version = "0.7.1"
+version = "0.7.2"
 dependencies = [
  "runmat-accelerate-api",
  "serde",
@@ -9381,7 +9416,7 @@ dependencies = [
 
 [[package]]
 name = "runmat-test"
-version = "0.7.1"
+version = "0.7.2"
 dependencies = [
  "futures",
  "hex",
@@ -9395,7 +9430,7 @@ dependencies = [
 
 [[package]]
 name = "runmat-test-runner"
-version = "0.7.1"
+version = "0.7.2"
 dependencies = [
  "futures",
  "runmat-execution",
@@ -9408,7 +9443,7 @@ dependencies = [
 
 [[package]]
 name = "runmat-test-runner-execution"
-version = "0.7.1"
+version = "0.7.2"
 dependencies = [
  "futures",
  "runmat-execution",
@@ -9424,7 +9459,7 @@ dependencies = [
 
 [[package]]
 name = "runmat-test-runner-native"
-version = "0.7.1"
+version = "0.7.2"
 dependencies = [
  "anyhow",
  "hex",
@@ -9455,11 +9490,11 @@ dependencies = [
 
 [[package]]
 name = "runmat-thread-local"
-version = "0.7.1"
+version = "0.7.2"
 
 [[package]]
 name = "runmat-time"
-version = "0.7.1"
+version = "0.7.2"
 dependencies = [
  "instant",
  "js-sys",
@@ -9467,7 +9502,7 @@ dependencies = [
 
 [[package]]
 name = "runmat-types"
-version = "0.7.1"
+version = "0.7.2"
 dependencies = [
  "schemars",
  "serde",
@@ -9478,7 +9513,7 @@ dependencies = [
 
 [[package]]
 name = "runmat-value"
-version = "0.7.1"
+version = "0.7.2"
 dependencies = [
  "indexmap 1.9.3",
  "libm",
@@ -9497,7 +9532,7 @@ dependencies = [
 
 [[package]]
 name = "runmat-vm"
-version = "0.7.1"
+version = "0.7.2"
 dependencies = [
  "allocator-api2",
  "anyhow",
@@ -9532,7 +9567,7 @@ dependencies = [
 
 [[package]]
 name = "runmat-wasm"
-version = "0.7.1"
+version = "0.7.2"
 dependencies = [
  "async-trait",
  "base64 0.22.1",
@@ -9593,7 +9628,7 @@ dependencies = [
 
 [[package]]
 name = "runmat-workspace-contracts"
-version = "0.7.1"
+version = "0.7.2"
 dependencies = [
  "ciborium",
  "runmat-types",
@@ -11437,9 +11472,9 @@ dependencies = [
 
 [[package]]
 name = "typed-path"
-version = "0.12.3"
+version = "0.13.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8e28f89b80c87b8fb0cf04ab448d5dd0dd0ade2f8891bae878de66a75a28600e"
+checksum = "9ce898823d8cd0f028662d2f349694b1af0a5cc9be83f1d213a00d3147445e1e"
 
 [[package]]
 name = "typenum"
@@ -12045,7 +12080,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9c324a910fd86ebdc364a3e61ec1f11737d3b1d6c273c0239ee8ff4bc0d24b4a"
 dependencies = [
  "proc-macro2",
- "quick-xml",
+ "quick-xml 0.39.4",
  "quote",
 ]
 
@@ -12171,7 +12206,7 @@ checksum = "6b0b3436f0729f6cdf2e6e9201f3d39dc95813fad61d826c1ed07918b4539353"
 dependencies = [
  "arrayvec",
  "bitflags 2.13.0",
- "cfg_aliases 0.2.1",
+ "cfg_aliases 0.2.2",
  "document-features",
  "js-sys",
  "log",
@@ -12198,7 +12233,7 @@ dependencies = [
  "arrayvec",
  "bit-vec 0.8.0",
  "bitflags 2.13.0",
- "cfg_aliases 0.2.1",
+ "cfg_aliases 0.2.2",
  "document-features",
  "indexmap 2.14.0",
  "log",
@@ -12227,7 +12262,7 @@ dependencies = [
  "bitflags 2.13.0",
  "block",
  "bytemuck",
- "cfg_aliases 0.2.1",
+ "cfg_aliases 0.2.2",
  "core-graphics-types",
  "glow",
  "glutin_wgl_sys",
@@ -12898,7 +12933,7 @@ dependencies = [
  "block2 0.5.1",
  "bytemuck",
  "calloop 0.13.0",
- "cfg_aliases 0.2.1",
+ "cfg_aliases 0.2.2",
  "concurrent-queue",
  "core-foundation 0.9.4",
  "core-graphics",
@@ -13370,15 +13405,21 @@ dependencies = [
 
 [[package]]
 name = "zip"
-version = "7.2.0"
+version = "9.6.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c42e33efc22a0650c311c2ef19115ce232583abbe80850bc8b66509ebef02de0"
+checksum = "80cc68510ea7553c30a69c732de5278e94183f68765af6c642dbccefd6ec777e"
 dependencies = [
+ "constant_time_eq",
  "crc32fast",
  "flate2",
+ "getrandom 0.4.3",
  "indexmap 2.14.0",
+ "libc",
  "memchr",
+ "nix 0.32.0",
  "typed-path",
+ "windows-sys 0.61.2",
+ "zeroize",
  "zopfli",
 ]
 

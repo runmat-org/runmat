@@ -1,0 +1,347 @@
+//! An assembly's motion studies as the Desktop plays them. Each study of the top assembly is
+//! solved frame by frame over the resolved tree ([`runmat_cad::assembly::motion::kinematics`]),
+//! and the compile's projection carries it under `motion`:
+//!
+//! ```json
+//! [{ "name": "open_close", "duration": 4, "profile": "linear", "track": "lid",
+//!    "drives": [{ "mate": "hinge", "quantity": "angle", "unit": "deg", "from": 0, "to": 90,
+//!                 "values": [0, 1.9, …] }],
+//!    "times": [0, 0.083, …],
+//!    "frames": [[{ "uuid": "…", "transform": [r00 … r22, tx, ty, tz] }, …], …],
+//!    "plot": { "occurrence": "lid", "speed": [mm/s …], "acceleration": [mm/s² …],
+//!              "angular_speed": [deg/s …] },
+//!    "stopped": { "time": 3.2, "message": "…" }, "problems": ["…"] }]
+//! ```
+//!
+//! Each frame lists the moving occurrences (and their subtrees) with their solved world
+//! transforms, in the display's layout: the rotation row by row, then the translation, in metres.
+//! The canvas swaps each listed occurrence's transform for the frame's while the study plays.
+//! The projection's `positions` lists the named mate positions.
+
+use runmat_cad::assembly::motion::drag::{top_node, Dragged};
+use runmat_cad::assembly::motion::kinematics::{
+    run_study, DriveQuantity, MotionContext, MotionRun,
+};
+use runmat_cad::assembly::motion::MotionKind;
+use runmat_cad::assembly::resolve::{ResolveContext, ResolveRequest, ResolvedAssembly};
+use runmat_cad::assembly::source::{DesignSource, MemorySource};
+use runmat_cad::regen::kernel::Transform;
+use runmat_cad::units::Units;
+use runmat_cad::value::{NoDynamicValues, ValueExpr};
+use serde_json::{json, Value};
+
+fn transform(w: &Transform) -> Vec<f64> {
+    let mut t = Vec::with_capacity(12);
+    for r in 0..3 {
+        for c in 0..3 {
+            t.push(w.rotation[r][c]);
+        }
+    }
+    t.extend(w.translation);
+    t
+}
+
+/// Rounded for the projection (it is sent on every compile).
+fn round(v: f64, places: i32) -> f64 {
+    let f = 10f64.powi(places);
+    (v * f).round() / f
+}
+
+/// The resolve context and request the studies and drags solve with.
+fn with_context<T>(
+    resolved: &ResolvedAssembly,
+    source: &MemorySource,
+    f: impl FnOnce(&MotionContext<'_>) -> T,
+) -> T {
+    let ctx = ResolveContext {
+        source,
+        units: &Units,
+        dynamic: &NoDynamicValues,
+        lock: None,
+        catalog: None,
+        tables: None,
+        gauge: None,
+    };
+    let request = ResolveRequest {
+        configuration: resolved.node(0).configuration.name.clone(),
+        ..ResolveRequest::default()
+    };
+    f(&MotionContext {
+        resolve: &ctx,
+        request: &request,
+        frame_bytes: study_frame_bytes(),
+    })
+}
+
+/// Top-level component `occurrence` dragged by `delta` (m) from its box centre, through the
+/// freedom its mates leave ([`runmat_cad::assembly::motion::drag`]).
+pub fn drag(
+    resolved: &ResolvedAssembly,
+    source: &MemorySource,
+    occurrence: &str,
+    delta: [f64; 3],
+) -> Result<Dragged, String> {
+    let doc = source
+        .assembly(&resolved.top, None)
+        .map_err(|_| "the assembly doesn't compile".to_owned())?;
+    let node = top_node(resolved, occurrence)
+        .ok_or_else(|| format!("the assembly has no component `{occurrence}`"))?;
+    let n = resolved.node(node);
+    let grab = source
+        .configured(&n.definition, n.revision.as_ref(), &n.configuration)
+        .ok()
+        .and_then(|c| c.bbox)
+        .filter(|b| !b.is_empty())
+        .map(|b| std::array::from_fn(|i| (b.min[i] + b.max[i]) / 2.0))
+        .unwrap_or([0.0; 3]);
+    with_context(resolved, source, |ctx| {
+        runmat_cad::assembly::motion::drag::drag(&doc, resolved, occurrence, grab, delta, ctx)
+    })
+}
+
+/// Study `name` of the top assembly, solved.
+pub fn run(resolved: &ResolvedAssembly, source: &MemorySource, name: &str) -> Option<MotionRun> {
+    let doc = source.assembly(&resolved.top, None).ok()?;
+    Some(with_context(resolved, source, |ctx| {
+        run_study(&doc, resolved, name, ctx)
+    }))
+}
+
+/// Every node under (and including) the moving nodes.
+fn moving_nodes(resolved: &ResolvedAssembly, run: &MotionRun) -> Vec<usize> {
+    let mut out = Vec::new();
+    let mut queue: Vec<u32> = run.moving.clone();
+    while let Some(n) = queue.pop() {
+        out.push(n as usize);
+        queue.extend(resolved.node(n).children.iter().copied());
+    }
+    out.sort_unstable();
+    out
+}
+
+fn study_json(
+    resolved: &ResolvedAssembly,
+    run: &MotionRun,
+    profile: &str,
+    track: Option<&str>,
+) -> Value {
+    let nodes = moving_nodes(resolved, run);
+    let frames: Vec<Value> = run
+        .frames
+        .iter()
+        .map(|f| {
+            Value::Array(
+                nodes
+                    .iter()
+                    .map(|&n| {
+                        json!({
+                            "uuid": resolved.nodes[n].uuid.to_string(),
+                            "transform": transform(&f[n]).into_iter().map(|v| round(v, 9)).collect::<Vec<_>>(),
+                        })
+                    })
+                    .collect(),
+            )
+        })
+        .collect();
+    let drives: Vec<Value> = run
+        .drives
+        .iter()
+        .map(|d| {
+            let (unit, scale) = match d.quantity {
+                DriveQuantity::Angle => ("deg", 180.0 / std::f64::consts::PI),
+                DriveQuantity::Length => ("mm", 1000.0),
+            };
+            let values: Vec<f64> = d.values.iter().map(|v| round(v * scale, 4)).collect();
+            json!({
+                "mate": d.mate,
+                "quantity": d.quantity,
+                "unit": unit,
+                "from": values.first(),
+                "to": values.last(),
+                "values": values,
+            })
+        })
+        .collect();
+    let plot = run.track.as_ref().map(|t| {
+        let norm = |v: &[f64; 3]| (v[0] * v[0] + v[1] * v[1] + v[2] * v[2]).sqrt();
+        json!({
+            "occurrence": t.occurrence,
+            "speed": t.velocity.iter().map(|v| round(norm(v) * 1000.0, 4)).collect::<Vec<_>>(),
+            "acceleration": t.acceleration.iter().map(|a| round(norm(a) * 1000.0, 3)).collect::<Vec<_>>(),
+            "angular_speed": t.angular_speed.iter().map(|w| round(w.to_degrees(), 4)).collect::<Vec<_>>(),
+            "position": t.position.iter().map(|p| p.map(|c| round(c, 9))).collect::<Vec<_>>(),
+        })
+    });
+    json!({
+        "name": run.name,
+        "duration": run.duration,
+        "profile": profile,
+        "track": track,
+        "drives": drives,
+        "times": run.times.iter().map(|t| round(*t, 6)).collect::<Vec<_>>(),
+        "frames": frames,
+        "plot": plot,
+        "stopped": run.stopped.as_ref().map(|(t, m)| json!({ "time": round(*t, 6), "message": m })),
+        "problems": run.problems,
+    })
+}
+
+/// The bytes one study's solved frames may take in the index: a sixteenth of the runtime's
+/// display-mesh budget ([`crate::runtime::part_cache::budget_bytes`]), the memory a compile's
+/// display data is held to. The budget follows the host's measured memory, so it is read per run.
+fn study_frame_bytes() -> usize {
+    crate::runtime::part_cache::budget_bytes() / 16
+}
+
+/// The top assembly's motion studies, solved; an empty array when it has none. A dynamic
+/// study first has every placed part's mass properties written into `source`.
+pub fn motion_studies(
+    resolved: &ResolvedAssembly,
+    source: &mut MemorySource,
+    documents: &std::collections::BTreeMap<String, runmat_cad::model::PartDocument>,
+    files: &crate::runtime::Files,
+) -> Value {
+    let Ok(doc) = source.assembly(&resolved.top, None) else {
+        return json!([]);
+    };
+    if doc.motions.iter().any(|s| s.kind == MotionKind::Dynamic) {
+        crate::mass::fill_part_masses(resolved, documents, source, files);
+    }
+    let source = &*source;
+    Value::Array(
+        doc.motions
+            .iter()
+            .filter_map(|s| {
+                let run = run(resolved, source, &s.name)?;
+                let mut row = study_json(resolved, &run, s.profile.key(), s.track.as_deref());
+                if s.kind == MotionKind::Dynamic {
+                    dynamic_rows(&mut row, &run, s);
+                }
+                Some(row)
+            })
+            .collect(),
+    )
+}
+
+/// A dynamic study's `kind`, its energy (J), its mate reactions per frame (for each mate, each
+/// frame's loads on the components it joins, at the mate's connector: point in mm, force in N,
+/// moment in N·m, world axes) and its bodies (mass in kg, centre of mass in mm in the body's own
+/// axes, inertia in kg·m² about it; per frame the centre in mm, its acceleration in m/s², the
+/// angular velocity in rad/s and angular acceleration in rad/s², world axes). The loads and the
+/// body motion keep full precision: Results to .fea balances them against each other.
+fn dynamic_rows(
+    row: &mut Value,
+    run: &MotionRun,
+    study: &runmat_cad::assembly::motion::MotionStudy,
+) {
+    let Some(o) = row.as_object_mut() else { return };
+    o.insert("kind".into(), json!("dynamic"));
+    // What the study loads the mechanism with, as written, for the command that edits it.
+    // As the run evaluated it (a written `-9.80665 m/s^2` is a negation, not a plain quantity).
+    let gravity: Vec<f64> = run
+        .gravity
+        .unwrap_or([
+            0.0,
+            0.0,
+            -runmat_cad::assembly::motion::dynamics::STANDARD_GRAVITY,
+        ])
+        .to_vec();
+    let spring = study.springs.first();
+    let motor = study.motors.first();
+    let angle = spring
+        .map(|s| {
+            [&s.stiffness, &s.damping]
+                .iter()
+                .any(|e| e.as_ref().is_some_and(|e| shown(e).contains("rad")))
+        })
+        .or(motor.map(|m| m.torque.is_some()))
+        .unwrap_or(true);
+    o.insert(
+        "setup".into(),
+        json!({
+            "gravity": gravity,
+            "mate": spring.map(|s| &s.mate).or(motor.map(|m| &m.mate)),
+            "quantity": if angle { "angle" } else { "distance" },
+            "stiffness": spring.and_then(|s| s.stiffness.as_ref()).map(shown),
+            "damping": spring.and_then(|s| s.damping.as_ref()).map(shown),
+            "load": motor.and_then(|m| m.torque.as_ref().or(m.force.as_ref())).map(shown),
+        }),
+    );
+    o.insert(
+        "energy".into(),
+        json!(run.energy.iter().map(|e| round(*e, 6)).collect::<Vec<_>>()),
+    );
+    o.insert(
+        "reactions".into(),
+        Value::Array(
+            run.reactions
+                .iter()
+                .map(|m| {
+                    json!({
+                        "mate": m.mate,
+                        "frames": m.frames.iter().map(|loads| loads.iter().map(|l| json!({
+                            "occurrence": l.occurrence,
+                            "point": l.point.map(|c| c * 1000.0),
+                            "force": l.force,
+                            "moment": l.moment,
+                        })).collect::<Vec<_>>()).collect::<Vec<_>>(),
+                    })
+                })
+                .collect(),
+        ),
+    );
+    o.insert(
+        "bodies".into(),
+        Value::Array(
+            run.bodies
+                .iter()
+                .map(|b| {
+                    json!({
+                        "occurrence": b.occurrence,
+                        "mass": b.mass,
+                        "center": b.center.map(|c| c * 1000.0),
+                        "inertia": b.inertia,
+                        "frames": b.frames.iter().map(|f| json!({
+                            "center": f.center.map(|c| c * 1000.0),
+                            "acceleration": f.acceleration,
+                            "angular_velocity": f.angular_velocity,
+                            "angular_acceleration": f.angular_acceleration,
+                        })).collect::<Vec<_>>(),
+                    })
+                })
+                .collect(),
+        ),
+    );
+}
+
+/// A value as the Outline shows it (`90 deg`, `25 mm`), from its expression.
+fn shown(e: &ValueExpr) -> String {
+    match e {
+        ValueExpr::Quantity { value, unit } => format!("{} {unit}", round(*value, 6)),
+        other => runmat_cad::syntax::value::print_value(other).unwrap_or_default(),
+    }
+}
+
+/// The top assembly's named mate positions: `[{ name, values: [{ mate, value }] }]`.
+pub fn mate_positions(resolved: &ResolvedAssembly, source: &MemorySource) -> Value {
+    let Ok(doc) = source.assembly(&resolved.top, None) else {
+        return json!([]);
+    };
+    Value::Array(
+        doc.positions
+            .iter()
+            .map(|p| {
+                let problem = p
+                    .values
+                    .iter()
+                    .find(|v| !doc.mates.iter().any(|m| m.name == v.mate))
+                    .map(|v| format!("no mate `{}` in the assembly", v.mate));
+                json!({
+                    "name": p.name,
+                    "values": p.values.iter().map(|v| json!({ "mate": v.mate, "value": shown(&v.value) })).collect::<Vec<_>>(),
+                    "problem": problem,
+                })
+            })
+            .collect(),
+    )
+}

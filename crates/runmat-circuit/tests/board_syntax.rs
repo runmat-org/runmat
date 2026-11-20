@@ -601,7 +601,7 @@ fn written_forms_and_diagnostics() {
         ("    net A\n    track A = { layer = In9.Cu, width = 1, from = [0, 0], to = [1, 1] }", "not a copper layer"),
         ("    net A\n    track A = { layer = F.Cu, width = 1, from = [0, 0] }", "needs `to`"),
         ("    net A\n    track A = { layer = F.Cu, width = 1, from = [0, 0], to = [1, 1], colour = red }", "has no `colour`"),
-        ("    net A\n    track A = { layer = F.Cu, width = 3 V, from = [0, 0], to = [1, 1] }", "not a length unit"),
+        ("    net A\n    track A = { layer = F.Cu, width = 3 V, from = [0, 0], to = [1, 1] }", "needs a unit of length such as m; V measures electric potential"),
         ("    footprint R1 = { package = nope, at = [0, 0] }", "not defined"),
         ("    net A\n    net A", "given twice"),
         ("    wire A = 1", "does not start a board statement"),

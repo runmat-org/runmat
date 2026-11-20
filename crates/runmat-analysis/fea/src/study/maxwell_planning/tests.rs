@@ -61,6 +61,7 @@ pub(in crate::study) fn compiled(
 ) -> CompiledAnalysisStudy {
     let properties = crate::properties::compile_property_map(&model, Some(mesh)).unwrap();
     CompiledAnalysisStudy {
+        displays: Vec::new(),
         module_path: "tests/maxwell.fea".into(),
         study_id: "maxwell".into(),
         study_inputs: vec![],

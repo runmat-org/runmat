@@ -1,9 +1,9 @@
 //! `design.overview` end to end (doc 18 §9): every fact on an overview comes from a check that
-//! ran, links go both ways (a part's study and drawing, a schematic's board), and every next
-//! step names a guide or a catalog command that exists.
+//! ran, links go both ways (a part's study and drawing, a schematic's board), and the counts are
+//! the check's.
 
-use runmat_design_tools::overview::{related_candidates, Level, Relation, StepAction};
-use runmat_design_tools::{call, guides, Files};
+use runmat_design_tools::overview::{related_candidates, Level, Relation};
+use runmat_design_tools::{call, Files};
 use serde_json::{json, Value};
 
 const IO_CIRCUIT: &str = include_str!("../../runmat-circuit/tests/projects/io/io.circuit");
@@ -47,14 +47,8 @@ fn overview(path: &str, files: &Files) -> Value {
         .unwrap_or_else(|e| panic!("{path}: {e}"))
 }
 
-fn command_ids() -> Vec<String> {
-    let mut c = runmat_cad::commands::catalog();
-    c.merge(runmat_circuit::commands::catalog());
-    c.commands.iter().map(|x| x.id.to_string()).collect()
-}
-
-/// Every fact names a check that ran, every link a check of the linked file, and every step a
-/// guide or command that exists and a fact or link that is on the overview.
+/// Every fact names a check that ran, every link a check of the linked file, and the counts
+/// come from the check.
 fn assert_grounded(out: &Value) {
     let checks: Vec<&str> = out["checks"]
         .as_array()
@@ -73,39 +67,9 @@ fn assert_grounded(out: &Value) {
     for link in out["links"].as_array().unwrap() {
         assert!(checks.contains(&link["source"].as_str().unwrap()), "{link}");
     }
-    let commands = command_ids();
-    let catalog = guides::catalog();
-    let steps = out["nextSteps"].as_array().unwrap();
-    assert!((1..=3).contains(&steps.len()), "{steps:#?}");
-    let facts: Vec<&str> = out["state"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .filter_map(|f| f["id"].as_str())
-        .collect();
-    for step in steps {
-        let action: StepAction = serde_json::from_value(step["action"].clone()).unwrap();
-        match action {
-            StepAction::Guide { id } => assert!(catalog.guide(&id).is_some(), "{id}"),
-            StepAction::Command { id } => {
-                assert!(commands.contains(&id), "{id} isn't in the command catalog")
-            }
-        }
-        let because = step["because"].as_str().unwrap();
-        assert!(
-            facts.contains(&because) || because == "links" || because == "open_decisions",
-            "{step} rests on {because}, which isn't on the overview"
-        );
-    }
-    for decision in out["openDecisions"].as_array().unwrap() {
-        let guide = catalog
-            .guide(decision["guide"].as_str().unwrap())
-            .expect("a guide");
-        assert!(
-            guide.decisions.iter().any(|d| d.id == decision["decision"]),
-            "{decision}"
-        );
-    }
+    assert!(checks.contains(&"design.check"), "{checks:?}");
+    assert!(out["counts"]["totals"].is_object(), "{}", out["counts"]);
+    assert!(out.get("nextSteps").is_none() && out.get("openDecisions").is_none());
 }
 
 #[test]
@@ -118,6 +82,7 @@ fn a_schematic_overview_reads_erc_its_board_and_its_simulation_sections() {
     .into();
     let out = overview("/b/io.circuit", &files);
     assert_grounded(&out);
+    assert_eq!(out["fileState"], "written");
     assert!(
         out["about"].as_str().unwrap().starts_with("Schematic: "),
         "{}",
@@ -210,14 +175,6 @@ drawing plate {
         .find(|l| l["relation"] == json!(Relation::Drawing))
         .expect("the drawing");
     assert_eq!(sheet["path"], "/parts/plate.drawing");
-    // With a study, the first step opens it rather than starting a new one.
-    let steps = out["nextSteps"].as_array().unwrap();
-    assert!(
-        steps
-            .iter()
-            .all(|s| s["action"] != json!({ "kind": "guide", "id": "simulation_setup" })),
-        "{steps:#?}"
-    );
     let inputs = out["state"]
         .as_array()
         .unwrap()
@@ -225,24 +182,15 @@ drawing plate {
         .find(|f| f["id"] == "inputs")
         .expect("inputs");
     assert_eq!(inputs["value"], "width 80 mm, depth 50 mm, thickness 10 mm");
-    // A part with nothing linked offers a study and a drawing.
+    // A part with nothing linked has no links and the check's counts.
     let alone: Files = [("/parts/plate.part".to_owned(), PART.to_owned())].into();
     let out = overview("/parts/plate.part", &alone);
     assert_grounded(&out);
-    let actions: Vec<Value> = out["nextSteps"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .map(|s| s["action"].clone())
-        .collect();
-    assert!(
-        actions.contains(&json!({ "kind": "guide", "id": "simulation_setup" })),
-        "{actions:?}"
-    );
-    assert!(
-        actions.contains(&json!({ "kind": "guide", "id": "drawing_for_release" })),
-        "{actions:?}"
-    );
+    assert_eq!(out["links"], json!([]));
+    assert_eq!(out["counts"]["ok"], true, "{}", out["counts"]);
+    assert_eq!(out["counts"]["totals"]["bodies"], 1, "{}", out["counts"]);
+    // What the part holds, from its index: a machined plate is a written part.
+    assert_eq!(out["fileState"], "written");
 }
 
 #[test]

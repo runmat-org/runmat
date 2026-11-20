@@ -66,6 +66,7 @@ fn line(id: &str, a: (ValueExpr, ValueExpr), b: (ValueExpr, ValueExpr)) -> Sketc
             end: pt(b.0, b.1),
         },
         construction: false,
+        projected: None,
     }
 }
 
@@ -83,6 +84,7 @@ fn arc(
             end: pt(b.0, b.1),
         },
         construction: false,
+        projected: None,
     }
 }
 
@@ -94,6 +96,7 @@ fn circle(id: &str, c: (ValueExpr, ValueExpr), r: ValueExpr) -> SketchEntity {
             radius: r,
         },
         construction: false,
+        projected: None,
     }
 }
 

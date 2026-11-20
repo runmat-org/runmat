@@ -18,6 +18,7 @@
 //! This module is pure data. [`LockSection::to_text`]/[`LockSection::from_text`] give a
 //! canonical line format; file I/O belongs to the host.
 
+use std::cmp::Ordering;
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 
@@ -114,6 +115,16 @@ impl NamePath {
     pub fn starts_with(&self, p: &NamePath) -> bool {
         self.0.len() >= p.0.len() && self.0[..p.0.len()] == p.0[..]
     }
+    /// Hierarchy order, as people number things: a sheet before its children, and segments in
+    /// natural order, so `c2` comes before `c10` and `adc[3]` before `adc[10]`.
+    pub fn natural_cmp(&self, other: &NamePath) -> Ordering {
+        self.0
+            .iter()
+            .zip(&other.0)
+            .map(|(a, b)| natural_cmp(a, b))
+            .find(|o| o.is_ne())
+            .unwrap_or_else(|| self.0.len().cmp(&other.0.len()))
+    }
     /// Replaces the prefix `from` with `to` (for sheet-instance renames).
     pub fn reprefix(&self, from: &NamePath, to: &NamePath) -> Option<NamePath> {
         self.starts_with(from).then(|| {
@@ -133,6 +144,41 @@ impl fmt::Display for NamePath {
             write!(f, "/{s}")?;
         }
         Ok(())
+    }
+}
+
+/// Natural text order: runs of digits compare as numbers (`c2` < `c10`), the rest as text. Names
+/// that compare equal that way (`c01`, `c1`) fall back to plain text order, so the order is total.
+pub fn natural_cmp(a: &str, b: &str) -> Ordering {
+    fn runs(s: &str) -> impl Iterator<Item = (bool, &str)> {
+        let mut rest = s;
+        std::iter::from_fn(move || {
+            let first = rest.chars().next()?;
+            let digit = first.is_ascii_digit();
+            let end = rest
+                .find(|c: char| c.is_ascii_digit() != digit)
+                .unwrap_or(rest.len());
+            let (run, tail) = rest.split_at(end);
+            rest = tail;
+            Some((digit, run))
+        })
+    }
+    let mut x = runs(a);
+    let mut y = runs(b);
+    loop {
+        let o = match (x.next(), y.next()) {
+            (None, None) => return a.cmp(b),
+            (None, Some(_)) => Ordering::Less,
+            (Some(_), None) => Ordering::Greater,
+            (Some((true, p)), Some((true, q))) => {
+                let (p, q) = (p.trim_start_matches('0'), q.trim_start_matches('0'));
+                p.len().cmp(&q.len()).then_with(|| p.cmp(q))
+            }
+            (Some((_, p)), Some((_, q))) => p.cmp(q),
+        };
+        if o.is_ne() {
+            return o;
+        }
     }
 }
 
@@ -698,6 +744,22 @@ mod tests {
 
     fn item(p: &str, k: &str) -> LockItem {
         LockItem::new(NamePath::parse(p), k)
+    }
+
+    #[test]
+    fn names_sort_in_natural_order() {
+        let mut names = vec![
+            "c10", "c2", "c1", "c01", "b", "c", "adc[10]", "adc[3]", "c2a",
+        ];
+        names.sort_by(|a, b| natural_cmp(a, b));
+        assert_eq!(
+            names,
+            ["adc[3]", "adc[10]", "b", "c", "c01", "c1", "c2", "c2a", "c10"]
+        );
+        let p = |s: &str| NamePath::parse(s);
+        assert!(p("/main").natural_cmp(&p("/main/c2")).is_lt());
+        assert!(p("/main/c2/x").natural_cmp(&p("/main/c10")).is_lt());
+        assert!(p("/").natural_cmp(&p("/a")).is_lt());
     }
 
     #[test]

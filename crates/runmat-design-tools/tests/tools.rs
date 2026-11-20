@@ -122,7 +122,69 @@ fn inspect_finds_faces_by_name_and_mass_properties() {
     let v = mass["volume_mm3"].as_f64().unwrap();
     // 80 × 50 × 10 less the 20 × 10 pocket and the hole.
     assert!(v > 30_000.0 && v < 40_000.0, "{mass:#}");
-    assert!(mass["mass_kg"].as_f64().unwrap() > 0.2);
+    // The bracket's own material, aluminum at 2700 kg/m³ (not a default steel density).
+    assert_eq!(mass["density"], 2700.0, "{mass:#}");
+    assert_eq!(mass["density_source"], "material", "{mass:#}");
+    let kg = mass["mass_kg"].as_f64().unwrap();
+    assert!((kg - v * 1e-9 * 2700.0).abs() < 1e-5, "{mass:#}");
+}
+
+/// No density is assumed: a part whose material has no known density (or that has no
+/// material) reports its mass, centre of mass and inertia as unknown, with a note naming the
+/// part and the material it looked for. Its geometry is still measured.
+#[test]
+fn inspect_reports_an_unknown_materials_mass_as_unknown() {
+    let unknown = BRACKET.replace(
+        "material = \"material.aluminum\"",
+        "material = \"material.unobtainium\"",
+    );
+    assert_ne!(unknown, BRACKET);
+    let files: Files = [("/p/bracket.part".to_owned(), unknown.clone())].into();
+    let out = ok(
+        "design.inspect",
+        json!({ "path": "/p/bracket.part", "sections": ["mass"] }),
+        &files,
+    );
+    let mass = &out["sections"]["mass"];
+    for unknown_field in ["density", "mass_kg", "centroid_mm", "inertia_kg_mm2"] {
+        assert!(mass[unknown_field].is_null(), "{unknown_field}: {mass:#}");
+    }
+    let reason = mass["unknown"].as_str().unwrap();
+    assert!(reason.contains("`material.unobtainium`"), "{reason}");
+    assert!(mass["volume_mm3"].as_f64().unwrap() > 30_000.0, "{mass:#}");
+    assert!(
+        mass["principal_axes"][0]["moment_kg_mm2"].is_null(),
+        "{mass:#}"
+    );
+    let notes = out["notes"].to_string();
+    assert!(
+        notes.contains("/p/bracket.part: mass unknown: no density is known for material `material.unobtainium`"),
+        "{notes}"
+    );
+    // A `density` given to the call is used as written.
+    let out = ok(
+        "design.inspect",
+        json!({ "path": "/p/bracket.part", "sections": ["mass"], "density": 1000.0 }),
+        &files,
+    );
+    assert_eq!(out["sections"]["mass"]["density"], 1000.0, "{out:#}");
+    assert_eq!(
+        out["sections"]["mass"]["density_source"], "input",
+        "{out:#}"
+    );
+    // With no material at all, the reason says so.
+    let bare = BRACKET.replace(", material = \"material.aluminum\"", "");
+    assert_ne!(bare, BRACKET);
+    let files: Files = [("/p/bracket.part".to_owned(), bare)].into();
+    let out = ok(
+        "design.inspect",
+        json!({ "path": "/p/bracket.part", "sections": ["mass"] }),
+        &files,
+    );
+    assert_eq!(
+        out["sections"]["mass"]["unknown"], "it has no material and no `density` property",
+        "{out:#}"
+    );
 }
 
 /// `set` regenerates the part with those inputs for this run: a plate's volume follows
@@ -422,23 +484,13 @@ fn step_files_import_as_a_part_that_names_them() {
 }
 
 #[test]
-fn the_catalog_declares_every_tool_with_object_schemas() {
-    let names: Vec<String> = runmat_design_tools::catalog()
-        .into_iter()
-        .map(|t| t.name)
-        .collect();
-    for n in [
-        "design.check",
-        "design.render",
-        "design.inspect",
-        "design.drc",
-        "design.erc",
-        "design.import",
-        "design.export",
-        "design.propose_edit",
-        "design.overview",
-    ] {
-        assert!(names.iter().any(|x| x == n), "{n}");
+fn every_tool_name_runs() {
+    // An empty input fails on its arguments, never as an unknown tool.
+    for name in runmat_design_tools::TOOL_NAMES {
+        let err = runmat_design_tools::call(name, json!({}), &Files::new());
+        if let Err(e) = err {
+            assert_ne!(e.code, "unknown_tool", "{name}");
+        }
     }
 }
 
@@ -532,7 +584,15 @@ drawing sheet {
         &files,
     )
     .expect("check");
-    assert_eq!(check["errors"], json!(0), "the drawing compiles: {check}");
+    // The view resolves `part bracket` to the file that declares it. (The check is the
+    // Desktop's Check drawing: a model that doesn't build on the grid test kernel is a Model
+    // finding on the view, which names the file it resolved.)
+    for d in check["diagnostics"].as_array().unwrap() {
+        if d["severity"] == "error" {
+            let message = d["message"].as_str().unwrap();
+            assert!(message.contains("/p/d/bracket_v2.part"), "{check}");
+        }
+    }
     assert_eq!(
         dependency_files("/p/d/sheet.drawing", drawing, &files),
         ["/p/d/bracket_v2.part"]

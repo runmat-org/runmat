@@ -4,9 +4,8 @@ keywords: [feature status, roadmap, not yet released, RunMat MCAD, RunMat ECAD]
 ---
 # Feature status
 
-The design docs describe the design language as it is meant to work. Where the docs describe a feature the current release does not include yet, a “Not yet in” badge marks it and links here. Each entry below says what the feature needs before the mark comes off.
+The design docs describe the design language as it is meant to work. Where the docs describe a feature the current release does not include yet, a “Not yet released” badge marks it, and its Status link leads here. Each entry below says what the feature needs before the mark comes off.
 
-This page is generated from `docs/design/ledger.json`; edit the ledger, not this page.
 
 ## Design language
 
@@ -23,10 +22,6 @@ This page is generated from `docs/design/ledger.json`; edit the ledger, not this
 ### design.mcad.drawing.standards
 
 **Drawing standards.** A sheet format selects an ISO or ASME standard that sets line weights, text, arrowheads and tolerance display in the Desktop sheet and the DXF, DWG and PDF exports.
-
-### design.mcad.evaluate.surface-analysis
-
-**Surface and shape analysis.** Evaluate runs section, thickness, undercut, curvature, zebra and deviation analyses on a part in the Desktop and through design.inspect, coloring the model by result as draft analysis does.
 
 ### design.fea.part-geometry
 
@@ -45,10 +40,6 @@ This page is generated from `docs/design/ledger.json`; edit the ledger, not this
 ### design.ecad.fab.assembly-drawing
 
 **Polarity marks on assembly drawings.** The assembly drawing of each side marks pin 1 and the polarity of polarized parts (diodes, LEDs, polarized capacitors, ICs) beside their outlines and designators, in the Gerber and PDF.
-
-### design.ecad.import.other-tools
-
-**Imports from other electronics tools.** Clean-room readers for the other common tools' binary, text and JSON schematic and board formats write circuits and boards with part declarations and a report of what did not carry over, tested on an openly licensed corpus.
 
 ### design.ecad.import.kicad-roundtrip
 

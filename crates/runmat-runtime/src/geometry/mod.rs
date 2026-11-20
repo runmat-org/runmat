@@ -307,6 +307,11 @@ thread_local! {
 }
 
 mod capture;
+mod design_load;
+pub mod design_source;
+pub use design_load::geometry_load_with_options_op_async;
+mod inspect_payload;
+pub use inspect_payload::geometry_inspect_payload_from_asset;
 
 pub struct ThreadGeometryCaptureAdapterGuard {
     previous: Option<&'static dyn GeometryViewCaptureAdapter>,
@@ -369,6 +374,29 @@ pub fn geometry_load_op(
 }
 
 pub fn geometry_load_with_options_op(
+    path: &str,
+    bytes: &[u8],
+    options: GeometryImportOptions,
+    context: OperationContext,
+) -> Result<OperationEnvelope<GeometryAsset>, OperationErrorEnvelope> {
+    // A part or an assembly loads as the exact geometry its regeneration writes.
+    let design;
+    let bytes = if design_source::is_design_geometry(path) {
+        design = design_source::design_geometry(
+            std::path::Path::new(path),
+            Some(bytes),
+            &design_source::DiskDesignFiles,
+        )
+        .map_err(|message| design_load::design_load_error(path, &context, message))?;
+        design.as_slice()
+    } else {
+        bytes
+    };
+    geometry_load_resolved_op(path, bytes, options, context)
+}
+
+/// Loads geometry bytes that are already exchange geometry (a design's regenerated STEP).
+fn geometry_load_resolved_op(
     path: &str,
     bytes: &[u8],
     options: GeometryImportOptions,
@@ -1923,3 +1951,6 @@ mod tests;
 
 #[cfg(all(test, feature = "plot-core"))]
 mod preview_scene_tests;
+
+#[cfg(all(test, feature = "plot-core", feature = "occt-native"))]
+mod section_cap_tests;

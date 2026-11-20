@@ -14,12 +14,20 @@ export const FEA_DIAGNOSTICS_ARTIFACT_KIND = "finite_element_diagnostics" as con
 export const FEA_ARTIFACT_MANIFEST_KIND = "finite_element_artifact_manifest" as const;
 export const FEA_FIELD_DEFAULT_PAGE_SIZE = 4096 as const;
 export const FEA_FIELD_DEFAULT_MATERIALIZE_LIMIT = 256 as const;
+export const FEA_PROGRESS_MINIMUM_EVENT_INTERVAL_MS = 100 as const;
+export const FEA_PROGRESS_HEARTBEAT_INTERVAL_MS = 2000 as const;
+export const FEA_PROGRESS_HEARTBEAT_POLL_INTERVAL_MS = 250 as const;
+export const FEA_PROGRESS_UNIT_METADATA = "unit" as const;
+export const FEA_PROGRESS_HEARTBEAT_METADATA = "heartbeat" as const;
+export const FEA_PROGRESS_ELAPSED_METADATA = "elapsedMs" as const;
 
 export type FeaExecutionMode = "single_core" | "multi_core";
 
 export type FeaExecutionReadiness = "ready" | "desktop_required" | "unavailable";
 
 export type FeaDocumentKind = "study" | "sweep";
+
+export type FeaRenderTopologyPresence = "persisted" | "absent";
 
 export type FeaFieldKind = "scalar" | "vector" | "tensor" | "unknown";
 
@@ -170,6 +178,24 @@ export interface FeaExecutionDuration {
   sampleCount: number;
 }
 
+export interface FeaResourceLimit {
+  code: string;
+  term: string;
+  requiredBytes: number | null;
+  maximumBytes: number;
+  nextAction: string;
+}
+
+export interface FeaOperationEstimate {
+  meshing: string;
+  assembly: string;
+  factorization: string;
+  solve: string;
+  other: string;
+  total: string;
+  solveIterations: number | null;
+}
+
 export interface FeaExecutionCandidate {
   mode: FeaExecutionMode;
   cores: number | null;
@@ -178,6 +204,10 @@ export interface FeaExecutionCandidate {
   durationEvidence?: FeaExecutionDuration;
   readiness: FeaExecutionReadiness;
   reason: string | null;
+  estimatedElementCount: number | null;
+  estimatedNodeCount: number | null;
+  resourceLimit: FeaResourceLimit | null;
+  estimatedOperations: FeaOperationEstimate | null;
 }
 
 export interface FeaExecutionChoices {
@@ -222,6 +252,7 @@ export interface FeaFieldBinding {
   stepId: string;
   runId: string;
   descriptor: FeaFieldDescriptor;
+  renderTopology?: FeaRenderTopologyPresence;
 }
 
 export interface FeaFieldRequestOptions {

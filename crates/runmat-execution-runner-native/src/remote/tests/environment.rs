@@ -2,6 +2,8 @@ use super::*;
 
 #[tokio::test]
 async fn encrypted_driver_uses_exact_environment_after_source_teardown_without_host_mutation() {
+    // Program execution roots values in the process-wide GC heap.
+    let _gc = runmat_gc::gc_test_guard();
     let name = "RUNMAT_BUNDLE_ENV132";
     let host = std::env::var_os(name);
     let source = "function tests = remoteTest()\n tests = functiontests(localfunctions);\nend\nfunction testEnvironment(testCase)\n testCase.verifyEqual(getenv('RUNMAT_BUNDLE_ENV132'), 'frozen');\n testCase.verifyEmpty(getenv('HOME'));\n setenv('RUNMAT_BUNDLE_ENV132', 'local-change');\n testCase.verifyEqual(getenv('RUNMAT_BUNDLE_ENV132'), 'local-change');\nend\n";

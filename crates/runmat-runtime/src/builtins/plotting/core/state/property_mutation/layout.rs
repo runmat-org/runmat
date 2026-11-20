@@ -1,6 +1,153 @@
 //! Existing ordinary axes mutations with explicit invocation authority.
 
 use super::super::*;
+use runmat_plot::plots::AxesGridCell;
+
+pub(crate) fn select_subplot_region_for_property(
+    property: &PropertyMutationTarget,
+    region: AxesGridCell,
+) -> Result<FigureAxesState, FigureError> {
+    let rows = region.rows as usize;
+    let cols = region.columns as usize;
+    if !region.is_valid() {
+        return Err(FigureError::InvalidSubplotGrid { rows, cols });
+    }
+    let mut reg = property.registry(PropertyLocation::CurrentFigure)?;
+    let handle = reg.current;
+    let existed = reg.figures.contains_key(&handle);
+    pin_legacy_axes_to_subplot_grid(&mut get_state_mut(&mut reg, handle).figure, region);
+    let (matching, targets, index) = {
+        let state = get_state_for_query(&mut reg, handle);
+        let figure = &state.figure;
+        let count = figure.axes_count();
+        let matching = (0..count).find(|index| {
+            figure.axes_metadata(*index).is_some_and(|metadata| {
+                metadata.overlay_parent.is_none()
+                    && figure
+                        .resolved_axes_grid_cell(*index)
+                        .is_some_and(|cell| cell.same_region(region))
+            })
+        });
+        if let Some(index) = matching {
+            (true, Vec::new(), index)
+        } else {
+            let mut targets: Vec<usize> = (0..count)
+                .filter(|index| {
+                    figure.axes_metadata(*index).is_some_and(|metadata| {
+                        metadata.overlay_parent.is_none()
+                            && subplot_region_overlaps(figure, *index, region)
+                    })
+                })
+                .collect();
+            // Include dependent overlay axes before retiring their parent.
+            loop {
+                let previous = targets.len();
+                for index in 0..count {
+                    if figure
+                        .axes_metadata(index)
+                        .and_then(|metadata| metadata.overlay_parent)
+                        .is_some_and(|parent| targets.contains(&parent))
+                        && !targets.contains(&index)
+                    {
+                        targets.push(index);
+                    }
+                }
+                if targets.len() == previous {
+                    break;
+                }
+            }
+            let index = targets
+                .first()
+                .copied()
+                .or_else(|| (0..count).find(|index| !figure.axes_is_live(*index)))
+                .unwrap_or(count);
+            (false, targets, index)
+        }
+    };
+    if !targets.is_empty() {
+        clear_axes::retire_registered_axes(&mut reg, handle, &targets);
+    }
+    let state = get_state_mut(&mut reg, handle);
+    if !matching {
+        state.figure.ensure_axes(index);
+        state
+            .figure
+            .set_axes_grid_cell(index, region)
+            .map_err(|_| FigureError::InvalidSubplotGrid { rows, cols })?;
+        state.reset_cycle(index);
+    }
+    state.active_axes = index;
+    state.figure.set_active_axes_index(index);
+    state.revision = state.revision.wrapping_add(1);
+    let figure = state.figure.clone();
+    drop(reg);
+    property.notify(
+        handle,
+        &figure,
+        if existed {
+            FigureEventKind::Updated
+        } else {
+            FigureEventKind::Created
+        },
+    )?;
+    Ok(FigureAxesState {
+        handle,
+        rows,
+        cols,
+        active_index: index,
+    })
+}
+
+/// The first subplot on a figure still laid out as a uniform grid takes that
+/// grid's axes into the requested grid by index. Axes `i` becomes slot `i`, as
+/// it did when subplot reconfigured the figure grid. Without this step, the
+/// default full-figure axes would overlap every requested cell. Subplot would
+/// then retire that axes, with any plot already drawn in it, and hand out
+/// index 0 for every first slot. For example, `subplot(1,2,2)` would return
+/// axes 0 instead of axes 1.
+fn pin_legacy_axes_to_subplot_grid(figure: &mut Figure, region: AxesGridCell) {
+    if figure.axes_use_independent_layout() {
+        return;
+    }
+    let slots = region.rows.saturating_mul(region.columns) as usize;
+    for index in 0..figure.axes_count().min(slots) {
+        let legacy = figure.axes_metadata(index).is_some_and(|metadata| {
+            metadata.overlay_parent.is_none() && !metadata.position_explicit
+        }) && figure.axes_grid_cell(index).is_none();
+        if legacy {
+            let cell = AxesGridCell::single(region.rows, region.columns, index as u32);
+            // A valid single cell always has a normalized position.
+            let _ = figure.set_axes_grid_cell(index, cell);
+        }
+    }
+}
+
+fn subplot_region_overlaps(figure: &Figure, index: usize, region: AxesGridCell) -> bool {
+    if let Some(cell) = figure.resolved_axes_grid_cell(index) {
+        return cell.overlaps(region);
+    }
+    let Some(metadata) = figure.axes_metadata(index) else {
+        return false;
+    };
+    let Some(target) = region.normalized_position() else {
+        return false;
+    };
+    let mut position = metadata.position;
+    if !metadata.units.eq_ignore_ascii_case("normalized") {
+        let [_, _, width, height] = figure.position;
+        if !(width.is_finite() && height.is_finite() && width > 0.0 && height > 0.0) {
+            return false;
+        }
+        position[0] /= width;
+        position[1] /= height;
+        position[2] /= width;
+        position[3] /= height;
+    }
+    position[0] < target[0] + target[2]
+        && target[0] < position[0] + position[2]
+        && position[1] < target[1] + target[3]
+        && target[1] < position[1] + position[3]
+}
 
 pub(crate) fn color_order_for_axes_for_property(
     property: &PropertyMutationTarget,
@@ -78,7 +225,9 @@ pub(crate) fn set_color_order_for_figure_for_property(
         state.figure_color_order = Some(colors.to_vec());
         let total_axes = axes_count(state);
         for axes_index in 0..total_axes {
-            state.color_cycle_for_axes_mut(axes_index).set_order(colors);
+            if state.figure.axes_is_live(axes_index) {
+                state.color_cycle_for_axes_mut(axes_index).set_order(colors);
+            }
         }
         state.figure.set_all_axes_color_order(colors.to_vec());
         state.revision = state.revision.wrapping_add(1);

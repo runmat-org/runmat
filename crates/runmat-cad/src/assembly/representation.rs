@@ -358,6 +358,69 @@ pub fn plan(ws: &WorkingSet, tree: &ResolvedAssembly, source: &dyn DesignSource)
     out
 }
 
+/// Whether node `id` stands as its envelope box: an occurrence at the `envelope` representation
+/// that no ancestor stands in for. A part or board draws and checks as its box; a sub-assembly
+/// stands in for everything under it with one box.
+pub fn is_envelope(tree: &ResolvedAssembly, id: NodeId) -> bool {
+    let node = tree.node(id);
+    node.parent.is_some()
+        && !node.represented_by_ancestor
+        && !node.failed
+        && node.representation == Representation::Envelope
+}
+
+/// Whether an export (STEP, meshes) writes node `id`'s own geometry. An ancestor at the
+/// `interface` representation stands in for what is under it, which the export leaves out. An
+/// envelope stands in only for display and checks: the export writes the parts under it, as mass
+/// properties adds them.
+pub fn exported(tree: &ResolvedAssembly, id: NodeId) -> bool {
+    let mut at = tree.node(id);
+    while at.represented_by_ancestor {
+        let Some(parent) = at.parent else {
+            return true;
+        };
+        at = tree.node(parent);
+        if !at.represented_by_ancestor && at.parent.is_some() {
+            return at.representation == Representation::Envelope;
+        }
+    }
+    true
+}
+
+/// The envelope box of node `id` in its own frame: a part's or board's configured box, or for a
+/// sub-assembly the box around every part and board under it. `None` when nothing has a box.
+pub fn envelope_box(
+    tree: &ResolvedAssembly,
+    source: &dyn DesignSource,
+    id: NodeId,
+) -> Option<Aabb> {
+    let node = tree.node(id);
+    let own = |n: &crate::assembly::resolve::OccNode| {
+        source
+            .configured(&n.definition, n.revision.as_ref(), &n.configuration)
+            .ok()
+            .and_then(|s| s.bbox)
+    };
+    if node.definition.kind != DefinitionKind::Assembly {
+        return own(node);
+    }
+    let to_local = node.world.inverse();
+    let mut acc = Aabb::EMPTY;
+    let mut stack = node.children.clone();
+    while let Some(c) = stack.pop() {
+        let child = tree.node(c);
+        if child.failed {
+            continue;
+        }
+        if child.definition.kind == DefinitionKind::Assembly {
+            stack.extend(child.children.iter().copied());
+        } else if let Some(b) = own(child) {
+            acc = acc.union(&b.transformed(&to_local.compose(&child.world)));
+        }
+    }
+    (!acc.is_empty()).then_some(acc)
+}
+
 #[cfg(test)]
 mod tests {
     use super::glob_match;

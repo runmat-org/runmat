@@ -53,6 +53,7 @@ fn compiled_duct() -> CompiledAnalysisStudy {
     });
     let properties = compile_property_map(&model, None).unwrap();
     CompiledAnalysisStudy {
+        displays: Vec::new(),
         module_path: "tests/acoustic-duct.fea".into(),
         study_id: "duct".into(),
         study_inputs: Vec::new(),

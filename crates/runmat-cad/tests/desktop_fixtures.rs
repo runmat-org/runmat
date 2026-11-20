@@ -22,7 +22,7 @@ use runmat_cad::index::{build_index, to_json};
 use runmat_cad::model::*;
 use runmat_cad::refs::*;
 use runmat_cad::regen::kernel::TessellationOptions;
-use runmat_cad::units::StubUnits;
+use runmat_cad::units::Units;
 use runmat_cad::value::NoDynamicValues;
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::PathBuf;
@@ -298,7 +298,7 @@ fn part_fixture() {
 fn assembly_fixture() {
     let mut p = generate(&SynthSpec::small());
     add_frame_mates(&mut p.source);
-    let units = StubUnits;
+    let units = Units;
     let dynamic = NoDynamicValues;
     let ctx = ResolveContext {
         source: &p.source,
@@ -414,6 +414,7 @@ impl AnnotationValues for Model {
         &self,
         _: &ModelRef,
         _: DimensionStyle,
+        _: &[runmat_cad::assembly::model::RelPath],
         entities: &[Vec<EntityName>],
     ) -> Option<String> {
         (!entities.is_empty()).then(|| "10 mm".into())
@@ -495,12 +496,16 @@ fn drawing() -> DrawingDocument {
         display: Display::HiddenLines,
         exclude: vec![],
         exploded: None,
+        title: None,
+        centerlines: true,
+        tangent_edges: None,
     };
     DrawingDocument {
         path: FilePath::new("rig.drawing"),
         header: Default::default(),
         formats: vec![SheetFormat {
             standard: Default::default(),
+            units: Default::default(),
             name: "a3".into(),
             size: SheetSize::Iso { name: "A3".into() },
             title_block: vec![
@@ -556,6 +561,9 @@ fn drawing() -> DrawingDocument {
                     },
                     label: "A".into(),
                     aligned: false,
+                    offset: None,
+                    keep_other_side: false,
+                    vertical: false,
                 },
             ),
             View {
@@ -582,6 +590,7 @@ fn drawing() -> DrawingDocument {
                     group: None,
                     reference: false,
                     condition: Default::default(),
+                    occurrences: Vec::new(),
                 },
                 at: [0.0, 0.0],
             },
@@ -608,6 +617,7 @@ fn drawing() -> DrawingDocument {
                 kind: AnnotationKind::Note {
                     text: "PART {part_number} REV {revision}".into(),
                     leader: None,
+                    width: None,
                 },
                 at: [0.0, 0.0],
             },
@@ -620,7 +630,7 @@ fn drawing() -> DrawingDocument {
                 include_fasteners: true,
                 spec: Default::default(),
             },
-            at: [0.0, 0.0],
+            at: None,
         }],
     }
 }

@@ -140,7 +140,6 @@ GROUPS = {
     "tooling-distributed": (
         "runmat",
         "runmat-design-tools",
-        "runmat-design-tools-wasm",
         "runmat-config",
         "runmat-execution",
         "runmat-execution-artifact",
@@ -409,6 +408,10 @@ def run_batch(command: list[str], repo_root: Path, target_directory: Path, recla
             if storage.free < 10 * 1024 ** 3:
                 raise RuntimeError("less than 10 GiB remains for the next build batch and runner logs")
     executables: set[Path] = set()
+    # rust-cache-target.py prunes deps outputs absent from this ledger before
+    # the Windows target cache is saved.
+    ledger_path = os.environ.get("RUNMAT_CARGO_ARTIFACT_LEDGER")
+    used_artifacts: list[str] = []
     with subprocess.Popen(command, cwd=repo_root, env=environment if environment is not None else test_environment(), encoding="utf-8", errors="replace",
                           stdout=subprocess.PIPE) as process:
         for line in process.stdout:
@@ -425,6 +428,10 @@ def run_batch(command: list[str], repo_root: Path, target_directory: Path, recla
                 continue
             if message["reason"] == "compiler-message":
                 print(message["message"].get("rendered") or "", end="", flush=True)
+            if ledger_path and message["reason"] == "compiler-artifact":
+                used_artifacts.extend(str(name) for name in message.get("filenames") or ())
+            if ledger_path and message["reason"] == "build-script-executed" and message.get("out_dir"):
+                used_artifacts.append(str(message["out_dir"]))
             if (message["reason"] == "compiler-artifact" and message.get("executable")
                     and (message.get("profile", {}).get("test")
                          or "example" in message.get("target", {}).get("kind", []))):
@@ -433,6 +440,9 @@ def run_batch(command: list[str], repo_root: Path, target_directory: Path, recla
                     executables.add(executable)
         code = process.wait()
     print(f"Batch exit: {code}", flush=True)
+    if ledger_path and used_artifacts:
+        with open(ledger_path, "a", encoding="utf-8") as ledger:
+            ledger.writelines(f"{name}\n" for name in used_artifacts)
     if reclaim:
         for executable in executables:
             executable.unlink(missing_ok=True)

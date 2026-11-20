@@ -893,45 +893,6 @@ void require_corner_edge(const TopoDS_Edge& e, const TopoDS_Shape& shape, const 
 
 // ---- fillet
 
-// OCCT's blend approximations use absolute tolerances tuned for millimetre models (a variable
-// radius fillet on a metre-scale box fails where the same box in millimetres blends): such an
-// operation works on a copy scaled up by 1000 and scales the result back, carrying origins and
-// kept faces through both transforms. Every fillet runs in that frame: a constant 3 mm fillet
-// built in metres whose blend crosses a nearby hole left edges ending 1.5 mm off their faces
-// and split planar faces whose triangles overlapped their neighbours.
-struct MmFrame {
-  bool on = false;
-  std::unique_ptr<BRepBuilderAPI_Transform> up;
-  Tracked work;
-
-  MmFrame(const Tracked& src, bool scale) : on(scale) {
-    if (!on) {
-      work = src;
-      return;
-    }
-    gp_Trsf t;
-    t.SetScale(gp::Origin(), 1000.0);
-    up = std::make_unique<BRepBuilderAPI_Transform>(src.shape, t, Standard_True);
-    work.shape = up->Shape();
-    work.sheet = src.sheet;
-    propagate(src, *up, work);
-    for (int i = 1; i <= src.kept.Extent(); ++i) work.kept.Add(up->ModifiedShape(src.kept.FindKey(i)), 1);
-  }
-  TopoDS_Shape image(const TopoDS_Shape& s) const { return on ? up->ModifiedShape(s) : s; }
-  double len(double v) const { return on ? v * 1000.0 : v; }
-  Tracked back(const Tracked& res) const {
-    if (!on) return res;
-    gp_Trsf t;
-    t.SetScale(gp::Origin(), 1e-3);
-    BRepBuilderAPI_Transform down(res.shape, t, Standard_True);
-    Tracked out;
-    out.shape = down.Shape();
-    out.sheet = res.sheet;
-    propagate(res, down, out);
-    for (int i = 1; i <= res.kept.Extent(); ++i) out.kept.Add(down.ModifiedShape(res.kept.FindKey(i)), 1);
-    return out;
-  }
-};
 
 Tracked do_fillet(const Exec& x, const KInstr& in) {
   const Tracked& src = x.slot(in.ints[0]);
@@ -2046,24 +2007,24 @@ Tracked do_box(const KInstr& in) {
 
 // ---- delete faces
 
+}  // namespace
+
+// Implemented in exact_delete_faces.cc: the faces removed and the body healed over them.
+Tracked delete_faces_healed(const Tracked& src, const std::vector<TopoDS_Face>& picked);
+// exact_offset_faces.cc: the faces moved along their normals by `dist`; their images take
+// `moved_origins`, every other face its own origin.
+Tracked offset_faces(const Tracked& src, const std::vector<TopoDS_Face>& faces,
+                     const std::vector<double>& dist, const std::vector<Origins>& moved_origins);
+
+namespace {
+
 Tracked do_defeature(const Exec& x, const KInstr& in) {
   const Tracked& src = x.slot(in.ints[0]);
   const std::int64_t operand = in.ints[1];
   const std::int64_t n = in.ints[2];
-  BRepAlgoAPI_Defeaturing df;
-  df.SetShape(src.shape);
-  for (std::int64_t i = 0; i < n; ++i) df.AddFaceToRemove(x.face(operand, in.ints[3 + i]));
-  df.SetRunParallel(Standard_False);
-  df.SetToFillHistory(Standard_True);
-  df.Build();
-  if (!df.IsDone() || df.HasErrors()) {
-    std::ostringstream m;
-    df.DumpErrors(m);
-    fail("the faces could not be removed and healed: " + m.str());
-  }
-  Tracked out;
-  out.shape = df.Shape();
-  propagate_history(src, df.History(), out);
+  std::vector<TopoDS_Face> faces;
+  for (std::int64_t i = 0; i < n; ++i) faces.push_back(x.face(operand, in.ints[3 + i]));
+  Tracked out = delete_faces_healed(src, faces);
   require_labels(out, "the face deletion");
   return out;
 }
@@ -2102,35 +2063,17 @@ Tracked do_offset_faces(const Exec& x, const KInstr& in) {
                                                            : in.reals[0];
   };
   const bool labelled = in.ints.size() == static_cast<std::size_t>(3 + 2 * n);
-  BRepOffset_MakeOffset mk;
-  mk.Initialize(src.shape, 0.0, 1e-6, BRepOffset_Skin, Standard_True, Standard_False,
-                GeomAbs_Intersection, Standard_False, Standard_False);
-  for (std::int64_t i = 0; i < n; ++i)
-    mk.SetOffsetOnFace(x.face(operand, in.ints[3 + i]), dist(i));
-  mk.MakeOffsetShape();
-  if (!mk.IsDone() || mk.Shape().IsNull()) fail("the faces could not be offset");
-  Tracked out;
-  out.shape = mk.Shape();
-  TopTools_IndexedMapOfShape faces;
-  TopExp::MapShapes(out.shape, TopAbs_FACE, faces);
-  const Body& b = x.operand(operand);
-  const BRepAlgo_Image& image = mk.OffsetFacesFromShapes();
-  for (std::size_t i = 0; i < b.faces.size(); ++i) {
-    Origins o = origins_of(src.faces, b.faces[i]);
-    if (labelled) {
-      for (std::int64_t k = 0; k < n; ++k)
-        if (in.ints[3 + k] == static_cast<std::int64_t>(i) && in.ints[3 + n + k] >= 0)
-          o = label(lab(in.ints[3 + n + k]));
-    }
-    if (faces.Contains(b.faces[i])) add_origins(out.faces, b.faces[i], o);
-    if (image.HasImage(b.faces[i])) {
-      TopTools_ListOfShape imgs;
-      image.LastImage(b.faces[i], imgs);
-      for (const TopoDS_Shape& g : imgs)
-        for (TopExp_Explorer ex(g, TopAbs_FACE); ex.More(); ex.Next())
-          if (faces.Contains(ex.Current())) add_origins(out.faces, ex.Current(), o);
-    }
+  std::vector<TopoDS_Face> faces;
+  std::vector<double> distances;
+  std::vector<Origins> origins;
+  for (std::int64_t i = 0; i < n; ++i) {
+    const TopoDS_Face f = x.face(operand, in.ints[3 + i]);
+    faces.push_back(f);
+    distances.push_back(dist(i));
+    origins.push_back(labelled && in.ints[3 + n + i] >= 0 ? label(lab(in.ints[3 + n + i]))
+                                                          : origins_of(src.faces, f));
   }
+  Tracked out = offset_faces(src, faces, distances, origins);
   require_labels(out, "the face offset");
   return out;
 }

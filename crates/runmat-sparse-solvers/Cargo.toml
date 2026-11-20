@@ -1,6 +1,6 @@
 [package]
 name = "runmat-sparse-solvers"
-version = "0.7.1"
+version = "0.7.2"
 edition = "2021"
 authors = ["Dystr Team"]
 license-file = "../../LICENSE.md"
@@ -15,6 +15,7 @@ rayon = "1.11"
 runmat-cpu-execution = { workspace = true }
 runmat-simulation-usage = { workspace = true }
 thiserror = { workspace = true }
+tracing = "0.1"
 
 # Threaded factorizations run on the caller's admitted Rayon pool natively; the browser build
 # stays sequential (spindle's futex waits are unavailable on wasm32).

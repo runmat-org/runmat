@@ -66,28 +66,33 @@ impl AuthoredParameterizedSignal {
         }
     }
 
+    /// Evaluate the signal's expression to canonical SI values for one set of bound inputs.
+    ///
+    /// Realization uses this same evaluation, so a reported value is the value a run uses.
+    pub fn evaluate(
+        &self,
+        inputs: &BTreeMap<String, AuthoredInputValue>,
+    ) -> Result<SignalValue<f64>, AuthoredParameterizedSignalError> {
+        let evaluate = |expression: &AuthoredNumericExpression| {
+            expression
+                .evaluate_for_quantity(inputs, self.quantity)
+                .map_err(AuthoredParameterizedSignalError::InvalidExpression)
+        };
+        Ok(match &self.value {
+            AuthoredSignalExpression::Scalar(value) => SignalValue::Scalar(evaluate(value)?),
+            AuthoredSignalExpression::Vector3(values) => SignalValue::Vector3([
+                evaluate(&values[0])?,
+                evaluate(&values[1])?,
+                evaluate(&values[2])?,
+            ]),
+        })
+    }
+
     pub fn realize(
         &self,
         inputs: &BTreeMap<String, AuthoredInputValue>,
     ) -> Result<PhysicalSignal, AuthoredParameterizedSignalError> {
-        let value = match &self.value {
-            AuthoredSignalExpression::Scalar(value) => SignalValue::Scalar(
-                value
-                    .evaluate_for_quantity(inputs, self.quantity)
-                    .map_err(AuthoredParameterizedSignalError::InvalidExpression)?,
-            ),
-            AuthoredSignalExpression::Vector3(values) => SignalValue::Vector3([
-                values[0]
-                    .evaluate_for_quantity(inputs, self.quantity)
-                    .map_err(AuthoredParameterizedSignalError::InvalidExpression)?,
-                values[1]
-                    .evaluate_for_quantity(inputs, self.quantity)
-                    .map_err(AuthoredParameterizedSignalError::InvalidExpression)?,
-                values[2]
-                    .evaluate_for_quantity(inputs, self.quantity)
-                    .map_err(AuthoredParameterizedSignalError::InvalidExpression)?,
-            ]),
-        };
+        let value = self.evaluate(inputs)?;
         let signal = Signal {
             signal_id: self.signal_id.clone(),
             shape: self.shape(),
@@ -180,40 +185,94 @@ fn physical<Q: CanonicalQuantity>(
     })
 }
 
+/// The quantities a parameterized signal can carry: each is a declaration-input type.
+const PARAMETERIZED_SIGNAL_QUANTITIES: [PhysicalQuantityKind; 24] = [
+    PhysicalQuantityKind::Displacement,
+    PhysicalQuantityKind::Rotation,
+    PhysicalQuantityKind::Velocity,
+    PhysicalQuantityKind::Acceleration,
+    PhysicalQuantityKind::AngularVelocity,
+    PhysicalQuantityKind::AngularAcceleration,
+    PhysicalQuantityKind::Force,
+    PhysicalQuantityKind::Moment,
+    PhysicalQuantityKind::Traction,
+    PhysicalQuantityKind::Pressure,
+    PhysicalQuantityKind::BodyForceDensity,
+    PhysicalQuantityKind::Temperature,
+    PhysicalQuantityKind::TemperatureDifference,
+    PhysicalQuantityKind::HeatFlux,
+    PhysicalQuantityKind::HeatGenerationDensity,
+    PhysicalQuantityKind::Power,
+    PhysicalQuantityKind::ElectricPotential,
+    PhysicalQuantityKind::ElectricCurrent,
+    PhysicalQuantityKind::ElectricCharge,
+    PhysicalQuantityKind::ElectricCurrentDensity,
+    PhysicalQuantityKind::ElectricChargeDensity,
+    PhysicalQuantityKind::MagneticVectorPotential,
+    PhysicalQuantityKind::MassFlowRate,
+    PhysicalQuantityKind::VolumeFlowRate,
+];
+
 fn quantity_input_type(quantity: PhysicalQuantityKind) -> Option<AuthoredInputType> {
-    if !matches!(
-        quantity,
-        PhysicalQuantityKind::Displacement
-            | PhysicalQuantityKind::Rotation
-            | PhysicalQuantityKind::Velocity
-            | PhysicalQuantityKind::Acceleration
-            | PhysicalQuantityKind::AngularVelocity
-            | PhysicalQuantityKind::AngularAcceleration
-            | PhysicalQuantityKind::Force
-            | PhysicalQuantityKind::Moment
-            | PhysicalQuantityKind::Traction
-            | PhysicalQuantityKind::Pressure
-            | PhysicalQuantityKind::BodyForceDensity
-            | PhysicalQuantityKind::Temperature
-            | PhysicalQuantityKind::TemperatureDifference
-            | PhysicalQuantityKind::HeatFlux
-            | PhysicalQuantityKind::HeatGenerationDensity
-            | PhysicalQuantityKind::Power
-            | PhysicalQuantityKind::ElectricPotential
-            | PhysicalQuantityKind::ElectricCurrent
-            | PhysicalQuantityKind::ElectricCharge
-            | PhysicalQuantityKind::ElectricCurrentDensity
-            | PhysicalQuantityKind::ElectricChargeDensity
-            | PhysicalQuantityKind::MagneticVectorPotential
-            | PhysicalQuantityKind::MassFlowRate
-            | PhysicalQuantityKind::VolumeFlowRate
-    ) {
+    if !PARAMETERIZED_SIGNAL_QUANTITIES.contains(&quantity) {
         return None;
     }
     Some(AuthoredInputType::Quantity(
         runmat_types::physical::DynamicDimension::try_new(quantity.dimension(), Some(quantity))
             .expect("catalog kind"),
     ))
+}
+
+/// A parameterized signal's value at one study's own input values, reported beside the checked
+/// program so an editor can label the signal without evaluating its expression. Derived data:
+/// it never enters a study, model, run or source identity.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct EvaluatedParameterizedSignal {
+    pub signal_id: SignalId,
+    pub quantity: PhysicalQuantityKind,
+    /// The SI unit symbol of `value_si` (`N` for a force).
+    pub unit: String,
+    /// `None` when the study's own inputs do not determine the value, for example when a study
+    /// input has no default and only a sweep case binds it.
+    pub value_si: Option<EvaluatedSignalValue>,
+}
+
+/// Canonical SI values of an evaluated parameterized signal.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[serde(untagged)]
+pub enum EvaluatedSignalValue {
+    Scalar(f64),
+    Vector3([f64; 3]),
+}
+
+impl AuthoredParameterizedSignal {
+    /// Report this signal's value for inputs bound as a run binds them, or no value when the
+    /// inputs are unavailable or the expression does not evaluate.
+    pub fn evaluated(
+        &self,
+        inputs: Option<&BTreeMap<String, AuthoredInputValue>>,
+    ) -> EvaluatedParameterizedSignal {
+        let value_si = inputs
+            .and_then(|inputs| self.evaluate(inputs).ok())
+            .and_then(|value| match value {
+                SignalValue::Scalar(value) => Some(EvaluatedSignalValue::Scalar(value)),
+                SignalValue::Vector3(values) => Some(EvaluatedSignalValue::Vector3(values)),
+                _ => None,
+            });
+        EvaluatedParameterizedSignal {
+            signal_id: self.signal_id.clone(),
+            quantity: self.quantity,
+            unit: si_unit(self.quantity).to_string(),
+            value_si,
+        }
+    }
+}
+
+/// The SI unit symbol of a parameterized-signal quantity, from the shared unit-kind table.
+fn si_unit(quantity: PhysicalQuantityKind) -> &'static str {
+    runmat_types::physical::unit_kind(quantity.dimension(), quantity.angle_power())
+        .map_or("1", |row| row.si_example)
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
@@ -228,4 +287,21 @@ pub enum AuthoredParameterizedSignalError {
     WrongExpressionType,
     #[error("scalar parameterized signals must omit a frame and vectors must declare one")]
     InvalidFrame,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn every_parameterized_quantity_has_an_si_unit() {
+        for quantity in PARAMETERIZED_SIGNAL_QUANTITIES {
+            assert_ne!(si_unit(quantity), "1", "{quantity:?} has no SI unit symbol");
+        }
+        assert_eq!(si_unit(PhysicalQuantityKind::Force), "N");
+        assert_eq!(
+            si_unit(PhysicalQuantityKind::AngularAcceleration),
+            "rad/s^2"
+        );
+    }
 }

@@ -17,9 +17,14 @@ export CXXFLAGS="${CXXFLAGS:-} -fwasm-exceptions -UOCC_CONVERT_SIGNALS"
 # its caught C++ import errors remain recoverable across repeated requests.
 export CARGO_TARGET_WASM32_UNKNOWN_EMSCRIPTEN_RUSTFLAGS="-C panic=abort -C link-arg=-sMODULARIZE=1 -C link-arg=-sEXPORT_ES6=1 -C link-arg=-sALLOW_MEMORY_GROWTH=1 -C link-arg=-sSTACK_SIZE=8388608 -C link-arg=-sINITIAL_MEMORY=33554432 -C link-arg=-sENVIRONMENT=web,worker,node -C link-arg=-sEXPORTED_RUNTIME_METHODS=cwrap,UTF8ToString,HEAPU8 -C link-arg=-sEXPORTED_FUNCTIONS=_main,_malloc,_free,_runmat_occt_exact_import,_runmat_occt_exact_free,_runmat_occt_exact_execute,_runmat_cad_call,_runmat_cad_call_framed,_runmat_cad_free_framed,_runmat_cad_seed -C link-arg=-fwasm-exceptions -C link-arg=-sNO_EXIT_RUNTIME=1"
 cd "$runmat_root"
+# The module starts at 32 MB and grows on demand up to wasm32's 4 GB address space;
+# the maximum reserves address space only. The host measures what it can still
+# grow into and derives its meshing ceiling, run-data inventory and part cache
+# from that (crates/runmat-geometry/wasm-host/src/memory.rs). Above 2 GB, JS
+# callers read returned pointers unsigned (`>>> 0`).
 # This is a leaf-link constraint, so changing the foreign-kernel heap ceiling
 # does not invalidate every Rust dependency's compilation cache.
-cargo +1.93.0 rustc --locked -p runmat-geometry-wasm-host --bin runmat_geometry_wasm_host --target wasm32-unknown-emscripten --release -j "${RUNMAT_CAD_BUILD_JOBS:-4}" -- -C link-arg=-sMAXIMUM_MEMORY=536870912
+cargo +1.93.0 rustc --locked -p runmat-geometry-wasm-host --bin runmat_geometry_wasm_host --target wasm32-unknown-emscripten --release -j "${RUNMAT_CAD_BUILD_JOBS:-4}" -- -C link-arg=-sMAXIMUM_MEMORY=4294967296
 runmat_output="$runmat_root/bindings/ts/dist/occt"
 mkdir -p "$runmat_output"
 cp "$CARGO_TARGET_DIR/wasm32-unknown-emscripten/release/runmat_geometry_wasm_host.js" "$runmat_output/"

@@ -60,20 +60,23 @@ pub use study::{
     AuthoredFieldDomain, AuthoredFieldProjection, AuthoredGeometryArgument,
     AuthoredGeometryArgumentValue, AuthoredGeometryInstance, AuthoredMeshRef,
     AuthoredModelArgument, AuthoredModelArgumentValue, AuthoredModelInstance,
-    AuthoredObservationError, AuthoredOutput, AuthoredOutputError, AuthoredOutputExpression,
-    AuthoredOutputPolicy, AuthoredOutputType, AuthoredOutputValue, AuthoredPortReduction,
-    AuthoredPrincipalSelection, AuthoredSeriesDomain, AuthoredSeriesReduction,
-    AuthoredSpatialReduction, AuthoredStudy, AuthoredStudyError, AuthoredStudyInputBinding,
-    AuthoredStudyInputRef, AuthoredStudyRealizationError, AuthoredStudyRef, AuthoredSweep,
-    AuthoredSweepAxis, AuthoredSweepAxisValue, AuthoredSweepBinding, AuthoredSweepCase,
-    AuthoredSweepDefinition, AuthoredSweepError, AuthoredSweepOutput,
-    AuthoredSweepOutputExpression, AuthoredVectorComponent, CaseOutputProjection,
-    LoweredAuthoredObservation, RealizedGeometryInstance, RealizedStudy, SweepAxisCombination,
-    SweepExtremum,
+    AuthoredObservationError, AuthoredOutput, AuthoredOutputDisplay, AuthoredOutputError,
+    AuthoredOutputExpression, AuthoredOutputPolicy, AuthoredOutputType, AuthoredOutputValue,
+    AuthoredPortReduction, AuthoredPrincipalSelection, AuthoredSeriesDomain,
+    AuthoredSeriesReduction, AuthoredSpatialReduction, AuthoredStudy, AuthoredStudyError,
+    AuthoredStudyInputBinding, AuthoredStudyInputRef, AuthoredStudyRealizationError,
+    AuthoredStudyRef, AuthoredSweep, AuthoredSweepAxis, AuthoredSweepAxisValue,
+    AuthoredSweepBinding, AuthoredSweepCase, AuthoredSweepDefinition, AuthoredSweepError,
+    AuthoredSweepOutput, AuthoredSweepOutputExpression, AuthoredVectorComponent,
+    CaseOutputProjection, DisplayRange, DisplayUnitSource, LoweredAuthoredObservation,
+    RealizedGeometryInstance, RealizedStudy, SweepAxisCombination, SweepExtremum,
+    DISPLAY_PRECISION_DIGITS,
 };
 pub use validate::physics_family_can_consume_state;
 pub use validate_authored::validate_coordinate_frame;
-pub use validate_outputs::spec::quantity_supported as procedure_produces_observation_quantity;
+pub use validate_outputs::family_supports_quantity as family_produces_observation_quantity;
+pub use validate_outputs::published_locations;
+pub use validate_outputs::quantity_supported as procedure_produces_observation_quantity;
 pub use validate_outputs::{
     observation_sampling_matches_domain, validate_authored_observation_request,
     validate_observation_sampling,
@@ -116,6 +119,7 @@ pub use problem::authored_model_physics::{
 };
 pub use problem::authored_parameterized_signals::{
     AuthoredParameterizedSignal, AuthoredParameterizedSignalError, AuthoredSignalExpression,
+    EvaluatedParameterizedSignal, EvaluatedSignalValue,
 };
 pub use problem::authored_properties::{
     AuthoredLayupDefinition, AuthoredLayupSource, AuthoredOrientationDefinition,
@@ -244,7 +248,8 @@ pub use study::output::{
     ObservationSpec, ObservationStoragePolicy, ObservationTarget, ObservationThreshold,
     ObservationValueShape, PartialAccessPolicy, RecoveryPolicy, ReductionPolicy, RetentionPolicy,
     SamplingPolicy, SeriesObservationEvent, SeriesReduction, SeriesWeighting, SignConvention,
-    SolverObservationEvent, SpatialReduction, SOUND_PRESSURE_LEVEL_REFERENCE_PA,
+    SolverObservationEvent, SourceQuantity, SpatialReduction, SOUND_PRESSURE_LEVEL_REFERENCE_PA,
+    SOURCE_QUANTITIES,
 };
 pub use study::sequence::{
     ActivationLifecycle, AnalysisSequence, ExcitationCaseSelection, IndependentDomain,

@@ -107,6 +107,103 @@ fn mapped(sketch: &Sketch, e: &SketchEntity, m: &Map2<'_>) -> Result<G, EditFail
                 radius: super::mm(r * m.scale),
             }
         }
+        G::Ellipse {
+            center,
+            major,
+            minor,
+            angle,
+            start,
+            end,
+        } => {
+            let literal = |v: &ValueExpr| {
+                radius_mm(v).ok_or_else(|| {
+                    model(format!(
+                        "`{}` has a size from an expression; change it in the source",
+                        e.id.0
+                    ))
+                })
+            };
+            let turn = match angle {
+                None => 0.0,
+                Some(ValueExpr::Quantity { value, unit }) if unit == "rad" => *value,
+                Some(ValueExpr::Quantity { value, .. }) => value.to_radians(),
+                Some(_) => {
+                    return Err(model(format!(
+                        "`{}` has an angle from an expression; change it in the source",
+                        e.id.0
+                    )))
+                }
+            };
+            // The major axis's new direction: its end mapped with the centre.
+            let c = position(sketch, center, 0)
+                .ok_or_else(|| model(format!("`{}` has a point with no position yet", e.id.0)))?;
+            let (q0, q1) = ((m.f)(c), (m.f)((c.0 + turn.cos(), c.1 + turn.sin())));
+            let turned = (q1.1 - q0.1).atan2(q1.0 - q0.0).to_degrees();
+            let ends = match (start, end) {
+                (Some(s), Some(t)) => {
+                    let (s, t) = (place(s)?, place(t)?);
+                    let (s, t) = if m.flip { (t, s) } else { (s, t) };
+                    (Some(s), Some(t))
+                }
+                _ => (None, None),
+            };
+            G::Ellipse {
+                center: place(center)?,
+                major: super::mm(literal(major)? * m.scale),
+                minor: super::mm(literal(minor)? * m.scale),
+                angle: (turned.abs() > 1e-9).then(|| ValueExpr::deg((turned * 1e6).round() / 1e6)),
+                start: ends.0,
+                end: ends.1,
+            }
+        }
+        // Text moves and turns with the map; mirrored, it keeps reading left to right.
+        G::Text {
+            text,
+            at: anchor,
+            height,
+            angle,
+            font,
+            stroke,
+        } => {
+            let literal = |v: &ValueExpr| {
+                radius_mm(v).ok_or_else(|| {
+                    model(format!(
+                        "`{}` has a size from an expression; change it in the source",
+                        e.id.0
+                    ))
+                })
+            };
+            let turn = match angle {
+                None => 0.0,
+                Some(ValueExpr::Quantity { value, unit }) if unit == "rad" => *value,
+                Some(ValueExpr::Quantity { value, .. }) => value.to_radians(),
+                Some(_) => {
+                    return Err(model(format!(
+                        "`{}` has an angle from an expression; change it in the source",
+                        e.id.0
+                    )))
+                }
+            };
+            let c = position(sketch, anchor, 0)
+                .ok_or_else(|| model(format!("`{}` has a point with no position yet", e.id.0)))?;
+            let (q0, q1) = ((m.f)(c), (m.f)((c.0 + turn.cos(), c.1 + turn.sin())));
+            let turned = if m.flip {
+                turn.to_degrees()
+            } else {
+                (q1.1 - q0.1).atan2(q1.0 - q0.0).to_degrees()
+            };
+            G::Text {
+                text: text.clone(),
+                at: place(anchor)?,
+                height: super::mm(literal(height)? * m.scale),
+                angle: (turned.abs() > 1e-9).then(|| ValueExpr::deg((turned * 1e6).round() / 1e6)),
+                font: *font,
+                stroke: match stroke {
+                    Some(w) => Some(super::mm(literal(w)? * m.scale)),
+                    None => None,
+                },
+            }
+        }
         G::Spline { points, closed } => {
             let mut points = points.iter().map(place).collect::<Result<Vec<_>, _>>()?;
             if m.flip && !*closed {
@@ -128,6 +225,8 @@ fn stem(e: &SketchEntity) -> &'static str {
         G::Arc { .. } => "a",
         G::Circle { .. } => "c",
         G::Spline { .. } => "sp",
+        G::Ellipse { .. } => "e",
+        G::Text { .. } => "t",
     }
 }
 
@@ -145,6 +244,7 @@ fn copy(
             id: fresh_like(sketch, stem(&e)),
             geometry,
             construction: e.construction,
+            projected: None,
         };
         added.push(new.id.0.clone());
         sketch.entities.push(new);

@@ -370,8 +370,12 @@ impl<'a, 'b> Resolver<'a, 'b> {
                 let s = s.clone();
                 let key = match self.eval_selection(&selection, env, &s, &file, &site) {
                     Ok(k) => k,
-                    Err((code, msg)) => {
-                        self.diag(code, Severity::Error, site.clone(), msg, Vec::new());
+                    Err(error) => {
+                        let mut at = site.clone();
+                        if error.param.is_some() {
+                            at.param = error.param;
+                        }
+                        self.diag(error.code, Severity::Error, at, error.message, Vec::new());
                         ConfigKey::default()
                     }
                 };
@@ -484,14 +488,21 @@ impl<'a, 'b> Resolver<'a, 'b> {
             NodeOrigin::Mirror { mirror } => {
                 let (mid, ml) = self.local_uuid(&file, "mirror", mirror);
                 let (sid, sl) = self.local_uuid(&file, "occurrence", &o.name);
-                (
-                    hash16(&[
-                        b"runmat-cad/occurrence/v1/mirror",
-                        &mid.0.to_be_bytes(),
-                        &sid.0.to_be_bytes(),
-                    ]),
-                    ml && sl,
-                )
+                // A mirrored pattern brings one image per instance (`rivet@port[3]`), each its own
+                // occurrence: the instance key joins the identity. The image of the seed itself
+                // (key `mirror`) keeps the plain form.
+                let key = segment
+                    .instance
+                    .as_ref()
+                    .map(|i| &i.key)
+                    .filter(|k| **k != InstanceKey::Mirror)
+                    .map(|k| k.to_string());
+                let (mb, sb) = (mid.0.to_be_bytes(), sid.0.to_be_bytes());
+                let mut parts: Vec<&[u8]> = vec![b"runmat-cad/occurrence/v1/mirror", &mb, &sb];
+                if let Some(k) = &key {
+                    parts.push(k.as_bytes());
+                }
+                (hash16(&parts), ml && sl)
             }
         };
         let parent_uuid = self.nodes[parent as usize].uuid;
@@ -528,6 +539,7 @@ impl<'a, 'b> Resolver<'a, 'b> {
             dof: None,
             representation: rep,
             represented_by_ancestor: parent_by_ancestor,
+            reference: o.reference || self.nodes[parent as usize].reference,
             material,
             properties,
             part_number,

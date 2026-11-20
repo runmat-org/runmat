@@ -3,9 +3,9 @@
   "cohort": "cad-airliner-drawing-memory",
   "policy_sha256": "eeab2d440d501db5062b1302e786dd0680fa4bf1065d061bfe57f6691b7a233b",
   "measured": {
-    "source_revision": "35f5a6c647203246c4caec0fbbcfe18d4f899a6e",
+    "source_revision": "dac88251baaa60d5834296cbce89c727092da233",
     "target": "linux-x86_64",
-    "hardware": "GCP N1 highmem-16, Intel Xeon, 16 vCPU and 104 GiB RAM",
+    "hardware": "GCP N1 highmem-16 (design-build-0716), Intel Xeon, 16 vCPU and 104 GiB RAM",
     "toolchain": "rustc 1.90.0 (1159e78c4 2025-09-14)",
     "command": [
       "cargo",
@@ -25,11 +25,11 @@
     "profile": {
       "release": true,
       "debug": 0,
-      "cargo_build_jobs": 8,
-      "incremental": false
+      "incremental": false,
+      "rust_test_nocapture": true
     },
-    "log_sha256": "1e377f693fb92ff957db5b4d995911117e9b1cce3d3fa8d4b8e3fc95b283193b",
-    "log_location": "gh-linux-20260327-125436:/home/nallana/rm1293/logs/intake-35f5a6c647-airliner-receipt.tests.log",
+    "log_sha256": "e607f1145836aa0590facaac9a4506e80364928e828168e38d5003c8471047b2",
+    "log_location": "design-build-0716:/home/nallana/runs/f-receipts-0716/cad-airliner-drawing-memory.tests.log (copy: runmat-acc-2 design-coord/release/evidence/receipts-dac88251ba/linux-0716)",
     "passed": 1,
     "failed": 0,
     "ignored": 0,
@@ -40,30 +40,46 @@
     ],
     "selected_filter": null,
     "inputs": {
-      "sha256": "bbb2feddfdd106f27287465c068b8ce426afb6cd6175e26733b229405d7feeb3",
-      "files": 26112,
+      "sha256": "82e3f3ef00d70b90678b39c575d9e94442cc2cbae2cbcd0077890c46639851fc",
+      "files": 26448,
       "encoding": "git-mode-type-blob-path-tuples-v1"
     },
     "artifacts": [
       {
-        "sha256": "27ba3f86ce8b7067787da66c5efc52dde2f5dbb0b2399139dfcbd353f40168d3",
-        "location": "gh-linux-20260327-125436:/home/nallana/rm1293/logs/cad-airliner-35f5a6c647-qualified"
+        "sha256": "c30049d11190bd498d797d68b5cb178085a479e0eed83777654aa858061e3bb4",
+        "location": "design-build-0716:/home/nallana/targets/rel072-receipts/release/deps/cad_airliner_drawing-d34f646c16f9bbdc"
       }
     ],
+    "test_seconds": 266.37,
     "source_verification": {
       "status": "verified",
-      "files": 27265,
-      "before_and_after": true
+      "revision": "dac88251baaa60d5834296cbce89c727092da233",
+      "files": 27660,
+      "before_and_after": true,
+      "checks": [
+        {
+          "revision": "dac88251baaa60d5834296cbce89c727092da233",
+          "host": "design-build-0716",
+          "tracked_files": 27660,
+          "differing": 0,
+          "diff_lines": [],
+          "checked_at": "2026-11-19T23:53:06Z",
+          "method": "git archive of the revision vs the receipt source tree, rsync -rlpcni (checksums, tracked files only)"
+        },
+        {
+          "revision": "dac88251baaa60d5834296cbce89c727092da233",
+          "host": "design-build-0716",
+          "tracked_files": 27660,
+          "differing": 0,
+          "diff_lines": [],
+          "checked_at": "2026-11-20T03:37:57Z",
+          "method": "git archive of the revision vs the receipt source tree, rsync -rlpcni (checksums, tracked files only)"
+        }
+      ]
     },
-    "test_seconds": 243.84,
-    "rust_heap_peak_mib": {
-      "sheet": 2,
-      "front": 331,
-      "top": 373,
-      "right": 346
-    }
+    "source_scope": "All 27,660 tracked source files of dac88251ba matched the receipt tree before the run (checksum sync) and after it (checksum dry-run, 0 differing)."
   },
-  "scope": "The complete staged drawing passes the unchanged Rust-heap ceiling through the optimized native browser-host adapter. Measurements exclude the C++ allocator and operating-system RSS. Distributed browser artifact acceptance is separate.",
+  "scope": "Fresh 0.7.2 combined-qualification run on the frozen candidate dac88251ba (GCP N1 highmem-16 (design-build-0716), Intel Xeon, 16 vCPU and 104 GiB RAM). The complete staged drawing passes the unchanged Rust-heap ceiling through the optimized native browser-host adapter. Measurements exclude the C++ allocator and operating-system RSS. Distributed browser artifact acceptance is separate. The test spawns no runmat CLI.",
   "comparison_runs": [
     {
       "source_revision": "80226433e07bba08d7f002da89db5cc3a4a3ef25",
@@ -75,19 +91,19 @@
   ],
   "conservation": {
     "measured_inputs": {
-      "sha256": "bbb2feddfdd106f27287465c068b8ce426afb6cd6175e26733b229405d7feeb3",
-      "files": 26112,
+      "sha256": "82e3f3ef00d70b90678b39c575d9e94442cc2cbae2cbcd0077890c46639851fc",
+      "files": 26448,
       "encoding": "git-mode-type-blob-path-tuples-v1"
     },
     "accepted_inputs": {
-      "sha256": "55f884d6cb44d49c880e97e043a427c54be4a91e9d00a6ab8874ac7cf6f03a06",
-      "files": 26117,
+      "sha256": "3e8870de46a03715aacaa8ef0b57a056df50e263427bc1e52ccce5cd5932db3d",
+      "files": 26449,
       "encoding": "git-mode-type-blob-path-tuples-v1"
     },
-    "reason": "Conserves the existing scientific measurements across release-publication metadata changes. The only scientific input changes remove publish=false from two required Rust libraries. Package versions, dependencies, features, targets, implementation source, numerical inputs and thresholds are unchanged. Rate-limit retry handling and release scheduling are publication tooling, not simulation execution. This review is not a rerun of scientific or performance measurements.",
+    "reason": "Conserves the fresh 0.7.2 scientific measurements on dac88251ba across G132 24074bbb35: pure move of analysis_authoring_workflow, analysis_procedure_ids, analysis_output_operation_ids, analysis_language_reference_paths into contracts/authoring_catalog.rs, re-exported at the same path; no behaviour change; debt ceiling file lowered 2467\u21922442; FEA OK 2026-11-20. Every line removed from contracts.rs is in the new module; the only other lines are the mod line, the re-export, the module doc comment, its import and one test import. scripts/development/fea-module-size-debt.json is not a scientific input. Solver arithmetic, model inputs, dependencies, features and thresholds are unchanged. This review is not a rerun of the scientific or performance measurements.",
     "review": {
-      "path": "qualification/scientific/reviews/publication-metadata-20261113-cad-airliner-drawing-memory.json",
-      "sha256": "94bb97b10df400ce5316e0293e2a69997b8cc5fe48905087c1559f8a799f17f1"
+      "path": "qualification/scientific/reviews/g132-authoring-catalog-move-20261120-cad-airliner-drawing-memory.json",
+      "sha256": "fbdcfdc83da4668078d04d6da23b5e532b5346416492ede6c21e0d77ad20a9db"
     }
   }
 }

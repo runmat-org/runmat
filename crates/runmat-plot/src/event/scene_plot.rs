@@ -319,6 +319,10 @@ pub enum ScenePlot {
         /// The mesh packed (base64), in place of `vertices`, `triangles` and `vertex_normals`.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         packed: Option<packed::PackedMesh>,
+        /// The scene owners the mesh belongs to (a solved body's region, an assembly node), so a
+        /// replayed scene can be isolated by owner.
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        owner_node_ids: Vec<String>,
         visible: bool,
     },
     Line3 {
@@ -402,4 +406,29 @@ pub enum ScenePlot {
         label: Option<String>,
         visible: bool,
     },
+}
+
+impl ScenePlot {
+    pub(super) fn axes_index(&self) -> u32 {
+        match self {
+            Self::Line { axes_index, .. }
+            | Self::ReferenceLine { axes_index, .. }
+            | Self::Scatter { axes_index, .. }
+            | Self::Bar { axes_index, .. }
+            | Self::ErrorBar { axes_index, .. }
+            | Self::Stairs { axes_index, .. }
+            | Self::Stem { axes_index, .. }
+            | Self::Area { axes_index, .. }
+            | Self::Quiver { axes_index, .. }
+            | Self::Surface { axes_index, .. }
+            | Self::Patch { axes_index, .. }
+            | Self::Mesh { axes_index, .. }
+            | Self::Line3 { axes_index, .. }
+            | Self::Scatter3 { axes_index, .. }
+            | Self::Contour { axes_index, .. }
+            | Self::ContourFill { axes_index, .. }
+            | Self::Pie { axes_index, .. }
+            | Self::Unsupported { axes_index, .. } => *axes_index,
+        }
+    }
 }

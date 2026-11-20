@@ -51,6 +51,12 @@ fn remembered(name: &EntityName) -> NameToken {
     token
 }
 
+/// The token of `name`, recorded so [`recipe_of`] gives the name back (a rename writes names
+/// whose tokens nest renamed names).
+pub fn remember(name: &EntityName) -> NameToken {
+    remembered(name)
+}
+
 /// The name a tag constructor made `token` from, if one did in this process.
 pub fn recipe_of(token: &NameToken) -> Option<EntityName> {
     recipes().lock().ok()?.get(token).cloned()

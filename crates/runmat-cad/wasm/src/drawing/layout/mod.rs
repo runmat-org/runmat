@@ -13,9 +13,13 @@
 //!    parent. Each view reserves room for its label and its dimension rows ([`views`]).
 //! 5. **Dimensions** stack outward from the view at the standard's offsets, shortest nearest;
 //!    a dimension that repeats one already drawn is a finding and is drawn once ([`dims`]).
-//! 6. **Callouts** (hole callouts, frames, finishes, notes, weld symbols, datum targets,
+//! 6. **Building marks**: level marks and door swings ([`plan_marks`]).
+//! 7. **Callouts** (hole callouts, frames, finishes, notes, weld symbols, datum targets,
 //!    balloons) take the free spot nearest what they point at, where their label overlaps
-//!    nothing and their leader crosses no text ([`callouts`], [`solver`]).
+//!    nothing and their leader crosses no text ([`callouts`], [`solver`]). Notes wrap to their
+//!    width or the room they have, and move off anything they would overprint ([`notes`]).
+//! 8. **Grids** last: each grid line runs to its bubble with a gap at every text it crosses
+//!    ([`plan_marks`]).
 //!
 //! Line weights, text heights, arrowheads and dimension offsets come from the sheet's drafting
 //! standard (`styles`, [`runmat_cad::drawing::standard`]). The layout is deterministic: the
@@ -25,6 +29,9 @@ mod border;
 mod angular;
 mod callouts;
 mod dims;
+mod lining;
+pub(crate) mod notes;
+mod plan_marks;
 pub(crate) mod marks;
 pub(crate) mod solver;
 mod tables;
@@ -32,6 +39,8 @@ mod views;
 
 #[cfg(test)]
 mod tests;
+#[cfg(test)]
+mod notes_tests;
 
 use serde::Serialize;
 use serde_json::{Map, Value};
@@ -139,7 +148,7 @@ impl Std {
             "visible" => Some(self.visible),
             "hidden" | "benddown" => Some(self.hidden),
             "center" | "bendup" => Some(self.center),
-            "dimink" | "hatch" => Some(self.thin),
+            "dimink" | "hatch" | "tangent" => Some(self.thin),
             "thick" => Some(self.thick),
             "frame" => Some(self.visible * 0.7),
             _ => None,
@@ -219,7 +228,9 @@ pub fn sheet_layout(data: &Value, displays: &Map<String, Value>, name: &str) -> 
     views::place(&mut ctx, &mut planned, &plans.rooms);
     views::draw(&mut ctx, &planned);
     dims::draw(&mut ctx, &planned, plans);
+    plan_marks::draw(&mut ctx, &planned);
     callouts::draw(&mut ctx, &planned);
+    plan_marks::draw_grids(&mut ctx, &planned);
     for p in &mut ctx.out.primitives {
         if p.width.is_none() {
             p.width = ctx.std.width(p.style);
@@ -237,10 +248,14 @@ pub(crate) struct Ctx<'a> {
     /// The sheet's scale (numerator / denominator).
     pub scale: f64,
     pub size: Xy,
+    /// The units the format's dimensions and scales print in.
+    pub units: runmat_cad::drawing::units::DrawingUnits,
     /// The drawing frame's inside: everything drawn stays in it.
     pub frame: solver::BoxR,
     pub occ: solver::Occupancy,
     pub out: SheetLayout,
+    /// Plain notes placed by hand, as fitted before the views: annotation id → (top-left, lines).
+    pub note_spots: std::collections::BTreeMap<String, (Xy, notes::TextBlock)>,
 }
 
 impl<'a> Ctx<'a> {
@@ -269,6 +284,7 @@ impl<'a> Ctx<'a> {
         };
         let std = Std::of(&data["styles"][sheet]);
         let frame = border::frame_box(size, std.iso);
+        let units = serde_json::from_value(format["units"].clone()).unwrap_or_default();
         Ctx {
             data,
             displays,
@@ -276,12 +292,14 @@ impl<'a> Ctx<'a> {
             std,
             scale,
             size,
+            units,
             frame,
             occ: solver::Occupancy::new(frame),
             out: SheetLayout {
                 size,
                 ..Default::default()
             },
+            note_spots: Default::default(),
         }
     }
 
@@ -299,6 +317,27 @@ impl<'a> Ctx<'a> {
             item: item.to_owned(),
             message,
         });
+    }
+
+    /// A view's scale as its label prints it, in the format's units (`1:2`, `3" = 1'-0"`,
+    /// `FULL SIZE` for 1:1 in inches or feet and inches).
+    pub fn scale_label(&self, scale: f64) -> String {
+        use runmat_cad::drawing::units::DrawingUnits;
+        if self.units != DrawingUnits::Mm && (scale - 1.0).abs() < 1e-9 {
+            return self.units.scale((1, 1));
+        }
+        if self.units == DrawingUnits::FtIn && scale > 0.0 && scale < 1.0 {
+            return self.units.scale((1, (1.0 / scale).round() as u32));
+        }
+        scale_text(scale)
+    }
+
+    /// A view's scale line under its title: `SCALE 1:2`, or `FULL SIZE` alone.
+    pub fn scale_line(&self, scale: f64) -> String {
+        match self.scale_label(scale) {
+            full if full == "FULL SIZE" => full,
+            label => format!("SCALE {label}"),
+        }
     }
 
     /// The text the compile gives an annotation (its value, frame cells, callout).

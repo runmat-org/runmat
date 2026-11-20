@@ -1,4 +1,5 @@
 use std::collections::BTreeSet;
+use std::time::{Duration, Instant};
 
 use async_trait::async_trait;
 use runmat_analysis_execution::{
@@ -87,6 +88,13 @@ pub(crate) trait AnalysisTaskPool: CacheImport {
         &mut self,
         planned_tasks: &[TaskId],
     ) -> NativeExecutionResult<()>;
+    /// Total wave wall time this pool measured before this process began observing those
+    /// waves. A replacement driver restores committed waves from the checkpoint and resumes
+    /// an interrupted wave on the clock it began with. Pools whose waves always begin in
+    /// this process carry no time.
+    fn carried_wave_millis(&self) -> u64 {
+        0
+    }
     /// Trust tiers this pool's workers may hold; task host requirements narrow to them.
     fn permitted_trust_tiers(
         &self,
@@ -112,6 +120,59 @@ pub(crate) trait AnalysisTaskPool: CacheImport {
         &mut self,
         tasks: AdmittedAnalysisBatch,
     ) -> NativeExecutionResult<Vec<AnalysisTaskCompletion>>;
+}
+
+/// Wall time of one wave measured before this process began observing it.
+///
+/// `measured` holds each task's durable wave wall, when the pool has one. The wave spans at
+/// least its longest durable wall, so the part that exceeds the local observation began
+/// under an earlier driver. A wave measured within its local observation carries nothing.
+pub(crate) fn carried_wave_millis(
+    measured: impl IntoIterator<Item = Option<u64>>,
+    observed: Duration,
+) -> u64 {
+    let observed = u64::try_from(observed.as_millis()).unwrap_or(u64::MAX);
+    measured
+        .into_iter()
+        .flatten()
+        .max()
+        .map_or(0, |measured| measured.saturating_sub(observed))
+}
+
+/// Elapsed wall time of one analysis workflow, enclosing every wave interval it charges.
+///
+/// After a driver replacement, the workflow reruns in the new driver. Waves committed under
+/// the replaced driver return from the checkpoint at once, and an interrupted wave keeps the
+/// clock it began with, so their measured intervals started before this process. The
+/// workflow wall is the time this process observed plus the wave time its pool carried
+/// across the replacement while the workflow ran.
+pub(crate) struct AnalysisWorkflowClock {
+    started: Instant,
+    carried_at_start: u64,
+}
+
+impl AnalysisWorkflowClock {
+    pub(crate) fn start(pool: &impl AnalysisTaskPool) -> Self {
+        Self {
+            started: Instant::now(),
+            carried_at_start: pool.carried_wave_millis(),
+        }
+    }
+
+    pub(crate) fn wall_millis(&self, pool: &impl AnalysisTaskPool) -> NativeExecutionResult<u64> {
+        let carried = pool
+            .carried_wave_millis()
+            .checked_sub(self.carried_at_start)
+            .ok_or_else(|| protocol("analysis pool carried wave time decreased"))?;
+        workflow_wall_millis(self.started.elapsed(), carried)
+    }
+}
+
+fn workflow_wall_millis(observed: Duration, carried: u64) -> NativeExecutionResult<u64> {
+    u64::try_from(observed.as_millis())
+        .ok()
+        .and_then(|observed| observed.checked_add(carried))
+        .ok_or_else(|| protocol("analysis workflow wall time overflowed"))
 }
 
 /// Only begin_analysis_batch can issue this pre-submission wave authority.

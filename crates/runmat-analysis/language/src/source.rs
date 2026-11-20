@@ -264,6 +264,10 @@ pub enum GeometryInspectionCapability {
     EngineeringProperties,
     MaterialCandidates,
     Regeneration,
+    /// The exact geometry backend read the file's authored names (`authored_names` is complete,
+    /// possibly empty), so a check can confirm `select name` regions. Separate from persistent
+    /// IDs, which an AP242 exchange can supply without the exact backend.
+    AuthoredNames,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -273,6 +277,10 @@ pub struct GeometryInspection {
     /// Advisory planning evidence only; not an exact meshing bound.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub preview_extent_m: Option<[f64; 3]>,
+    /// Volume, area and sizing spectrum of the same preview, in canonical metres, for the
+    /// check-time mesh estimate. Advisory evidence like the extent.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub preview_measure: Option<runmat_geometry_core::PreviewMeasure>,
     pub content_digest: SourceDigest,
     pub topology_digest: SourceDigest,
     pub capabilities: Vec<GeometryInspectionCapability>,
@@ -285,7 +293,8 @@ pub struct GeometryInspection {
     pub unit_evidence: runmat_geometry_core::physical::LengthUnitEvidence,
     /// Authored names in the exact model by region role (`vertex`, `edge`, `face`, `solid`), one
     /// entry per named entity (sorted), so a check can reject a `select name` that matches nothing
-    /// or more entities than the region expects. Empty when the source carries no exact names.
+    /// or more entities than the region expects. Complete only with the `AuthoredNames`
+    /// capability; without it the names are unknown.
     #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
     pub authored_names: std::collections::BTreeMap<String, Vec<String>>,
     /// Faces two solids share (`interfaces = shared`), so a check can classify the faces that

@@ -265,14 +265,52 @@ pub struct LocalSweepCase {
     pub outcome: Result<CompletedLocalFeaCase, String>,
 }
 
+/// Runs a checked study or sweep locally. The run is one `fea.study` trace span with a step
+/// span per phase (see [`runmat_analysis_fea::progress::trace`]).
 pub async fn execute_checked_fea_locally(
     source: &runmat_core::CheckedFeaSessionSource,
     options: LocalFeaExecutionOptions,
 ) -> Result<LocalFeaExecution, String> {
-    let root = source
-        .resolve_root(options.root.as_ref())
-        .map_err(|error| error.to_string())?;
-    let (scope, options) = run_admission::admit_root(source, &root, options)?;
+    use runmat_analysis_fea::progress::trace;
+    use tracing::Instrument;
+    let study = trace::study_span(&source.physical_path().display().to_string());
+    execute_checked_fea_in_study_span(source, options, &study)
+        .instrument(study.clone())
+        .await
+}
+
+async fn execute_checked_fea_in_study_span(
+    source: &runmat_core::CheckedFeaSessionSource,
+    options: LocalFeaExecutionOptions,
+    study: &tracing::Span,
+) -> Result<LocalFeaExecution, String> {
+    use runmat_analysis_fea::progress::trace;
+    // The source was checked when it was loaded; this step admits the checked root for this
+    // run and reports the check's errors.
+    let check = trace::StudyStep::Check.span();
+    let admitted = check.in_scope(|| {
+        let root = source
+            .resolve_root(options.root.as_ref())
+            .map_err(|error| error.to_string())?;
+        run_admission::admit_root(source, &root, options).map(|admitted| (root, admitted))
+    });
+    let errors = source
+        .diagnostics()
+        .filter(|diagnostic| {
+            diagnostic.severity == runmat_analysis_language::FeaDiagnosticSeverity::Error
+        })
+        .count();
+    trace::finish(&check, &trace::check_result(errors));
+    drop(check);
+    let (
+        root,
+        run_admission::AdmittedRoot {
+            scope,
+            options,
+            run_id,
+        },
+    ) = admitted?;
+    trace::record_run_id(study, &run_id);
     let result = match scope
         .run_checked_result_future(execute_admitted_root(source, root, options))
         .await
@@ -409,12 +447,13 @@ async fn execute_admitted_root(
                                 value: binding.value,
                             })
                             .collect();
-                        let outcome = execute_case(source, study, inputs, options).await.map(
-                            |mut completed| {
-                                completed.case_id = case.case_id.clone();
-                                completed
-                            },
-                        );
+                        let outcome =
+                            in_case(&case.case_id, execute_case(source, study, inputs, options))
+                                .await
+                                .map(|mut completed| {
+                                    completed.case_id = case.case_id.clone();
+                                    completed
+                                });
                         (
                             index,
                             LocalSweepCase {
@@ -517,6 +556,18 @@ fn sweep_concurrency(
 }
 
 /// One study case, or the two analyses of a harmonic-heating chain run in order.
+/// Runs `future` inside a `fea.study.case` trace span named `name`; an empty name opens no
+/// span.
+fn in_case<F: std::future::Future>(name: &str, future: F) -> tracing::instrument::Instrumented<F> {
+    use tracing::Instrument;
+    let span = if name.is_empty() {
+        tracing::Span::none()
+    } else {
+        runmat_analysis_fea::progress::trace::case_span(name)
+    };
+    future.instrument(span)
+}
+
 async fn execute_study_cases(
     source: &runmat_core::CheckedFeaSessionSource,
     study: runmat_analysis_language::ResolvedAnalysisStudy,
@@ -535,7 +586,11 @@ async fn execute_study_cases(
         // conduction field at the temperatures the heat case published (final time of a
         // transient). The conduction case carries those temperatures in its planning policy, so
         // it runs on any placement without solving the coupled loop again.
-        let mut heat = execute_case(source, study.clone(), Vec::new(), options).await?;
+        let mut heat = in_case(
+            &label(&analysis),
+            execute_case(source, study.clone(), Vec::new(), options),
+        )
+        .await?;
         heat.case_id = label(&analysis);
         let CompletedFeaStudyResult::Thermal(thermal) = &heat.result else {
             return Err(
@@ -565,33 +620,40 @@ async fn execute_study_cases(
                 transient,
             )
             .map_err(|error| error.to_string())?;
-        let authority = format!("typed-fea-local:{}", uuid::Uuid::new_v4());
-        let prepared = preparation::prepare_study_with_role(
-            source,
-            study,
-            &[],
-            &authority,
-            options,
-            preparation::PreparationRole::ElectrothermalConduction {
-                element_temperature_k,
-                operating_time_s,
-            },
-        )
+        let conduction_id = label(&format!("{analysis}/conduction"));
+        let mut conduction = in_case(&conduction_id, async {
+            let authority = format!("typed-fea-local:{}", uuid::Uuid::new_v4());
+            let prepared = preparation::prepare_study_with_role(
+                source,
+                study,
+                &[],
+                &authority,
+                options,
+                preparation::PreparationRole::ElectrothermalConduction {
+                    element_temperature_k,
+                    operating_time_s,
+                },
+            )
+            .await?;
+            execute_prepared_with_source(prepared, options, Some(source)).await
+        })
         .await?;
-        let mut conduction = execute_prepared_with_source(prepared, options, Some(source)).await?;
-        conduction.case_id = label(&format!("{analysis}/conduction"));
+        conduction.case_id = conduction_id;
         return Ok(vec![heat, conduction]);
     }
     let Some(chain) = chain::heating_chain(&study) else {
-        let mut case = execute_case(source, study, Vec::new(), options).await?;
+        let mut case = in_case(prefix, execute_case(source, study, Vec::new(), options)).await?;
         case.case_id = prefix.to_string();
         return Ok(vec![case]);
     };
-    let mut harmonic = execute_case(
-        source,
-        chain::sub_study(&study, &chain.harmonic),
-        Vec::new(),
-        options,
+    let mut harmonic = in_case(
+        &label(&chain.harmonic),
+        execute_case(
+            source,
+            chain::sub_study(&study, &chain.harmonic),
+            Vec::new(),
+            options,
+        ),
     )
     .await?;
     harmonic.case_id = label(&chain.harmonic);
@@ -603,21 +665,24 @@ async fn execute_study_cases(
         .result
         .element_loss_density_w_per_m3(&maxwell.mesh)
         .map_err(|error| error.to_string())?;
-    let authority = format!("typed-fea-local:{}", uuid::Uuid::new_v4());
-    let prepared = preparation::prepare_study_with_role(
-        source,
-        chain::sub_study(&study, &chain.thermal),
-        &[],
-        &authority,
-        options,
-        preparation::PreparationRole::Heated(runmat_analysis_fea::study::ElementHeatSource {
-            step_id: chain.thermal.clone(),
-            source_id: format!("{}.{}", chain.harmonic, chain.state_id),
-            element_density_w_per_m3: density,
-        }),
-    )
+    let mut thermal = in_case(&label(&chain.thermal), async {
+        let authority = format!("typed-fea-local:{}", uuid::Uuid::new_v4());
+        let prepared = preparation::prepare_study_with_role(
+            source,
+            chain::sub_study(&study, &chain.thermal),
+            &[],
+            &authority,
+            options,
+            preparation::PreparationRole::Heated(runmat_analysis_fea::study::ElementHeatSource {
+                step_id: chain.thermal.clone(),
+                source_id: format!("{}.{}", chain.harmonic, chain.state_id),
+                element_density_w_per_m3: density,
+            }),
+        )
+        .await?;
+        execute_prepared_with_source(prepared, options, Some(source)).await
+    })
     .await?;
-    let mut thermal = execute_prepared_with_source(prepared, options, Some(source)).await?;
     thermal.case_id = label(&chain.thermal);
     Ok(vec![harmonic, thermal])
 }

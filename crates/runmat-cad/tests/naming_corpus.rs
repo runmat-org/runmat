@@ -1505,6 +1505,7 @@ fn c41_sketch_on_face_follows_and_hole_by_sketch_point() {
             at: PointExpr::mm(30.0, 20.0),
         },
         construction: false,
+        projected: None,
     });
     d.features.push(sketch("marks", s));
     d.features.push(Feature::new(

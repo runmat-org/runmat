@@ -82,17 +82,15 @@ pub fn pack_surface_vertices(
         .checked_mul(lod_y_len)
         .ok_or_else(|| "surf: grid dimensions overflowed vertex count".to_string())?;
     let output_size = vertex_count as u64 * std::mem::size_of::<Vertex>() as u64;
-    let output_buffer = runmat_accelerate_api::WgpuBufferOwner::new(device.create_buffer(
-        &wgpu::BufferDescriptor {
-            label: Some("surface-gpu-vertices"),
-            size: output_size,
-            usage: wgpu::BufferUsages::STORAGE
-                | wgpu::BufferUsages::VERTEX
-                | wgpu::BufferUsages::COPY_DST
-                | wgpu::BufferUsages::COPY_SRC,
-            mapped_at_creation: false,
-        },
-    ));
+    let output_buffer = emission.own_buffer(device.create_buffer(&wgpu::BufferDescriptor {
+        label: Some("surface-gpu-vertices"),
+        size: output_size,
+        usage: wgpu::BufferUsages::STORAGE
+            | wgpu::BufferUsages::VERTEX
+            | wgpu::BufferUsages::COPY_DST
+            | wgpu::BufferUsages::COPY_SRC,
+        mapped_at_creation: false,
+    }));
 
     let min_z = if params.min_z.is_finite() {
         params.min_z

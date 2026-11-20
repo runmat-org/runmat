@@ -63,6 +63,7 @@ Environment Variables:
   RUNMAT_ORG_ID=<uuid>        Remote org override (remote commands)
   RUNMAT_PROJECT_ID=<uuid>    Remote project override (remote commands)
   RUNMAT_PACKAGE_CACHE_DIR=<path>  Shared package cache override
+  RUNMAT_AOT_CACHE_DIR=<path>  Compile-time runtime pack cache override
   NO_COLOR=<non-empty>        Disable ANSI color by default
   CLICOLOR=0                  Disable automatic ANSI color
   CLICOLOR_FORCE=<non-zero>   Force ANSI color for human output
@@ -309,6 +310,11 @@ pub enum Commands {
         #[arg(long)]
         json: bool,
     },
+    /// Install the compile-time runtime used by `runmat compile`
+    Aot {
+        #[command(subcommand)]
+        command: AotCommand,
+    },
     /// Compile a MATLAB program into a standalone native executable
     Compile {
         /// MATLAB script or function entrypoint
@@ -319,6 +325,9 @@ pub enum Commands {
         /// Native optimization policy
         #[arg(long, value_enum, default_value = "speed")]
         optimization: AotOptLevel,
+        /// Install the matching compile-time runtime without prompting if needed
+        #[arg(long)]
+        install_aot_runtime: bool,
         /// Native runtime composition policy
         #[arg(long, value_enum, default_value = "native-specialized")]
         policy: AotPolicy,
@@ -356,10 +365,11 @@ pub enum Commands {
         #[command(subcommand)]
         command: NativeInterfaceCommand,
     },
-    /// Check a MATLAB script or .fea document without running it, or run a circuit's checks
-    /// (ERC, the review suites, DRC and its simulations' limits)
+    /// Check a MATLAB script or .fea document without running it, regenerate a part, assembly
+    /// or drawing, or run a circuit's checks (ERC, the review suites, DRC and its simulations'
+    /// limits)
     Check {
-        /// .m, .fea, .circuit or .circuit.layout file to check
+        /// .m, .fea, .part, .assembly, .drawing, .circuit or .circuit.layout file to check
         file: PathBuf,
         #[command(flatten)]
         root: FeaRootArgs,
@@ -378,6 +388,20 @@ pub enum Commands {
         /// Circuits: leave out the simulation sections
         #[arg(long = "no-simulate")]
         no_simulate: bool,
+        /// Assemblies: also check the parts for overlapping material, and fail on any overlap
+        #[arg(long)]
+        interference: bool,
+        /// Design files: the workspace folder the file's imports resolve in (default: the file's
+        /// project, the nearest folder up holding a runmat.toml, else its folder)
+        #[arg(long = "root", value_name = "DIRECTORY")]
+        design_root: Option<PathBuf>,
+    },
+    /// Run a design catalog command or export a design file:
+    /// `runmat design run <file> <command> …` and `runmat design export <file> --format … …`
+    Design {
+        /// `run` or `export`, the file and the command's flags
+        #[arg(trailing_var_arg = true, allow_hyphen_values = true, num_args = 1..)]
+        args: Vec<String>,
     },
     /// Print the logical phases and analysis definition for one .fea study or sweep
     Plan {
@@ -588,6 +612,16 @@ pub enum Commands {
 }
 
 #[derive(Subcommand, Clone)]
+pub enum AotCommand {
+    /// Download and verify the runtime, or install a previously downloaded pack
+    Install {
+        /// Provision the exact matching distribution pack without a download
+        #[arg(long, value_name = "PATH")]
+        from: Option<PathBuf>,
+    },
+}
+
+#[derive(Subcommand, Debug, Clone)]
 pub enum GcCommand {
     /// Show GC statistics
     Stats,
@@ -667,7 +701,7 @@ pub enum ConfigUserCommand {
 mod tests {
     use std::path::PathBuf;
 
-    use super::{Cli, Commands};
+    use super::{AotCommand, Cli, Commands};
     use crate::cli::{
         AotPolicy, BatchCommand, ClusterCommand, ClusterStateArg, MeshSourceUnitsArg,
     };
@@ -1048,6 +1082,40 @@ mod tests {
             panic!("expected run command")
         };
         assert_eq!(args, ["--cluster", "not-placement"]);
+    }
+
+    #[test]
+    fn aot_install_and_compile_consent_are_explicit() {
+        let cli = Cli::try_parse_from([
+            "runmat",
+            "aot",
+            "install",
+            "--offline",
+            "--from",
+            "runtime.zip",
+        ])
+        .unwrap();
+        assert!(cli.offline);
+        assert!(matches!(cli.command, Some(Commands::Aot {
+            command: AotCommand::Install { from: Some(path) }
+        }) if path == PathBuf::from("runtime.zip")));
+        let cli =
+            Cli::try_parse_from(["runmat", "compile", "main.m", "--install-aot-runtime"]).unwrap();
+        assert!(matches!(
+            cli.command,
+            Some(Commands::Compile {
+                install_aot_runtime: true,
+                ..
+            })
+        ));
+        let cli = Cli::try_parse_from(["runmat", "compile", "main.m"]).unwrap();
+        assert!(matches!(
+            cli.command,
+            Some(Commands::Compile {
+                install_aot_runtime: false,
+                ..
+            })
+        ));
     }
 
     #[test]

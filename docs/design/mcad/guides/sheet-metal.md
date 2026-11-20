@@ -22,6 +22,32 @@ $$
 
 so a 90° bend with $R$ = 2 mm, $T$ = 1.5 mm and $K$ = 0.44 develops 4.18 mm of flat.
 
+### Gauges and bend tables
+
+A shop orders sheet by gauge and bends it to its own bend table. The part keeps both as data, in one line that every sheet body of the part follows:
+
+```
+sheet_metal = { gauges = steel, gauge = "16", bend_table = din6935 }
+```
+
+**Gauge** on the Sheet Metal tab picks the gauge table and the gauge. The gauge sets each sheet body's thickness, inside bend radius and, when its rule is a K-factor, its K-factor. The built-in tables are:
+
+| Table | Gauges | Source |
+|---|---|---|
+| `steel` | 3 to 28 | Manufacturers' Standard Gauge for sheet steel (16 gauge is 0.0598 in, 1.519 mm) |
+| `aluminum` | 8 to 24 | Brown & Sharpe gauge, $d = 0.005\,\text{in} \times 92^{(36-n)/39}$ (ASTM B258), to four decimal places of an inch |
+
+A built-in row bends at an inside radius equal to its thickness, with the DIN 6935 K-factor for that ratio, 0.325. A shop's own table is a CSV file in the project with the columns `gauge,thickness_mm,bend_radius_mm,k_factor`; choose **A table in the project** and name the file. An empty gauge goes back to each feature's own thickness and radius.
+
+**Bend table** sets the rule every bend develops by:
+
+- **K-factor**: one K-factor for every bend (`k = 0.38`).
+- **DIN 6935**: the K-factor from each bend's radius-to-thickness ratio, $K = \tfrac{1}{2}\left(0.65 + 0.5 \log_{10} \tfrac{R}{T}\right)$, and $K = 0.5$ above $R/T = 5$.
+- **Bend table in the project**: a CSV file with the columns `thickness_mm,radius_mm,angle_deg,allowance_mm`. A bend takes the allowance of the row for its thickness and radius, interpolated in angle. The flat pattern of a bend with no row for its thickness and radius fails, and the error names both.
+- **Each feature's own rule**: the part line is removed, and each base flange's `rule` applies again.
+
+A table file is part of what the part depends on: saving a change to it rebuilds the part and its flat pattern. A file that is missing or doesn't parse is reported in the bottom strip with its line number.
+
 ## 2. Flanges, reliefs and formed features
 
 ```part file=vent_cover.part
@@ -132,8 +158,8 @@ drawing vent_cover_flat {
 Export the flat pattern as DXF for the cutter:
 
 ```sh
-runmat-design export vent_cover.part --format dxf --out flat
-runmat-design export vent_cover_flat.drawing --format pdf --out drawings
+runmat design export vent_cover.part --format dxf --out flat
+runmat design export vent_cover_flat.drawing --format pdf --out drawings
 ```
 
 ## 5. Check it for manufacture

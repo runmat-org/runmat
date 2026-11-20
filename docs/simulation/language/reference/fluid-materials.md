@@ -1,3 +1,8 @@
+---
+description: Syntax reference for incompressible fluid materials: Newtonian viscosity, power-law, Carreau, Cross, Bingham and Herschel-Bulkley laws, and Darcy-Forchheimer porous zones.
+keywords: [fluid material, Newtonian viscosity, power law, Carreau, Bingham, Herschel-Bulkley, porous zone, Darcy-Forchheimer]
+doc_type: language-reference
+---
 # Incompressible fluid materials
 
 A fluid material declares its law in the `fluid` block. A constant-viscosity

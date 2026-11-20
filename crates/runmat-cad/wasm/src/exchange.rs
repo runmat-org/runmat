@@ -33,6 +33,7 @@ pub mod export;
 pub mod flat;
 pub mod meshes;
 pub mod pmi;
+pub mod study;
 
 fn stem(path: &str) -> String {
     let name = path.rsplit('/').next().unwrap_or(path);
@@ -236,6 +237,47 @@ pub fn part_step_in(
 ) -> Result<Option<Vec<u8>>, String> {
     let part = crate::runtime::regenerate_part_in(path, text, configuration, &Default::default())
         .map_err(|d| first_message(&d))?;
+    part_step_of(path, part)
+}
+
+/// [`part_step_in`] for a simulation study: a part whose regeneration reports an error is
+/// refused with that error, so a study never analyzes the bodies its failed features left.
+pub fn part_study_step_in(
+    path: &str,
+    text: &str,
+    configuration: Option<&str>,
+) -> Result<Option<Vec<u8>>, String> {
+    let part = crate::runtime::regenerate_part_in(path, text, configuration, &Default::default())
+        .map_err(|d| first_message(&d))?;
+    if let Some(error) = part.result.diagnostics.errors().next() {
+        let line = error
+            .span
+            .as_ref()
+            .map(|span| format!(" (line {})", line_of(text, span.start)))
+            .unwrap_or_default();
+        return Err(format!(
+            "`{}` doesn't regenerate{line}: {}",
+            path.rsplit('/').next().unwrap_or(path),
+            error.message
+        ));
+    }
+    part_step_of(path, part)
+}
+
+/// The 1-based line of byte `offset` in `text`.
+fn line_of(text: &str, offset: u32) -> usize {
+    let end = (offset as usize).min(text.len());
+    text.as_bytes()[..end]
+        .iter()
+        .filter(|b| **b == b'\n')
+        .count()
+        + 1
+}
+
+fn part_step_of(
+    path: &str,
+    part: crate::runtime::RegeneratedPart,
+) -> Result<Option<Vec<u8>>, String> {
     let product = Product::new(
         &stem(path),
         part.document.clone(),
@@ -325,12 +367,12 @@ pub fn assembly_step_in(
         let Some(parent) = node.parent else {
             continue;
         };
-        if node.failed || node.represented_by_ancestor {
+        if node.failed || !runmat_cad::assembly::representation::exported(resolved, id) {
             continue;
         }
         let part = match node.definition.kind {
             DefinitionKind::Part => {
-                let file = node.definition.file.0.clone();
+                let file = node.source_key();
                 let key = (file.clone(), node.configuration.digest());
                 let index = match by_key.get(&key) {
                     Some(i) => *i,
@@ -382,9 +424,11 @@ pub fn assembly_step_in(
         let (definition, same_as) = match part {
             Some(_) => (None, None),
             None => {
-                let file = node.definition.file.0.clone();
-                let key = (file.clone(), node.configuration.digest());
-                (Some(stem(&file)), assemblies.get(&key).copied())
+                let key = (node.source_key(), node.configuration.digest());
+                (
+                    Some(stem(node.definition.file.as_str())),
+                    assemblies.get(&key).copied(),
+                )
             }
         };
         let at = occurrences.len() as u32;

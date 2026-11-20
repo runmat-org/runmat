@@ -216,6 +216,7 @@ pub fn read(drawing: &Element, name: &str, report: &mut Report) -> Result<Board,
                 pad_nets: pad_nets.remove(&reference).unwrap_or_default(),
                 fitted: e.attr("populate") != Some("no"),
                 properties: Default::default(),
+                written: Default::default(),
             },
         );
     }

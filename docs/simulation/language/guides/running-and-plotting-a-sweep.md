@@ -1,3 +1,8 @@
+---
+description: Declare bounded study inputs, create a named sweep over the study, check and run its cases, plot the collected values, and decide which fields to retain.
+keywords: [parameter sweep, sweep outputs, plot sweep, study inputs, load envelope]
+doc_type: guide
+---
 # Run and plot a sweep
 
 Start with bounded study inputs, then create a named sweep over that study:

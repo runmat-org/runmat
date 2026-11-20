@@ -22,4 +22,10 @@ impl Figure {
     pub fn geometry_source(&self) -> Option<&GeometryScene> {
         self.geometry_source.as_deref()
     }
+
+    /// The same scene as [`Figure::geometry_source`], shared, so a renderer keeps it without
+    /// copying its geometry.
+    pub fn shared_geometry_source(&self) -> Option<&Arc<GeometryScene>> {
+        self.geometry_source.as_ref()
+    }
 }

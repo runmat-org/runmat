@@ -19,6 +19,14 @@ pub(super) struct CellSpatialCache {
 }
 
 impl CellSpatialCache {
+    pub(super) fn resident_bytes(&self) -> u64 {
+        self.index
+            .resident_bytes()
+            .saturating_add(self.pending.resident_bytes())
+    }
+}
+
+impl CellSpatialCache {
     // Queries observe only the current topology, never intermediate cells that
     // were created and removed before a query. Retain the first indexed bounds
     // and final live bounds per stable corner key; exact net-zero changes vanish.

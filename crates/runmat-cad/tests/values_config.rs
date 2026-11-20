@@ -8,7 +8,7 @@ use runmat_cad::assembly::fasteners::{Column, ColumnData, ColumnarTable, MemoryT
 use runmat_cad::config::*;
 use runmat_cad::ids::{ConfigurationName, InputName};
 use runmat_cad::model::*;
-use runmat_cad::units::{Dimension, StubUnits};
+use runmat_cad::units::{Dimension, Units};
 use runmat_cad::value::*;
 use std::collections::BTreeMap;
 
@@ -87,7 +87,7 @@ fn call(f: &str, volatile: bool) -> ValueExpr {
 
 fn input_env(expr: ValueExpr) -> ValueEnv {
     let ev = Evaluator {
-        units: &StubUnits,
+        units: &Units,
         dynamic: &Fns,
     };
     let mut overrides = BTreeMap::new();
@@ -132,7 +132,7 @@ fn v02_effects_need_volatile_and_volatile_values_are_recorded() {
 #[test]
 fn v03_cache_keys_chain_the_contract_and_seeded_randomness_is_deterministic() {
     let ev = Evaluator {
-        units: &StubUnits,
+        units: &Units,
         dynamic: &Fns,
     };
     let mc = |seed: f64| ValueExpr::Dynamic {
@@ -227,7 +227,7 @@ fn c01_columnar_design_tables_expand_typed() {
         ("light", 5.0, 70.0),
         ("xl", 12.0, 120.0),
     ]));
-    let (m, problems) = materialize(&doc, &[spec(&d)], &tables, &StubUnits);
+    let (m, problems) = materialize(&doc, &[spec(&d)], &tables, &Units);
     assert!(problems.is_empty(), "{:?}", problems);
     let names: Vec<String> = m
         .all_configurations()
@@ -249,7 +249,7 @@ fn c01_columnar_design_tables_expand_typed() {
         *unit = "deg".into();
     }
     let d = tables.put(&bad);
-    let (_, problems) = materialize(&doc, &[spec(&d)], &tables, &StubUnits);
+    let (_, problems) = materialize(&doc, &[spec(&d)], &tables, &Units);
     assert!(
         problems
             .iter()
@@ -297,5 +297,68 @@ fn c02_impact_and_verify_touch_only_affected_configurations() {
     assert_eq!(
         imp.affected.keys().cloned().collect::<Vec<_>>(),
         vec![Some(ConfigurationName::new("thin"))]
+    );
+}
+
+/// A mass input reads `g` as the gram, where elsewhere `g` is standard gravity: its default, an
+/// override, a negated literal and a sum all read their literal units expecting a mass.
+#[test]
+fn v04_a_mass_input_reads_g_as_the_gram() {
+    let ev = Evaluator {
+        units: &Units,
+        dynamic: &Fns,
+    };
+    let mass = |default: ValueExpr, overrides: &[(&str, ValueExpr)]| {
+        let overrides = overrides
+            .iter()
+            .map(|(n, e)| (InputName::new(*n), e.clone()))
+            .collect();
+        ev.evaluate_env(&[InputDecl::new("m", "mass", default)], &[], &overrides)
+    };
+    let env = mass(ValueExpr::qty(0.35, "g"), &[]);
+    assert!(env.failed.is_empty(), "{:?}", env.failed);
+    let m = env.inputs[&InputName::new("m")];
+    assert_eq!(m.dimension, Dimension::MASS);
+    assert!((m.si - 0.000_35).abs() < 1e-15, "{}", m.si);
+    let env = mass(
+        ValueExpr::qty(1.0, "kg"),
+        &[("m", ValueExpr::qty(250.0, "mg"))],
+    );
+    assert!((env.inputs[&InputName::new("m")].si - 0.000_25).abs() < 1e-15);
+    let sum = ValueExpr::Binary {
+        op: BinaryOp::Add,
+        lhs: Box::new(ValueExpr::qty(1.0, "kg")),
+        rhs: Box::new(ValueExpr::qty(500.0, "g")),
+    };
+    let env = mass(sum, &[]);
+    assert!((env.inputs[&InputName::new("m")].si - 1.5).abs() < 1e-12);
+    // A length input still refuses grams, naming the unit as usually read.
+    let env = ev.evaluate_env(
+        &[InputDecl::new("t", "length", ValueExpr::qty(3.0, "g"))],
+        &[],
+        &BTreeMap::new(),
+    );
+    assert!(
+        matches!(
+            env.failed.get("input.t"),
+            Some(ValueError::UnitMismatch { .. })
+        ),
+        "{:?}",
+        env.failed
+    );
+    // An acceleration keeps g as standard gravity.
+    let env = ev.evaluate_env(
+        &[InputDecl::new(
+            "a",
+            "acceleration",
+            ValueExpr::qty(1.0, "g"),
+        )],
+        &[],
+        &BTreeMap::new(),
+    );
+    assert!(
+        (env.inputs[&InputName::new("a")].si - 9.806_65).abs() < 1e-9,
+        "{:?}",
+        env.failed
     );
 }

@@ -23,7 +23,7 @@ use crate::props::{
 use crate::refs::history::SurfaceKind;
 use crate::regen::records::FeatureRecord;
 use crate::regen::RegenResult;
-use crate::units::{Dimension, UnitAuthority};
+use crate::units::{Dimension, Units};
 use crate::value::Evaluator;
 use runmat_rules as rules;
 use serde::{Deserialize, Serialize};
@@ -566,7 +566,102 @@ pub fn pack(process: Process) -> CheckPack {
 pub fn run(
     packs: &[CheckPack],
     graph: &DfmGraph,
-    units: &dyn UnitAuthority,
+    units: &Units,
 ) -> (Vec<CheckResult>, DiagnosticReport) {
     run_checks_on(packs, graph, units)
+}
+
+/// A built-in check's rule in words, by its name in its pack (`hole_depth`): what the
+/// measured attribute is, for a results table.
+pub fn rule_text(pack: &str, check: &str) -> Option<&'static str> {
+    Some(match (pack, check) {
+        ("dfm.machining", "hole_depth") => "Blind hole depth over diameter (twist-drill reach)",
+        ("dfm.machining", "hole_diameter") => "Hole diameter",
+        ("dfm.machining", "tap_depth") => "Thread depth over diameter",
+        ("dfm.machining", "hole_edge") => "Hole edge distance over diameter",
+        ("dfm.machining", "pocket_corners") => {
+            "Sharp internal pocket corners (a rotating tool leaves a radius)"
+        }
+        ("dfm.machining", "pocket_depth") => "Pocket depth over width (end-mill reach)",
+        ("dfm.machining" | "dfm.additive", "min_wall") => "Thinnest wall",
+        ("dfm.sheet_metal", "bend_radius") => "Inside bend radius over thickness",
+        ("dfm.sheet_metal", "k_factor_low") => "K-factor, lower bound",
+        ("dfm.sheet_metal", "k_factor_high") => "K-factor, upper bound",
+        ("dfm.sheet_metal", "flange_length") => "Flange length over thickness (across the V-die)",
+        ("dfm.sheet_metal", "hole_diameter") => "Punched hole diameter over thickness",
+        ("dfm.sheet_metal", "hole_edge") => "Hole edge distance over thickness",
+        ("dfm.molding", "draft") => "Faces short of the minimum draft",
+        ("dfm.molding", "undercuts") => "Undercut faces along the pull",
+        ("dfm.molding", "wall_min") => "Thinnest wall",
+        ("dfm.molding", "wall_max") => "Thickest wall",
+        ("dfm.molding", "wall_uniformity") => "Thickest wall over thinnest wall",
+        ("dfm.molding", "rib_thickness") => "Rib thickness over wall (sink marks)",
+        ("dfm.molding", "rib_height") => "Rib height over wall",
+        ("dfm.molding", "fillet_radius") => "Fillet radius",
+        ("dfm.additive", "min_hole") => "Hole diameter",
+        ("dfm.additive", "overhangs") => "Faces that need support (overhangs)",
+        ("dfm.additive", "enclosed_voids") => "Enclosed voids (trapped powder or resin)",
+        ("dfm.additive", "build_x") => "Size in X (build volume)",
+        ("dfm.additive", "build_y") => "Size in Y (build volume)",
+        ("dfm.additive", "build_z") => "Size in Z (build volume)",
+        _ => return None,
+    })
+}
+
+/// A check's limit as written: the comparison and the expected value with its unit (`≤ 10`,
+/// `≥ 0.8 mm`).
+pub fn limit_text(def: &CheckDef) -> String {
+    let op = match def.op {
+        CompareOp::Lt => "<",
+        CompareOp::Le => "≤",
+        CompareOp::Gt => ">",
+        CompareOp::Ge => "≥",
+        CompareOp::Eq => "=",
+        CompareOp::Ne => "≠",
+        CompareOp::Present => return "present".into(),
+    };
+    let value = match &def.expected {
+        Expected::Quantity { text } => text.clone(),
+        Expected::Text { value } => value.clone(),
+        Expected::Boolean { value } => value.to_string(),
+        Expected::None => String::new(),
+    };
+    format!("{op} {value}")
+}
+
+impl DfmGraph {
+    /// The item labelled `label`'s attribute `attribute` as a reader sees it: lengths in mm,
+    /// ratios and counts as numbers. `None` when the item doesn't have it.
+    pub fn measured(&self, label: &str, attribute: &str) -> Option<String> {
+        let item = self.items.iter().find(|i| i.label == label)?;
+        Some(attr_text(item.attrs.get(attribute)?))
+    }
+
+    /// The feature an item is about, when it has one.
+    pub fn feature_of(&self, label: &str) -> Option<&FeatureId> {
+        self.items
+            .iter()
+            .find(|i| i.label == label)?
+            .feature
+            .as_ref()
+    }
+}
+
+fn attr_text(v: &rules::AttrValue) -> String {
+    use rules::AttrValue as A;
+    match v {
+        A::Num(q) if q.dim == to_rules_dim(Dimension::LENGTH) => {
+            format!("{:.3} mm", q.value * 1000.0)
+        }
+        A::Num(q) => {
+            if q.value.fract() == 0.0 && q.value.abs() < 1e9 {
+                format!("{}", q.value as i64)
+            } else {
+                format!("{:.3}", q.value)
+            }
+        }
+        A::Bool(b) => if *b { "yes" } else { "no" }.into(),
+        A::Str(s) => s.clone(),
+        A::List(items) => items.iter().map(attr_text).collect::<Vec<_>>().join(", "),
+    }
 }

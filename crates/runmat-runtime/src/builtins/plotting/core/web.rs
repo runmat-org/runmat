@@ -262,7 +262,7 @@ pub(crate) mod wasm {
     pub(super) fn present_geometry_scene_on_surface_impl(
         surface_id: u32,
         handle: u32,
-        scene: runmat_plot::GeometryScene,
+        scene: std::sync::Arc<runmat_plot::GeometryScene>,
     ) -> BuiltinResult<()> {
         SURFACES.with(|slot| {
             let mut map = slot.borrow_mut();
@@ -307,7 +307,7 @@ pub(crate) mod wasm {
             if expected.is_some() && expected != entry.bound_target {
                 return Ok(());
             }
-            if expected.is_none() && !frame.pointers.is_empty() {
+            if expected.is_none() && (!frame.pointers.is_empty() || !frame.guides.is_empty()) {
                 return Err(web_error("Presence requires a bound target"));
             }
             entry
@@ -778,7 +778,7 @@ pub(crate) mod wasm {
     pub(super) fn present_geometry_scene_on_surface_impl(
         _surface_id: u32,
         _handle: u32,
-        _scene: runmat_plot::GeometryScene,
+        _scene: std::sync::Arc<runmat_plot::GeometryScene>,
     ) -> BuiltinResult<()> {
         Err(web_error(ERR_PLOTTING_UNAVAILABLE))
     }
@@ -911,7 +911,7 @@ pub fn present_figure_on_surface(surface_id: u32, handle: u32) -> BuiltinResult<
 pub fn present_geometry_scene_on_surface(
     surface_id: u32,
     handle: u32,
-    scene: runmat_plot::GeometryScene,
+    scene: std::sync::Arc<runmat_plot::GeometryScene>,
 ) -> BuiltinResult<()> {
     wasm::present_geometry_scene_on_surface_impl(surface_id, handle, scene)
 }

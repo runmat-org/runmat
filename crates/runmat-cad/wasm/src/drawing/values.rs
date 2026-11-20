@@ -7,8 +7,10 @@
 //! Y14.5 and ISO 1101 write them).
 //!
 //! Values print as drawings print them: in the part's millimetres with no unit, trailing zeros
-//! dropped (`80`, `12.5`).
+//! dropped (`80`, `12.5`); dimensions print in the drawing's units when its format sets them
+//! (`9'-1 1/8"`, [`runmat_cad::drawing::units`]).
 
+use runmat_cad::assembly::model::RelPath;
 use runmat_cad::drawing::index::AnnotationValues;
 use runmat_cad::drawing::{ArcCondition, DimensionStyle, ModelRef};
 use runmat_cad::model::PartDocument;
@@ -26,6 +28,43 @@ type P3 = [f64; 3];
 pub struct Values<'a> {
     pub displays: &'a serde_json::Map<String, Value>,
     pub documents: &'a BTreeMap<String, PartDocument>,
+    /// The units dimension values print in (the drawing's sheet formats').
+    pub units: runmat_cad::drawing::units::DrawingUnits,
+    /// Assembly occurrences the annotations name, each its faces placed in the assembly
+    /// ([`super::occurrences::scoped`]), by [`scoped_key`].
+    pub scoped: &'a BTreeMap<String, Value>,
+}
+
+/// The key a scoped occurrence display is kept under: the model file as the view wrote it and
+/// the occurrence path.
+pub fn scoped_key(file: &str, path: &str) -> String {
+    format!("{file}#{path}")
+}
+
+impl Values<'_> {
+    /// The faces a dimension's entities name: on the drawn part, or on each entity's occurrence
+    /// of the drawn assembly.
+    fn faces(
+        &self,
+        model: &ModelRef,
+        occurrences: &[RelPath],
+        entities: &[Vec<EntityName>],
+    ) -> Vec<(Vec<P3>, &Value)> {
+        let file = model.file.as_str();
+        entities
+            .iter()
+            .enumerate()
+            .filter_map(|(i, e)| {
+                let display = if occurrences.is_empty() {
+                    self.displays.get(file)?
+                } else {
+                    self.scoped
+                        .get(&scoped_key(file, &occurrences.get(i)?.to_string()))?
+                };
+                face(display, &text_of(e.first()?)?)
+            })
+            .collect()
+    }
 }
 
 /// A number as a drawing prints it: two decimals at most, trailing zeros dropped.
@@ -61,7 +100,7 @@ pub fn face<'v>(display: &'v Value, text: &str) -> Option<(Vec<P3>, &'v Value)> 
     None
 }
 
-fn centroid(points: &[P3]) -> P3 {
+pub(crate) fn centroid(points: &[P3]) -> P3 {
     let n = points.len().max(1) as f64;
     let mut c = [0.0; 3];
     for p in points {
@@ -76,7 +115,7 @@ fn dot(a: P3, b: P3) -> f64 {
     a[0] * b[0] + a[1] * b[1] + a[2] * b[2]
 }
 
-fn vec3(v: &Value) -> Option<P3> {
+pub(crate) fn vec3(v: &Value) -> Option<P3> {
     let f = floats(v);
     (f.len() == 3).then(|| [f[0], f[1], f[2]])
 }
@@ -99,7 +138,7 @@ pub fn cylinder(surface: &Value) -> Option<(P3, P3, f64)> {
     Some((p, d.map(|x| x / l), surface["radius"].as_f64()? * 1000.0))
 }
 
-fn symbol(c: Characteristic) -> &'static str {
+pub(crate) fn symbol(c: Characteristic) -> &'static str {
     match c {
         Characteristic::Straightness => "⏤",
         Characteristic::Flatness => "⏥",
@@ -206,7 +245,7 @@ pub fn arc_anchors(
     }
 }
 
-fn modifier(m: MaterialCondition) -> &'static str {
+pub(crate) fn modifier(m: MaterialCondition) -> &'static str {
     match m {
         MaterialCondition::Rfs => "",
         MaterialCondition::Mmc => " Ⓜ",
@@ -215,19 +254,8 @@ fn modifier(m: MaterialCondition) -> &'static str {
 }
 
 /// A length written in the part: millimetres, or the unit converted.
-fn length_mm(v: &ValueExpr) -> Option<f64> {
-    match v {
-        ValueExpr::Quantity { value, unit } => Some(match unit.as_str() {
-            "mm" => *value,
-            "m" => value * 1000.0,
-            "cm" => value * 10.0,
-            "um" | "µm" => value / 1000.0,
-            "in" => value * 25.4,
-            _ => return None,
-        }),
-        ValueExpr::Number { value } => Some(*value),
-        _ => None,
-    }
+pub(crate) fn length_mm(v: &ValueExpr) -> Option<f64> {
+    runmat_cad::units::length_mm(v)
 }
 
 impl AnnotationValues for Values<'_> {
@@ -235,38 +263,35 @@ impl AnnotationValues for Values<'_> {
         &self,
         model: &ModelRef,
         style: DimensionStyle,
+        occurrences: &[RelPath],
         entities: &[Vec<EntityName>],
     ) -> Option<String> {
-        let display = self.displays.get(model.file.as_str())?;
-        let faces: Vec<(Vec<P3>, &Value)> = entities
-            .iter()
-            .filter_map(|e| e.first())
-            .filter_map(text_of)
-            .filter_map(|t| face(display, &t))
-            .collect();
+        let faces = self.faces(model, occurrences, entities);
         match (style, faces.as_slice()) {
             (DimensionStyle::Radius, [(_, surface)]) => {
-                cylinder(surface).map(|(_, _, r)| format!("R{}", number(r)))
+                cylinder(surface).map(|(_, _, r)| format!("R{}", self.units.length(r)))
             }
             (_, [(_, surface)]) => {
-                cylinder(surface).map(|(_, _, r)| format!("⌀{}", number(2.0 * r)))
+                cylinder(surface).map(|(_, _, r)| format!("⌀{}", self.units.length(2.0 * r)))
             }
             (DimensionStyle::Angular, [a, b]) => angle(a, b).map(|deg| format!("{}°", number(deg))),
             // Baseline: each feature from the first; chain: each from the one before. One value
             // per pair, in order, joined by ` · ` (the sheet draws one dimension line each).
             (DimensionStyle::Baseline, [first, rest @ ..]) if !rest.is_empty() => {
-                let v: Option<Vec<String>> =
-                    rest.iter().map(|f| linear(first, f).map(number)).collect();
+                let v: Option<Vec<String>> = rest
+                    .iter()
+                    .map(|f| linear(first, f).map(|v| self.units.length(v)))
+                    .collect();
                 v.map(|v| v.join(" · "))
             }
             (DimensionStyle::Chain, all) if all.len() >= 2 => {
                 let v: Option<Vec<String>> = all
                     .windows(2)
-                    .map(|w| linear(&w[0], &w[1]).map(number))
+                    .map(|w| linear(&w[0], &w[1]).map(|v| self.units.length(v)))
                     .collect();
                 v.map(|v| v.join(" · "))
             }
-            (_, [a, b]) => linear(a, b).map(number),
+            (_, [a, b]) => linear(a, b).map(|v| self.units.length(v)),
             _ => None,
         }
     }
@@ -276,20 +301,15 @@ impl AnnotationValues for Values<'_> {
         model: &ModelRef,
         style: DimensionStyle,
         condition: ArcCondition,
+        occurrences: &[RelPath],
         entities: &[Vec<EntityName>],
     ) -> Option<String> {
         let sign = match condition {
-            ArcCondition::Center => return self.dimension(model, style, entities),
+            ArcCondition::Center => return self.dimension(model, style, occurrences, entities),
             ArcCondition::Min => -1.0,
             ArcCondition::Max => 1.0,
         };
-        let display = self.displays.get(model.file.as_str())?;
-        let faces: Vec<(Vec<P3>, &Value)> = entities
-            .iter()
-            .filter_map(|e| e.first())
-            .filter_map(text_of)
-            .filter_map(|t| face(display, &t))
-            .collect();
+        let faces = self.faces(model, occurrences, entities);
         let [a, b] = faces.as_slice() else {
             return None;
         };
@@ -298,7 +318,19 @@ impl AnnotationValues for Values<'_> {
             .filter_map(|(_, s)| cylinder(s))
             .map(|(_, _, r)| r)
             .sum();
-        Some(number(linear(a, b)? + sign * radii))
+        Some(self.units.length(linear(a, b)? + sign * radii))
+    }
+
+    fn elevation(&self, model: &ModelRef, occurrence: &RelPath, on: &Reference) -> Option<String> {
+        let file = model.file.as_str();
+        let display = if occurrence.is_empty() {
+            self.displays.get(file)?
+        } else {
+            self.scoped
+                .get(&scoped_key(file, &occurrence.to_string()))?
+        };
+        let p = super::point_of(display, on)?;
+        Some(format!("EL. {}", self.units.elevation(p[2])))
     }
 
     fn tolerance_frame(&self, model: &ModelRef, tolerance: &str) -> Option<String> {
@@ -357,6 +389,14 @@ impl AnnotationValues for Values<'_> {
         tolerance_text(&location.distance)
     }
 
+    fn treatment(&self, model: &ModelRef, name: &str) -> Option<String> {
+        let pmi = &self.documents.get(model.file.as_str())?.pmi;
+        pmi.treatments
+            .iter()
+            .find(|t| t.name == name)
+            .map(|t| t.specification.clone())
+    }
+
     fn surface_finish(&self, model: &ModelRef, on: &Reference) -> Option<String> {
         let pmi = &self.documents.get(model.file.as_str())?.pmi;
         let finish = pmi.finishes.iter().find(|f| f.on.contains(on))?;
@@ -372,7 +412,7 @@ impl AnnotationValues for Values<'_> {
 
 /// A tolerance as a drawing writes it after the nominal: `±0.1` when symmetric, else
 /// `+0.012/0` (upper over lower, a zero deviation without a sign).
-fn tolerance_text(value: &ValueExpr) -> Option<String> {
+pub(crate) fn tolerance_text(value: &ValueExpr) -> Option<String> {
     let ValueExpr::Toleranced { minus, plus, .. } = value else {
         return None;
     };

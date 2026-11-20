@@ -1,8 +1,12 @@
 //! The CAD document runtime behind the wasm entry points, in plain Rust so it tests natively.
 
 pub mod assembly_stages;
+pub mod memory_capacity;
 pub mod part_cache;
 mod prototype_reuse;
+mod releases;
+pub use releases::store as release_store;
+mod unbuilt;
 mod published_frames;
 mod published_paths;
 pub mod values_host;
@@ -14,14 +18,14 @@ use runmat_cad::assembly::index::build_assembly_index;
 use runmat_cad::assembly::model::{AssemblyDocument, DefinitionKind, DefinitionRef};
 use runmat_cad::assembly::resolve::{resolve, ResolveContext, ResolveRequest};
 use runmat_cad::assembly::source::{Aabb, ConfiguredSummary, DefinitionSummary, MemorySource};
-use runmat_cad::display::{assembly_display_configured, part_display, sketch_display, PartDisplay};
+use runmat_cad::display::{part_display, sketch_display, PartDisplay};
 use runmat_cad::index::build_index;
 use runmat_cad::model::PartDocument;
 use runmat_cad::regen::kernel::TessellationOptions;
 use runmat_cad::regen::{regenerate, RegenCache, RegenContext, RegenRequest, RegenResult};
 use runmat_cad::sketch_solver::ConstraintSketchSolver;
 use runmat_cad::syntax::{parse_assembly_in, parse_part};
-use runmat_cad::units::StubUnits;
+use runmat_cad::units::Units;
 use runmat_cad::value::NoDynamicValues;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
@@ -180,10 +184,46 @@ pub fn dependencies(path: &str, text: &str) -> Vec<String> {
         out.extend(runmat_cad::value::m_functions::call_folders(
             path, text, &doc,
         ));
+        // Its release store, which Release adds the next revision to.
+        out.push(runmat_cad::refs::release_store::store_path(path));
+        // The library files its library features and parts come from, and the library
+        // folders the Profile library and Library panels search.
+        out.extend(
+            runmat_cad::model::library::files(&doc)
+                .iter()
+                .map(|f| resolve_path(path, f, &Files::new())),
+        );
+        for folder in [
+            runmat_cad::model::library::FOLDER,
+            runmat_cad::model::library::PROFILES,
+        ] {
+            out.push(format!("{}/", resolve_path(path, folder, &Files::new())));
+        }
+        // The gauge and bend tables its sheet metal reads.
+        if let Some(defaults) = &doc.sheet_metal {
+            out.extend(
+                runmat_cad::model::sheet_metal::tables::files(defaults)
+                    .iter()
+                    .map(|f| resolve_path(path, f, &Files::new())),
+            );
+        }
         return out;
     }
-    // The folders it can name designs in, and the design files it names by path.
-    runmat_cad::modules::dependencies(path, text)
+    // The folders it can name designs in, and the design files it names by path; beside each,
+    // the release store its designs' released revisions are read from.
+    let named = runmat_cad::modules::dependencies(path, text);
+    let mut out = named.clone();
+    out.push(runmat_cad::refs::release_store::store_folder(folder(path)));
+    for d in &named {
+        out.push(if d.ends_with('/') {
+            runmat_cad::refs::release_store::store_folder(d)
+        } else {
+            runmat_cad::refs::release_store::store_path(d)
+        });
+    }
+    let mut seen = BTreeSet::new();
+    out.retain(|p| seen.insert(p.clone()));
+    out
 }
 
 /// [`dependencies`] resolved among `files`, which hold the listed folders' files: each folder
@@ -199,16 +239,24 @@ pub fn dependency_files(path: &str, text: &str, files: &Files) -> Vec<String> {
     }
     let mut out: Vec<String> = dependencies(path, text)
         .into_iter()
-        .filter(|d| !d.ends_with('/'))
+        // A release store counts once the project has one.
+        .filter(|d| {
+            !d.ends_with('/')
+                && (!d.contains(runmat_cad::refs::release_store::STORE_FOLDER)
+                    || files.contains_key(d))
+        })
         .collect();
     if is_assembly(path) {
         let scope = module_scope(path, text, files);
         if let Some(doc) = parse_assembly_in(path, text, &scope).document {
-            out.extend(
-                definitions(&doc)
-                    .iter()
-                    .map(|d| resolve_path(path, &d.file.0, files)),
-            );
+            for d in definitions(&doc) {
+                let file = resolve_path(path, &d.file.0, files);
+                let store = runmat_cad::refs::release_store::store_path(&file);
+                if files.contains_key(&store) {
+                    out.push(store);
+                }
+                out.push(file);
+            }
         }
     }
     let mut seen = BTreeSet::new();
@@ -278,6 +326,17 @@ pub fn regenerate_part_in(
     let Some(document) = parsed.document else {
         return Err(syntax_diagnostics(path, text, &parsed.diagnostics));
     };
+    // The part's gauge and bend table, read from the project, in every sheet body's rules.
+    let (document, mut table_problems) =
+        runmat_cad::model::sheet_metal::tables::resolve(&document, &|reference| {
+            values_host::host_file(path, reference)
+        });
+    // Library features and parts from the project's library files.
+    let (document, library_problems) =
+        runmat_cad::model::library::resolve(&document, &|reference| {
+            values_host::host_file(path, reference)
+        });
+    table_problems.extend(library_problems);
     let kernel = crate::kernel::make();
     let request = RegenRequest {
         configuration: configuration.map(runmat_cad::ids::ConfigurationName::new),
@@ -288,8 +347,9 @@ pub fn regenerate_part_in(
         let watched = part_cache::Watched::new(dynamic, &used);
         let ctx = RegenContext {
             kernel: kernel.as_ref(),
+            tessellator: Some(kernel.as_ref()),
             solver: &ConstraintSketchSolver,
-            units: &StubUnits,
+            units: &Units,
             dynamic: &watched,
             lock: None,
             catalog: None,
@@ -299,6 +359,7 @@ pub fn regenerate_part_in(
         regenerate(&document, &ctx, &request, &mut RegenCache::default())
     });
     result.diagnostics.attach_spans(&parsed.spans);
+    document_problems(&document, table_problems, &mut result);
     // The part as the configuration makes it: its feature parameters, part number and
     // properties, for every reader of the regenerated part (title blocks, exports).
     let document = match &request.configuration {
@@ -310,6 +371,7 @@ pub fn regenerate_part_in(
     values_host::resolve_let_files(path, &mut index.lets);
     let mut display = part_display(&result, kernel.as_ref(), tessellation);
     display.sketches = sketch_display(&document, &result);
+    display.origin_planes = runmat_cad::display::origin_plane_display();
     display.references = runmat_cad::display::references::reference_display(
         &document,
         &result,
@@ -326,6 +388,9 @@ pub fn regenerate_part_in(
         output.and_then(|p| p.color.as_deref()),
     ));
     runmat_cad::appearance::color_output_bodies(&document, &result, &mut display);
+    // 3D annotations placed on this rebuild's geometry, and their Outline rows.
+    display.annotations = crate::annotate::annotation_display(&document, &result, &display);
+    index.annotations = crate::annotate::annotation_rows(&document, &display.annotations);
     Ok(RegeneratedPart {
         document,
         spans: parsed.spans,
@@ -335,6 +400,49 @@ pub fn regenerate_part_in(
         display,
         dynamic: used.get(),
     })
+}
+
+/// The standard profile sizes and the entries of the `library/` files beside `path`.
+pub fn library_entries(path: &str, files: &Files) -> Vec<runmat_cad::model::library::LibraryEntry> {
+    use runmat_cad::model::library;
+    let base = format!("{}/", folder(path));
+    let mut out = library::standard_entries();
+    for (file, text) in files {
+        let Some(relative) = file.strip_prefix(&base) else {
+            continue;
+        };
+        let in_folder = |f: &str| {
+            relative
+                .strip_prefix(&format!("{f}/"))
+                .is_some_and(|rest| !rest.contains('/') && rest.ends_with(".part"))
+        };
+        if in_folder(library::FOLDER) || in_folder(library::PROFILES) {
+            out.extend(library::file_entries(relative, text));
+        }
+    }
+    out
+}
+
+/// The part's own setting problems in its regeneration's diagnostics: sheet-metal tables that
+/// can't be read, and on an ASME part each GD&T tolerance whose characteristic ASME Y14.5-2018
+/// withdrew ([`runmat_cad::drawing::standard::DrawingStandard::refusal`]).
+fn document_problems(document: &PartDocument, tables: Vec<String>, result: &mut RegenResult) {
+    use runmat_cad::diagnostics::{Cause, DiagCode, Severity, Site, Subject};
+    let standard = document.settings.as_ref().and_then(|s| s.standard);
+    let refused = document.pmi.tolerances.iter().filter_map(|t| {
+        let why = standard?.refusal(t.characteristic)?;
+        Some(format!("tolerance `{}`: {why}", t.name))
+    });
+    for message in tables.into_iter().chain(refused) {
+        result.diagnostics.push(
+            DiagCode::RegenInvalid,
+            Severity::Warning,
+            Site::of(Subject::Document),
+            message,
+            Cause::Root,
+            Vec::new(),
+        );
+    }
 }
 
 pub fn compile_part(path: &str, text: &str) -> Result<CompiledPart, Vec<Diagnostic>> {
@@ -349,7 +457,10 @@ pub fn compile_part_in(
     configuration: Option<&str>,
 ) -> Result<CompiledPart, Vec<Diagnostic>> {
     let part = regenerate_part_in(path, text, configuration, &TessellationOptions::default())?;
-    let projection = json!({ "document": &part.document, "index": &part.index });
+    // What each feature reference resolves to on this kernel, for the Source view's reference
+    // hovers (the editor's language server forwards them; `setDesignEntities`).
+    let facts = runmat_cad::index::reference_facts(&part.document, &part.result);
+    let projection = json!({ "document": &part.document, "index": &part.index, "facts": facts });
     Ok(CompiledPart {
         diagnostics: regen_diagnostics(path, &part),
         document: part.document,
@@ -440,6 +551,47 @@ pub struct AssemblyResolution {
     pub problems: Vec<Diagnostic>,
     /// Each regenerated part file's digest ([`part_cache::digest`] of its cache key), by file.
     pub digests: BTreeMap<String, String>,
+    /// The definitions placed without their model, by file, with the reason (a file not in the
+    /// workspace, a board whose layout doesn't compile). Their occurrences draw as their box,
+    /// and their Outline rows carry the reason ([`unbuilt::mark_rows`]).
+    pub unbuilt: BTreeMap<String, String>,
+}
+
+/// A part file an assembly uses that failed to compile: resolution's "not in the project" text
+/// for it, and what the assembly says in its place.
+struct FailedPart {
+    missing: String,
+    message: String,
+}
+
+/// The part file `key` at `text` regenerated for an assembly (kept by `cache_key`): its
+/// document, display with coarser levels, published datums and diagnostics.
+fn assembly_part_entry(
+    key: &str,
+    text: &str,
+    cache_key: String,
+) -> Result<std::rc::Rc<part_cache::AssemblyPart>, Vec<Diagnostic>> {
+    part_cache::assembly_part(cache_key, || {
+        regenerate_part_with(key, text, &ASSEMBLY_TESSELLATION).map(|part| {
+            let diagnostics = regen_diagnostics(key, &part);
+            let publishes = published_datums(&part);
+            // Coarser tessellations for the canvas's level of detail.
+            let levels = runmat_cad::display::display_levels(
+                &part.result,
+                part.kernel.as_ref(),
+                &ASSEMBLY_TESSELLATION,
+            );
+            let mut display = part.display;
+            display.levels = levels;
+            let entry = part_cache::AssemblyPart {
+                diagnostics,
+                publishes,
+                display,
+                document: part.document,
+            };
+            (entry, part.dynamic)
+        })
+    })
 }
 
 /// Resolves the assembly `path` from its text; syntax errors are the `Err` diagnostics.
@@ -480,11 +632,30 @@ pub fn resolve_assembly_in(
     let mut documents: BTreeMap<String, PartDocument> = BTreeMap::new();
     let mut problems = Vec::new();
     let mut digests: BTreeMap<String, String> = BTreeMap::new();
+    let mut unbuilt: BTreeMap<String, String> = BTreeMap::new();
+    // Part files that failed to compile: reported as such, instead of "not in the project".
+    let mut failed_parts: Vec<FailedPart> = Vec::new();
     let top_path = top.path.clone();
     // Breadth-first over sub-assemblies, each definition once.
     let mut queue: Vec<(String, AssemblyDocument)> = vec![(path.to_owned(), top)];
     let mut done: BTreeSet<String> = BTreeSet::new();
+    let mut pins = releases::PinnedLoads::default();
     while let Some((at, doc)) = queue.pop() {
+        // Released revisions: each file's store, and the pinned revisions' texts.
+        pins.load(
+            &at,
+            &doc,
+            files,
+            &scope,
+            &mut releases::Sink {
+                source: &mut source,
+                displays: &mut displays,
+                documents: &mut documents,
+                digests: &mut digests,
+                problems: &mut problems,
+                queue: &mut queue,
+            },
+        );
         for def in definitions(&doc) {
             let key = def.file.0.clone();
             if !done.insert(key.clone()) {
@@ -492,18 +663,14 @@ pub fn resolve_assembly_in(
             }
             let file = resolve_path(&at, &key, files);
             let Some(text) = files.get(&file) else {
-                problems.push(Diagnostic {
-                    path: path.to_owned(),
-                    start: 0,
-                    end: 0,
-                    severity: "warning".into(),
-                    message: format!(
-                        "{key} isn't open or in the workspace, so it draws as its box"
-                    ),
-                });
+                let reason = format!("{file} isn't open or in the workspace");
+                problems.push(unbuilt::diagnostic(path, &doc, &def, &reason, false));
+                unbuilt.insert(key.clone(), reason);
                 continue;
             };
             match def.kind {
+                // A probe leaves a board the cache doesn't hold for its caller to find.
+                DefinitionKind::Circuit if crate::board::left_out(&file, files) => continue,
                 DefinitionKind::Circuit => match crate::board::board_display(&file, files) {
                     Ok(display) => {
                         let configured = ConfiguredSummary {
@@ -524,13 +691,27 @@ pub fn resolve_assembly_in(
                             digests.insert(key.clone(), d);
                         }
                     }
-                    Err(message) => problems.push(Diagnostic {
-                        path: path.to_owned(),
-                        start: 0,
-                        end: 0,
-                        severity: "warning".into(),
-                        message: format!("{key}: {message}, so it draws as its box"),
-                    }),
+                    Err(reason) => {
+                        // The board's outline box stands in, so the occurrence still shows
+                        // where it is and explodes with its steps.
+                        let bbox = crate::board::board_box(&file, files);
+                        problems.push(unbuilt::diagnostic(
+                            path,
+                            &doc,
+                            &def,
+                            &reason,
+                            bbox.is_some(),
+                        ));
+                        if bbox.is_some() {
+                            let configured = ConfiguredSummary {
+                                bbox,
+                                artifact: format!("text:{key}"),
+                                ..Default::default()
+                            };
+                            source.add_part(DefinitionSummary::new(def.clone()), configured);
+                        }
+                        unbuilt.insert(key.clone(), reason);
+                    }
                 },
                 DefinitionKind::Assembly => match parse_assembly_in(&file, text, &scope).document {
                     Some(sub) => {
@@ -552,27 +733,7 @@ pub fn resolve_assembly_in(
                     if part_cache::skip(&cache_key) {
                         continue;
                     }
-                    match part_cache::assembly_part(cache_key, || {
-                        regenerate_part_with(&key, text, &ASSEMBLY_TESSELLATION).map(|part| {
-                            let diagnostics = regen_diagnostics(&key, &part);
-                            let publishes = published_datums(&part);
-                            // Coarser tessellations for the canvas's level of detail.
-                            let levels = runmat_cad::display::display_levels(
-                                &part.result,
-                                part.kernel.as_ref(),
-                                &ASSEMBLY_TESSELLATION,
-                            );
-                            let mut display = part.display;
-                            display.levels = levels;
-                            let entry = part_cache::AssemblyPart {
-                                diagnostics,
-                                publishes,
-                                display,
-                                document: part.document,
-                            };
-                            (entry, part.dynamic)
-                        })
-                    }) {
+                    match assembly_part_entry(&key, text, cache_key) {
                         Ok(part) => {
                             // A part that regenerates with errors (a feature the kernel refused)
                             // says so on the assembly, at the assembly's top.
@@ -587,55 +748,34 @@ pub fn resolve_assembly_in(
                                     });
                                 }
                             }
-                            let mut summary = DefinitionSummary::new(def.clone());
-                            summary.configurations = part
-                                .document
-                                .configurations
-                                .iter()
-                                .map(|c| c.name.clone())
-                                .collect();
-                            summary.configuration_part_numbers = part
-                                .document
-                                .all_configurations()
-                                .into_iter()
-                                .filter_map(|c| c.part_number.map(|pn| (c.name, pn)))
-                                .collect();
-                            summary.inputs = part
-                                .document
-                                .inputs
-                                .iter()
-                                .map(|i| (i.name.clone(), i.kind.clone()))
-                                .collect();
-                            if let Some(output) = part.document.parts.first() {
-                                summary.material = output.material.clone();
-                                if summary.part_number.is_none() {
-                                    summary.part_number = output.part_number.clone();
-                                }
-                            }
-                            if part.document.parts.len() > 1 {
-                                summary.outputs = part
-                                    .document
-                                    .parts
-                                    .iter()
-                                    .map(|o| runmat_cad::assembly::source::OutputSummary {
-                                        name: o.name.as_str().to_owned(),
-                                        part_number: o.part_number.clone(),
-                                        material: o.material.clone(),
-                                    })
-                                    .collect();
-                            }
-                            summary.digest = format!("text:{}", text.len());
-                            let configured = ConfiguredSummary {
-                                bbox: bbox(&part.display),
-                                artifact: format!("text:{key}"),
-                                publishes: part.publishes.clone(),
-                                ..Default::default()
-                            };
+                            let (summary, configured) =
+                                releases::part_summary(&def, &part, &key, text);
                             source.add_part(summary, configured);
                             displays.insert(key.clone(), part.display.clone());
                             documents.insert(key.clone(), part.document.clone());
                         }
-                        Err(mut d) => problems.append(&mut d),
+                        Err(mut d) => {
+                            // A part that doesn't compile places nothing. Resolution reports its
+                            // file as missing; that report is reworded below to say why.
+                            let first = d
+                                .iter()
+                                .find(|e| e.severity == "error")
+                                .map(|e| e.message.clone())
+                                .unwrap_or_default();
+                            problems.append(&mut d);
+                            // Its occurrences are placed without their model: their Outline rows
+                            // say why, as for a file not in the workspace.
+                            unbuilt.insert(key.clone(), format!("{key} doesn't compile: {first}"));
+                            failed_parts.push(FailedPart {
+                                missing: runmat_cad::assembly::source::SourceError::NotFound {
+                                    file: runmat_cad::ids::FilePath::new(&key),
+                                }
+                                .to_string(),
+                                message: format!(
+                                    "{key} doesn't compile, so it draws nothing: {first}"
+                                ),
+                            });
+                        }
                     }
                 }
             }
@@ -657,7 +797,7 @@ pub fn resolve_assembly_in(
     source.add_assembly(top_doc);
     let ctx = ResolveContext {
         source: &source,
-        units: &StubUnits,
+        units: &Units,
         dynamic: &NoDynamicValues,
         lock: None,
         catalog: None,
@@ -668,7 +808,31 @@ pub fn resolve_assembly_in(
         configuration: configuration.map(runmat_cad::ids::ConfigurationName::new),
         ..ResolveRequest::default()
     };
-    let resolved = resolve(&top_path, &request, &ctx);
+    let mut resolved = resolve(&top_path, &request, &ctx);
+    // Resolution sees a part that failed to compile as a missing file. Its diagnostic (code and
+    // span on the `use` line) is reworded at the source, so the index, the language server and
+    // the Desktop all say the part doesn't compile.
+    for failed in &failed_parts {
+        let mut found = false;
+        for d in resolved
+            .diagnostics
+            .diagnostics
+            .iter_mut()
+            .filter(|d| d.message.contains(&failed.missing))
+        {
+            d.message = failed.message.clone();
+            found = true;
+        }
+        if !found {
+            problems.push(Diagnostic {
+                path: path.to_owned(),
+                start: 0,
+                end: 0,
+                severity: "error".into(),
+                message: failed.message.clone(),
+            });
+        }
+    }
     // What resolution could not do (a placement whose frame is missing, a pattern that does
     // not expand) is shown on the assembly, not dropped.
     for d in &resolved.diagnostics.diagnostics {
@@ -692,6 +856,7 @@ pub fn resolve_assembly_in(
         resolved,
         problems,
         digests,
+        unbuilt,
     })
 }
 
@@ -701,19 +866,21 @@ pub fn compile_assembly(
     text: &str,
     files: &Files,
 ) -> Result<(Value, Value, Vec<Diagnostic>), Vec<Diagnostic>> {
-    compile_assembly_known(path, text, files, &BTreeSet::new())
+    compile_assembly_known(path, text, files, None, &BTreeSet::new())
 }
 
 /// [`compile_assembly`] for a caller that holds the part displays whose digests are in `known`:
 /// each prototype carries its part's `digest`, and a known one is sent `reused` without its
-/// part display ([`prototype_reuse`]).
+/// part display ([`prototype_reuse`]). `configuration` is the top assembly's active
+/// configuration (the Desktop's Configuration menu); `None` compiles it as written.
 pub fn compile_assembly_known(
     path: &str,
     text: &str,
     files: &Files,
+    configuration: Option<&str>,
     known: &BTreeSet<String>,
 ) -> Result<(Value, Value, Vec<Diagnostic>), Vec<Diagnostic>> {
-    compile_assembly_with(path, text, files, known, |_, _| ())
+    compile_assembly_with(path, text, files, configuration, known, |_, _| ())
 }
 
 /// An assembly's projection, display, diagnostics and hierarchical parts list.
@@ -732,10 +899,16 @@ pub fn compile_assembly_indented(
     files: &Files,
 ) -> Result<CompiledAssemblyWithIndentedBom, Vec<Diagnostic>> {
     let mut rows = Vec::new();
-    let (index, display, problems) =
-        compile_assembly_with(path, text, files, &BTreeSet::new(), |resolved, source| {
+    let (index, display, problems) = compile_assembly_with(
+        path,
+        text,
+        files,
+        None,
+        &BTreeSet::new(),
+        |resolved, source| {
             rows = runmat_cad::assembly::bom::indented_bom(resolved, Some(source));
-        })?;
+        },
+    )?;
     Ok(CompiledAssemblyWithIndentedBom {
         index,
         display,
@@ -749,30 +922,84 @@ fn compile_assembly_with(
     path: &str,
     text: &str,
     files: &Files,
+    configuration: Option<&str>,
     known: &BTreeSet<String>,
     also: impl FnOnce(&runmat_cad::assembly::resolve::ResolvedAssembly, &MemorySource),
 ) -> Result<(Value, Value, Vec<Diagnostic>), Vec<Diagnostic>> {
     let AssemblyResolution {
-        source,
+        mut source,
         displays,
         documents,
         resolved,
         problems,
         digests,
-    } = resolve_assembly(path, text, files)?;
+        unbuilt,
+    } = resolve_assembly_in(path, text, files, configuration)?;
     also(&resolved, &source);
     let index = build_assembly_index(&resolved, Some(&source));
     let configured = crate::configured::configured_displays(&resolved, &documents);
-    let mut display = assembly_display_configured(&resolved, &source, &displays, &configured);
-    let prototype_digests = prototype_reuse::prototype_digests(&resolved, &documents, &digests);
+    // Assembly features (cuts, holes, weld beads) change the components they affect.
+    let assembly = runmat_cad::syntax::parse_assembly_in(
+        path,
+        text,
+        &crate::runtime::module_scope(path, text, files),
+    )
+    .document;
+    let mut operated = match &assembly {
+        Some(doc) if !doc.operations.is_empty() => {
+            crate::operated::operated_displays(&resolved, doc, &documents)
+        }
+        _ => Default::default(),
+    };
+    // Components at a part's analysis representation draw that representation.
+    let represented =
+        crate::representation::assembly_displays(&resolved, &documents, files, &mut operated);
+    let mut problems = problems;
+    problems.extend(represented.into_iter().map(|(name, why)| Diagnostic {
+        path: path.to_owned(),
+        start: 0,
+        end: 0,
+        severity: "warning".into(),
+        message: format!("component `{name}` draws its full part: {why}"),
+    }));
+    // Each at its `operation <name>` statement.
+    problems.extend(operated.problems.iter().map(|(name, why)| {
+        let word = format!("operation {name}");
+        let at = text.find(&word).unwrap_or(0);
+        Diagnostic {
+            path: path.to_owned(),
+            start: utf16(text, at),
+            end: utf16(text, at + if at == 0 { 0 } else { word.len() }),
+            severity: "error".into(),
+            message: format!("assembly feature `{name}`: {why}"),
+        }
+    }));
+    let mut display = runmat_cad::display::assembly_display_operated(
+        &resolved,
+        &source,
+        &displays,
+        &configured,
+        &operated.displays,
+    );
+    let prototype_digests =
+        prototype_reuse::prototype_digests(&resolved, &documents, &digests, &operated.digests);
     let reused = prototype_reuse::omit_known(&mut display, &prototype_digests, known);
     let mut display = serde_json::to_value(&display).unwrap_or(Value::Null);
     prototype_reuse::mark(&mut display, &prototype_digests, &reused);
     let mut index = serde_json::to_value(&index).unwrap_or(Value::Null);
+    unbuilt::mark_rows(&mut index, &unbuilt);
     if let Some(row) = index.as_object_mut() {
         row.insert(
             "exploded".into(),
             crate::exploded::exploded_views(&resolved, &source),
+        );
+        row.insert(
+            "motion".into(),
+            crate::motion::motion_studies(&resolved, &mut source, &documents, files),
+        );
+        row.insert(
+            "positions".into(),
+            crate::motion::mate_positions(&resolved, &source),
         );
     }
     Ok((index, display, problems))
@@ -787,17 +1014,28 @@ pub fn assembly_index(
     files: &Files,
 ) -> Result<(Value, Vec<Diagnostic>), Vec<Diagnostic>> {
     let AssemblyResolution {
-        source,
+        mut source,
         resolved,
         problems,
+        unbuilt,
+        documents,
         ..
     } = resolve_assembly(path, text, files)?;
     let mut index =
         serde_json::to_value(build_assembly_index(&resolved, Some(&source))).unwrap_or(Value::Null);
+    unbuilt::mark_rows(&mut index, &unbuilt);
     if let Some(row) = index.as_object_mut() {
         row.insert(
             "exploded".into(),
             crate::exploded::exploded_views(&resolved, &source),
+        );
+        row.insert(
+            "motion".into(),
+            crate::motion::motion_studies(&resolved, &mut source, &documents, files),
+        );
+        row.insert(
+            "positions".into(),
+            crate::motion::mate_positions(&resolved, &source),
         );
     }
     Ok((index, problems))
@@ -843,7 +1081,7 @@ pub fn compile_json_known(
         return crate::drawing::compile_json(path, text, files);
     }
     let out = if is_assembly(path) {
-        match compile_assembly_known(path, text, files, known) {
+        match compile_assembly_known(path, text, files, configuration, known) {
             Ok((mut index, display, diagnostics)) => {
                 crate::repairs::label_candidates(&mut index["diagnostics"]);
                 // Built from the values held: `json!` would serialize a copy of the assembly's
@@ -867,12 +1105,22 @@ pub fn compile_json_known(
         match compile_part_in(path, text, configuration) {
             Ok(mut part) => {
                 crate::repairs::label_candidates(&mut part.projection["index"]["diagnostics"]);
-                json!({
+                // What the part's library panels search: standard sizes and the project's
+                // library files.
+                part.projection["index"]["library"] = json!(library_entries(path, files));
+                let mut out = json!({
                     "projection": { "kind": "part", "data": part.projection },
                     "display": { "kind": "part", "data": part.display },
                     "diagnostics": part.diagnostics,
                     "kernel": crate::kernel::name(),
-                })
+                });
+                // The analysis representation the Desktop draws on request.
+                if let (Some(name), Some(map)) =
+                    (crate::representation::requested(), out.as_object_mut())
+                {
+                    crate::representation::apply(path, text, configuration, &name, map);
+                }
+                out
             }
             Err(diagnostics) => json!({ "diagnostics": diagnostics }),
         }
@@ -918,8 +1166,12 @@ mod tests {
     #[test]
     fn an_assembly_draws_its_parts_from_their_text() {
         let assembly = "runmat 0.7\nstd 1\n\nassembly rig {\n    use part bracket as a\n    use part bracket as b {\n        placement = { placement = offset, offset = { translation = [100 mm, 0 mm, 0 mm] } }\n    }\n}\n";
-        // The parts are named in the assembly's folder: the host lists `/p/` and reads them.
-        assert_eq!(dependencies("/p/rig.assembly", assembly), ["/p/"]);
+        // The parts are named in the assembly's folder: the host lists `/p/` and reads them, and
+        // the release store beside them, which pinned revisions are read from.
+        assert_eq!(
+            dependencies("/p/rig.assembly", assembly),
+            ["/p/", "/p/.runmat/releases/"]
+        );
         let files: Files = [("/p/bracket.part".to_owned(), BRACKET.to_owned())].into();
         let out: Value =
             serde_json::from_str(&compile_json("/p/rig.assembly", assembly, &files)).unwrap();

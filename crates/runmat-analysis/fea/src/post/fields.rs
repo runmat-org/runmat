@@ -29,7 +29,7 @@ pub use catalog::{
     StructuralLinearFieldQuantity,
 };
 use edge::edge_strain_tensor;
-use scalars::{recover_strain_energy_density, recover_stress, recover_von_mises};
+use scalars::recover_von_mises;
 use state::{
     recover_displacement, recover_reaction_force, recover_reaction_moment, recover_rotation,
     rotation_shape, structural_displacement_node_count,
@@ -97,7 +97,8 @@ pub(crate) async fn recover_result_fields_with_capacity<A>(
     if solve_result.solution.is_empty()
         || solve_result.solution.iter().any(|value| !value.is_finite())
     {
-        return Ok(empty_structural_fields());
+        // A failed or empty solve has no field entries, so no field is published.
+        return Ok(Vec::new());
     }
 
     let node_count = structural_displacement_node_count(summary, summary.dof_count.max(3));
@@ -190,19 +191,26 @@ pub(crate) async fn recover_result_fields_with_capacity<A>(
         })
         .await?
     };
-    fields.extend([
-        AnalysisField::host_f64(
+    // Reactions exist only at constrained rows: translational reactions need a constrained
+    // translational DOF, and moments need rotational DOFs. A field with no entries for this
+    // model is not published.
+    if state::has_translational_reaction_rows(summary) {
+        fields.push(AnalysisField::host_f64(
             FEA_FIELD_STRUCTURAL_REACTION_FORCE,
             AnalysisFieldLayout::vector3(ObservationQuantity::ReactionForce, FieldLocation::Node),
             vec![node_count, VECTOR_COMPONENT_COUNT],
             reaction_values,
-        ),
-        AnalysisField::host_f64(
+        ));
+    }
+    if summary.structural_rotational_dof_count > 0 {
+        fields.push(AnalysisField::host_f64(
             FEA_FIELD_STRUCTURAL_REACTION_MOMENT,
             AnalysisFieldLayout::vector3(ObservationQuantity::ReactionMoment, FieldLocation::Node),
             rotation_shape(summary),
             reaction_moment_values,
-        ),
+        ));
+    }
+    fields.extend([
         AnalysisField::host_f64(
             FEA_FIELD_STRUCTURAL_TOTAL_STRAIN_ENERGY,
             AnalysisFieldLayout::scalar(ObservationQuantity::StrainEnergy, FieldLocation::Global),
@@ -297,23 +305,9 @@ async fn recover_deformation_result_fields_with_capacity<A>(
         .await?;
         let element_count = strain_recovery.element_count;
         let strain_values = strain_recovery.values;
-        let stress_values = match strain_recovery.stress {
-            Some(stress) => stress,
-            None => {
-                measured(
-                    owner,
-                    UsageCategory::Solve,
-                    tensor_work(&strain_values, 17)?,
-                    || {
-                        Ok::<_, StructuralFieldRecoveryError>(recover_stress(
-                            &strain_values,
-                            summary.structural_material,
-                        ))
-                    },
-                )
-                .await?
-            }
-        };
+        let stress_values = strain_recovery
+            .stress
+            .ok_or_else(continuum_without_solid_recovery)?;
         let von_mises_values = measured(
             owner,
             UsageCategory::Solve,
@@ -341,23 +335,9 @@ async fn recover_deformation_result_fields_with_capacity<A>(
             || Ok::<_, StructuralFieldRecoveryError>(recover_von_mises(&nodal_stress_values)),
         )
         .await?;
-        let strain_energy_density_values = match strain_recovery.strain_energy_density {
-            Some(energy) => energy,
-            None => {
-                measured(
-                    owner,
-                    UsageCategory::Solve,
-                    tensor_work(&strain_values, 12)?,
-                    || {
-                        Ok::<_, StructuralFieldRecoveryError>(recover_strain_energy_density(
-                            &strain_values,
-                            &stress_values,
-                        ))
-                    },
-                )
-                .await?
-            }
-        };
+        let strain_energy_density_values = strain_recovery
+            .strain_energy_density
+            .ok_or_else(continuum_without_solid_recovery)?;
         let integration_point_strain = strain_recovery.integration_point_strain;
         let integration_point_stress = strain_recovery.integration_point_stress;
         Some((
@@ -375,20 +355,21 @@ async fn recover_deformation_result_fields_with_capacity<A>(
         None
     };
 
-    let mut fields = vec![
-        AnalysisField::host_f64(
-            FEA_FIELD_STRUCTURAL_DISPLACEMENT,
-            AnalysisFieldLayout::vector3(ObservationQuantity::Displacement, FieldLocation::Node),
-            vec![node_count, VECTOR_COMPONENT_COUNT],
-            displacement_values,
-        ),
-        AnalysisField::host_f64(
+    let mut fields = vec![AnalysisField::host_f64(
+        FEA_FIELD_STRUCTURAL_DISPLACEMENT,
+        AnalysisFieldLayout::vector3(ObservationQuantity::Displacement, FieldLocation::Node),
+        vec![node_count, VECTOR_COMPONENT_COUNT],
+        displacement_values,
+    )];
+    // Rotation is a field only of models with rotational DOFs (beams, shells, reference points).
+    if summary.structural_rotational_dof_count > 0 {
+        fields.push(AnalysisField::host_f64(
             FEA_FIELD_STRUCTURAL_ROTATION,
             AnalysisFieldLayout::vector3(ObservationQuantity::Rotation, FieldLocation::Node),
             rotation_shape(summary),
             recover_rotation(summary, solution),
-        ),
-    ];
+        ));
+    }
     if let Some((
         element_count,
         strain_values,
@@ -505,6 +486,14 @@ async fn recover_deformation_result_fields_with_capacity<A>(
 
 fn publishes_continuum_fields(summary: &AssemblySummary) -> bool {
     !summary.structural_solid_recovery.is_empty()
+}
+
+/// Continuum stress and energy come only from solid element recovery, which owns each element's
+/// material; no model-wide material summary stands in for it.
+fn continuum_without_solid_recovery() -> StructuralFieldRecoveryError {
+    StructuralFieldRecoveryError::InvalidPhysicalLayout {
+        reason: "continuum stress requires solid element recovery".into(),
+    }
 }
 
 /// Moves formulation-owned spatial fields with stable physical semantics into the observation
@@ -684,104 +673,6 @@ struct StructuralStrainRecovery {
     integration_point_stress: Vec<f64>,
     element_count: usize,
     basis: &'static str,
-}
-
-fn empty_structural_fields() -> Vec<AnalysisField> {
-    vec![
-        AnalysisField::host_f64(
-            FEA_FIELD_STRUCTURAL_DISPLACEMENT,
-            AnalysisFieldLayout::vector3(ObservationQuantity::Displacement, FieldLocation::Node),
-            vec![0, 3],
-            Vec::new(),
-        ),
-        AnalysisField::host_f64(
-            FEA_FIELD_STRUCTURAL_ROTATION,
-            AnalysisFieldLayout::vector3(ObservationQuantity::Rotation, FieldLocation::Node),
-            vec![0, 3],
-            Vec::new(),
-        ),
-        AnalysisField::host_f64(
-            FEA_FIELD_STRUCTURAL_VON_MISES,
-            AnalysisFieldLayout::scalar(
-                ObservationQuantity::VonMisesStress,
-                FieldLocation::Element,
-            ),
-            vec![0],
-            Vec::new(),
-        ),
-        AnalysisField::host_f64(
-            FEA_FIELD_STRUCTURAL_STRAIN,
-            AnalysisFieldLayout::symmetric_tensor3(
-                ObservationQuantity::Strain,
-                FieldLocation::Element,
-            ),
-            vec![0, 6],
-            Vec::new(),
-        ),
-        AnalysisField::host_f64(
-            FEA_FIELD_STRUCTURAL_STRESS,
-            AnalysisFieldLayout::symmetric_tensor3(
-                ObservationQuantity::Stress,
-                FieldLocation::Element,
-            ),
-            vec![0, 6],
-            Vec::new(),
-        ),
-        AnalysisField::host_f64(
-            FEA_FIELD_STRUCTURAL_NODAL_VON_MISES,
-            AnalysisFieldLayout::scalar(ObservationQuantity::VonMisesStress, FieldLocation::Node),
-            vec![0],
-            Vec::new(),
-        ),
-        AnalysisField::host_f64(
-            FEA_FIELD_STRUCTURAL_NODAL_STRESS,
-            AnalysisFieldLayout::symmetric_tensor3(
-                ObservationQuantity::Stress,
-                FieldLocation::Node,
-            ),
-            vec![0, 6],
-            Vec::new(),
-        ),
-        AnalysisField::host_f64(
-            FEA_FIELD_STRUCTURAL_STRAIN_ENERGY_DENSITY,
-            AnalysisFieldLayout::scalar(
-                ObservationQuantity::StrainEnergyDensity,
-                FieldLocation::Element,
-            ),
-            vec![0],
-            Vec::new(),
-        ),
-        AnalysisField::host_f64(
-            FEA_FIELD_STRUCTURAL_REACTION_FORCE,
-            AnalysisFieldLayout::vector3(ObservationQuantity::ReactionForce, FieldLocation::Node),
-            vec![0, 3],
-            Vec::new(),
-        ),
-        AnalysisField::host_f64(
-            FEA_FIELD_STRUCTURAL_REACTION_MOMENT,
-            AnalysisFieldLayout::vector3(ObservationQuantity::ReactionMoment, FieldLocation::Node),
-            vec![0, 3],
-            Vec::new(),
-        ),
-        AnalysisField::host_f64(
-            FEA_FIELD_STRUCTURAL_TOTAL_STRAIN_ENERGY,
-            AnalysisFieldLayout::scalar(ObservationQuantity::StrainEnergy, FieldLocation::Global),
-            vec![0],
-            Vec::new(),
-        ),
-        AnalysisField::host_f64(
-            FEA_FIELD_STRUCTURAL_RESIDUAL_NORM,
-            AnalysisFieldLayout::scalar(ObservationQuantity::Residual, FieldLocation::Global),
-            vec![0],
-            Vec::new(),
-        ),
-        AnalysisField::host_f64(
-            FEA_FIELD_STRUCTURAL_EQUATION_SCALE,
-            AnalysisFieldLayout::scalar(ObservationQuantity::EquationScale, FieldLocation::Global),
-            vec![0],
-            Vec::new(),
-        ),
-    ]
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]

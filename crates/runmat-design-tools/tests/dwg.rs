@@ -616,3 +616,40 @@ fn the_hand_built_drawing_exports_every_annotation_kind_from_the_one_layout() {
         assert!(body.contains(want), "no {want} in the PDF");
     }
 }
+
+/// A plan's grids export their grid lines on the center layer (chain lines) and their row of
+/// dimensions as dimension entities.
+#[test]
+fn a_plan_s_grid_lines_export_as_center_lines_beside_their_dimension_row() {
+    let skeleton = "runmat 0.7\nstd 1\n\npart skel {\n    feature g1 = plane.offset(base = origin.yz, distance = 0 mm)\n    feature g2 = plane.offset(base = origin.yz, distance = 40 mm)\n    feature g3 = plane.offset(base = origin.yz, distance = 80 mm)\n    publish grid_1 = datum(datum = { datum = feature, feature = g1 })\n    publish grid_2 = datum(datum = { datum = feature, feature = g2 })\n    publish grid_3 = datum(datum = { datum = feature, feature = g3 })\n}\n";
+    let rig = "runmat 0.7\nstd 1\n\nassembly rig {\n    use part skel as skeleton\n    use part bracket as a\n}\n";
+    let drawing = "runmat 0.7\nstd 1\n\ndrawing rig {\n    format a3 = { size = { size = iso, name = A3 }, title_block = [] }\n    sheet \"1\" = { format = a3, scale = [1, 1], projection = third_angle }\n    view top = standard(orientation = top, sheet = \"1\", model = { assembly = rig }, at = [150, 150], display = visible_lines)\n    annotation grids = grids(occurrence = [{ name = skeleton }], datums = [grid_1, grid_2, grid_3], labels = [\"1\", \"2\", \"3\"], view = top)\n}\n";
+    let mut files = files();
+    files.insert("/p/skel.part".into(), skeleton.into());
+    files.insert("/p/rig.assembly".into(), rig.into());
+    files.insert("/p/rig.drawing".into(), drawing.into());
+    let out = call(
+        "design.export",
+        json!({ "path": "/p/rig.drawing", "format": "dxf" }),
+        &files,
+    )
+    .unwrap_or_else(|e| panic!("{e}"));
+    let sheet = dxf::read(out["files"][0]["content"].as_str().unwrap()).unwrap();
+    let center = sheet
+        .entities
+        .iter()
+        .filter(|e| e.layer == "CENTER")
+        .count();
+    assert!(center >= 3, "{center} center-layer entities");
+    let rows = sheet
+        .entities
+        .iter()
+        .filter(|e| matches!(&e.shape, Shape::Dimension(_)))
+        .count();
+    assert_eq!(rows, 2);
+    assert!(sheet
+        .blocks
+        .iter()
+        .flat_map(|b| &b.entities)
+        .all(|e| e.layer != "CENTER"));
+}

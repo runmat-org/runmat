@@ -26,6 +26,27 @@ impl<'a> GeometryAllocationReservation<'a> {
         Ok(Self { control, bytes })
     }
 
+    /// Extend this charge by `bytes` before the storage it covers grows. A refused extension
+    /// leaves the charge unchanged.
+    pub fn grow(&mut self, bytes: u64) -> Result<(), GeometryEvaluationError> {
+        self.control.checkpoint()?;
+        self.control.consume_allocation_bytes(bytes)?;
+        self.bytes = self
+            .bytes
+            .checked_add(bytes)
+            .expect("an admitted charge fits the allocation budget");
+        Ok(())
+    }
+
+    /// Release `bytes` of this charge once the storage they covered is gone.
+    pub fn release(&mut self, bytes: u64) {
+        self.bytes = self
+            .bytes
+            .checked_sub(bytes)
+            .expect("released more storage than reserved");
+        self.control.release_allocation_bytes(bytes);
+    }
+
     /// Keep part of this charge after returning a retained result. That part is
     /// conservatively charged for the remaining evaluation lifetime.
     pub fn retain_bytes(&mut self, bytes: u64) {

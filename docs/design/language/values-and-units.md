@@ -99,23 +99,52 @@ A toleranced value carries its nominal and its bounds. Geometry and solvers use 
 
 ## Units
 
+### One unit authority
+
+Every design file kind and `.fea` read units from the same registry and check them the same way. `80 mm`, `0.25 in` and `50 mil` mean the same thing in a part, a board and a simulation, and a wrong unit gets the same message, underline and fixes in each.
+
 ### Mechanical files
 
 `.part`, `.assembly` and `.drawing` values take these kinds and units:
 
 | Kind (as written after `:`) | Units |
 |---|---|
-| `length`, `distance` | `m`, `cm`, `mm`, `um` (also `µm`), `in`, `ft` |
-| `area` | `m^2`, `mm^2` |
-| `angle` | `deg`, `rad` |
-| `mass` | `kg`, `gram` |
+| `length`, `distance` | `m`, `cm`, `mm`, `um` (also `µm`), `nm`, `km`, `in`, `ft`, `mil` (also `thou`) |
+| `area` | `m^2`, `cm^2`, `mm^2` (also `m²`, `mm²`) |
+| `volume` | `m^3`, `cm^3`, `mm^3` |
+| `angle` | `deg` (also `°`), `rad` |
+| `mass` | `kg`, `g` (also `gram`) |
+| `time` | `s`, `ms`, `us`, `ns` |
+| `force`, `pressure`, `mass_density` and the other physical kinds | their SI units and the prefixed forms listed for `.fea`, composed with `*`, `/` and `^` (`N*m`, `kg/m^3`) |
 | `real`, `dimensionless`, `count`, `integer` | a bare number |
 
-A bare number where a length is expected is an error: write `5 mm`, not `5`. Imperial lengths read as written: `40 ft`, `5.5 in`, and a feet-and-inches length is a sum, `8 ft + 1.125 in`. Board coordinates in a `.circuit.layout` are the exception: a bare number there is millimetres.
+Each unit a value displays in also reads back: `30 g`, `12 mm²`, `45°`. A bare number where a length is expected is an error: write `5 mm`, not `5`. Imperial lengths read as written: `40 ft`, `5.5 in`, and a feet-and-inches length is a sum, `8 ft + 1.125 in`. Board coordinates in a `.circuit.layout` are the exception: a bare number there is millimetres.
+
+A value keeps the unit it was written in. Hover, Properties and the Outline show `0.25 in` for a value written `0.25 in`; the compiler converts to SI only to check and compute. A computed value, such as `input.width / 2`, shows in its kind's display unit: millimetres for a length, degrees for an angle.
+
+### Wrong units
+
+A value whose unit measures the wrong kind is an error at the value. The message names the field, the kind it needs with its SI unit, and what the written unit measures:
+
+```text
+distance needs a unit of length such as m; kg measures mass
+                                           ^^^^^ expected m
+```
+
+| Written | Message after the field name |
+|---|---|
+| `distance = 10 kg` | `needs a unit of length such as m; kg measures mass` |
+| `distance = 10 deg` | `needs a unit of length such as m; deg measures angle` |
+| `distance = 10` | `needs a unit of length such as m; a plain number has no unit` |
+| `distance = input.load` | `needs a unit of length such as m; the value measures force` |
+
+- The underline covers the value (`10 kg`), not the whole statement.
+- The code names the language that raised it: `cad.value.unit` in a `.part` or `.assembly`, `circuit.value.unit` in a `.circuit.layout`, and the `.fea` checker's own codes (`fea.semantic.mesh`, `fea.semantic.material`, `fea.semantic.model`). An assembly that sets an occurrence's input in the wrong unit (`input.thickness = 3 deg`) reports `cad.value.unit` at that value; `cad.asm.input_type` covers an input the definition doesn't declare.
+- The quick fix offers the same number in each common unit of the expected kind: `10 mm`, `10 cm`, `10 m` and `10 in` for a length. It never changes the number.
 
 ### Electrical files
 
-`.circuit` and `.circuit.layout` values take SI units with the SI prefixes `T`, `G`, `M`, `k`, `m`, `u` (also `µ`), `n`, `p` and `f`:
+`.circuit` and `.circuit.layout` values read their units from the same registry as mechanical files and `.fea`. These units take the SI prefixes `T`, `G`, `M`, `k`, `m`, `u` (also `µ`), `n`, `p` and `f`:
 
 | Quantity | Unit | Examples |
 |---|---|---|
@@ -128,9 +157,10 @@ A bare number where a length is expected is an error: write `5 mm`, not `5`. Imp
 | Time | `s` | `5 ns`, `14 us` |
 | Power, energy, charge | `W`, `J`, `C` | `62.5 mW` |
 | Conductance | `S` | `1 mS` |
-| Length | `m` | `0.2 mm`; board lengths also take `mil` |
+| Length | `m` | `0.2 mm`; board lengths take every length unit of the registry, such as `mil` and `in`, on a 1 nm grid |
 | Temperature | `K`, `degC` | `25 degC` |
-| Tolerance | `%` | `± 1 %` |
+| Tolerance | `%`, `ppm` | `± 1 %`, `50 ppm` |
+| Copper weight | `oz` (34.79 µm of copper) | `1 oz` |
 
 The circuit printer writes quantities in SI units (`10000 ohm`), so a file reads back bit for bit; any of the forms above reads in.
 

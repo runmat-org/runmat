@@ -24,6 +24,12 @@ pub struct PublishedStudyAssessment {
     /// Bounded execution/return-contract diagnostic, separate from the engineering verdict.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub function_execution_diagnostic: Option<String>,
+    /// The result against its limit as legends, reports and the Desktop print it: "Peak 76.3 MPa
+    /// (element) · limit 184 MPa · factor 2.41". Written at publication in the unit and
+    /// precision of the study's display of the assessed field; `None` for a function rule.
+    /// Presentation only: no identity or receipt digest reads it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub summary_line: Option<String>,
 }
 
 /// Sweep case attribution is retained outside the immutable per-study report.
@@ -54,6 +60,7 @@ pub struct FeaReassessmentRequest {
     pub result_manifest_path: String,
 }
 
+pub(crate) mod summary_line;
 mod reassessment;
 pub use reassessment::{
     prepare_saved_study_reassessment, prepare_saved_study_reassessment_for_source,
@@ -330,7 +337,7 @@ pub(in crate::analysis) fn evaluate_with_source(
             &evidence,
             step.map(|step| &step.run_id),
         ))?;
-        reports.push(PublishedStudyAssessment {
+        let mut report = PublishedStudyAssessment {
             definition: definition.clone(),
             result: evaluate_assessment(definition, measurement),
             study_definition,
@@ -338,7 +345,18 @@ pub(in crate::analysis) fn evaluate_with_source(
             evidence,
             function_execution_identity: None,
             function_execution_diagnostic: None,
-        });
+            summary_line: None,
+        };
+        report.summary_line =
+            summary_line::published_line(&report, producer, &observations, &compiled.displays);
+        workspace.admit(&(
+            &output_types,
+            &observations,
+            &metadata_by_run,
+            &reports,
+            &report,
+        ))?;
+        reports.push(report);
     }
     if is_cancelled() {
         return Err(Error::Cancelled);

@@ -42,7 +42,6 @@ pub(super) struct TransientFieldRecovery {
     pub von_mises_snapshots: Vec<AnalysisField>,
     pub strain_energy_density_snapshots: Vec<AnalysisField>,
     pub spatial_projection_evidence: Vec<SpatialProjectionEvidence>,
-    pub electro_thermal_summaries: Vec<Option<crate::assembly::ElectroThermalAssemblySummary>>,
 }
 
 pub(super) fn recover_transient_fields<I>(
@@ -103,7 +102,6 @@ where
     let mut connector_force_snapshots = Vec::with_capacity(snapshot_count);
     let mut connector_stored_energy_snapshots = Vec::with_capacity(snapshot_count);
     let mut spatial_projection_evidence = Vec::new();
-    let mut electro_thermal_summaries = Vec::with_capacity(snapshot_count);
     // Raw solver vectors are no longer needed after their accepted state is
     // recovered. Consume them alongside the assemblies so processed vectors
     // do not stay resident alongside the retained typed field histories.
@@ -288,7 +286,6 @@ where
             ));
         }
         spatial_projection_evidence.append(&mut summary.spatial_projection_evidence);
-        electro_thermal_summaries.push(summary.electro_thermal.take());
     }
     require_recovered_field_count(
         snapshot_count,
@@ -345,7 +342,6 @@ where
         von_mises_snapshots,
         strain_energy_density_snapshots,
         spatial_projection_evidence,
-        electro_thermal_summaries,
     })
 }
 

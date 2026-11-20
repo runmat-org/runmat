@@ -44,7 +44,6 @@ pub(super) fn finish_transient_run(
         .ok_or_else(|| {
             FeaRunError::Assembly("transient solve produced no reporting assembly snapshot".into())
         })?;
-    let reporting_dof_count = reporting_summary.dof_count;
     emit_phase(
         "fea.run_transient",
         FeaProgressPhase::Solve,
@@ -177,7 +176,6 @@ pub(super) fn finish_transient_run(
         von_mises_snapshots,
         strain_energy_density_snapshots,
         spatial_projection_evidence,
-        electro_thermal_summaries,
     } = recovered;
     let mut run = FeaRunResult {
         identity,
@@ -310,14 +308,6 @@ pub(super) fn finish_transient_run(
         field.field_id = crate::contracts::FEA_FIELD_STRUCTURAL_CONNECTOR_STORED_ENERGY.into();
         run.fields.push(field);
     }
-    let electro_thermal_fields = recover_realized_electro_thermal_fields(
-        &electro_thermal_summaries,
-        &transient.residual_norms,
-        reporting_dof_count,
-        options.solver_mesh.as_ref(),
-    );
-    run.diagnostics.extend(electro_thermal_fields.diagnostics);
-    run.fields.extend(electro_thermal_fields.static_fields);
     let evaluated_histories = if execution_step.observations.iter().any(|request| {
         matches!(
             request,
@@ -499,9 +489,6 @@ pub(super) fn finish_transient_run(
         energy_balance_residual_snapshots,
         relative_energy_balance_error_snapshots,
         dynamic_balance_snapshots: transient.dynamic_balance_snapshots,
-        electro_thermal_temperature_snapshots: electro_thermal_fields.temperature_snapshots,
-        electro_thermal_thermal_residual_snapshots: electro_thermal_fields
-            .thermal_residual_snapshots,
         residual_norms: transient.residual_norms,
     })
 }

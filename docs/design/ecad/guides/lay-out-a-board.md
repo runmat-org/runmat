@@ -96,7 +96,13 @@ In the Desktop, Update board (ECO) lists each change the board hasn't taken, wit
 
 Drag footprints on the canvas, or set `at`, `rotation` and `side` in Properties. Place in the order the circuit works: the connector at the board edge, the regulator and its capacitors beside it, the sensor with its decoupling capacitor as close to its supply pins as the courtyards allow, the pull-ups near the connector. Ratsnest lines show the connections still to route. `locked = true` keeps a placed part from moving.
 
-Placement tools align and distribute a selection, and a room (`room <name> = { outline, members }`) keeps a group of parts, such as one channel of a repeated sheet, inside an area.
+Place (Board ▸ Place) puts footprints inside the outline in one step. From schematic takes every footprint outside the outline, which is where Update board leaves new parts, and sets them on a grid in the board's free room, clear of the parts already placed; Single component places only the picked parts: a picked part outside the outline goes on the grid, and one already inside keeps its spot. Both put the parts on the side you choose. Place doesn't move a locked part, and it says so when the outline has no room left.
+
+Align (Board ▸ Align) lines two or more picked parts up by their extents (courtyard and pads): left, right, top or bottom edges, horizontal centers (one X) or vertical centers (one Y). The distribute choices spread three or more parts evenly between the outermost two. Board Y grows upward, so Top is the largest Y. The schematic is unchanged by either command.
+
+Right-click a net and choose Length to see its routed length (tracks plus via barrels), the straight length of its open connections, its via count and the `length_max` its rules set. A net past its limit shows as an error row.
+
+A room (`room <name> = { outline, members }`) keeps a group of parts, such as one channel of a repeated sheet, inside an area.
 
 ## 4. Route
 
@@ -133,7 +139,7 @@ Draw pour takes a net, the corners of its outline and a layer, and fills that la
 DRC runs as you edit. Each finding names the rule, the two objects and the gap between them, and selecting it selects those objects on the canvas. Typical findings are a track too close to a pad of another net, copper too near the edge, silkscreen on a pad, an unrouted connection. The check passes when DRC is clean, every connection is routed and the board has taken every schematic change:
 
 ```sh
-runmat-design check baro.circuit.layout
+runmat check baro.circuit.layout
 ```
 
 See [Board layout](/docs/ecad/layout#design-rules) for every rule.

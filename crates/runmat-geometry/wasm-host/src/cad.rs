@@ -23,6 +23,7 @@ use runmat_design_tools::commands;
 use runmat_geometry_io::ImportSource;
 use runmat_geometry_io::OcctKernel;
 use serde::Deserialize;
+use std::cell::RefCell;
 use std::collections::BTreeMap;
 use std::ffi::{c_char, CStr, CString};
 use std::sync::{Arc, Mutex};
@@ -35,10 +36,15 @@ struct Request {
     args: Vec<String>,
 }
 
-/// The STEP files of the request being served, by the names an `import(source = …)` may give
-/// them (the workspace path and the bare file name). The browser host has no project folder, so
-/// the files travel in the request and the kernel reads their text from here.
-static IMPORTS: Mutex<BTreeMap<String, ImportSource>> = Mutex::new(BTreeMap::new());
+thread_local! {
+    /// The STEP files of the request being served on this thread, by the names an
+    /// `import(source = …)` may give them (the workspace path and the bare file name). The
+    /// browser host has no project folder, so the files travel in the request and the kernel
+    /// reads their text from here. The table is per thread because a native process can serve
+    /// requests on several threads at once (the test harness does), and the runtime makes each
+    /// request's kernel on the request's own thread.
+    static IMPORTS: RefCell<BTreeMap<String, ImportSource>> = const { RefCell::new(BTreeMap::new()) };
+}
 
 /// What the last `probe` found.
 static LAST_PROBE: Mutex<Option<runtime::part_cache::ProbeReport>> = Mutex::new(None);
@@ -58,15 +64,21 @@ fn set_imports(files: &runtime::Files) {
                 .or_insert_with(|| source.clone());
         }
     }
-    *IMPORTS.lock().unwrap_or_else(|e| e.into_inner()) = map;
+    IMPORTS.with(|imports| *imports.borrow_mut() = map);
 }
 
 /// Installs OCCT as the runtime's kernel (once per process; later calls do nothing). Each
-/// kernel it makes reads imported STEP files from the current request's files.
+/// kernel it makes reads imported STEP files from the current request's files. The part cache
+/// keeps a quarter of this module's measured maximum memory ([`crate::memory`]).
 pub fn install_occt() {
+    if let Some(memory) = crate::memory::HostMemory::measure() {
+        runtime::part_cache::set_budget_bytes(
+            usize::try_from(memory.maximum_bytes / 4).unwrap_or(usize::MAX),
+        );
+    }
     kernel::install("occt", || {
         let mut k = OcctKernel::new();
-        k.imports = IMPORTS.lock().unwrap_or_else(|e| e.into_inner()).clone();
+        k.imports = IMPORTS.with(|imports| imports.borrow().clone());
         Box::new(k)
     });
 }
@@ -82,12 +94,31 @@ fn error(message: &str) -> String {
 /// Runs one request on OCCT and returns the runtime's JSON answer.
 pub fn call(request: &str) -> String {
     install_occt();
+    // The request's STEP files live only for this call: a thread that serves a later request
+    // never sees them, even when this one panics.
+    struct ClearImports;
+    impl Drop for ClearImports {
+        fn drop(&mut self) {
+            IMPORTS.with(|imports| imports.borrow_mut().clear());
+        }
+    }
+    let _clear = ClearImports;
     let request: Request = match serde_json::from_str(request) {
         Ok(r) => r,
         Err(e) => return error(&format!("malformed CAD request: {e}")),
     };
     let a = &request.args;
     match request.function.as_str() {
+        // This module's memory, measured in the module: what the page sizes its helper hosts
+        // and part store by.
+        "hostMemory" => {
+            let memory = crate::memory::HostMemory::measure();
+            serde_json::json!({
+                "maximumBytes": memory.map(|m| m.maximum_bytes),
+                "inUseBytes": memory.map(|m| m.in_use_bytes),
+            })
+            .to_string()
+        }
         "dependencies" => {
             let deps = runtime::dependencies(arg(a, 0), arg(a, 1));
             serde_json::to_string(&deps).unwrap_or_else(|_| "[]".into())
@@ -120,6 +151,23 @@ pub fn call(request: &str) -> String {
                     });
                     *LAST_PROBE.lock().unwrap_or_else(|e| e.into_inner()) = Some(report);
                     out
+                }
+                Err(message) => runtime::error_json(path, &message),
+            }
+        }
+        // A part or an assembly as a study's geometry: the exact STEP AP242 text of one
+        // regeneration, with its regions as entity names (`exchange::study`).
+        "studyGeometry" => {
+            let path = arg(a, 0);
+            match runtime::parse_files(arg(a, 2)) {
+                Ok(mut files) => {
+                    files.insert(path.to_owned(), arg(a, 1).to_owned());
+                    set_imports(&files);
+                    match runmat_cad_wasm::exchange::study::study_geometry(path, &files, None) {
+                        Ok(step) => serde_json::json!({ "step": String::from_utf8_lossy(&step) })
+                            .to_string(),
+                        Err(message) => error(&message),
+                    }
                 }
                 Err(message) => runtime::error_json(path, &message),
             }

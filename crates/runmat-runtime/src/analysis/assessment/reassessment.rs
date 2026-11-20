@@ -43,6 +43,7 @@ pub fn prepare_saved_study_reassessment(
         limits,
         maximum_manifest_bytes,
         is_cancelled,
+        None,
         |_| Ok(()),
     )
 }
@@ -65,6 +66,7 @@ pub fn prepare_saved_study_reassessment_for_source(
         limits,
         maximum_manifest_bytes,
         is_cancelled,
+        Some(&study.displays),
         |compiled| validate_reassessment_source(compiled, study),
     )
 }
@@ -136,6 +138,7 @@ fn prepare_saved_reassessment(
     limits: AssessmentEvaluationLimits,
     maximum_manifest_bytes: u64,
     is_cancelled: impl Fn() -> bool,
+    displays: Option<&[runmat_analysis_core::AuthoredOutputDisplay]>,
     validate_source: impl FnOnce(&CompiledAnalysisStudy) -> Result<(), AssessmentEvaluationError>,
 ) -> Result<PreparedStudyReassessment, AssessmentEvaluationError> {
     if is_cancelled() {
@@ -144,7 +147,7 @@ fn prepare_saved_reassessment(
     if assessments.len() > limits.maximum_assessments {
         return Err(AssessmentEvaluationError::ResourceLimit);
     }
-    let (compiled, published) = crate::analysis::study_result_manifest::load_for_reassessment(
+    let (mut compiled, published) = crate::analysis::study_result_manifest::load_for_reassessment(
         definition,
         manifest_path,
         maximum_manifest_bytes,
@@ -158,6 +161,11 @@ fn prepare_saved_reassessment(
         }
     })?;
     validate_source(&compiled)?;
+    // The assessment lines read the current source's displays, as its legends do. Displays
+    // never enter the study identity the saved evidence is checked against.
+    if let Some(displays) = displays {
+        compiled.displays = displays.to_vec();
+    }
     let reports = reassess_study_results_with_limits(
         &compiled,
         &published,

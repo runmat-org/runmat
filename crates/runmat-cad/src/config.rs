@@ -21,7 +21,7 @@ use crate::model::PartDocument;
 use crate::regen::deps::DependencyGraph;
 use crate::regen::engine::{regenerate, RegenCache, RegenContext, RegenRequest};
 use crate::regen::hash::CacheKey;
-use crate::units::UnitAuthority;
+use crate::units::Units;
 use crate::value::ValueExpr;
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
@@ -76,7 +76,7 @@ pub fn expand_columnar(
     doc: &PartDocument,
     spec: &ColumnarConfigurations,
     table: &ColumnarTable,
-    units: &dyn UnitAuthority,
+    units: &Units,
 ) -> Result<ConfigurationTable, Vec<TableProblem>> {
     let mut problems = Vec::new();
     let keys: Vec<String> = match table.column(&spec.key) {
@@ -112,20 +112,25 @@ pub fn expand_columnar(
                 continue;
             }
             Some(ColumnData::F64 { unit, values }) => {
-                let Some(u) = units.unit(unit) else {
+                let read = match expected {
+                    Some(k) => units.unit_expecting(unit, k),
+                    None => units.unit(unit),
+                };
+                let Some(u) = read else {
                     problems.push(TableProblem::UnknownUnit {
                         column: col.clone(),
                         unit: unit.clone(),
                     });
                     continue;
                 };
-                if let Some(k) = &expected {
-                    if k.dimension != u.dimension {
+                if let Some(k) = expected {
+                    let found = crate::units::dimension_of(&u);
+                    if k != found {
                         problems.push(TableProblem::KindMismatch {
                             column: col.clone(),
                             input: input.0.clone(),
-                            expected: format!("{} ({})", k.id, k.si_symbol),
-                            found: u.dimension.to_string(),
+                            expected: crate::value::kind_name(k).to_owned(),
+                            found: crate::value::kind_name(found).to_owned(),
                         });
                         continue;
                     }
@@ -169,7 +174,7 @@ pub fn materialize(
     doc: &PartDocument,
     specs: &[ColumnarConfigurations],
     tables: &dyn TableSource,
-    units: &dyn UnitAuthority,
+    units: &Units,
 ) -> (PartDocument, Vec<(String, TableProblem)>) {
     let mut out = doc.clone();
     let mut problems = Vec::new();

@@ -24,7 +24,7 @@ pub struct QuiverGpuParams {
     pub head_size: f32,
 }
 
-#[repr(C)]
+#[repr(C, align(16))]
 #[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
 struct QuiverUniforms {
     color: [f32; 4],
@@ -34,7 +34,7 @@ struct QuiverUniforms {
     xy_mode: u32,
     scale: f32,
     head_size: f32,
-    _pad: f32,
+    _pad: [f32; 2],
 }
 
 pub fn pack_vertices(
@@ -49,17 +49,15 @@ pub fn pack_vertices(
     let x_buffer = axis_storage_buffer(emission, "quiver-x", &inputs.x_data, inputs.scalar)?;
     let y_buffer = axis_storage_buffer(emission, "quiver-y", &inputs.y_data, inputs.scalar)?;
     let vertex_count = inputs.count as u64 * 6;
-    let output_buffer = runmat_accelerate_api::WgpuBufferOwner::new(device.create_buffer(
-        &wgpu::BufferDescriptor {
-            label: Some("quiver-gpu-vertices"),
-            size: vertex_count * std::mem::size_of::<Vertex>() as u64,
-            usage: wgpu::BufferUsages::STORAGE
-                | wgpu::BufferUsages::VERTEX
-                | wgpu::BufferUsages::COPY_DST
-                | wgpu::BufferUsages::COPY_SRC,
-            mapped_at_creation: false,
-        },
-    ));
+    let output_buffer = emission.own_buffer(device.create_buffer(&wgpu::BufferDescriptor {
+        label: Some("quiver-gpu-vertices"),
+        size: vertex_count * std::mem::size_of::<Vertex>() as u64,
+        usage: wgpu::BufferUsages::STORAGE
+            | wgpu::BufferUsages::VERTEX
+            | wgpu::BufferUsages::COPY_DST
+            | wgpu::BufferUsages::COPY_SRC,
+        mapped_at_creation: false,
+    }));
     let uniforms = QuiverUniforms {
         color: params.color.to_array(),
         count: inputs.count,
@@ -68,7 +66,7 @@ pub fn pack_vertices(
         xy_mode: inputs.xy_mode,
         scale: params.scale,
         head_size: params.head_size,
-        _pad: 0.0,
+        _pad: [0.0; 2],
     };
     let uniform_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
         label: Some("quiver-pack-uniforms"),

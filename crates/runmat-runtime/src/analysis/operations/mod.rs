@@ -2,6 +2,7 @@ mod compare;
 mod observation_history;
 mod query;
 pub use observation_history::analysis_observation_history_sample_by_run_id_op;
+pub(crate) use query::{assessed_source_field_ids, move_fields_first, result_field_inventory};
 mod trends;
 
 use super::{diagnostic_metric, AnalysisRunResult};

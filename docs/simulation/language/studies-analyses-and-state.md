@@ -74,7 +74,7 @@ Common step graphs:
 | Induction heating | `electromagnetic harmonic` → `thermal steady { heat_source = … }` |
 | Preload, then nonlinear, then modes | `structural preload` → `structural nonlinear` → `structural prestressed_modal` [not yet in the current release](pending:structural.nonlinear.sequence) |
 
-The thermal-prestress graph is the canonical example [`thermal-prestress.fea`](../examples/thermal-prestress.fea):
+The thermal-prestress graph is the canonical example `thermal-prestress.fea`:
 
 ```fea source=thermal-prestress.fea
     analysis heat { thermal steady {} retain heated }

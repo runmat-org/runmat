@@ -1,4 +1,4 @@
-//! A design workspace read from disk, for command-line callers (`runmat-design`, `runmat check`,
+//! A design workspace read from disk, for command-line callers (`runmat check`, `runmat design`,
 //! `runmat test`): every design file and model library under a folder.
 
 use crate::Files;
@@ -23,6 +23,18 @@ pub const DESIGN_EXTENSIONS: &[&str] = &[
     ".m",
     ".svg",
 ];
+
+/// The workspace a design file is read in when no `--root` names one: its project, the
+/// nearest folder at or above the file's own that holds a `runmat.toml`, so a drawing in
+/// `drawings/` resolves models it names `from = ".."`; else the file's folder.
+pub fn project_root(file: &Path) -> PathBuf {
+    let folder = file.parent().unwrap_or(Path::new("/"));
+    folder
+        .ancestors()
+        .find(|dir| dir.join("runmat.toml").is_file())
+        .unwrap_or(folder)
+        .to_path_buf()
+}
 
 /// Every design file under `dir`, keyed by [`source_path`]. Hidden folders,
 /// `target` and `node_modules` are skipped.
@@ -137,5 +149,24 @@ mod tests {
             )
             .is_err());
         }
+    }
+
+    #[test]
+    fn a_file_reads_in_its_projects_workspace() {
+        let dir = std::env::temp_dir().join(format!("runmat-project-root-{}", std::process::id()));
+        let drawings = dir.join("house/drawings");
+        std::fs::create_dir_all(&drawings).unwrap();
+        std::fs::write(
+            dir.join("house/runmat.toml"),
+            "[package]\nname = \"house\"\n",
+        )
+        .unwrap();
+        let drawing = drawings.join("plans.drawing");
+        // The project's folder, from a drawing one folder down.
+        assert_eq!(super::project_root(&drawing), dir.join("house"));
+        // Outside any project: the file's own folder.
+        let loose = dir.join("loose/part.part");
+        assert_eq!(super::project_root(&loose), dir.join("loose"));
+        std::fs::remove_dir_all(&dir).unwrap();
     }
 }

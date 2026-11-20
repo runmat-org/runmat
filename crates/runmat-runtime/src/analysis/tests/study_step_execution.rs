@@ -102,7 +102,6 @@ fn owned_study_sweep_commits_mesh_results_and_evidence_on_async_only_storage() {
     }
 
     let _host = analysis_test_guard();
-    let _provider_lock = runmat_filesystem::provider_override_lock();
     let provider = std::sync::Arc::new(runmat_filesystem::MemoryFsProvider::new());
     let _provider = runmat_filesystem::replace_provider(provider.clone());
     let root = PathBuf::from("/owned-async-study");
@@ -211,4 +210,68 @@ fn owned_study_sweep_commits_mesh_results_and_evidence_on_async_only_storage() {
     assert_eq!(error.trace_id.as_deref(), Some("owned-async-trace"));
     assert_eq!(error.request_id.as_deref(), Some("owned-async-request"));
     assert!(storage::scoped_artifact_provider().is_none());
+}
+
+/// A structural study with no solver mesh, no meshing settings and no explicit beam/shell
+/// elements: what `fea.study(id, geometry, model)` builds without the `Mesh` option.
+fn unmeshed_modal_study_spec() -> AnalysisStudySpec {
+    let mut spec = sample_linear_static_study_spec();
+    let procedure_step = ProcedureStep::structural_modal("step_default_modal");
+    spec.model.sequence =
+        AnalysisSequence::from_steps("unmeshed_modal", vec![procedure_step.clone()]);
+    spec.model.signals.clear();
+    spec.model.excitations.clear();
+    spec.model.excitation_cases.clear();
+    spec.execution = AnalysisExecutionPlan {
+        steps: vec![AnalysisExecutionStep {
+            step_id: procedure_step.step_id.clone(),
+            backend: ComputeBackend::Cpu,
+            accelerator_admission: Default::default(),
+            solver_options: AnalysisSolverOptions::defaults_for(&procedure_step).unwrap(),
+        }],
+    };
+    spec.meshing_settings = None;
+    spec.solver_mesh_artifact_path = None;
+    assert!(spec
+        .model
+        .structural
+        .as_ref()
+        .is_none_or(|structural| structural.elements.is_empty()));
+    spec
+}
+
+#[test]
+fn unmeshed_structural_study_is_refused_before_any_step_by_every_host() {
+    struct UnreachableExecutor;
+    impl AnalysisStudyStepExecutor for UnreachableExecutor {
+        fn allocated_cpu_millicores(&self) -> u64 {
+            1000
+        }
+        fn execute_step<'a>(&'a self, _: AnalysisStudyStepRequest) -> AnalysisStudyStepFuture<'a> {
+            panic!("an unmeshed structural study must not reach a step executor")
+        }
+    }
+    let _guard = analysis_test_guard();
+    let spec = unmeshed_modal_study_spec();
+
+    let in_process = analysis_run_study_op(&spec, OperationContext::new(None, None))
+        .expect_err("the in-process host must refuse an unmeshed structural study");
+    let owned = futures::executor::block_on(analysis_execute_study_with_step_executor(
+        &spec,
+        OperationContext::new(None, None),
+        &UnreachableExecutor,
+    ))
+    .expect_err("the step-executor host must refuse an unmeshed structural study");
+    let Err(native) =
+        analysis_prepare_structural_study_op(&spec, OperationContext::new(None, None))
+    else {
+        panic!("the native host must refuse an unmeshed structural study");
+    };
+    for error in [in_process, owned, native] {
+        assert_eq!(error.error_code, "RM.FEA.RUN_STUDY.PORTABLE_MESH_REQUIRED");
+        assert_eq!(
+            error.message,
+            "portable structural study execution requires a canonical solver mesh"
+        );
+    }
 }

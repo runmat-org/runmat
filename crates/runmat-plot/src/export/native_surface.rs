@@ -17,6 +17,13 @@ use crate::overlay::plot_overlay::{OverlayConfig, OverlayMetrics, PlotOverlay};
 #[cfg(feature = "egui-overlay")]
 use egui_wgpu::ScreenDescriptor;
 
+#[path = "native_surface/presented_frame.rs"]
+mod presented_frame;
+pub use presented_frame::{PresentedFrame, PresentedFrameRetention};
+#[path = "native_surface/shared_scene.rs"]
+mod shared_scene;
+pub use shared_scene::{HeadlessFrameRenderer, HeadlessRgbaFrame};
+
 pub const HEADLESS_GPU_ADAPTER_UNAVAILABLE: &str = "Failed to find suitable GPU adapter";
 pub const HEADLESS_GPU_DEVICE_CREATION_FAILED_PREFIX: &str = "Failed to create device:";
 pub const HEADLESS_GPU_CONTEXT_PANICKED_PREFIX: &str = "Headless GPU context creation panicked:";
@@ -27,6 +34,7 @@ pub struct NativeSurfaceRenderContext {
     config: PlotRenderConfig,
     pixels_per_point: f32,
     presented_frame: Option<Arc<PresentedFrame>>,
+    presented_frame_retention: PresentedFrameRetention,
     background_policy: BackgroundPolicy,
     textmark: Option<String>,
     #[cfg(feature = "egui-overlay")]
@@ -82,75 +90,6 @@ pub struct NativeSurfaceCameraState {
     pub axes_camera_user_controlled: Vec<bool>,
 }
 
-/// An immutable GPU copy of a completed native frame. Readback does not rerender
-/// or reconstruct layout, so text, antialiasing, and all overlays are preserved.
-pub struct PresentedFrame {
-    texture: wgpu::Texture,
-    access: runmat_accelerate_api::WgpuDeviceAccess,
-}
-
-impl PresentedFrame {
-    pub fn size(&self) -> (u32, u32) {
-        (self.texture.width(), self.texture.height())
-    }
-
-    pub async fn rgba(&self) -> Result<Vec<u8>, String> {
-        let (width, height) = self.size();
-        let stride = (width * 4).div_ceil(256) * 256;
-        let byte_len = stride as usize * height as usize;
-        let buffer = self
-            .access
-            .with_shared(|emission| {
-                let buffer = emission.device().create_buffer(&wgpu::BufferDescriptor {
-                    label: Some("presented frame readback"),
-                    size: byte_len as u64,
-                    usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
-                    mapped_at_creation: false,
-                });
-                let mut encoder =
-                    emission
-                        .device()
-                        .create_command_encoder(&wgpu::CommandEncoderDescriptor {
-                            label: Some("presented frame readback"),
-                        });
-                encoder.copy_texture_to_buffer(
-                    crate::wgpu_compat::TexelCopyTextureInfo {
-                        texture: &self.texture,
-                        mip_level: 0,
-                        origin: wgpu::Origin3d::ZERO,
-                        aspect: wgpu::TextureAspect::All,
-                    },
-                    crate::wgpu_compat::TexelCopyBufferInfo {
-                        buffer: &buffer,
-                        layout: crate::wgpu_compat::TexelCopyBufferLayout {
-                            offset: 0,
-                            bytes_per_row: Some(stride),
-                            rows_per_image: Some(height),
-                        },
-                    },
-                    self.texture.size(),
-                );
-                emission.queue().submit(Some(encoder.finish()));
-                buffer
-            })
-            .map_err(|error| error.to_string())?;
-        let data = crate::gpu::util::readback_bytes(&self.access, &buffer, byte_len).await?;
-        let mut rgba = Vec::with_capacity((width * height * 4) as usize);
-        for row in data.chunks_exact(stride as usize) {
-            rgba.extend_from_slice(&row[..(width * 4) as usize]);
-        }
-        if matches!(
-            self.texture.format(),
-            wgpu::TextureFormat::Bgra8Unorm | wgpu::TextureFormat::Bgra8UnormSrgb
-        ) {
-            for pixel in rgba.chunks_exact_mut(4) {
-                pixel.swap(0, 2);
-            }
-        }
-        Ok(rgba)
-    }
-}
-
 impl NativeSurfaceRenderContext {
     /// Create a context that can render into external texture views.
     pub async fn new(
@@ -200,6 +139,7 @@ impl NativeSurfaceRenderContext {
             config,
             pixels_per_point: 1.0,
             presented_frame: None,
+            presented_frame_retention: PresentedFrameRetention::None,
             background_policy: BackgroundPolicy::ThemeDriven,
             textmark: None,
             #[cfg(feature = "egui-overlay")]
@@ -209,64 +149,6 @@ impl NativeSurfaceRenderContext {
             #[cfg(feature = "egui-overlay")]
             overlay,
         })
-    }
-
-    /// Keep the final native output on the GPU; CPU readback is deferred until
-    /// an actual overlay handoff. Never overwrite a frame held by a reader.
-    pub fn retain_presented_frame(&mut self, source: &wgpu::Texture) {
-        let access = self.renderer.wgpu_renderer.access.clone();
-        let reusable = self.presented_frame.take().filter(|frame| {
-            Arc::strong_count(frame) == 1
-                && frame.texture.size() == source.size()
-                && frame.texture.format() == source.format()
-        });
-        let retained = access.with_shared(|emission| {
-            let frame = reusable.unwrap_or_else(|| {
-                let texture = emission.device().create_texture(&wgpu::TextureDescriptor {
-                    label: Some("completed native frame"),
-                    size: source.size(),
-                    mip_level_count: 1,
-                    sample_count: 1,
-                    dimension: wgpu::TextureDimension::D2,
-                    format: source.format(),
-                    usage: wgpu::TextureUsages::COPY_DST | wgpu::TextureUsages::COPY_SRC,
-                    view_formats: &[],
-                });
-                Arc::new(PresentedFrame {
-                    texture,
-                    access: access.clone(),
-                })
-            });
-            let mut encoder =
-                emission
-                    .device()
-                    .create_command_encoder(&wgpu::CommandEncoderDescriptor {
-                        label: Some("retain native frame"),
-                    });
-            encoder.copy_texture_to_texture(
-                crate::wgpu_compat::TexelCopyTextureInfo {
-                    texture: source,
-                    mip_level: 0,
-                    origin: wgpu::Origin3d::ZERO,
-                    aspect: wgpu::TextureAspect::All,
-                },
-                crate::wgpu_compat::TexelCopyTextureInfo {
-                    texture: &frame.texture,
-                    mip_level: 0,
-                    origin: wgpu::Origin3d::ZERO,
-                    aspect: wgpu::TextureAspect::All,
-                },
-                source.size(),
-            );
-            emission.queue().submit(Some(encoder.finish()));
-            frame
-        });
-        // A gate failure leaves no stale frame: readers must not observe it.
-        self.presented_frame = retained.ok();
-    }
-
-    pub fn presented_frame(&self) -> Option<Arc<PresentedFrame>> {
-        self.presented_frame.clone()
     }
 
     /// Resize renderer viewport state.
@@ -514,6 +396,8 @@ impl NativeSurfaceRenderContext {
         self.render_geometry_scene_to_view_with_presentation(scene, view, camera, None)
     }
 
+    /// Copies the scene once; a host that keeps its scene in an `Arc` calls
+    /// [`Self::render_shared_geometry_scene_to_view`] and copies nothing.
     pub fn render_geometry_scene_to_view_with_presentation(
         &mut self,
         scene: &GeometryScene,
@@ -521,22 +405,8 @@ impl NativeSurfaceRenderContext {
         camera: Option<&Camera>,
         presentation: Option<&GeometryScenePresentation>,
     ) -> Result<RenderResult, String> {
-        let access = self.renderer.wgpu_renderer.access.clone();
-        access
-            .with_shared(|emission| {
-                self.prepare_geometry_scene(scene, camera, presentation);
-
-                let mut encoder =
-                    emission
-                        .device()
-                        .create_command_encoder(&wgpu::CommandEncoderDescriptor {
-                            label: Some("Native Geometry Scene Render Encoder"),
-                        });
-
-                let prepared = self.render_scene_with_overlay(emission, &mut encoder, view)?;
-                Ok(prepared.submit(emission.queue(), encoder))
-            })
-            .map_err(|error| error.to_string())?
+        let scene = Arc::new(scene.clone());
+        self.render_shared_geometry_scene_to_view(&scene, view, camera, presentation)
     }
 
     /// Render a figure into an offscreen texture and read back RGBA8 bytes.
@@ -671,97 +541,17 @@ impl NativeSurfaceRenderContext {
     }
 
     /// Render the same presentation used by the native surface, including selections,
-    /// annotations, visibility, sectioning, and display mode.
+    /// annotations, visibility, sectioning, and display mode. Copies the scene once; see
+    /// [`Self::render_shared_geometry_scene_to_rgba`].
     pub async fn render_geometry_scene_to_rgba_with_presentation(
         &mut self,
         scene: &GeometryScene,
         camera: Option<&Camera>,
         presentation: Option<&GeometryScenePresentation>,
     ) -> Result<Vec<u8>, String> {
-        self.prepare_geometry_scene(scene, camera, presentation);
-
-        let width = self.config.width.max(1);
-        let height = self.config.height.max(1);
-        let format = self.renderer.wgpu_renderer.surface_config.format;
-        let access = self.renderer.wgpu_renderer.access.clone();
-        let (output_buffer, padded_bytes_per_row) = access
-            .with_shared(|emission| {
-                let device = emission.device();
-                let queue = emission.queue();
-
-                let color_texture = device.create_texture(&wgpu::TextureDescriptor {
-                    label: Some("native_surface_geometry_offscreen_color"),
-                    size: wgpu::Extent3d {
-                        width,
-                        height,
-                        depth_or_array_layers: 1,
-                    },
-                    mip_level_count: 1,
-                    sample_count: 1,
-                    dimension: wgpu::TextureDimension::D2,
-                    format,
-                    usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC,
-                    view_formats: &[],
-                });
-                let color_view = color_texture.create_view(&wgpu::TextureViewDescriptor::default());
-
-                let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
-                    label: Some("Native Geometry Surface RGBA Render Encoder"),
-                });
-                let prepared =
-                    self.render_scene_with_overlay(emission, &mut encoder, &color_view)?;
-                prepared.submit(queue, encoder);
-
-                let bytes_per_pixel = 4u32;
-                let padded_bytes_per_row = (width * bytes_per_pixel).div_ceil(256) * 256;
-                let output_buffer_size = (padded_bytes_per_row * height) as wgpu::BufferAddress;
-                let output_buffer = device.create_buffer(&wgpu::BufferDescriptor {
-                    label: Some("native_surface_geometry_offscreen_readback"),
-                    size: output_buffer_size,
-                    usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
-                    mapped_at_creation: false,
-                });
-
-                let mut copy_encoder =
-                    device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
-                        label: Some("Native Geometry Surface RGBA Copy Encoder"),
-                    });
-                copy_encoder.copy_texture_to_buffer(
-                    crate::wgpu_compat::TexelCopyTextureInfo {
-                        texture: &color_texture,
-                        mip_level: 0,
-                        origin: wgpu::Origin3d::ZERO,
-                        aspect: wgpu::TextureAspect::All,
-                    },
-                    crate::wgpu_compat::TexelCopyBufferInfo {
-                        buffer: &output_buffer,
-                        layout: crate::wgpu_compat::TexelCopyBufferLayout {
-                            offset: 0,
-                            bytes_per_row: Some(padded_bytes_per_row),
-                            rows_per_image: Some(height),
-                        },
-                    },
-                    wgpu::Extent3d {
-                        width,
-                        height,
-                        depth_or_array_layers: 1,
-                    },
-                );
-                queue.submit(std::iter::once(copy_encoder.finish()));
-
-                Ok::<_, String>((output_buffer, padded_bytes_per_row))
-            })
-            .map_err(|error| error.to_string())??;
-        let data = readback_bytes(&access, &output_buffer, output_buffer.size() as usize).await?;
-        let mut pixels = vec![0u8; (width * height * 4) as usize];
-        for row in 0..height as usize {
-            let src_start = row * padded_bytes_per_row as usize;
-            let dst_start = row * width as usize * 4;
-            pixels[dst_start..dst_start + width as usize * 4]
-                .copy_from_slice(&data[src_start..src_start + width as usize * 4]);
-        }
-        drop(data);
-        Ok(pixels)
+        let scene = Arc::new(scene.clone());
+        self.render_shared_geometry_scene_to_rgba(&scene, camera, presentation)
+            .await
     }
 
     fn prepare_scene(
@@ -804,28 +594,6 @@ impl NativeSurfaceRenderContext {
         }
         if let Some(flags) = axes_camera_user_controlled {
             self.renderer.set_axes_camera_interaction_flags(flags);
-        }
-    }
-
-    fn prepare_geometry_scene(
-        &mut self,
-        scene: &GeometryScene,
-        camera: Option<&Camera>,
-        presentation: Option<&GeometryScenePresentation>,
-    ) {
-        self.background_policy = BackgroundPolicy::ThemeDriven;
-        self.apply_background_policy();
-        self.config.show_grid = scene.show_grid;
-        self.config.show_title = scene.title.is_some();
-
-        if let Some(presentation) = presentation {
-            self.renderer
-                .set_geometry_scene_with_presentation(scene.clone(), presentation.clone());
-        } else {
-            self.renderer.set_geometry_scene(scene.clone());
-        }
-        if let Some(camera) = camera {
-            *self.renderer.camera_mut() = camera.clone();
         }
     }
 
@@ -997,13 +765,14 @@ impl NativeSurfaceRenderContext {
             }
 
             let (rows, cols) = self.renderer.figure_axes_grid();
+            let expected_axes = self.renderer.figure_axes_count().max(1);
             log::debug!(
                 "runmat-plot: native_surface.render_scene_with_overlay.axes_grid rows={} cols={} plot_area_present={}",
                 rows,
                 cols,
                 plot_area_points.is_some()
             );
-            if rows * cols > 1 {
+            if self.renderer.figure_requires_axes_layout() {
                 log::debug!(
                     "runmat-plot: native_surface.render_scene_with_overlay.branch_subplot_axes"
                 );
@@ -1022,9 +791,9 @@ impl NativeSurfaceRenderContext {
                     rows,
                     cols,
                     existing_rect_count,
-                    rows * cols
+                    expected_axes
                 );
-                let rects = if overlay.plot_overlay.axes_plot_rects().len() == rows * cols {
+                let rects = if overlay.plot_overlay.axes_plot_rects().len() == expected_axes {
                     log::debug!(
                         "runmat-plot: native_surface.render_scene_with_overlay.subplot_rect_source_existing rects={}",
                         existing_rect_count
@@ -1263,6 +1032,12 @@ fn is_default_figure_bg(bg: glam::Vec4) -> bool {
 #[cfg(all(test, feature = "egui-overlay", not(target_arch = "wasm32")))]
 #[path = "native_surface/preparation_tests.rs"]
 mod preparation_tests;
+#[cfg(all(test, not(target_arch = "wasm32")))]
+#[path = "native_surface/frame_reuse_tests.rs"]
+mod frame_reuse_tests;
+#[cfg(all(test, not(target_arch = "wasm32")))]
+#[path = "native_surface/foreign_device_tests.rs"]
+mod foreign_device_tests;
 
 pub async fn create_headless_context(
     width: u32,
@@ -1453,7 +1228,26 @@ pub async fn render_geometry_scene_rgba_bytes_with_camera_theme_and_scale(
     context.set_theme_config(theme);
     context.set_pixels_per_point(pixels_per_point);
     context
-        .render_geometry_scene_to_rgba(&scene, Some(camera))
+        .render_shared_geometry_scene_to_rgba(&Arc::new(scene), Some(camera), None)
+        .await
+}
+
+/// As [`render_geometry_scene_rgba_bytes_with_camera_theme_and_scale`], drawn with
+/// `presentation` (edge width, display mode, section) as an interactive view would draw it.
+pub async fn render_geometry_scene_rgba_bytes_with_presentation(
+    scene: GeometryScene,
+    width: u32,
+    height: u32,
+    camera: &Camera,
+    theme: PlotThemeConfig,
+    pixels_per_point: f32,
+    presentation: &GeometryScenePresentation,
+) -> Result<Vec<u8>, String> {
+    let mut context = create_headless_context(width.max(1), height.max(1)).await?;
+    context.set_theme_config(theme);
+    context.set_pixels_per_point(pixels_per_point);
+    context
+        .render_shared_geometry_scene_to_rgba(&Arc::new(scene), Some(camera), Some(presentation))
         .await
 }
 
@@ -1465,7 +1259,10 @@ pub async fn render_geometry_scene_rgba_bytes_interactive_and_theme(
 ) -> Result<Vec<u8>, String> {
     let mut context = create_headless_context(width.max(1), height.max(1)).await?;
     context.set_theme_config(theme);
-    context.render_geometry_scene_to_rgba(&scene, None).await
+    let scene = Arc::new(scene);
+    context
+        .render_shared_geometry_scene_to_rgba(&scene, None, None)
+        .await
 }
 
 pub async fn render_geometry_scene_png_bytes_interactive_with_camera_and_theme(
@@ -1781,6 +1578,7 @@ mod parity_tests {
         )
         .await
         .unwrap();
+        live.set_presented_frame_retention(PresentedFrameRetention::EveryPresent);
         let mut figure = Figure::new();
         figure.set_subplot_grid(1, 2);
         for axis in 0..2 {
@@ -1826,14 +1624,12 @@ mod parity_tests {
                 vertex_count: 3,
                 triangle_count: 1,
                 progress_percent: None,
-                scalar_legend: Some(GeometrySceneScalarLegend {
-                    label: "structural.displacement magnitude".into(),
-                    unit: "m".into(),
-                    minimum: 0.0,
-                    maximum: 9.65e-10,
-                    limit: None,
-                    note: None,
-                }),
+                scalar_legend: Some(GeometrySceneScalarLegend::of_data(
+                    "structural.displacement magnitude".into(),
+                    "m".into(),
+                    0.0,
+                    9.65e-10,
+                )),
                 region_count: 1,
                 mapped_region_count: 1,
                 assembly_nodes: vec![],
@@ -1875,6 +1671,7 @@ mod parity_tests {
                     ])
                     .expect("2D pointer");
                 let frame = crate::collaboration::PresenceFrame {
+                    guides: Vec::new(),
                     revision: "accepted-run".into(),
                     target: None,
                     pointers: vec![crate::collaboration::PresencePointer {
@@ -1990,6 +1787,7 @@ mod parity_tests {
                         ])
                         .expect("geometry pointer");
                     let geometry_frame = crate::collaboration::PresenceFrame {
+                        guides: Vec::new(),
                         revision: "geometry-revision".into(),
                         target: None,
                         pointers: vec![crate::collaboration::PresencePointer {

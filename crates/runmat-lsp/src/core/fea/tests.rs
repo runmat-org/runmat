@@ -3,21 +3,17 @@ use runmat_lexer::fea::FeaKeyword;
 
 use super::*;
 
-fn check_with_overlays(
+fn check_in_roots(
     source: &str,
     physical_path: &std::path::Path,
     workspace_roots: &[PathBuf],
-    project_overlays: &[(PathBuf, Vec<u8>)],
 ) -> Result<FeaDocumentAnalysis, String> {
-    let prepared = FeaDocumentAnalysis::prepare_with_overlays(
+    futures::executor::block_on(analyze_fea_source(
         source,
         physical_path,
         workspace_roots,
-        project_overlays,
-    )?;
-    Ok(FeaDocumentAnalysis::from_checked(
-        prepared.check(Vec::new(), Vec::new())?,
-        BTreeMap::new(),
+        &BTreeMap::new(),
+        crate::core::analysis::CompatMode::RunMat,
     ))
 }
 
@@ -59,7 +55,7 @@ fn keyword_inventory_matches_the_lexer() {
     }
     assert_eq!(
         names.len(),
-        52,
+        59,
         "preserve the complete existing completion inventory"
     );
 }
@@ -120,8 +116,7 @@ study static {
     output displacement = analysis.solve.field.node.displacement
 }
 "#;
-    let analysis =
-        check_with_overlays(source, &main_path, &[temporary.path().to_path_buf()], &[]).unwrap();
+    let analysis = check_in_roots(source, &main_path, &[temporary.path().to_path_buf()]).unwrap();
 
     assert!(
         analysis.diagnostics(source).is_empty(),
@@ -248,8 +243,7 @@ fn invalid_unsaved_source_reports_production_parser_diagnostics() {
     let temporary = tempfile::tempdir().unwrap();
     let path = temporary.path().join("invalid.fea");
     let source = "study broken {\n";
-    let analysis =
-        check_with_overlays(source, &path, &[temporary.path().to_path_buf()], &[]).unwrap();
+    let analysis = check_in_roots(source, &path, &[temporary.path().to_path_buf()]).unwrap();
     let diagnostics = analysis.diagnostics(source);
     assert!(!diagnostics.is_empty());
     assert!(diagnostics.iter().any(|diagnostic| {
@@ -305,12 +299,18 @@ model impact_model {
 "#;
     std::fs::write(&study_path, source).unwrap();
 
-    let prepared = FeaDocumentAnalysis::prepare_with_overlays(
+    let project = futures::executor::block_on(
+        crate::core::project::ProjectContext::discover_from_source_name_async(study_path.to_str()),
+    )
+    .expect("the study's frozen project");
+    let root = fea_source_root(&study_path, &[source_root.to_path_buf()], Some(&project));
+    assert_eq!(root, source_root);
+    let prepared = futures::executor::block_on(prepare_fea_snapshot(
         source,
         &study_path,
-        &[source_root.to_path_buf()],
-        &[],
-    )
+        &root,
+        &BTreeMap::new(),
+    ))
     .unwrap();
     let requests = prepared.function_requests().unwrap();
     let unsaved_function = r#"% Unsaved editor overlay.
@@ -325,13 +325,13 @@ function y = impactPulse(t, scale)
 end
 "#;
     let source_overlays = BTreeMap::from([(function_path.clone(), unsaved_function.to_string())]);
-    let facts = resolve_project_facts(
-        prepared.source_root(),
+    let facts = futures::executor::block_on(resolve_project_facts(
+        &root,
         &requests,
-        &study_path,
+        Some(&project),
         crate::core::analysis::CompatMode::RunMat,
         &source_overlays,
-    )
+    ))
     .unwrap();
     assert_eq!(facts.functions.len(), 1);
     assert_eq!(facts.functions[0].inputs[0].name, "t");
@@ -391,4 +391,136 @@ end
         std::fs::read_to_string(&function_path).unwrap(),
         function_source
     );
+}
+
+const STEEL_MODULE: &str = r#"material steel {
+    mass_density = 7850 kg/m^3
+    elastic {
+        youngs_modulus = 200 GPa
+        poisson_ratio = 0.3
+    }
+}
+"#;
+
+/// A project with `materials.fea` at its root, `outside.fea` above it and a study folder.
+fn project_with_study_folder() -> (tempfile::TempDir, PathBuf, PathBuf) {
+    let temporary = tempfile::tempdir().unwrap();
+    let project = temporary.path().join("project");
+    let simulation = project.join("simulation");
+    std::fs::create_dir_all(&simulation).unwrap();
+    std::fs::write(project.join("materials.fea"), STEEL_MODULE).unwrap();
+    std::fs::write(temporary.path().join("outside.fea"), STEEL_MODULE).unwrap();
+    (temporary, project, simulation.join("study.fea"))
+}
+
+fn import_codes(analysis: &FeaDocumentAnalysis, source: &str) -> Vec<String> {
+    analysis
+        .diagnostics(source)
+        .into_iter()
+        .filter_map(|diagnostic| match diagnostic.code {
+            Some(lsp_types::NumberOrString::String(code)) => Some(code),
+            _ => None,
+        })
+        .filter(|code| code.starts_with("fea.module") || code.starts_with("fea.host"))
+        .collect()
+}
+
+fn imports_steel(analysis: &FeaDocumentAnalysis) -> bool {
+    analysis
+        .workspace_symbols(Some("steel"))
+        .iter()
+        .any(|symbol| symbol.location.uri.path().ends_with("/materials.fea"))
+}
+
+#[test]
+fn a_study_reads_a_sibling_folder_inside_the_project_root() {
+    let (_temporary, project, study) = project_with_study_folder();
+    let source = "import material steel from \"../materials.fea\"\n";
+    let analysis = check_in_roots(source, &study, std::slice::from_ref(&project)).unwrap();
+    assert!(
+        import_codes(&analysis, source).is_empty(),
+        "{:#?}",
+        analysis.diagnostics(source)
+    );
+    assert!(imports_steel(&analysis));
+}
+
+#[test]
+fn a_study_cannot_read_above_the_project_root() {
+    let (_temporary, project, study) = project_with_study_folder();
+    let source = "import material steel from \"../../outside.fea\"\n";
+    let analysis = check_in_roots(source, &study, std::slice::from_ref(&project)).unwrap();
+    let diagnostics = analysis.diagnostics(source);
+    assert!(
+        diagnostics.iter().any(|diagnostic| {
+            diagnostic.code
+                == Some(lsp_types::NumberOrString::String(
+                    "fea.module.invalid_path".into(),
+                ))
+                && diagnostic
+                    .message
+                    .contains("escapes the declared source root")
+        }),
+        "{diagnostics:#?}"
+    );
+    assert!(!imports_steel(&analysis));
+}
+
+#[test]
+fn without_workspace_roots_a_study_resolves_from_the_filesystem_root() {
+    let (_temporary, _project, study) = project_with_study_folder();
+    let source = "import material steel from \"../materials.fea\"\n";
+    let analysis = check_in_roots(source, &study, &[]).unwrap();
+    assert!(
+        import_codes(&analysis, source).is_empty(),
+        "{:#?}",
+        analysis.diagnostics(source)
+    );
+    assert!(imports_steel(&analysis));
+    assert_eq!(
+        fea_source_root(&study, &[], None),
+        study.ancestors().last().unwrap()
+    );
+}
+
+#[test]
+fn the_deepest_workspace_root_holding_the_study_wins() {
+    let (_temporary, project, study) = project_with_study_folder();
+    let simulation = study.parent().unwrap().to_path_buf();
+    let roots = [
+        project.clone(),
+        simulation.clone(),
+        PathBuf::from("/elsewhere"),
+    ];
+    assert_eq!(fea_source_root(&study, &roots, None), simulation);
+    assert_eq!(fea_source_root(&study, &roots[..1], None), project);
+}
+
+/// A study in `simulation/` may mesh a part in another folder of the project: the path climbs
+/// out of the study's folder but stays inside the project root. One more `..` leaves the root.
+#[test]
+fn a_study_in_a_subfolder_meshes_a_part_elsewhere_in_the_project() {
+    let (_temporary, project, study) = project_with_study_folder();
+    let body = project.join("mechanical").join("body");
+    std::fs::create_dir_all(&body).unwrap();
+    std::fs::write(body.join("landing_skid.part"), "part landing_skid {}\n").unwrap();
+    let escapes = |part: &str| {
+        let source = format!("geometry skid {{\n    file = \"{part}\"\n    units = mm\n}}\n");
+        let analysis = check_in_roots(&source, &study, std::slice::from_ref(&project)).unwrap();
+        let diagnostics = analysis.diagnostics(&source);
+        let escaped = diagnostics.iter().any(|diagnostic| {
+            diagnostic.code
+                == Some(lsp_types::NumberOrString::String(
+                    "fea.inspection.invalid_geometry_path".into(),
+                ))
+                && diagnostic
+                    .message
+                    .contains("escapes the declared source root")
+        });
+        (escaped, diagnostics)
+    };
+    let (escaped, diagnostics) = escapes("../mechanical/body/landing_skid.part");
+    assert!(!escaped, "{diagnostics:#?}");
+    let (escaped, diagnostics) = escapes("../../mechanical/body/landing_skid.part");
+    assert!(escaped, "{diagnostics:#?}");
 }

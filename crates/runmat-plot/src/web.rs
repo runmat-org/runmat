@@ -385,6 +385,9 @@ impl WebRenderer {
 
     fn pick_axes_index(&self, position: glam::Vec2) -> usize {
         for (i, (x, y, w, h)) in self.last_axes_viewports_px.iter().enumerate() {
+            if !self.plot_renderer.figure_axes_is_live(i) {
+                continue;
+            }
             let x0 = *x as f32;
             let y0 = *y as f32;
             let x1 = (*x + *w) as f32;
@@ -393,7 +396,9 @@ impl WebRenderer {
                 return i;
             }
         }
-        0
+        (0..self.plot_renderer.figure_axes_count())
+            .find(|index| self.plot_renderer.figure_axes_is_live(*index))
+            .unwrap_or(0)
     }
 
     /// Apply a user interaction event (mouse/keyboard) to the renderer state.
@@ -666,14 +671,14 @@ impl WebRenderer {
     /// Render a chunked geometry scene directly into the canvas.
     pub fn render_geometry_scene(
         &mut self,
-        scene: crate::GeometryScene,
+        scene: impl Into<std::sync::Arc<crate::GeometryScene>>,
     ) -> Result<(), WebRendererError> {
         self.render_geometry_scene_with_presentation(scene, None)
     }
 
     pub fn render_geometry_scene_with_presentation(
         &mut self,
-        scene: crate::GeometryScene,
+        scene: impl Into<std::sync::Arc<crate::GeometryScene>>,
         presentation: Option<GeometryScenePresentation>,
     ) -> Result<(), WebRendererError> {
         self.background_policy = BackgroundPolicy::ThemeDriven;
@@ -1111,7 +1116,6 @@ impl WebRenderer {
                 }
 
                 // Render plot content into the plot area viewport(s) using the camera-to-viewport path.
-                let (rows, cols) = self.plot_renderer.figure_axes_grid();
                 let expected_axes = self.plot_renderer.figure_axes_count().max(1);
                 let rect_points = plot_area_points.unwrap_or_else(|| {
                     egui::Rect::from_min_size(
@@ -1122,7 +1126,7 @@ impl WebRenderer {
                         ),
                     )
                 });
-                let axes_plot_rects = if rows * cols > 1 || expected_axes > 1 {
+                let axes_plot_rects = if self.plot_renderer.figure_requires_axes_layout() {
                     if overlay.plot_overlay.axes_plot_rects().len() == expected_axes {
                         overlay.plot_overlay.axes_plot_rects().to_vec()
                     } else {

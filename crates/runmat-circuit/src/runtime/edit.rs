@@ -37,6 +37,10 @@ pub struct EditOutput {
     pub files: Vec<FileChange>,
     /// One line on what the edit did.
     pub summary: String,
+    /// A results table a report command answers with (Net length): `title`, `summary`,
+    /// `columns` and `rows` (`cells`, `items`), the shape the Desktop's results pane shows.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub report: Option<Value>,
 }
 
 /// Why an edit did nothing: the files don't compile, or the edit can't be made.
@@ -98,6 +102,16 @@ pub fn edit(
         ),
         diagnostics,
     })?;
+    let layout_path = layout_path_for(&project.circuit_path);
+    // The starter is given once: a starter that reads to no board refuses below, as before.
+    if project.layout.is_none()
+        && request.command == super::STARTS_BOARD
+        && !files.contains_key(&layout_path)
+    {
+        return super::with_starter_layout(files, &layout_path, &project.own.name, |files| {
+            edit(path, text, files, request)
+        });
+    }
     match request.command.as_str() {
         "schematic.update-board" => update_board(&project, request),
         "board.update-schematic" => update_schematic(&project, request),
@@ -115,6 +129,14 @@ pub fn edit(
         "library.place" => super::library_edit::place(&project, request),
         "circuit.set-property" => super::set_property::run(&project, request),
         "study.new" => super::board_study::run(&project, files, request),
+        c if super::context_edit::COMMANDS.contains(&c) => {
+            super::context_edit::run(&project, request)
+        }
+        c if super::component_cmds::COMMANDS.contains(&c) => {
+            super::component_cmds::run(&project, request)
+        }
+        "circuit.net-class" => super::rule_edit::net_class(&project, request),
+        "circuit.net-length" => super::net_length::run(&project, request),
         c if super::schematic_edit::COMMANDS.contains(&c) => {
             super::schematic_edit::run(&project, files, request)
         }
@@ -170,6 +192,7 @@ pub fn edit(
                 }
             }
             Ok(EditOutput {
+                report: None,
                 summary,
                 files: vec![file_change(&layout.path, &layout.text, change)],
             })
@@ -216,7 +239,7 @@ fn selected_lines(values: &serde_json::Map<String, Value>, prefix: &str) -> BTre
         .collect()
 }
 
-fn strings(v: Option<&Value>) -> Vec<String> {
+pub(super) fn strings(v: Option<&Value>) -> Vec<String> {
     match v {
         Some(Value::String(s)) => vec![s.clone()],
         Some(Value::Array(items)) => items
@@ -232,7 +255,7 @@ fn flag(values: &serde_json::Map<String, Value>, id: &str, default: bool) -> boo
     values.get(id).and_then(Value::as_bool).unwrap_or(default)
 }
 
-fn number(values: &serde_json::Map<String, Value>, id: &str) -> Option<f64> {
+pub(super) fn number(values: &serde_json::Map<String, Value>, id: &str) -> Option<f64> {
     values.get(id).and_then(Value::as_f64)
 }
 
@@ -311,6 +334,7 @@ fn update_board(project: &Project, request: &EditRequest) -> Result<EditOutput, 
     )
     .map_err(failure)?;
     Ok(EditOutput {
+        report: None,
         summary: eco_summary(&plan, &report),
         files: vec![file_change(&layout.path, &layout.text, change)],
     })
@@ -429,6 +453,7 @@ fn update_schematic(project: &Project, request: &EditRequest) -> Result<EditOutp
     }
     files.extend(lock_change(project, &lock, false));
     Ok(EditOutput {
+        report: None,
         summary: format!("back-annotated {} change(s)", applied.len()),
         files,
     })
@@ -475,6 +500,7 @@ fn room_formats(project: &Project, request: &EditRequest) -> Result<EditOutput, 
     let tracks: usize = report.copies.iter().map(|c| c.tracks_added.len()).sum();
     let pours: usize = report.copies.iter().map(|c| c.pours_added.len()).sum();
     Ok(EditOutput {
+        report: None,
         summary: format!(
             "copied {source} into {} room(s): {placed} part(s) placed, {tracks} track(s) and {pours} pour(s) copied",
             report.copies.len()
@@ -484,7 +510,11 @@ fn room_formats(project: &Project, request: &EditRequest) -> Result<EditOutput, 
 }
 
 /// An Outline node id or designator → the site or designator `apply_board_edit` resolves.
-fn site_of(board: &Board, sites: &BTreeMap<ItemId, String>, id: &str) -> Result<String, EditError> {
+pub(super) fn site_of(
+    board: &Board,
+    sites: &BTreeMap<ItemId, String>,
+    id: &str,
+) -> Result<String, EditError> {
     let (kind, rest) = id.split_once(':').unwrap_or(("", id));
     match kind {
         "component" | "footprint" | "" => {
@@ -659,6 +689,9 @@ pub(super) fn board_edit(
                 diameter: mm_value(values, "diameter").unwrap_or(crate::geom::mm(1.0)),
             })
         }
+        "board.place" => super::placement::place(board, sites, request),
+        "board.align" => super::placement::align(board, sites, request),
+        "board.rules" => super::rule_edit::rule(board, request),
         "board.route" | "board.place-via" | "board.pour" | "board.keepout" | "board.room"
         | "board.dimension" | "board.outline" | "board.fill" => {
             crate::drawn::drawn_edit(board, command, values, &request.selection)

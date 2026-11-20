@@ -117,7 +117,7 @@ fn placement_fields_move_lock_and_flip_the_footprint() {
     );
     let next = ok(&files, "component:C900", "y", json!("30 mm"));
     assert!(
-        line(&next[LAYOUT], "footprint C900").contains("at = [97, 30]"),
+        line(&next[LAYOUT], "footprint C900").contains("at = [97, 30 mm]"),
         "{}",
         line(&next[LAYOUT], "footprint C900")
     );
@@ -151,7 +151,7 @@ fn a_tracks_width_and_a_vias_sizes_are_written_on_that_item_only() {
     let track = *board.tracks.keys().next().expect("a track");
     let widths = |text: &str| {
         text.lines()
-            .filter(|l| l.trim_start().starts_with("track ") && l.contains("width = 0.5,"))
+            .filter(|l| l.trim_start().starts_with("track ") && l.contains("width = 0.5 mm,"))
             .count()
     };
     let next = ok(
@@ -184,6 +184,57 @@ fn a_tracks_width_and_a_vias_sizes_are_written_on_that_item_only() {
             "the via's drill must be smaller than its diameter"
         );
     }
+}
+
+/// The Desktop value field's edit for a literal typed with a unit.
+fn typed(value: f64, unit: &str) -> Value {
+    json!({
+        "kind": "value",
+        "value": { "form": "quantity", "value": value, "unit": unit },
+        "text": format!("{value} {unit}"),
+        "scope": { "scope": "all" },
+    })
+}
+
+#[test]
+fn a_value_typed_in_another_unit_is_written_as_typed() {
+    let files = files();
+    let parsed = runmat_circuit::syntax::board::parse_board(LAYOUT, &files[LAYOUT]);
+    let board = parsed.board.expect("the io layout reads");
+    let track = format!("track:{}", board.tracks.keys().next().expect("a track").0);
+    // A track width in mil, from the value field and as text.
+    let next = ok(&files, &track, "width", typed(12.0, "mil"));
+    let changed: Vec<&str> = next[LAYOUT]
+        .lines()
+        .filter(|l| l.contains("width = 12 mil"))
+        .collect();
+    assert_eq!(changed.len(), 1, "{changed:?}");
+    assert_eq!(next[LAYOUT].lines().count(), files[LAYOUT].lines().count());
+    // It reads as 12 mil: 0.3048 mm.
+    let reread = runmat_circuit::syntax::board::parse_board(LAYOUT, &next[LAYOUT]);
+    let width = reread
+        .board
+        .expect("reads")
+        .tracks
+        .values()
+        .next()
+        .unwrap()
+        .width;
+    assert_eq!(width, 304_800);
+    // A footprint's x in inches keeps its y as written.
+    let next = ok(&files, "component:C900", "x", typed(3.5, "in"));
+    let statement = line(&next[LAYOUT], "footprint C900");
+    assert!(statement.contains("at = [3.5 in, 24]"), "{statement}");
+    // Then moving it in y keeps the x as typed: a rewritten statement keeps its written values.
+    let next = ok(&next, "component:C900", "y", json!(25));
+    let statement = line(&next[LAYOUT], "footprint C900");
+    assert!(statement.contains("at = [3.5 in, 25]"), "{statement}");
+    // A bare number is millimetres, written as the printer writes it.
+    let next = ok(&next, &track, "width", json!(0.25));
+    assert!(next[LAYOUT].lines().any(|l| l.contains("width = 0.25,")));
+    // A component value keeps its unit as written.
+    let next = ok(&files, "component:C900", "value", json!("220 nF"));
+    assert!(line(&next[CIRCUIT], "component C900").contains("value = 220 nF"));
 }
 
 #[test]
@@ -288,4 +339,119 @@ fn fitting_needs_the_variant_and_shown_fields_are_refused() {
     })
     .expect_err("empty");
     assert_eq!(e.message, "Value can't be empty");
+}
+
+/// The compiled projection of `files`.
+fn index(files: &Files) -> runmat_circuit::index::CircuitIndex {
+    let mut session = Session::new();
+    let out = session.compile(CIRCUIT, &files[CIRCUIT], files, &CompileOptions::default());
+    out.index.expect("the project compiles")
+}
+
+#[test]
+fn a_footprints_placement_shows_as_written_while_it_still_reads_so() {
+    let files = files();
+    let next = ok(&files, "component:C900", "x", typed(3.5, "in"));
+    let next = ok(&next, "component:C900", "rotation", json!("0.5 rad"));
+    let board = index(&next).board.expect("a board");
+    let row = board
+        .footprints
+        .iter()
+        .find(|f| f.reference == "C900")
+        .unwrap();
+    assert!((row.x_mm - 88.9).abs() < 1e-6, "{}", row.x_mm);
+    assert_eq!(row.written.get("x").map(String::as_str), Some("3.5 in"));
+    assert_eq!(
+        row.written.get("rotation").map(String::as_str),
+        Some("0.5 rad")
+    );
+    // y is written in mm, which Properties shows as the number.
+    assert_eq!(row.written.get("y"), None);
+    // Moved in mm, x shows the new number.
+    let moved = ok(&next, "component:C900", "x", json!(90));
+    let board = index(&moved).board.expect("a board");
+    let row = board
+        .footprints
+        .iter()
+        .find(|f| f.reference == "C900")
+        .unwrap();
+    assert_eq!(row.written.get("x"), None);
+    assert_eq!(
+        row.written.get("rotation").map(String::as_str),
+        Some("0.5 rad")
+    );
+}
+
+#[test]
+fn a_component_param_is_written_as_typed_and_read_by_its_name() {
+    let mut files = files();
+    let circuit = files[CIRCUIT].replace(
+        "component C900 = { part = \"C0805-10U\" }",
+        "component C900 = { part = \"C0805-10U\", mass = 0.35 g }",
+    );
+    files.insert(CIRCUIT.into(), circuit);
+    let row = |files: &Files| {
+        index(files)
+            .components
+            .into_iter()
+            .find(|c| c.designator == "C900")
+            .unwrap()
+    };
+    // The projection carries the param as written, for Properties to edit.
+    assert_eq!(
+        row(&files).written.get("mass").map(String::as_str),
+        Some("0.35 g")
+    );
+    // A mass typed in grams is written as typed and reads as grams.
+    let next = ok(&files, "component:C900", "param.mass", json!("0.5 g"));
+    assert!(line(&next[CIRCUIT], "component C900").contains("mass = 0.5 g"));
+    assert_eq!(
+        row(&next).written.get("mass").map(String::as_str),
+        Some("0.5 g")
+    );
+    // A library part's param is written on the component, overriding the part's.
+    let library = row(&files);
+    let (param, _) = library
+        .params
+        .iter()
+        .find(|(name, _)| name.as_str() == "voltage_rating")
+        .expect("the part rates its voltage");
+    let next = ok(
+        &files,
+        "component:C900",
+        &format!("param.{param}"),
+        json!("25 V"),
+    );
+    assert!(line(&next[CIRCUIT], "component C900").contains("voltage_rating = 25 V"));
+    // A value of another kind is refused.
+    let refused = set(
+        &files,
+        "component:C900",
+        "param.mass",
+        json!("5 V"),
+        CompileOptions::default(),
+    )
+    .expect_err("volts aren't a mass");
+    assert!(refused.message.contains("mass"), "{}", refused.message);
+    // So is a param the component doesn't have.
+    assert!(set(
+        &files,
+        "component:C900",
+        "param.color",
+        json!("red"),
+        CompileOptions::default()
+    )
+    .is_err());
+}
+
+#[test]
+fn every_component_names_the_package_its_footprint_uses() {
+    let index = index(&files());
+    let c1 = index
+        .components
+        .iter()
+        .find(|c| c.designator == "C1")
+        .unwrap();
+    assert_eq!(c1.footprint.as_deref(), Some("C_0402_1005Metric_IPCN"));
+    assert!(index.components.iter().all(|c| c.footprint.is_some()));
 }
