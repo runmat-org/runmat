@@ -83,6 +83,13 @@ if (-not (Get-Service sshd -ErrorAction SilentlyContinue)) {
 }
 Start-Service sshd -ErrorAction SilentlyContinue
 
+# Java 21 for runmat-java and the AOT Java adapter tests (GitHub's images ship a JDK).
+if (-not (Test-Path "$state\jdk21-v1")) {
+    & 'C:\ProgramData\chocolatey\bin\choco.exe' install temurin21 --no-progress
+    if ($LASTEXITCODE -ne 0) { throw "Temurin 21 install failed ($LASTEXITCODE)" }
+    New-Item -ItemType File -Force -Path "$state\jdk21-v1" | Out-Null
+}
+
 # Jobs find the shared rustup proxies on PATH.
 $machinePath = [Environment]::GetEnvironmentVariable('Path', 'Machine')
 if ($machinePath -notlike '*E:\ci-cache\cargo\bin*') {
@@ -148,6 +155,7 @@ foreach ($entry in $slots) {
 
     $envFile = @"
 CI_SLOT=$slot
+JAVA_HOME=$([Environment]::GetEnvironmentVariable('JAVA_HOME', 'Machine'))
 TEMP=D:\ci-work\$slot\tmp
 TMP=D:\ci-work\$slot\tmp
 CARGO_HOME=E:\ci-cache\cargo

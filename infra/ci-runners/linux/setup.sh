@@ -53,6 +53,11 @@ if [[ ! -f /var/lib/ci-runner/packages-v1 ]]; then
   mkdir -p /var/lib/ci-runner && touch /var/lib/ci-runner/packages-v1
 fi
 
+# Java 21 for runmat-java and the AOT Java adapter tests (GitHub's images ship a JDK).
+if [[ ! -d /usr/lib/jvm/java-21-openjdk-amd64 ]]; then
+  DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends openjdk-21-jdk-headless
+fi
+
 # Concurrent jobs all run `sudo apt-get update/install`. Serialize them, and
 # keep Ubuntu's background apt jobs from holding the lock.
 cat > /usr/local/sbin/apt-get <<'WRAP'
@@ -155,6 +160,7 @@ TMPDIR=/ci/work/$slot/tmp
 CARGO_HOME=/ci/cache/cargo
 RUSTUP_HOME=/ci/cache/rustup/$slot
 RUSTUP_INIT_SKIP_SUDO_CHECK=yes
+JAVA_HOME=/usr/lib/jvm/java-21-openjdk-amd64
 RUNMAT_CI_CACHE=/ci/cache
 RUNMAT_CI_TOOL=/opt/ci/common/ci_cache.py
 RUNMAT_VCPKG_ROOT=/ci/cache/vcpkg-runmat

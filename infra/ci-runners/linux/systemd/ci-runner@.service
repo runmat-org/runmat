@@ -14,7 +14,9 @@ Environment=HOME=/ci/work/%i/home
 # Before the runner starts: release locks and wipe the slot, in case a crash skipped the job-completed hook.
 ExecStartPre=+/bin/sh -c '/usr/bin/python3 /opt/ci/common/ci_cache.py slot-start %i && mkdir -p /ci/work/%i/w /ci/work/%i/home /ci/work/%i/tmp /ci/work/%i/cold-target && chown -R runner:runner /ci/work/%i'
 ExecStart=/opt/ci-runner/%i/run.sh
-KillMode=process
+# Stop the whole slot (listener, worker and job processes). A listener left
+# running would keep taking jobs while the restarted slot wipes its workspace.
+KillMode=mixed
 KillSignal=SIGTERM
 TimeoutStopSec=5min
 Restart=always
