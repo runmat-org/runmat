@@ -77,6 +77,18 @@ pub(super) fn write_captured_evidence(
 }
 
 pub(super) fn atomic_write_bytes(path: &PathBuf, bytes: &[u8]) -> Result<(), String> {
+    // The installed provider owns atomic publication when it offers it. A
+    // pinned execution must use it: it publishes outputs atomically but owns
+    // no rename. Providers without it keep the staged write and rename.
+    match runmat_filesystem::atomic_replace(path, bytes) {
+        Ok(_) => return Ok(()),
+        Err(err) if err.kind() == ErrorKind::Unsupported => {}
+        Err(err) => {
+            return Err(format!(
+                "failed to atomically persist study evidence file: {err}"
+            ))
+        }
+    }
     // Publication also runs in browser workers, which have no process ID.
     // Independent executions need independent staging names, not a wall clock
     // or a counter shared only within one worker.

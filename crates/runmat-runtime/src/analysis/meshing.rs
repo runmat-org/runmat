@@ -269,15 +269,24 @@ impl runmat_meshing_core::MeshingCancellationSignal for MeshPersistenceCancellat
 fn persist_canonical(path: &Path, bytes: &[u8]) -> Result<(), String> {
     // The browser's artifacts belong to the installed provider, not std::fs.
     // Only an authoritative NotFound permits creating a new immutable artifact.
-    let exists = match runmat_filesystem::metadata(path) {
-        Ok(_) => true,
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => false,
+    let existing_len = match runmat_filesystem::metadata(path) {
+        Ok(metadata) => Some(metadata.len()),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => None,
         Err(error) => return Err(format!("failed to inspect {}: {error}", path.display())),
     };
-    if exists {
-        let mut existing = runmat_filesystem::File::open(path)
+    if let Some(existing_len) = existing_len {
+        // A different length is a collision without reading it. An equal
+        // length is read through the provider's own read, which every provider
+        // supports; a pinned execution refuses synchronous opens.
+        if existing_len != bytes.len() as u64 {
+            return Err(format!(
+                "canonical meshing output collision at {}",
+                path.display()
+            ));
+        }
+        let existing = runmat_filesystem::read(path)
             .map_err(|error| format!("failed to open {}: {error}", path.display()))?;
-        return compare_canonical(path, bytes, &mut existing);
+        return compare_canonical(path, bytes, &mut std::io::Cursor::new(existing));
     }
     atomic_write_bytes(&path.to_path_buf(), bytes)
 }

@@ -242,6 +242,7 @@ mod tests {
 
     #[test]
     fn pair_write_protects_and_replaces_existing_destinations() {
+        let _serial = runmat_filesystem::provider_override_lock();
         let directory = tempfile::TempDir::new().expect("temporary directory");
         let mesh_path = directory.path().join("mesh.cbor");
         let evidence_path = directory.path().join("evidence.cbor");
@@ -276,5 +277,37 @@ mod tests {
         .expect("forced replacement");
         assert_eq!(std::fs::read(&mesh_path).unwrap(), b"second mesh");
         assert_eq!(std::fs::read(&evidence_path).unwrap(), b"second evidence");
+    }
+
+    #[test]
+    fn pair_write_publishes_and_replaces_inside_a_pinned_execution() {
+        use runmat_filesystem::pinned::{InputManifest, PinnedFsProvider};
+        let _serial = runmat_filesystem::provider_override_lock();
+        let base = std::sync::Arc::new(runmat_filesystem::MemoryFsProvider::new());
+        let pinned = PinnedFsProvider::new(
+            base.clone(),
+            InputManifest {
+                snapshot_id: "capture".into(),
+                entries: Vec::new(),
+            },
+        )
+        .unwrap();
+        let pinned_provider = runmat_filesystem::replace_provider(std::sync::Arc::new(pinned));
+        let mesh_path = Path::new("/meshes/mesh.cbor");
+        let evidence_path = Path::new("/meshes/evidence.cbor");
+        write_canonical_artifact_pair(mesh_path, b"first", evidence_path, b"first", false)
+            .expect("first publication");
+        write_canonical_artifact_pair(mesh_path, b"second", evidence_path, b"second", true)
+            .expect("forced replacement");
+        drop(pinned_provider);
+        let _base_provider = runmat_filesystem::replace_provider(base);
+        assert_eq!(runmat_filesystem::read(mesh_path).unwrap(), b"second");
+        assert_eq!(runmat_filesystem::read(evidence_path).unwrap(), b"second");
+        assert_eq!(
+            runmat_filesystem::read_dir(Path::new("/meshes"))
+                .unwrap()
+                .len(),
+            2
+        );
     }
 }

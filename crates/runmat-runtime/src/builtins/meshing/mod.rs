@@ -340,6 +340,7 @@ mod tests {
 
     #[test]
     fn save_and_load_round_trip_only_the_canonical_artifacts() {
+        let _serial = runmat_filesystem::provider_override_lock();
         let directory = tempfile::TempDir::new().expect("temporary directory");
         let mesh_path = directory.path().join("part.solver-mesh.cbor");
         let evidence_path = directory.path().join("part.meshing-evidence.cbor");

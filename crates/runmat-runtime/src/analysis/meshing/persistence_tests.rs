@@ -135,3 +135,42 @@ fn borrowed_mesh_encoding_observes_runtime_cancellation_and_preserves_original()
         );
     }
 }
+
+#[test]
+fn mesh_and_study_evidence_publish_inside_a_pinned_execution() {
+    use runmat_filesystem::pinned::{InputManifest, PinnedFsProvider};
+    let _guard = crate::analysis::tests::analysis_test_guard();
+    let base = std::sync::Arc::new(runmat_filesystem::MemoryFsProvider::new());
+    let pinned = PinnedFsProvider::new(
+        base.clone(),
+        InputManifest {
+            snapshot_id: "capture".into(),
+            entries: Vec::new(),
+        },
+    )
+    .unwrap();
+    let pinned_provider = runmat_filesystem::replace_provider(std::sync::Arc::new(pinned));
+    let mesh = Path::new("/fixture.solver-mesh.cbor");
+    persist_canonical(mesh, b"mesh").unwrap();
+    persist_canonical(mesh, b"mesh").unwrap();
+    assert!(persist_canonical(mesh, b"other")
+        .unwrap_err()
+        .contains("collision"));
+    assert!(persist_canonical(mesh, b"mesk")
+        .unwrap_err()
+        .contains("collision"));
+    let evidence = PathBuf::from("/study.json");
+    atomic_write_bytes(&evidence, b"first").unwrap();
+    atomic_write_bytes(&evidence, b"replacement").unwrap();
+    drop(pinned_provider);
+    let _base_provider = runmat_filesystem::replace_provider(base);
+    assert_eq!(runmat_filesystem::read(mesh).unwrap(), b"mesh");
+    assert_eq!(runmat_filesystem::read(&evidence).unwrap(), b"replacement");
+    let mut names: Vec<_> = runmat_filesystem::read_dir(Path::new("/"))
+        .unwrap()
+        .into_iter()
+        .map(|entry| entry.file_name().to_string_lossy().into_owned())
+        .collect();
+    names.sort();
+    assert_eq!(names, ["fixture.solver-mesh.cbor", "study.json"]);
+}
