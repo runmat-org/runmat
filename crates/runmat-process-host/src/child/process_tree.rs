@@ -30,8 +30,35 @@ pub(super) fn configure(command: &mut Command, placement: ProcessGroupPlacement)
 
 #[cfg(windows)]
 pub(super) fn configure(command: &mut Command, _placement: ProcessGroupPlacement) {
+    command.creation_flags(windows_creation_flags(!host_has_terminal()));
+}
+
+/// Whether this process's standard streams reach a terminal. The Desktop app and its workers are
+/// GUI programs with no terminal; the CLI run from a terminal has one.
+#[cfg(windows)]
+fn host_has_terminal() -> bool {
+    use std::io::IsTerminal;
+    std::io::stdin().is_terminal()
+        || std::io::stdout().is_terminal()
+        || std::io::stderr().is_terminal()
+}
+
+/// Creation flags for a child started by this process on Windows.
+///
+/// A host without a terminal (the Desktop app and its workers, which are GUI programs) starts
+/// children with `CREATE_NO_WINDOW`. Without it, every console program such a host starts (`reg`,
+/// `cmd`, a console helper) opens its own console window, which shows on screen until the child exits.
+/// A host with a terminal keeps sharing it with its children. The flag has no effect on GUI
+/// children, which never get a console.
+#[cfg(any(windows, test))]
+fn windows_creation_flags(host_has_no_console_window: bool) -> u32 {
     const CREATE_NEW_PROCESS_GROUP: u32 = 0x0000_0200;
-    command.creation_flags(CREATE_NEW_PROCESS_GROUP);
+    const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+    if host_has_no_console_window {
+        CREATE_NEW_PROCESS_GROUP | CREATE_NO_WINDOW
+    } else {
+        CREATE_NEW_PROCESS_GROUP
+    }
 }
 
 #[cfg(not(any(unix, windows)))]
@@ -417,7 +444,9 @@ pub async fn terminate_id(process_id: u32) -> std::io::Result<()> {
 
     #[cfg(windows)]
     {
-        let status = Command::new("taskkill")
+        let mut command = Command::new("taskkill");
+        configure(&mut command, ProcessGroupPlacement::OwnGroup);
+        let status = command
             .args(["/PID", &process_id.to_string(), "/T", "/F"])
             .status()
             .await?;
@@ -462,7 +491,9 @@ pub fn is_alive(process_id: u32) -> bool {
 
     #[cfg(windows)]
     {
+        use std::os::windows::process::CommandExt;
         std::process::Command::new("tasklist")
+            .creation_flags(windows_creation_flags(!host_has_terminal()))
             .args(["/FI", &format!("PID eq {process_id}"), "/FO", "CSV", "/NH"])
             .output()
             .ok()
@@ -502,6 +533,15 @@ fn unix_process_id(process_id: u32) -> std::io::Result<i32> {
                 "process identity is outside the positive native PID range",
             )
         })
+}
+
+#[cfg(test)]
+mod windows_creation_flag_tests {
+    #[test]
+    fn hosts_without_a_console_window_start_children_without_one() {
+        assert_eq!(super::windows_creation_flags(true), 0x0800_0200);
+        assert_eq!(super::windows_creation_flags(false), 0x0000_0200);
+    }
 }
 
 #[cfg(all(
