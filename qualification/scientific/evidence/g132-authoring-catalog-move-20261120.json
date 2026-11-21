@@ -1,10 +1,21 @@
 {
  "schema_version": 1,
- "source_revision": "24074bbb356f5ed8d0f613fab5aa595a83548164",
+ "source_revision": "0d83068b4411ec015bc88d1ce776b22cfafbd672",
  "measured_revision": "dac88251baaa60d5834296cbce89c727092da233",
  "changed_scientific_inputs": [
+  "crates/runmat-filesystem/src/lib.rs",
+  "crates/runmat-filesystem/src/pinned/provider.rs",
+  "crates/runmat-filesystem/src/pinned/provider/owned.rs",
+  "crates/runmat-filesystem/src/pinned/tests.rs",
+  "crates/runmat-process-host/src/child/process_tree.rs",
   "crates/runmat-runtime/src/analysis/contracts.rs",
-  "crates/runmat-runtime/src/analysis/contracts/authoring_catalog.rs"
+  "crates/runmat-runtime/src/analysis/contracts/authoring_catalog.rs",
+  "crates/runmat-runtime/src/analysis/evidence_filesystem.rs",
+  "crates/runmat-runtime/src/analysis/meshing.rs",
+  "crates/runmat-runtime/src/analysis/meshing/persistence_tests.rs",
+  "crates/runmat-runtime/src/builtins/io/repl_fs/file_transfer/tests.rs",
+  "crates/runmat-runtime/src/builtins/meshing/mod.rs",
+  "crates/runmat-runtime/src/meshing/persistence.rs"
  ],
  "checks": [
   {
@@ -26,7 +37,18 @@
    "name": "fea-review",
    "revision": "24074bbb356f5ed8d0f613fab5aa595a83548164",
    "result": "FEA gave written OK on 2026-11-20 to conserve the four dac88251ba receipts across 24074bbb35."
+  },
+  {
+   "name": "pinned-run-repair",
+   "revision": "d10736298dcbd5f0bdc3af9fc421083428ba1329",
+   "host": "local (git diff review)",
+   "method": "git diff 0dc53c17c3 d10736298d: 11 paths, all file publication or tests; no solver, input, material, meshing-algorithm or threshold code."
+  },
+  {
+   "name": "fea-review-pinned",
+   "revision": "d10736298dcbd5f0bdc3af9fc421083428ba1329",
+   "result": "FEA reviewed d10736298d against 0dc53c17c3 on 2026-11-20. The change alters only how files are published and which files a pinned execution may rename, replace or remove: study evidence and canonical meshes publish through the provider's atomic replace, the canonical-mesh collision check reads through the provider, and a pinned execution may now move and remove the files and folders it created while inputs, mounts and peer files stay refused. No solver arithmetic, model inputs, materials, meshing algorithms, dependencies, features or qualification thresholds changed, and receipt workloads run without an input manifest, so they never use the pinned provider. FEA approves conserving the current scientific receipts across d10736298d."
   }
  ],
- "review": "Conserves the fresh 0.7.2 scientific measurements on dac88251ba across G132 24074bbb35: pure move of analysis_authoring_workflow, analysis_procedure_ids, analysis_output_operation_ids, analysis_language_reference_paths into contracts/authoring_catalog.rs, re-exported at the same path; no behaviour change; debt ceiling file lowered 2467\u21922442; FEA OK 2026-11-20. Every line removed from contracts.rs is in the new module; the only other lines are the mod line, the re-export, the module doc comment, its import and one test import. scripts/development/fea-module-size-debt.json is not a scientific input. Solver arithmetic, model inputs, dependencies, features and thresholds are unchanged. This review is not a rerun of the scientific or performance measurements."
+ "review": "Conserves the fresh 0.7.2 scientific measurements on dac88251ba across G132 24074bbb35: pure move of analysis_authoring_workflow, analysis_procedure_ids, analysis_output_operation_ids, analysis_language_reference_paths into contracts/authoring_catalog.rs, re-exported at the same path; no behaviour change; debt ceiling file lowered 2467\u21922442; FEA OK 2026-11-20. Every line removed from contracts.rs is in the new module; the only other lines are the mod line, the re-export, the module doc comment, its import and one test import. scripts/development/fea-module-size-debt.json is not a scientific input. Solver arithmetic, model inputs, dependencies, features and thresholds are unchanged. This review is not a rerun of the scientific or performance measurements. Also conserved across Pinned-run repair d10736298d (FEA, 2026-11-20): study evidence and canonical meshes publish through the provider's atomic replace; the canonical-mesh collision check reads through the provider; a pinned execution may move and remove only the files and folders it created. File publication only; no solver arithmetic, model inputs, materials, meshing algorithms, dependencies, features or thresholds changed, and the receipt workloads run without an input manifest, so they never use the pinned provider. Design reviewed the diff on 2026-11-20."
 }

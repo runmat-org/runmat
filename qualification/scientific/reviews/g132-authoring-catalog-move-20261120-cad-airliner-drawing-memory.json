@@ -6,8 +6,8 @@
   "encoding": "git-mode-type-blob-path-tuples-v1"
  },
  "accepted_inputs": {
-  "sha256": "3e8870de46a03715aacaa8ef0b57a056df50e263427bc1e52ccce5cd5932db3d",
-  "files": 26449,
+  "sha256": "1f9a9bb66c24e696b58dd2a50bef72e0b8cd121f1e9b4defcd4d7030c0e9d7ba",
+  "files": 26450,
   "encoding": "git-mode-type-blob-path-tuples-v1"
  },
  "cohorts": [
@@ -16,10 +16,76 @@
  "qualification_evidence": [
   {
    "path": "qualification/scientific/evidence/g132-authoring-catalog-move-20261120.json",
-   "sha256": "34313309c1c6b7a3a13d1ab7c32312333032e969c3a7513f0b3e354bda7a97c2"
+   "sha256": "75cafe8825e56024a66c0f92ad3f67fca98c235bb4a2d6cb71989b35070cacd1"
   }
  ],
  "changed_inputs": [
+  {
+   "path": "crates/runmat-filesystem/src/lib.rs",
+   "before": [
+    "100644",
+    "blob",
+    "fa417adbe4a9ed7b55b597fa16be23d4c1e79cb4"
+   ],
+   "after": [
+    "100644",
+    "blob",
+    "a24d36278d3ec608b134d9d94e1439a833b9fa91"
+   ],
+   "reason": "Pinned-run repair d10736298d (FEA, 2026-11-20): study evidence and canonical meshes publish through the provider's atomic replace; the canonical-mesh collision check reads through the provider; a pinned execution may move and remove only the files and folders it created. File publication only: adds atomic_replace and atomic_replace_async."
+  },
+  {
+   "path": "crates/runmat-filesystem/src/pinned/provider.rs",
+   "before": [
+    "100644",
+    "blob",
+    "50e010322ebf22605998c60f1af721c8fd6f9e12"
+   ],
+   "after": [
+    "100644",
+    "blob",
+    "696c54355fe9abcdb5ca3f98fa0e932809107049"
+   ],
+   "reason": "Pinned-run repair d10736298d (FEA, 2026-11-20): study evidence and canonical meshes publish through the provider's atomic replace; the canonical-mesh collision check reads through the provider; a pinned execution may move and remove only the files and folders it created. File publication only: PinnedFsProvider implements atomic_replace through its owned-version write and routes rename, rename_replace, remove_dir and remove_dir_all to its owned-output rules."
+  },
+  {
+   "path": "crates/runmat-filesystem/src/pinned/provider/owned.rs",
+   "before": null,
+   "after": [
+    "100644",
+    "blob",
+    "1d95fe344bf805140dcba55d8e4bcb7da8314d4f"
+   ],
+   "reason": "Pinned-run repair d10736298d (FEA, 2026-11-20): study evidence and canonical meshes publish through the provider's atomic replace; the canonical-mesh collision check reads through the provider; a pinned execution may move and remove only the files and folders it created. File publication only: new module with the owned-output move and removal rules; inputs, mounts and peer files stay refused."
+  },
+  {
+   "path": "crates/runmat-filesystem/src/pinned/tests.rs",
+   "before": [
+    "100644",
+    "blob",
+    "dd01a2719b330df3f4fa7b6882dd5e8bf36b8040"
+   ],
+   "after": [
+    "100644",
+    "blob",
+    "e0699baf30b9d124dc6ae4f509117ff171e34c23"
+   ],
+   "reason": "Pinned-run repair d10736298d (FEA, 2026-11-20): study evidence and canonical meshes publish through the provider's atomic replace; the canonical-mesh collision check reads through the provider; a pinned execution may move and remove only the files and folders it created. File publication only: tests only."
+  },
+  {
+   "path": "crates/runmat-process-host/src/child/process_tree.rs",
+   "before": [
+    "100644",
+    "blob",
+    "e113dc639689c5b9c53b79726099f02b15dd12e0"
+   ],
+   "after": [
+    "100644",
+    "blob",
+    "3cd65db69ed215531160b91be4170b701e54e8f2"
+   ],
+   "reason": "Windows console-window repair (Design WINFLASH072, 2026-11-20): a host without a console window starts children with CREATE_NO_WINDOW, also for taskkill and tasklist; process creation flags only, Windows only; no solver, input or threshold change."
+  },
   {
    "path": "crates/runmat-runtime/src/analysis/contracts.rs",
    "before": [
@@ -43,7 +109,91 @@
     "a2d70d16630570e1584cda5e01bfa30206803f4f"
    ],
    "reason": "G132 24074bbb35: pure move of analysis_authoring_workflow, analysis_procedure_ids, analysis_output_operation_ids, analysis_language_reference_paths into contracts/authoring_catalog.rs, re-exported at the same path; no behaviour change; debt ceiling file lowered 2467\u21922442; FEA OK 2026-11-20. New module: every line is a removed contracts.rs line, plus its doc comment and its AnalysisProcedure import."
+  },
+  {
+   "path": "crates/runmat-runtime/src/analysis/evidence_filesystem.rs",
+   "before": [
+    "100644",
+    "blob",
+    "3805446b2d0216d41748f179e596aa0b3e64c350"
+   ],
+   "after": [
+    "100644",
+    "blob",
+    "cd0e8e0476c5cf82f07f86d6fafa6ae32bdafe06"
+   ],
+   "reason": "Pinned-run repair d10736298d (FEA, 2026-11-20): study evidence and canonical meshes publish through the provider's atomic replace; the canonical-mesh collision check reads through the provider; a pinned execution may move and remove only the files and folders it created. File publication only: atomic_write_bytes tries atomic_replace first and keeps the staged write and rename for providers that return Unsupported."
+  },
+  {
+   "path": "crates/runmat-runtime/src/analysis/meshing.rs",
+   "before": [
+    "100644",
+    "blob",
+    "84cb968002e8f00d10f0ea2a3e0f11b5a86087b9"
+   ],
+   "after": [
+    "100644",
+    "blob",
+    "753458743c34ffcf3521226d0d0f7c5eba4cb049"
+   ],
+   "reason": "Pinned-run repair d10736298d (FEA, 2026-11-20): study evidence and canonical meshes publish through the provider's atomic replace; the canonical-mesh collision check reads through the provider; a pinned execution may move and remove only the files and folders it created. File publication only: persist_canonical compares an existing artifact by length and then through the provider's read instead of a synchronous open."
+  },
+  {
+   "path": "crates/runmat-runtime/src/analysis/meshing/persistence_tests.rs",
+   "before": [
+    "100644",
+    "blob",
+    "aa670ca9a7086f2d50adf9c095cbfd067deb6aa4"
+   ],
+   "after": [
+    "100644",
+    "blob",
+    "8755a7951df677513e37a577e598090b90498c70"
+   ],
+   "reason": "Pinned-run repair d10736298d (FEA, 2026-11-20): study evidence and canonical meshes publish through the provider's atomic replace; the canonical-mesh collision check reads through the provider; a pinned execution may move and remove only the files and folders it created. File publication only: tests only."
+  },
+  {
+   "path": "crates/runmat-runtime/src/builtins/io/repl_fs/file_transfer/tests.rs",
+   "before": [
+    "100644",
+    "blob",
+    "d99ef6a6171322f2bae007da3fd207d687da332c"
+   ],
+   "after": [
+    "100644",
+    "blob",
+    "df84442faa75d4aa4ad126b4edc5fe29af30c98f"
+   ],
+   "reason": "Pinned-run repair d10736298d (FEA, 2026-11-20): study evidence and canonical meshes publish through the provider's atomic replace; the canonical-mesh collision check reads through the provider; a pinned execution may move and remove only the files and folders it created. File publication only: tests only."
+  },
+  {
+   "path": "crates/runmat-runtime/src/builtins/meshing/mod.rs",
+   "before": [
+    "100644",
+    "blob",
+    "dbce527d4a64aeffd1f6a761011b7edbfff0dfd3"
+   ],
+   "after": [
+    "100644",
+    "blob",
+    "0c30778d81f236b67b6dc8016a3ad02a25d6c499"
+   ],
+   "reason": "Pinned-run repair d10736298d (FEA, 2026-11-20): study evidence and canonical meshes publish through the provider's atomic replace; the canonical-mesh collision check reads through the provider; a pinned execution may move and remove only the files and folders it created. File publication only: a test takes the provider override lock."
+  },
+  {
+   "path": "crates/runmat-runtime/src/meshing/persistence.rs",
+   "before": [
+    "100644",
+    "blob",
+    "d201ac14141c7f1b4ed5f2220db83d66b2f8fa91"
+   ],
+   "after": [
+    "100644",
+    "blob",
+    "406d77deb0be564c2fde34081e831e080df9211e"
+   ],
+   "reason": "Pinned-run repair d10736298d (FEA, 2026-11-20): study evidence and canonical meshes publish through the provider's atomic replace; the canonical-mesh collision check reads through the provider; a pinned execution may move and remove only the files and folders it created. File publication only: a test takes the provider override lock and a new test covers pair writes inside a pinned execution."
   }
  ],
- "reason": "Conserves the fresh 0.7.2 scientific measurements on dac88251ba across G132 24074bbb35: pure move of analysis_authoring_workflow, analysis_procedure_ids, analysis_output_operation_ids, analysis_language_reference_paths into contracts/authoring_catalog.rs, re-exported at the same path; no behaviour change; debt ceiling file lowered 2467\u21922442; FEA OK 2026-11-20. Every line removed from contracts.rs is in the new module; the only other lines are the mod line, the re-export, the module doc comment, its import and one test import. scripts/development/fea-module-size-debt.json is not a scientific input. Solver arithmetic, model inputs, dependencies, features and thresholds are unchanged. This review is not a rerun of the scientific or performance measurements."
+ "reason": "Conserves the fresh 0.7.2 scientific measurements on dac88251ba across G132 24074bbb35: pure move of analysis_authoring_workflow, analysis_procedure_ids, analysis_output_operation_ids, analysis_language_reference_paths into contracts/authoring_catalog.rs, re-exported at the same path; no behaviour change; debt ceiling file lowered 2467\u21922442; FEA OK 2026-11-20. Every line removed from contracts.rs is in the new module; the only other lines are the mod line, the re-export, the module doc comment, its import and one test import. scripts/development/fea-module-size-debt.json is not a scientific input. Solver arithmetic, model inputs, dependencies, features and thresholds are unchanged. This review is not a rerun of the scientific or performance measurements. Also conserved across Pinned-run repair d10736298d (FEA, 2026-11-20): study evidence and canonical meshes publish through the provider's atomic replace; the canonical-mesh collision check reads through the provider; a pinned execution may move and remove only the files and folders it created. File publication only; no solver arithmetic, model inputs, materials, meshing algorithms, dependencies, features or thresholds changed, and the receipt workloads run without an input manifest, so they never use the pinned provider. Design reviewed the diff on 2026-11-20."
 }

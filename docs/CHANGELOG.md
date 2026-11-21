@@ -47,6 +47,7 @@ _November 18, 2026_
 
 * Fixed program worker transfers stopping at a fixed 128 MiB limit; the runtime admits requests and results against the run budget.
 * Fixed dialogs and menus appearing behind native MCAD and ECAD viewports.
+* On Windows, opening a project or running a study no longer flashes console windows. The Desktop app and its workers start helper programs without a console window.
 
 ### Mechanical Design
 

@@ -103,14 +103,14 @@
       "encoding": "git-mode-type-blob-path-tuples-v1"
     },
     "accepted_inputs": {
-      "sha256": "3e8870de46a03715aacaa8ef0b57a056df50e263427bc1e52ccce5cd5932db3d",
-      "files": 26449,
+      "sha256": "1f9a9bb66c24e696b58dd2a50bef72e0b8cd121f1e9b4defcd4d7030c0e9d7ba",
+      "files": 26450,
       "encoding": "git-mode-type-blob-path-tuples-v1"
     },
-    "reason": "Conserves the fresh 0.7.2 scientific measurements on dac88251ba across G132 24074bbb35: pure move of analysis_authoring_workflow, analysis_procedure_ids, analysis_output_operation_ids, analysis_language_reference_paths into contracts/authoring_catalog.rs, re-exported at the same path; no behaviour change; debt ceiling file lowered 2467\u21922442; FEA OK 2026-11-20. Every line removed from contracts.rs is in the new module; the only other lines are the mod line, the re-export, the module doc comment, its import and one test import. scripts/development/fea-module-size-debt.json is not a scientific input. Solver arithmetic, model inputs, dependencies, features and thresholds are unchanged. This review is not a rerun of the scientific or performance measurements.",
+    "reason": "Conserves the fresh 0.7.2 scientific measurements on dac88251ba across G132 24074bbb35: pure move of analysis_authoring_workflow, analysis_procedure_ids, analysis_output_operation_ids, analysis_language_reference_paths into contracts/authoring_catalog.rs, re-exported at the same path; no behaviour change; debt ceiling file lowered 2467\u21922442; FEA OK 2026-11-20. Every line removed from contracts.rs is in the new module; the only other lines are the mod line, the re-export, the module doc comment, its import and one test import. scripts/development/fea-module-size-debt.json is not a scientific input. Solver arithmetic, model inputs, dependencies, features and thresholds are unchanged. This review is not a rerun of the scientific or performance measurements. Also conserved across Pinned-run repair d10736298d (FEA, 2026-11-20): study evidence and canonical meshes publish through the provider's atomic replace; the canonical-mesh collision check reads through the provider; a pinned execution may move and remove only the files and folders it created. File publication only; no solver arithmetic, model inputs, materials, meshing algorithms, dependencies, features or thresholds changed, and the receipt workloads run without an input manifest, so they never use the pinned provider. Design reviewed the diff on 2026-11-20.",
     "review": {
       "path": "qualification/scientific/reviews/g132-authoring-catalog-move-20261120-driver-recovery-physics.json",
-      "sha256": "9dab970d2bdb356960ea36c61e5aa2dadac43210a21b4b41df85b4ad946e5f3c"
+      "sha256": "6e30b7a2a3c7b7b7e129f3c4233c9f034c6318cc490cfe73178b65761cd4b321"
     }
   }
 }
