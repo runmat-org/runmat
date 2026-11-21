@@ -9,8 +9,10 @@ export const CI_RUN = 44870312552;
 const REPOSITORY = "runmat-org/runmat";
 const COHORTS = ["authored-cli-physics", "driver-recovery-physics", "circuit-large-board-performance", "cad-airliner-drawing-memory"];
 const MANIFESTS = new Set(["crates/runmat-cad/wasm/Cargo.toml", "crates/runmat-design-tools/Cargo.toml"]);
+const WASM_REGISTRY = "crates/runmat-runtime/src/builtins/generated_wasm_registry.rs";
+const REGISTRY_FINGERPRINT = /^pub const REGISTRY_SOURCE_FINGERPRINT: &str = "sha256:[0-9a-f]{64}";$/m;
 const ALLOWED = new Set([
-  ...MANIFESTS, ".github/workflows/ci.yml", ".github/workflows/release.yml",
+  ...MANIFESTS, WASM_REGISTRY, ".github/workflows/ci.yml", ".github/workflows/release.yml",
   "scripts/verify-release-version.mjs", "scripts/publish-crates.mjs", "scripts/publish-crates.test.mjs",
   "scripts/distribution/release-ci-checkpoint.mjs", "scripts/distribution/release-ci-checkpoint.test.mjs",
   "qualification/scientific/evidence/publication-metadata-20261113.json",
@@ -28,6 +30,12 @@ export function validateDelta(changes, before, after) {
     if (MANIFESTS.has(change.path)) {
       assert.equal(after(change.path), before(change.path).replace(/^publish = false\n/m, ""),
         `Full CI required for dependency, feature or other manifest changes: ${change.path}`);
+    }
+    if (change.path === WASM_REGISTRY) {
+      const entries = text => text.replace(REGISTRY_FINGERPRINT, "");
+      assert(REGISTRY_FINGERPRINT.test(after(change.path)), "Missing wasm registry source fingerprint");
+      assert.equal(entries(after(change.path)), entries(before(change.path)),
+        "Full CI required for changed wasm builtin registry entries");
     }
     if (change.path === ".github/workflows/ci.yml") {
       const normalized = after(change.path).replace(/^          scripts\/publish-crates\.test\.mjs\n/m, "")

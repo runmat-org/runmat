@@ -35,6 +35,15 @@ test("accepts only the exact publish=false removal from required manifests", () 
     assert.throws(() => validateDelta([changed(file)], () => original, () => after));
   }
 });
+test("accepts only a wasm registry fingerprint refresh", () => {
+  const file = "crates/runmat-runtime/src/builtins/generated_wasm_registry.rs";
+  const line = hex => `pub const REGISTRY_SOURCE_FINGERPRINT: &str = "sha256:${hex.repeat(64)}";\n`;
+  const original = "// generated\n" + line("a") + "pub const ENTRIES: &[&str] = &[\"sin\"];\n";
+  validateDelta([changed(file)], () => original, () => original.replace(line("a"), line("b")));
+  for (const after of [original.replace("sin", "cos"), original.replace(line("a"), "")]) {
+    assert.throws(() => validateDelta([changed(file)], () => original, () => after));
+  }
+});
 test("rejects runtime, lockfile, compiler, fixture and unknown changes", () => {
   for (const path of ["Cargo.lock", "Cargo.toml", "rust-toolchain.toml", "crates/runmat-runtime/src/lib.rs",
     "scripts/build-runmat-with-aot-runtime.sh", "verification/meshing/input.json", "docs/CHANGELOG.md"]) {
