@@ -4,8 +4,8 @@ import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import { pathToFileURL } from "node:url";
 
-export const BASELINE = "0c8e1e15ed26b501846021c2b6076bfac5d6253d";
-export const CI_RUN = 43367308557;
+export const BASELINE = "b218f8ad66dcb1def5fab80875c8c6f7b05940ce";
+export const CI_RUN = 44870312552;
 const REPOSITORY = "runmat-org/runmat";
 const COHORTS = ["authored-cli-physics", "driver-recovery-physics", "circuit-large-board-performance", "cad-airliner-drawing-memory"];
 const MANIFESTS = new Set(["crates/runmat-cad/wasm/Cargo.toml", "crates/runmat-design-tools/Cargo.toml"]);
