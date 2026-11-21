@@ -123,6 +123,15 @@ install -d /etc/systemd/system
 install -m 0644 "$CI"/linux/systemd/* /etc/systemd/system/
 systemctl daemon-reload
 
+# Jobs get HOME=/ci/work/<slot>/home, which every job hook wipes. The runner
+# user's passwd home stays /home/runner; rustup-init compares the two and
+# RUSTUP_INIT_SKIP_SUDO_CHECK (in each slot's .env) tells it the difference is
+# intended. Tools that read the passwd home directly (ssh) must not keep state
+# there between jobs, so root owns it and the runner user cannot write to it.
+chown root:runner /home/runner && chmod 0550 /home/runner
+# No job runs during boot: a provisioning lock left by a reset belongs to no one.
+rmdir /ci/cache/vcpkg-runmat.lock 2>/dev/null || true
+
 registration="$(md ci-registration)"   # {"owner/repo": "<registration token>"}; short-lived, removed by the operator
 for entry in $SLOTS; do
   slot="${entry%%=*}" repo="${entry#*=}"
@@ -145,6 +154,7 @@ HOME=/ci/work/$slot/home
 TMPDIR=/ci/work/$slot/tmp
 CARGO_HOME=/ci/cache/cargo
 RUSTUP_HOME=/ci/cache/rustup/$slot
+RUSTUP_INIT_SKIP_SUDO_CHECK=yes
 RUNMAT_CI_CACHE=/ci/cache
 RUNMAT_CI_TOOL=/opt/ci/common/ci_cache.py
 RUNMAT_VCPKG_ROOT=/ci/cache/vcpkg-runmat
