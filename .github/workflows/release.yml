@@ -128,7 +128,7 @@ jobs:
         platform:
           
           - release_for: windows-x86_64
-            os: warp-windows-latest-x64-16x
+            os: runmat-gcp-windows-x64
             target: x86_64-pc-windows-msvc
             bin: runmat.exe
             name: runmat-windows-x86_64.zip
@@ -149,7 +149,7 @@ jobs:
             command: build
 
           - release_for: linux-x86_64
-            os: warp-ubuntu-latest-x64-16x
+            os: runmat-gcp-linux-x64
             target: x86_64-unknown-linux-gnu
             bin: runmat
             name: runmat-linux-x86_64.tar.gz
@@ -163,14 +163,22 @@ jobs:
           fetch-depth: 0
           ref: ${{ github.ref_name }}
 
+      - name: Use the warm lane target (GCP runners)
+        if: startsWith(runner.name, 'gcp-')
+        shell: bash
+        # infra/ci-runners: target/ links to this lane's warm target on the cache disk.
+        run: '"$(command -v python3 || command -v python)" "${RUNMAT_CI_TOOL}" acquire "runmat-native-${{ matrix.platform.target }}" "runmat=${GITHUB_WORKSPACE}" "--link=${GITHUB_WORKSPACE}/target"'
+
       - name: Prepare bounded Windows build storage
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
+          # Hosted images carry unused tools; the GCP runners (RUNMAT_CI_TOOL set) do not.
+          $target = if ($env:RUNMAT_CI_TARGET) { $env:RUNMAT_CI_TARGET } else { "$env:GITHUB_WORKSPACE/target" }
           $storage = & ./infra/scripts/prepare-windows-build-storage.ps1 `
-            -TargetDirectory "$env:GITHUB_WORKSPACE/target" `
+            -TargetDirectory $target `
             -ScratchDirectory "$env:RUNNER_TEMP/runmat-build-scratch" `
-            -ReclaimUnusedRunnerTools
+            -ReclaimUnusedRunnerTools:(-not $env:RUNMAT_CI_TOOL)
           "TMP=$($storage.ScratchDirectory)" >> $env:GITHUB_ENV
           "TEMP=$($storage.ScratchDirectory)" >> $env:GITHUB_ENV
 
@@ -200,6 +208,7 @@ jobs:
         run: rustup target add "${{ matrix.platform.target }}"
 
       - name: Restore native artifact build cache
+        if: ${{ !startsWith(runner.name, 'gcp-') }}
         uses: Swatinem/rust-cache@v2
         with:
           shared-key: native-artifact-0.7-v2-${{ matrix.platform.target }}
@@ -219,6 +228,7 @@ jobs:
         run: node infra/scripts/native-build-cache-key.mjs >> "$GITHUB_OUTPUT"
 
       - name: Restore rolling native checkpoint
+        if: ${{ !startsWith(runner.name, 'gcp-') }}
         uses: actions/cache/restore@v5
         with:
           path: target
@@ -228,11 +238,12 @@ jobs:
             ${{ steps.native-checkpoint-key.outputs.key }}-
 
       - name: Restore byte-verified same-commit source timestamps
+        if: ${{ !startsWith(runner.name, 'gcp-') }}
         shell: bash
         run: node infra/scripts/native-build-cache-source.mjs restore target/.runmat-source-inputs.json
 
       - name: Restore Windows native dependency cache
-        if: runner.os == 'Windows' && matrix.platform.target != 'aarch64-pc-windows-gnu'
+        if: runner.os == 'Windows' && matrix.platform.target != 'aarch64-pc-windows-gnu' && !startsWith(runner.name, 'gcp-')
         uses: actions/cache@v5
         with:
           path: ~/vcpkg-runmat/installed
@@ -437,7 +448,7 @@ jobs:
 
       - name: Save rolling native checkpoint
         id: native-checkpoint-source
-        if: always() && steps.native-checkpoint-key.outputs.key != ''
+        if: always() && steps.native-checkpoint-key.outputs.key != '' && !startsWith(runner.name, 'gcp-')
         shell: bash
         run: node infra/scripts/native-build-cache-source.mjs capture target/.runmat-source-inputs.json
 
@@ -447,6 +458,11 @@ jobs:
         with:
           path: target
           key: ${{ steps.native-checkpoint-key.outputs.key }}-${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}
+
+      - name: Record warm lane source times
+        if: always() && startsWith(runner.name, 'gcp-')
+        shell: bash
+        run: '"$(command -v python3 || command -v python)" "${RUNMAT_CI_TOOL}" commit "runmat-native-${{ matrix.platform.target }}" "runmat=${GITHUB_WORKSPACE}"'
 
   create-release:
     if: github.event_name == 'push'

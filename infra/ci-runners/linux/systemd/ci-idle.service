@@ -1,0 +1,6 @@
+[Unit]
+Description=Stop this runner VM after the idle period
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/python3 /opt/ci/common/ci_cache.py idle-check

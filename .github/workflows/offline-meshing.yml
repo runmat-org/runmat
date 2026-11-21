@@ -13,7 +13,7 @@ permissions:
 
 jobs:
   meshing:
-    runs-on: warp-ubuntu-latest-x64-16x
+    runs-on: runmat-gcp-linux-x64
     env:
       MATRIX_NAME: linux-offline
       CARGO_TARGET_DIR: ${{ github.workspace }}/target
@@ -35,9 +35,15 @@ jobs:
           persist-credentials: false
       - uses: dtolnay/rust-toolchain@1.90.0
       - uses: Swatinem/rust-cache@v2
+        # GCP runners use the warm lane target below instead of the Actions cache.
+        if: ${{ !startsWith(runner.name, 'gcp-') }}
         with:
           # Start a clean namespace; GitHub also scopes writes to the dispatch ref.
           prefix-key: offline-meshing-v2
+      - name: Use the warm lane target (GCP runners)
+        if: startsWith(runner.name, 'gcp-')
+        # infra/ci-runners: target/ links to this lane's warm target on the cache disk.
+        run: python3 "${RUNMAT_CI_TOOL}" acquire runmat-offline-meshing "runmat=${GITHUB_WORKSPACE}" "--link=${GITHUB_WORKSPACE}/target"
       - name: Install native dependencies
         run: |
           sudo apt-get update
@@ -88,3 +94,6 @@ jobs:
           name: meshing-performance-linux-offline
           path: target/runmat-meshing-verification/performance-linux-offline.json
           if-no-files-found: error
+      - name: Record warm lane source times
+        if: always() && startsWith(runner.name, 'gcp-')
+        run: python3 "${RUNMAT_CI_TOOL}" commit runmat-offline-meshing "runmat=${GITHUB_WORKSPACE}"
