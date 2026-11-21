@@ -53,6 +53,11 @@ if [[ ! -f /var/lib/ci-runner/packages-v1 ]]; then
   mkdir -p /var/lib/ci-runner && touch /var/lib/ci-runner/packages-v1
 fi
 
+# setup-python's prebuilt interpreters record /opt/hostedtoolcache as their
+# prefix (sysconfig LIBDIR), so the tool cache must be reachable at that path.
+mkdir -p /ci/cache/toolcache && chown runner:runner /ci/cache/toolcache
+[[ -L /opt/hostedtoolcache ]] || { rm -rf /opt/hostedtoolcache; ln -s /ci/cache/toolcache /opt/hostedtoolcache; }
+
 # Java 21 for runmat-java and the AOT Java adapter tests (GitHub's images ship a JDK).
 if [[ ! -d /usr/lib/jvm/java-21-openjdk-amd64 ]]; then
   DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends openjdk-21-jdk-headless
@@ -164,8 +169,8 @@ JAVA_HOME=/usr/lib/jvm/java-21-openjdk-amd64
 RUNMAT_CI_CACHE=/ci/cache
 RUNMAT_CI_TOOL=/opt/ci/common/ci_cache.py
 RUNMAT_VCPKG_ROOT=/ci/cache/vcpkg-runmat
-AGENT_TOOLSDIRECTORY=/ci/cache/toolcache
-RUNNER_TOOL_CACHE=/ci/cache/toolcache
+AGENT_TOOLSDIRECTORY=/opt/hostedtoolcache
+RUNNER_TOOL_CACHE=/opt/hostedtoolcache
 npm_config_cache=/ci/cache/npm
 PIP_CACHE_DIR=/ci/cache/pip
 ACTIONS_RUNNER_HOOK_JOB_STARTED=/opt/ci/linux/hooks/job-started.sh
