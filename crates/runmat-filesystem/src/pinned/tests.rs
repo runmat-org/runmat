@@ -87,6 +87,143 @@ async fn owned_outputs_can_be_removed_and_recreated_but_cannot_steal_new_paths()
     assert!(pinned.write(path, b"overwrite").await.is_err());
     assert_eq!(base.read(path).await.unwrap(), b"peer");
 }
+#[tokio::test]
+async fn atomic_replace_publishes_owned_outputs_without_a_rename() {
+    let base = Arc::new(Versions {
+        live: MemoryFsProvider::new(),
+        outputs: Mutex::default(),
+    });
+    let pinned = PinnedFsProvider::new(base.clone(), manifest("v1")).unwrap();
+    let path = Path::new("/evidence.json");
+    pinned.atomic_replace(path, b"first").await.unwrap();
+    pinned.atomic_replace(path, b"second").await.unwrap();
+    assert_eq!(pinned.read(path).await.unwrap(), b"second");
+    assert_eq!(base.outputs.lock().unwrap().0.len(), 1);
+    assert!(pinned
+        .atomic_replace(Path::new("/source.m"), b"input")
+        .await
+        .is_err());
+    base.write(path, b"peer").await.unwrap();
+    assert!(pinned.atomic_replace(path, b"stale").await.is_err());
+}
+
+#[tokio::test]
+async fn owned_files_and_directories_move_and_remove_but_inputs_and_peer_files_do_not() {
+    let base = Arc::new(MemoryFsProvider::new());
+    base.write(Path::new("/source.m"), b"disp(1)\n")
+        .await
+        .unwrap();
+    let pinned = PinnedFsProvider::new(base.clone(), manifest("v1")).unwrap();
+
+    // A staged file renames over nothing, then over an owned file.
+    pinned.write(Path::new("/stage.tmp"), b"one").await.unwrap();
+    pinned
+        .rename(Path::new("/stage.tmp"), Path::new("/result.txt"))
+        .await
+        .unwrap();
+    pinned.write(Path::new("/stage.tmp"), b"two").await.unwrap();
+    pinned
+        .rename_replace(Path::new("/stage.tmp"), Path::new("/result.txt"))
+        .await
+        .unwrap();
+    assert_eq!(pinned.read(Path::new("/result.txt")).await.unwrap(), b"two");
+    assert!(pinned.read(Path::new("/stage.tmp")).await.is_err());
+    assert_eq!(base.read(Path::new("/result.txt")).await.unwrap(), b"two");
+    assert!(base.metadata(Path::new("/stage.tmp")).await.is_err());
+
+    // Inputs and peer files are never moved, replaced or removed.
+    assert!(pinned
+        .rename(Path::new("/source.m"), Path::new("/moved.m"))
+        .await
+        .is_err());
+    assert!(pinned
+        .rename(Path::new("/result.txt"), Path::new("/source.m"))
+        .await
+        .is_err());
+    base.write(Path::new("/peer.txt"), b"peer").await.unwrap();
+    assert!(pinned
+        .rename(Path::new("/result.txt"), Path::new("/peer.txt"))
+        .await
+        .is_err());
+    assert_eq!(base.read(Path::new("/peer.txt")).await.unwrap(), b"peer");
+    assert_eq!(base.read(Path::new("/result.txt")).await.unwrap(), b"two");
+
+    // An owned tree moves and is removed whole.
+    pinned
+        .create_dir_all(Path::new("/out/nested"))
+        .await
+        .unwrap();
+    pinned
+        .write(Path::new("/out/nested/a.txt"), b"a")
+        .await
+        .unwrap();
+    pinned.write(Path::new("/out/b.txt"), b"b").await.unwrap();
+    pinned
+        .rename(Path::new("/out"), Path::new("/moved"))
+        .await
+        .unwrap();
+    assert_eq!(
+        pinned.read(Path::new("/moved/nested/a.txt")).await.unwrap(),
+        b"a"
+    );
+    assert_eq!(base.read(Path::new("/moved/b.txt")).await.unwrap(), b"b");
+    assert!(base.metadata(Path::new("/out")).await.is_err());
+    assert!(pinned.remove_dir(Path::new("/moved")).await.is_err());
+    pinned.remove_dir_all(Path::new("/moved")).await.unwrap();
+    assert!(base.metadata(Path::new("/moved")).await.is_err());
+
+    // A tree holding a peer's file is refused before anything changes.
+    pinned.create_dir(Path::new("/shared")).await.unwrap();
+    pinned
+        .write(Path::new("/shared/mine.txt"), b"m")
+        .await
+        .unwrap();
+    base.write(Path::new("/shared/theirs.txt"), b"t")
+        .await
+        .unwrap();
+    assert!(pinned.remove_dir_all(Path::new("/shared")).await.is_err());
+    assert!(pinned
+        .rename(Path::new("/shared"), Path::new("/elsewhere"))
+        .await
+        .is_err());
+    assert_eq!(
+        base.read(Path::new("/shared/mine.txt")).await.unwrap(),
+        b"m"
+    );
+    assert_eq!(
+        base.read(Path::new("/shared/theirs.txt")).await.unwrap(),
+        b"t"
+    );
+    assert!(base.metadata(Path::new("/elsewhere")).await.is_err());
+
+    // Archive extraction stages each entry through a handle, then renames it.
+    {
+        use std::io::Write;
+        let flags = OpenFlags {
+            write: true,
+            create_new: true,
+            ..Default::default()
+        };
+        let mut partial = pinned
+            .open_async(Path::new("/entry.partial"), &flags)
+            .await
+            .unwrap();
+        partial.write_all(b"entry").unwrap();
+        partial.sync_all_async().await.unwrap();
+    }
+    pinned
+        .rename(Path::new("/entry.partial"), Path::new("/entry.txt"))
+        .await
+        .unwrap();
+    assert_eq!(base.read(Path::new("/entry.txt")).await.unwrap(), b"entry");
+    assert!(base.metadata(Path::new("/entry.partial")).await.is_err());
+
+    // An empty owned directory is removed alone.
+    pinned.create_dir(Path::new("/empty")).await.unwrap();
+    pinned.remove_dir(Path::new("/empty")).await.unwrap();
+    assert!(base.metadata(Path::new("/empty")).await.is_err());
+}
+
 #[async_trait(?Send)]
 impl FsProvider for Versions {
     fn open(&self, path: &Path, flags: &OpenFlags) -> io::Result<Box<dyn FileHandle>> {

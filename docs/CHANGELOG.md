@@ -120,6 +120,8 @@ _November 18, 2026_
 * Fixed the source check hiding file read errors; it reports the error at the file it names.
 * Fixed a completed run without saved render topology failing to redraw its view.
 * Fixed a run that resumes on another worker after its driver is replaced failing its resource accounting check.
+* FEA studies in Desktop and the web sandbox save their results again. Saving a study's mesh and evidence no longer fails with `RM.FEA.RUN_STUDY.MESH_ARTIFACT_STORE_FAILED` in projects that run from a captured snapshot of their inputs.
+* In projects that run from a captured snapshot of their inputs, `mesh.save`, `unzip`, `movefile`, `data.move` and `rmdir` work on the files and folders the run created. Inputs and files created outside the run stay read-only, and a folder that holds any of them is refused before anything changes.
 * The multigrid coarse solve factors in place and no longer allocates a scratch buffer sized from the CPU cache, so its memory stays within the run plan.
 
 RunMat FEA, mechanical design, and electrical design are currently in beta. We will mark them as production-ready when development and validation are complete. Many capabilities are available; see the documentation for supported workflows and current limitations.

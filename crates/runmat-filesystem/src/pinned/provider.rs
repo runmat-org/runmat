@@ -1,7 +1,9 @@
+mod owned;
+
 use super::{normalize, InputManifest, PinnedContent, PinnedEntry};
 use crate::{
-    AtomicCreateResult, DataManifestDescriptor, DataManifestRequest, DirEntry, FileHandle,
-    FsFileType, FsMetadata, FsProvider, OpenFlags,
+    AtomicCreateResult, AtomicReplaceOutcome, DataManifestDescriptor, DataManifestRequest,
+    DirEntry, FileHandle, FsFileType, FsMetadata, FsProvider, OpenFlags,
 };
 use async_trait::async_trait;
 use std::{
@@ -249,6 +251,18 @@ impl FsProvider for PinnedFsProvider {
         })
     }
 
+    /// An execution's own outputs are already published atomically: `write`
+    /// creates the path or replaces the exact version this execution owns.
+    /// Callers that stage a temporary file and rename it cannot work here,
+    /// because the pinned execution owns no rename.
+    async fn atomic_replace(&self, path: &Path, bytes: &[u8]) -> io::Result<AtomicReplaceOutcome> {
+        self.write(path, bytes).await?;
+        Ok(AtomicReplaceOutcome {
+            durability: crate::PublicationDurability::AtomicVisibility,
+            durability_diagnostic: None,
+        })
+    }
+
     async fn metadata(&self, path: &Path) -> io::Result<FsMetadata> {
         #[cfg(windows)]
         if let Some((path, provider)) = self.mounts.native_access(path)? {
@@ -393,14 +407,19 @@ impl FsProvider for PinnedFsProvider {
             .remove(&path);
         Ok(())
     }
-    async fn remove_dir(&self, _path: &Path) -> io::Result<()> {
-        Err(denied("remove directories outside the pinned execution"))
+    async fn remove_dir(&self, path: &Path) -> io::Result<()> {
+        self.remove_owned_dir(path).await
     }
-    async fn remove_dir_all(&self, _path: &Path) -> io::Result<()> {
-        Err(denied("remove directories outside the pinned execution"))
+    async fn remove_dir_all(&self, path: &Path) -> io::Result<()> {
+        self.remove_owned_dir_all(path).await
     }
-    async fn rename(&self, _from: &Path, _to: &Path) -> io::Result<()> {
-        Err(denied("rename files outside the pinned execution"))
+    async fn rename(&self, from: &Path, to: &Path) -> io::Result<()> {
+        self.rename_owned(from, to).await
+    }
+    /// Owned file destinations are replaced by the exact version this
+    /// execution published; anything else is refused before any change.
+    async fn rename_replace(&self, from: &Path, to: &Path) -> io::Result<()> {
+        self.rename_owned(from, to).await
     }
     async fn set_readonly(&self, _path: &Path, _readonly: bool) -> io::Result<()> {
         Err(denied("input permissions are immutable"))

@@ -1223,6 +1223,25 @@ pub fn atomic_create_new(
     })
 }
 
+pub async fn atomic_replace_async(
+    path: impl AsRef<Path>,
+    bytes: impl AsRef<[u8]>,
+) -> io::Result<AtomicReplaceOutcome> {
+    let (provider, resolved) = capture_provider_path(path.as_ref())?;
+    provider.atomic_replace(&resolved, bytes.as_ref()).await
+}
+
+pub fn atomic_replace(
+    path: impl AsRef<Path>,
+    bytes: impl AsRef<[u8]>,
+) -> io::Result<AtomicReplaceOutcome> {
+    let path = path.as_ref().to_path_buf();
+    let bytes = bytes.as_ref().to_vec();
+    wait_for_fs("atomic_replace", move || async move {
+        atomic_replace_async(path, bytes).await
+    })
+}
+
 pub async fn read_to_string_async(path: impl AsRef<Path>) -> io::Result<String> {
     let bytes = read_async(path).await?;
     String::from_utf8(bytes).map_err(|err| io::Error::new(ErrorKind::InvalidData, err.utf8_error()))
