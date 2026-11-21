@@ -1,6 +1,6 @@
 {
  "schema_version": 1,
- "source_revision": "0d83068b4411ec015bc88d1ce776b22cfafbd672",
+ "source_revision": "543c8f9f73073059a0f3814b953143d6d5d0871f",
  "measured_revision": "dac88251baaa60d5834296cbce89c727092da233",
  "changed_scientific_inputs": [
   "crates/runmat-filesystem/src/lib.rs",
@@ -13,6 +13,7 @@
   "crates/runmat-runtime/src/analysis/evidence_filesystem.rs",
   "crates/runmat-runtime/src/analysis/meshing.rs",
   "crates/runmat-runtime/src/analysis/meshing/persistence_tests.rs",
+  "crates/runmat-runtime/src/builtins/generated_wasm_registry.rs",
   "crates/runmat-runtime/src/builtins/io/repl_fs/file_transfer/tests.rs",
   "crates/runmat-runtime/src/builtins/meshing/mod.rs",
   "crates/runmat-runtime/src/meshing/persistence.rs"
@@ -48,7 +49,18 @@
    "name": "fea-review-pinned",
    "revision": "d10736298dcbd5f0bdc3af9fc421083428ba1329",
    "result": "FEA reviewed d10736298d against 0dc53c17c3 on 2026-11-20. The change alters only how files are published and which files a pinned execution may rename, replace or remove: study evidence and canonical meshes publish through the provider's atomic replace, the canonical-mesh collision check reads through the provider, and a pinned execution may now move and remove the files and folders it created while inputs, mounts and peer files stay refused. No solver arithmetic, model inputs, materials, meshing algorithms, dependencies, features or qualification thresholds changed, and receipt workloads run without an input manifest, so they never use the pinned provider. FEA approves conserving the current scientific receipts across d10736298d."
+  },
+  {
+   "name": "wasm-registry-fingerprint",
+   "revision": "543c8f9f73073059a0f3814b953143d6d5d0871f",
+   "host": "runmat-build-mac (gate build)",
+   "method": "regenerate-wasm-registry.mjs at the tag source; diff 7636f28329 543c8f9f73 changes only the REGISTRY_SOURCE_FINGERPRINT literal (checked by this script)."
+  },
+  {
+   "name": "fea-review-registry",
+   "revision": "543c8f9f73073059a0f3814b953143d6d5d0871f",
+   "result": "FEA reviewed 543c8f9f73 on 2026-11-21. Within the scientific input roots it changes only the REGISTRY_SOURCE_FINGERPRINT literal in crates/runmat-runtime/src/builtins/generated_wasm_registry.rs; the 3,084 registry entries are unchanged. FEA recomputed the fingerprint from the commit's tree with an independent implementation of the build script's algorithm (4,589 source inputs) and obtained exactly the committed value, sha256:19856b5fa9c7b0c5f985e9c53e3b65eed29f909e26c9d9b953122686089af179. The previous value went stale because d10736298d added a test-only lock line to crates/runmat-runtime/src/builtins/meshing/mod.rs, which the fingerprint covers. The registry file is compiled only for target_arch = wasm32, so the native receipt workloads never compile it. No solver arithmetic, model inputs, dependencies, features or qualification thresholds changed. FEA approves conserving the current scientific receipts across 543c8f9f73, following the 2026-11-09 wasm registry refresh precedent."
   }
  ],
- "review": "Conserves the fresh 0.7.2 scientific measurements on dac88251ba across G132 24074bbb35: pure move of analysis_authoring_workflow, analysis_procedure_ids, analysis_output_operation_ids, analysis_language_reference_paths into contracts/authoring_catalog.rs, re-exported at the same path; no behaviour change; debt ceiling file lowered 2467\u21922442; FEA OK 2026-11-20. Every line removed from contracts.rs is in the new module; the only other lines are the mod line, the re-export, the module doc comment, its import and one test import. scripts/development/fea-module-size-debt.json is not a scientific input. Solver arithmetic, model inputs, dependencies, features and thresholds are unchanged. This review is not a rerun of the scientific or performance measurements. Also conserved across Pinned-run repair d10736298d (FEA, 2026-11-20): study evidence and canonical meshes publish through the provider's atomic replace; the canonical-mesh collision check reads through the provider; a pinned execution may move and remove only the files and folders it created. File publication only; no solver arithmetic, model inputs, materials, meshing algorithms, dependencies, features or thresholds changed, and the receipt workloads run without an input manifest, so they never use the pinned provider. Design reviewed the diff on 2026-11-20."
+ "review": "Conserves the fresh 0.7.2 scientific measurements on dac88251ba across G132 24074bbb35: pure move of analysis_authoring_workflow, analysis_procedure_ids, analysis_output_operation_ids, analysis_language_reference_paths into contracts/authoring_catalog.rs, re-exported at the same path; no behaviour change; debt ceiling file lowered 2467\u21922442; FEA OK 2026-11-20. Every line removed from contracts.rs is in the new module; the only other lines are the mod line, the re-export, the module doc comment, its import and one test import. scripts/development/fea-module-size-debt.json is not a scientific input. Solver arithmetic, model inputs, dependencies, features and thresholds are unchanged. This review is not a rerun of the scientific or performance measurements. Also conserved across Pinned-run repair d10736298d (FEA, 2026-11-20): study evidence and canonical meshes publish through the provider's atomic replace; the canonical-mesh collision check reads through the provider; a pinned execution may move and remove only the files and folders it created. File publication only; no solver arithmetic, model inputs, materials, meshing algorithms, dependencies, features or thresholds changed, and the receipt workloads run without an input manifest, so they never use the pinned provider. Design reviewed the diff on 2026-11-20. Also conserved across WASM builtin registry fingerprint refresh 543c8f9f73 (Design, 2026-11-21): regenerated with scripts/regenerate-wasm-registry.mjs (target wasm32-unknown-unknown, features plot-web) at the 0.7.2 tag source; only the REGISTRY_SOURCE_FINGERPRINT literal changed (3084 registry entries, 2343 builtins, rows unchanged). The file is compiled only for target_arch = wasm32; native receipt workloads never include it; no solver arithmetic, model inputs, materials, meshing algorithms, dependencies, features or thresholds changed. Design reviewed the diff on 2026-11-21."
 }

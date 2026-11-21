@@ -19,7 +19,9 @@ const ALLOWED = new Set([
   ...COHORTS.flatMap(name => [
     `qualification/scientific/receipts/${name}.json`,
     `qualification/scientific/reviews/publication-metadata-20261113-${name}.json`,
+    `qualification/scientific/reviews/g132-authoring-catalog-move-20261120-${name}.json`,
   ]),
+  "qualification/scientific/evidence/g132-authoring-catalog-move-20261120.json",
 ]);
 
 export function validateDelta(changes, before, after) {
