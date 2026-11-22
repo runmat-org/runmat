@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "release": "0.7.1",
+  "release": "0.7.2",
   "about": "Design features the design docs describe that are not built yet (status pending), and those that have landed since (status release, landed_in). Each pending row is flagged where the docs describe it: [not yet in the current release](pending:<id>). docs/design/language/status.md is generated from this file (node scripts/docs/design.mjs --write-status).",
   "capabilities": [
     {
