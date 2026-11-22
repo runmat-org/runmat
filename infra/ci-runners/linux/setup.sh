@@ -142,6 +142,18 @@ chown root:runner /home/runner && chmod 0550 /home/runner
 # No job runs during boot: a provisioning lock left by a reset belongs to no one.
 rmdir /ci/cache/vcpkg-runmat.lock 2>/dev/null || true
 
+# Each slot's work folder is bind-mounted at /ci/w inside its unit (ci-runner@.service).
+# On the host /ci/w stays an empty, read-only mount point.
+mkdir -p /ci/w && chown root:root /ci/w && chmod 0555 /ci/w
+
+# JavaScript test runners size their worker pools from the CPU count. Give each
+# slot a share that assumes half the slots run CPU-bound tests at once: 9 on 32
+# vCPU with 7 slots. Vitest reads these variables (threads and forks pools; min
+# and max both, because a max below vitest's default minimum is ignored).
+slot_count=$(wc -w <<<"$SLOTS")
+test_workers=$(( 2 * $(nproc) / (slot_count > 0 ? slot_count : 1) ))
+(( test_workers >= 2 )) || test_workers=2
+
 registration="$(md ci-registration)"   # {"owner/repo": "<registration token>"}; short-lived, removed by the operator
 for entry in $SLOTS; do
   slot="${entry%%=*}" repo="${entry#*=}"
@@ -155,9 +167,20 @@ for entry in $SLOTS; do
     rm -rf "$dir"; mkdir -p "$dir"; cp -a "$dist/." "$dir/"; chown -R runner:runner "$dir"
     sudo -u runner env HOME="/ci/work/$slot/home" "$dir/config.sh" --unattended --replace \
       --url "https://github.com/$repo" --token "$token" --name "gcp-$(hostname -s)-$slot" \
-      --labels "$LABEL" --work "/ci/work/$slot/w" --disableupdate >/dev/null
+      --labels "$LABEL" --work /ci/w --disableupdate >/dev/null
     echo "slot $slot: registered for $repo with label $LABEL"
   fi
+  # Slots registered before the shared path existed: point them at /ci/w.
+  python3 - "$dir/.runner" <<'PY2'
+import json, sys
+path = sys.argv[1]
+with open(path, encoding="utf-8-sig") as handle:
+    data = json.load(handle)
+if data.get("workFolder") != "/ci/w":
+    data["workFolder"] = "/ci/w"
+    with open(path, "w", encoding="utf-8") as handle:
+        json.dump(data, handle, indent=2)
+PY2
   cat > "$dir/.env" <<ENV
 CI_SLOT=$slot
 HOME=/ci/work/$slot/home
@@ -173,6 +196,10 @@ AGENT_TOOLSDIRECTORY=/opt/hostedtoolcache
 RUNNER_TOOL_CACHE=/opt/hostedtoolcache
 npm_config_cache=/ci/cache/npm
 PIP_CACHE_DIR=/ci/cache/pip
+VITEST_MAX_THREADS=$test_workers
+VITEST_MIN_THREADS=$test_workers
+VITEST_MAX_FORKS=$test_workers
+VITEST_MIN_FORKS=$test_workers
 ACTIONS_RUNNER_HOOK_JOB_STARTED=/opt/ci/linux/hooks/job-started.sh
 ACTIONS_RUNNER_HOOK_JOB_COMPLETED=/opt/ci/linux/hooks/job-completed.sh
 LANG=C.UTF-8

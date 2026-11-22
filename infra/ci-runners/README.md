@@ -32,6 +32,29 @@ The runners run only code from runmat-org repositories:
 - The runners are registered per repository (the organization is on GitHub
   Free, which has no restricted runner groups).
 
+## How slots share a VM
+
+- CPU: on Linux each slot's unit has `CPUWeight=100`, so busy slots get equal
+  CPU shares however many threads their jobs start. An idle VM gives one job
+  every core.
+- JavaScript tests: Vitest otherwise starts one worker per core less one (31 on
+  32 vCPU), and its main process, which transforms every module, cannot keep up;
+  tests then time out waiting for imports. On Linux each slot's `.env` sets
+  `VITEST_MAX_THREADS`, `VITEST_MIN_THREADS`, `VITEST_MAX_FORKS` and
+  `VITEST_MIN_FORKS` to `2 × vCPUs / slots` (9 on `ci-linux-x64`), a share that
+  assumes half the slots run CPU-bound tests at once. Vitest ignores a maximum
+  below its default minimum, so both are set.
+- Checkout path: every Linux slot sees its own work folder at `/ci/w` (a bind
+  mount in the slot's mount namespace; the runners are registered with
+  `--work /ci/w`). Jobs on different slots therefore build from the same
+  absolute paths, and a lane's warm Cargo target stays fresh whichever slot ran
+  last. Cargo fingerprints a package whose build script prints no
+  `rerun-if-changed` by its newest file's absolute path, so different paths
+  rebuilt those crates and everything above them. On the host, `/ci/w` is an
+  empty read-only mount point; the hooks and timers use `/ci/work/<slot>/w`.
+  A step that hands a workspace path to the Docker daemon (`docker run -v`)
+  would name the host's `/ci/w`; no workflow does this today.
+
 ## What a job may leave behind
 
 Every slot has its own work folder, `HOME` and temporary folder on the work

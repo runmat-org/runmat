@@ -14,6 +14,15 @@ Environment=HOME=/ci/work/%i/home
 # Before the runner starts: release locks and wipe the slot, in case a crash skipped the job-completed hook.
 ExecStartPre=+/bin/sh -c '/usr/bin/python3 /opt/ci/common/ci_cache.py slot-start %i && mkdir -p /ci/work/%i/w /ci/work/%i/home /ci/work/%i/tmp /ci/work/%i/cold-target && chown -R runner:runner /ci/work/%i'
 ExecStart=/opt/ci-runner/%i/run.sh
+# Every slot sees its own work folder at the same path, /ci/w (the runners are
+# registered with --work /ci/w). Cargo fingerprints some packages by absolute
+# source paths, so a lane's warm target is only reusable from the path that
+# built it. The bind lives in this unit's mount namespace; ExecStartPre (+) and
+# the timers see the real /ci/work/<slot>/w.
+BindPaths=/ci/work/%i/w:/ci/w
+# Busy slots share the CPU equally, whatever their thread counts (cgroup v2
+# weights; no cap while the other slots are idle).
+CPUWeight=100
 # Stop the whole slot (listener, worker and job processes). A listener left
 # running would keep taking jobs while the restarted slot wipes its workspace.
 KillMode=mixed
