@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "release": "0.7.0",
+  "release": "0.7.2",
   "about": "The one capability ledger for RunMat simulation. Status, requirement ids, verification cases and docs pages live here; ANALYSIS_IDENTITIES, the docs' pending flags, Validation → Status and the per-family Validation pages (from its reference checks) are generated from it. See docs/schema/ledger.schema.json.",
   "capabilities": [
     {
