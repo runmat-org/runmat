@@ -90,6 +90,16 @@ if (-not (Test-Path "$state\jdk21-v1")) {
     New-Item -ItemType File -Force -Path "$state\jdk21-v1" | Out-Null
 }
 
+# Desktop release signing (private repo): Azure Artifact Signing runs signtool with
+# Azure.CodeSigning.Dlib.dll, a mixed-mode .NET 8 library, and signs in through the
+# Azure CLI. Without the .NET 8 runtime signtool aborts (exit code 3, no message).
+# GitHub's images ship both.
+if (-not (Test-Path "$state\signing-v1")) {
+    & 'C:\ProgramData\chocolatey\bin\choco.exe' install dotnet-8.0-runtime azure-cli --no-progress
+    if ($LASTEXITCODE -ne 0 -and $LASTEXITCODE -ne 3010) { throw ".NET 8 runtime / Azure CLI install failed ($LASTEXITCODE)" }
+    New-Item -ItemType File -Force -Path "$state\signing-v1" | Out-Null
+}
+
 # Jobs find the shared rustup proxies on PATH.
 $machinePath = [Environment]::GetEnvironmentVariable('Path', 'Machine')
 if ($machinePath -notlike '*E:\ci-cache\cargo\bin*') {
@@ -106,6 +116,10 @@ if (-not (Get-LocalUser -Name runner -ErrorAction SilentlyContinue)) {
 $bytes = New-Object byte[] 36; [Security.Cryptography.RandomNumberGenerator]::Create().GetBytes($bytes)
 $password = [Convert]::ToBase64String($bytes) + 'aA1!'
 Set-LocalUser -Name runner -Password (ConvertTo-SecureString $password -AsPlainText -Force) -PasswordNeverExpires $true -ErrorAction Stop
+# The reset makes the account's DPAPI-protected data unreadable; the Azure CLI's sign-in
+# cache is one such file, and `az login` fails on it ("Key not valid for use in specified
+# state"). Drop it so the next sign-in starts clean.
+Remove-Item -Recurse -Force 'C:\Users\runner\.azure' -ErrorAction SilentlyContinue
 
 # ---- cache layout and config
 foreach ($dir in 'lanes', 'locks', 'cargo', 'rustup', 'toolcache', 'npm', 'pip') { New-Item -ItemType Directory -Force -Path "E:\ci-cache\$dir" | Out-Null }
