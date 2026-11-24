@@ -45,7 +45,7 @@ use policy::{
 mod artifact_root;
 pub mod fea_run_admission;
 mod evidence_filesystem;
-use evidence_filesystem::{atomic_write_bytes, fs_create_dir_all};
+use evidence_filesystem::atomic_write_bytes;
 mod modal_run_admission;
 mod render_topology;
 use modal_run_admission::analysis_admit_modal_run_with_id;
@@ -1615,23 +1615,6 @@ pub fn analysis_plan_study_sweep_op(
         .join("sweeps")
         .join(sanitized_sweep_id)
         .join("plan.json");
-    if let Some(parent) = evidence_path.parent() {
-        fs_create_dir_all(parent).map_err(|err| {
-            operation_error(
-                ANALYSIS_PLAN_STUDY_SWEEP_OPERATION,
-                ANALYSIS_PLAN_STUDY_SWEEP_OP_VERSION,
-                &context,
-                OperationErrorSpec {
-                    error_code: "RM.FEA.PLAN_STUDY_SWEEP.ARTIFACT_STORE_FAILED",
-                    error_type: OperationErrorType::Internal,
-                    retryable: true,
-                    severity: OperationErrorSeverity::Error,
-                },
-                format!("failed to create study sweep planning evidence directory: {err}"),
-                BTreeMap::from([("sweep_id".to_string(), spec.sweep_id.clone())]),
-            )
-        })?;
-    }
     let payload = serde_json::json!({
         "schema_version": "fea_study_sweep_plan_artifact/v1",
         "sweep_id": spec.sweep_id.clone(),
@@ -1656,7 +1639,9 @@ pub fn analysis_plan_study_sweep_op(
             BTreeMap::from([("sweep_id".to_string(), spec.sweep_id.clone())]),
         )
     })?;
-    atomic_write_bytes(&evidence_path, &payload_bytes).map_err(|err| {
+    // Through the open result transaction when there is one, as the run evidence.
+    evidence_filesystem::write_captured_evidence(&evidence_path, payload_bytes).map_err(|err| {
+        let err = err.to_string();
         operation_error(
             ANALYSIS_PLAN_STUDY_SWEEP_OPERATION,
             ANALYSIS_PLAN_STUDY_SWEEP_OP_VERSION,
@@ -1727,23 +1712,6 @@ pub fn analysis_validate_study_sweep_op(
         .join("sweeps")
         .join(sanitized_sweep_id)
         .join("validate.json");
-    if let Some(parent) = evidence_path.parent() {
-        fs_create_dir_all(parent).map_err(|err| {
-            operation_error(
-                ANALYSIS_VALIDATE_STUDY_SWEEP_OPERATION,
-                ANALYSIS_VALIDATE_STUDY_SWEEP_OP_VERSION,
-                &context,
-                OperationErrorSpec {
-                    error_code: "RM.FEA.VALIDATE_STUDY_SWEEP.ARTIFACT_STORE_FAILED",
-                    error_type: OperationErrorType::Internal,
-                    retryable: true,
-                    severity: OperationErrorSeverity::Error,
-                },
-                format!("failed to create study sweep validation evidence directory: {err}"),
-                BTreeMap::from([("sweep_id".to_string(), spec.sweep_id.clone())]),
-            )
-        })?;
-    }
     let payload = serde_json::json!({
         "schema_version": "fea_study_sweep_validate_artifact/v1",
         "sweep_id": spec.sweep_id.clone(),
@@ -1766,7 +1734,9 @@ pub fn analysis_validate_study_sweep_op(
             BTreeMap::from([("sweep_id".to_string(), spec.sweep_id.clone())]),
         )
     })?;
-    atomic_write_bytes(&evidence_path, &payload_bytes).map_err(|err| {
+    // Through the open result transaction when there is one, as the run evidence.
+    evidence_filesystem::write_captured_evidence(&evidence_path, payload_bytes).map_err(|err| {
+        let err = err.to_string();
         operation_error(
             ANALYSIS_VALIDATE_STUDY_SWEEP_OPERATION,
             ANALYSIS_VALIDATE_STUDY_SWEEP_OP_VERSION,

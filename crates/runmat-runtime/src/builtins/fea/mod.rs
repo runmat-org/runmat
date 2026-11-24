@@ -194,7 +194,10 @@ pub async fn fea_validate_builtin(input: Value) -> BuiltinResult<Value> {
             &ERROR_OPERATION,
             &ERROR_INTERNAL,
             FEA_SWEEP_VALIDATION_CLASS,
-            analysis_validate_study_sweep_op(&composed.sweep, OperationContext::new(None, None)),
+            artifact_access::publish(VALIDATE_NAME, || {
+                analysis_validate_study_sweep_op(&composed.sweep, OperationContext::new(None, None))
+            })
+            .await?,
         ),
     }
 }
@@ -214,7 +217,10 @@ pub async fn fea_plan_builtin(input: Value) -> BuiltinResult<Value> {
             analysis_plan_study_op(&composed.study, OperationContext::new(None, None)),
         ),
         RuntimeResolvedDocument::Sweep(composed) => sweep_plan_result_to_object(
-            analysis_plan_study_sweep_op(&composed.sweep, OperationContext::new(None, None)),
+            artifact_access::publish(PLAN_NAME, || {
+                analysis_plan_study_sweep_op(&composed.sweep, OperationContext::new(None, None))
+            })
+            .await?,
         ),
     }
 }

@@ -6,7 +6,9 @@ use std::path::PathBuf;
 /// Stage mutable evidence in the already captured result transaction. The outer
 /// adapter owns the original provider's commit; this scope never escapes this
 /// synchronous call. Native callers without a captured view keep their direct
-/// filesystem route.
+/// filesystem route, unless the result store's provider allows writes only
+/// through a captured transaction: then the write is refused rather than sent
+/// to another provider.
 pub(super) fn write_captured_evidence(
     path: &std::path::Path,
     bytes: Vec<u8>,
@@ -21,6 +23,20 @@ pub(super) fn write_captured_evidence(
         .ok_or("Study evidence has no parent directory.")?;
     let name = path.file_name().ok_or("Study evidence has no file name.")?;
     let Some(provider) = super::storage::scoped_artifact_provider() else {
+        if let super::storage::ResultStoreProvider::Store(provider) =
+            super::storage::ResultStoreProvider::capture()?
+        {
+            let maximum = super::configuration::publication_staging_budget()?;
+            if let Err(error) = provider.workspace_access(root, false, maximum) {
+                if error.kind() == ErrorKind::Unsupported {
+                    return Err(format!(
+                        "Study evidence at {} can be saved only inside a result transaction, and none is open. Run the save through with_artifact_access. ({error})",
+                        path.display()
+                    )
+                    .into());
+                }
+            }
+        }
         fs_create_dir_all(root).map_err(AnalysisPublicationError::from_io)?;
         return atomic_write_bytes(&path.to_path_buf(), &bytes).map_err(Into::into);
     };
