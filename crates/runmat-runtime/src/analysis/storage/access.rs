@@ -41,14 +41,35 @@ impl FilesystemAnalysisArtifactStore {
                 "artifact directory budget must be positive",
             ));
         }
+        let workspace = match self.provider.workspace_access(
+            &self.root,
+            writable,
+            maximum_inventory_bytes,
+        ) {
+            Ok(workspace) => workspace,
+            // The provider allows access only through a captured transaction
+            // and no scope is open. A read takes its own read-only snapshot;
+            // a write must run inside `with_artifact_access`, which commits it.
+            // Callers that make several reads open one snapshot for all of them
+            // with `with_result_reads`.
+            Err(error)
+                if error.kind() == ErrorKind::Unsupported
+                    && !writable
+                    && self.provider.supports_workspace_transactions() =>
+            {
+                runmat_filesystem::workspace_access::WorkspaceTransaction::capture_read_view_blocking(
+                    self.provider.clone(),
+                    self.root.clone(),
+                    maximum_inventory_bytes,
+                )?
+                .workspace_access(&self.root, false, maximum_inventory_bytes)?
+            }
+            Err(error) => return Err(error),
+        };
         Ok(FilesystemAccess {
             store: self,
             budget: ScopeBudget::new(maximum_inventory_bytes),
-            workspace: self.provider.workspace_access(
-                &self.root,
-                writable,
-                maximum_inventory_bytes,
-            )?,
+            workspace,
         })
     }
 }

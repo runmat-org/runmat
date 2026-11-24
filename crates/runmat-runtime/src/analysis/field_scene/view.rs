@@ -22,6 +22,31 @@ pub fn build_scene_view(
     view: Option<RenderViewRequest>,
     terms: &legend::FieldLegendTerms,
 ) -> Result<(GeometryScene, f64, bool), FieldSceneError> {
+    // The run record, render tiles, field values and mesh come from one
+    // snapshot of the result store.
+    storage::with_result_reads(|| {
+        scene_view(
+            run_id,
+            field_id,
+            shape_mode,
+            exaggeration,
+            show_undeformed_outline,
+            view,
+            terms,
+        )
+    })
+    .map_err(|error| FieldSceneError::from(error.to_string()))?
+}
+
+fn scene_view(
+    run_id: &str,
+    field_id: Option<&str>,
+    shape_mode: &str,
+    exaggeration: f64,
+    show_undeformed_outline: bool,
+    view: Option<RenderViewRequest>,
+    terms: &legend::FieldLegendTerms,
+) -> Result<(GeometryScene, f64, bool), FieldSceneError> {
     if !matches!(shape_mode, "undeformed" | "true" | "exaggerated") {
         return Err(format!("unknown FEA shape mode '{shape_mode}'").into());
     }

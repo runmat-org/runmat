@@ -77,6 +77,130 @@ impl ResultStoreProvider {
     }
 }
 
+/// The result store refuses direct coherent access, so every read and write
+/// goes through one captured transaction of its provider.
+fn admit_transaction(
+    provider: &dyn runmat_filesystem::FsProvider,
+    root: &Path,
+) -> Result<(), AnalysisPublicationError> {
+    admit_read_snapshot(provider)?;
+    // Evidence is part of the same result tree and the same commit. A separately
+    // configured root requires its own provider-coordinated multi-root contract.
+    if !crate::analysis::structural_study::publication::evidence::study_evidence_root()
+        .starts_with(root)
+    {
+        return Err("Simulation evidence must share the configured result storage root.".into());
+    }
+    Ok(())
+}
+
+/// A read snapshot needs only a provider that captures transactions. It reads
+/// the result tree and commits nothing, so the rule that evidence shares the
+/// write commit does not apply.
+fn admit_read_snapshot(
+    provider: &dyn runmat_filesystem::FsProvider,
+) -> Result<(), AnalysisPublicationError> {
+    if !provider.supports_workspace_transactions() {
+        return Err(
+            "This storage provider cannot save or read simulation results atomically.".into(),
+        );
+    }
+    Ok(())
+}
+
+/// A read-only result store over one consistent snapshot of `provider`.
+pub(super) fn capture_read_snapshot(
+    root: PathBuf,
+    provider: Arc<dyn runmat_filesystem::FsProvider>,
+    maximum: u64,
+) -> Result<FilesystemAnalysisArtifactStore, AnalysisPublicationError> {
+    admit_read_snapshot(provider.as_ref())?;
+    let view =
+        runmat_filesystem::workspace_access::WorkspaceTransaction::capture_read_view_blocking(
+            provider,
+            root.clone(),
+            maximum,
+        )
+        .map_err(AnalysisPublicationError::from_io)?;
+    Ok(FilesystemAnalysisArtifactStore {
+        root,
+        provider: view,
+        manifests: RwLock::new(FilesystemManifestCache::default()),
+    })
+}
+
+/// Run synchronous result reads against one consistent snapshot of the result store.
+///
+/// Inside an open artifact scope, or when the store's provider grants direct
+/// coherent access, the operation runs unchanged. When the provider allows
+/// access only through a captured transaction (a cloud project), one
+/// read-only snapshot is captured and installed for the whole operation, so a
+/// run attempt, its records, field values and meshes all come from the same
+/// committed publication. Nothing is committed afterwards.
+pub fn with_result_reads<R>(operation: impl FnOnce() -> R) -> Result<R, AnalysisPublicationError> {
+    if scoped_store().is_some() {
+        return Ok(operation());
+    }
+    let store = capture_artifact_store()?;
+    let Some((root, provider)) = store.filesystem_scope() else {
+        return Ok(operation());
+    };
+    let maximum = crate::analysis::configuration::publication_staging_budget()?;
+    match provider.workspace_access(&root, false, maximum) {
+        Ok(scope) => {
+            drop(scope);
+            return Ok(operation());
+        }
+        Err(error) if error.kind() == ErrorKind::Unsupported => {}
+        // A result store that does not exist yet has no results to read; the
+        // operation reports that in its own terms.
+        Err(error) if error.kind() == ErrorKind::NotFound => return Ok(operation()),
+        Err(error) => return Err(AnalysisPublicationError::from_io(error)),
+    }
+    let snapshot: Arc<dyn AnalysisArtifactStore> =
+        Arc::new(capture_read_snapshot(root, provider, maximum)?);
+    let _restore = Restore(SCOPED_STORE.with(|slot| slot.replace(Some(snapshot))));
+    Ok(operation())
+}
+
+/// Read one file of the result tree (a mesh or study evidence) through the
+/// result store's provider, as it was written. Returns `None` for a path
+/// outside the result tree, or for an in-memory store whose meshes live on
+/// the host filesystem; the caller reads those through its own provider.
+pub(in crate::analysis) fn read_result_file(
+    path: &Path,
+    maximum: u64,
+) -> Option<std::io::Result<Vec<u8>>> {
+    let store = match capture_artifact_store() {
+        Ok(store) => store,
+        Err(error) => return Some(Err(std::io::Error::other(error))),
+    };
+    let (root, provider) = store.filesystem_scope()?;
+    let relative = path.strip_prefix(&root).ok()?;
+    if relative
+        .components()
+        .any(|part| !matches!(part, std::path::Component::Normal(_)))
+    {
+        return None;
+    }
+    let access = match provider.workspace_access(&root, false, maximum) {
+        Ok(access) => Ok(access),
+        Err(error)
+            if error.kind() == ErrorKind::Unsupported
+                && provider.supports_workspace_transactions() =>
+        {
+            runmat_filesystem::workspace_access::WorkspaceTransaction::capture_read_view_blocking(
+                provider,
+                root.clone(),
+                maximum,
+            )
+            .and_then(|view| view.workspace_access(&root, false, maximum))
+        }
+        Err(error) => Err(error),
+    };
+    Some(access.and_then(|access| access.read(relative, maximum)))
+}
+
 struct Restore(Option<Arc<dyn AnalysisArtifactStore>>);
 impl Drop for Restore {
     fn drop(&mut self) {
@@ -162,20 +286,7 @@ impl CapturedArtifactAccess {
             Err(error) if error.kind() == ErrorKind::Unsupported => {}
             Err(error) => return Err(AnalysisPublicationError::from_io(error)),
         }
-        if !provider.supports_workspace_transactions() {
-            return Err(
-                "This storage provider cannot save or read simulation results atomically.".into(),
-            );
-        }
-        // Evidence is part of the same result tree and the same commit. A separately
-        // configured root requires its own provider-coordinated multi-root contract.
-        if !crate::analysis::structural_study::publication::evidence::study_evidence_root()
-            .starts_with(&root)
-        {
-            return Err(
-                "Simulation evidence must share the configured result storage root.".into(),
-            );
-        }
+        admit_transaction(provider.as_ref(), &root)?;
         let transaction = runmat_filesystem::workspace_access::WorkspaceTransaction::capture(
             provider,
             root.clone(),
@@ -252,15 +363,16 @@ mod tests {
     #[test]
     fn public_attempt_queries_use_the_captured_store_and_restore_the_global_owner() {
         let _host = crate::analysis::tests::analysis_test_guard();
-        // An uncaptured memory filesystem refuses coherent access. It must
-        // remain the global owner, not replace the scoped transaction below.
+        // An uncaptured memory filesystem refuses direct coherent access, so
+        // its reads come from a read-only snapshot. It must remain the global
+        // owner, not replace the scoped transaction below.
         let global: Arc<dyn AnalysisArtifactStore> = Arc::new(FilesystemAnalysisArtifactStore {
             provider: Arc::new(runmat_filesystem::MemoryFsProvider::new()),
             root: "/results".into(),
             manifests: RwLock::new(FilesystemManifestCache::default()),
         });
         replace_artifact_store(Arc::clone(&global)).unwrap();
-        assert!(super::super::run_attempts("definition").is_err());
+        assert!(super::super::run_attempts("definition").unwrap().is_empty());
         {
             let scoped: Arc<dyn AnalysisArtifactStore> =
                 Arc::new(InMemoryAnalysisArtifactStore::new());
@@ -272,6 +384,10 @@ mod tests {
             );
             assert!(Arc::ptr_eq(&*global_store().read().unwrap(), &global));
         }
-        assert!(super::super::resolve_run_attempt("definition").is_err());
+        assert_eq!(
+            super::super::resolve_run_attempt("definition").unwrap(),
+            "definition"
+        );
+        assert!(Arc::ptr_eq(&*global_store().read().unwrap(), &global));
     }
 }
