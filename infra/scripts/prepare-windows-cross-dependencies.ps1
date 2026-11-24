@@ -1,10 +1,17 @@
 param(
     [Parameter(Mandatory = $true)]
     [string]$Target,
-    [string]$VcpkgRoot = (Join-Path ([Environment]::GetFolderPath('UserProfile')) 'vcpkg-runmat')
+    # The GCP runners (infra/ci-runners) keep one vcpkg root on their cache disk.
+    [string]$VcpkgRoot = $(if ($env:RUNMAT_VCPKG_ROOT) { $env:RUNMAT_VCPKG_ROOT } else { Join-Path ([Environment]::GetFolderPath('UserProfile')) 'vcpkg-runmat' })
 )
 
 $ErrorActionPreference = 'Stop'
+if ($env:RUNMAT_VCPKG_ROOT -and $VcpkgRoot -eq $env:RUNMAT_VCPKG_ROOT) {
+    # Concurrent jobs on one runner VM share this root: provision it one job at a
+    # time. The process releases the mutex when it exits.
+    $sharedRootLock = [Threading.Mutex]::new($false, 'Global\runmat-vcpkg-root')
+    try { [void]$sharedRootLock.WaitOne() } catch [Threading.AbandonedMutexException] { }
+}
 $vcpkgRevision = 'a7eda31dc16994fcaa8587982eb833a8695f1b6f'
 $triplet = switch ($Target) {
     'x86_64-pc-windows-msvc' { 'x64-windows' }

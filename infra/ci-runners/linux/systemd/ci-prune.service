@@ -1,0 +1,7 @@
+[Unit]
+Description=Daily prune of RunMat CI caches
+
+[Service]
+Type=oneshot
+Nice=10
+ExecStart=/usr/bin/python3 /opt/ci/common/ci_cache.py prune-if-due

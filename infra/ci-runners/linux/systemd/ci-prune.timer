@@ -1,0 +1,9 @@
+[Unit]
+Description=Prune RunMat CI caches once a day (and soon after boot when a prune is due)
+
+[Timer]
+OnBootSec=10min
+OnUnitActiveSec=1h
+
+[Install]
+WantedBy=timers.target
