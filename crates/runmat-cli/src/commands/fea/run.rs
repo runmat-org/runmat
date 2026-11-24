@@ -218,7 +218,7 @@ fn print_local_sweep(
                             }),
                         ),
                         Err(message) => {
-                            super::remote::MaterializedFeaSweepTerminal::Failed(message)
+                            super::remote::MaterializedFeaSweepTerminal::Failed(message.to_string())
                         }
                     },
                 },

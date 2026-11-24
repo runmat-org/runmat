@@ -8,8 +8,8 @@ use runmat_analysis_execution::assessment_program::{
 };
 use runmat_analysis_execution::named_callable::NamedCallableExecutionContext;
 use runmat_runtime::analysis::{
-    assessment::PublishedStudyAssessment, assessment_evidence_identity, AssessmentExecutionReceipt,
-    PreparedStudyPublication,
+    assessment::PublishedStudyAssessment, assessment_evidence_identity,
+    storage::ArtifactAccessScope, AssessmentExecutionReceipt, PreparedStudyPublication,
 };
 use std::collections::BTreeSet;
 
@@ -50,13 +50,40 @@ pub async fn complete(
     runmat_runtime::analysis::AnalysisStudyRunData,
     runmat_runtime::analysis::storage::AnalysisPublicationError,
 > {
+    complete_in(None, source, publication).await
+}
+
+/// Complete a publication whose preparation was staged in `scope`. The final
+/// write joins that same transaction; function evaluation runs outside it.
+pub(super) async fn complete_in(
+    scope: Option<&ArtifactAccessScope>,
+    source: &runmat_core::CheckedFeaSessionSource,
+    publication: PreparedStudyPublication,
+) -> Result<
+    runmat_runtime::analysis::AnalysisStudyRunData,
+    runmat_runtime::analysis::storage::AnalysisPublicationError,
+> {
     if publication.function_inputs().next().is_none() {
-        return publication
-            .complete(Vec::<NativeAssessmentReceipt>::new())
-            .map(|envelope| envelope.data);
+        return finish(scope, publication, Vec::<NativeAssessmentReceipt>::new());
     }
     let (mut pool, resources) = local_pool()?;
-    complete_with_pool(source, publication, &mut pool, resources).await
+    complete_with_pool(scope, source, publication, &mut pool, resources).await
+}
+
+/// Write the completed publication, inside the captured transaction when one is given.
+fn finish<R: AssessmentExecutionReceipt>(
+    scope: Option<&ArtifactAccessScope>,
+    publication: PreparedStudyPublication,
+    receipts: Vec<R>,
+) -> Result<
+    runmat_runtime::analysis::AnalysisStudyRunData,
+    runmat_runtime::analysis::storage::AnalysisPublicationError,
+> {
+    let persist = move || publication.complete(receipts).map(|envelope| envelope.data);
+    match scope {
+        Some(scope) => scope.enter(|_| persist()),
+        None => persist(),
+    }
 }
 
 pub async fn freeze_functions(
@@ -98,6 +125,17 @@ pub async fn complete_frozen_locally(
     runmat_runtime::analysis::AnalysisStudyRunData,
     runmat_runtime::analysis::storage::AnalysisPublicationError,
 > {
+    complete_frozen_in(None, publication, functions).await
+}
+
+pub(super) async fn complete_frozen_in(
+    scope: Option<&ArtifactAccessScope>,
+    publication: PreparedStudyPublication,
+    functions: &[FrozenAssessmentCallable],
+) -> Result<
+    runmat_runtime::analysis::AnalysisStudyRunData,
+    runmat_runtime::analysis::storage::AnalysisPublicationError,
+> {
     let mut ids = BTreeSet::new();
     for function in functions {
         function.validate().map_err(|error| error.to_string())?;
@@ -106,9 +144,7 @@ pub async fn complete_frozen_locally(
         }
     }
     if publication.function_inputs().next().is_none() {
-        return publication
-            .complete(Vec::<NativeAssessmentReceipt>::new())
-            .map(|envelope| envelope.data);
+        return finish(scope, publication, Vec::<NativeAssessmentReceipt>::new());
     }
     let (mut pool, resources) = local_pool()?;
     let mut receipts = Vec::new();
@@ -134,7 +170,7 @@ pub async fn complete_frozen_locally(
             .map_err(|error| error.to_string())?;
         receipts.push(execute_program(program, &mut pool, resources.clone()).await?);
     }
-    publication.complete(receipts).map(|envelope| envelope.data)
+    finish(scope, publication, receipts)
 }
 
 fn local_pool() -> Result<
@@ -178,10 +214,11 @@ pub async fn complete_remotely(
     runmat_runtime::analysis::storage::AnalysisPublicationError,
 > {
     let mut pool = RemoteAnalysisTaskPool::new(pool);
-    complete_with_pool(source, publication, &mut pool, resources).await
+    complete_with_pool(None, source, publication, &mut pool, resources).await
 }
 
 async fn complete_with_pool<P: AnalysisTaskPool>(
+    scope: Option<&ArtifactAccessScope>,
     source: &runmat_core::CheckedFeaSessionSource,
     publication: PreparedStudyPublication,
     pool: &mut P,
@@ -192,7 +229,7 @@ async fn complete_with_pool<P: AnalysisTaskPool>(
 > {
     let receipts =
         execute_functions(source, publication.function_inputs(), pool, resources).await?;
-    publication.complete(receipts).map(|envelope| envelope.data)
+    finish(scope, publication, receipts)
 }
 
 async fn execute_functions<'a, P: AnalysisTaskPool>(
@@ -247,6 +284,10 @@ async fn execute_functions<'a, P: AnalysisTaskPool>(
 }
 
 /// Re-evaluate compatible immutable saved outputs without re-solving or changing the source.
+///
+/// Reading the saved outputs, writing reassessment evidence and publishing the
+/// reassessment happen in one result transaction. Assessment functions run
+/// between those steps, outside the transaction scope.
 pub async fn reassess_saved_locally(
     source: &runmat_core::CheckedFeaSessionSource,
     definition: runmat_execution::Digest,
@@ -255,30 +296,31 @@ pub async fn reassess_saved_locally(
     limits: runmat_runtime::analysis::assessment::AssessmentEvaluationLimits,
     maximum_manifest_bytes: u64,
 ) -> Result<runmat_runtime::analysis::assessment::PublishedStudyReassessment, String> {
-    let publication =
-        runmat_runtime::analysis::assessment::prepare_saved_study_reassessment_for_source(
-            definition,
-            manifest_path,
-            study,
-            limits,
-            maximum_manifest_bytes,
-            runmat_runtime::interrupt::is_cancelled,
-        )
-        .map_err(|error| error.to_string())?;
-    if publication.function_inputs().next().is_none() {
-        return publication
-            .complete(
-                Vec::<NativeAssessmentReceipt>::new(),
-                runmat_runtime::interrupt::is_cancelled,
-            )
-            .map_err(|error| error.to_string());
-    }
-    let (mut pool, resources) = local_pool()?;
-    let receipts =
-        execute_functions(source, publication.function_inputs(), &mut pool, resources).await?;
-    publication
-        .complete(receipts, runmat_runtime::interrupt::is_cancelled)
-        .map_err(|error| error.to_string())
+    runmat_runtime::analysis::storage::with_artifact_access_async(true, |scope| async move {
+        let publication = scope
+            .enter(|_| {
+                runmat_runtime::analysis::assessment::prepare_saved_study_reassessment_for_source(
+                    definition,
+                    manifest_path,
+                    study,
+                    limits,
+                    maximum_manifest_bytes,
+                    runmat_runtime::interrupt::is_cancelled,
+                )
+            })
+            .map_err(|error| error.to_string())?;
+        let receipts = if publication.function_inputs().next().is_none() {
+            Vec::<NativeAssessmentReceipt>::new()
+        } else {
+            let (mut pool, resources) = local_pool()?;
+            execute_functions(source, publication.function_inputs(), &mut pool, resources).await?
+        };
+        scope
+            .enter(|_| publication.complete(receipts, runmat_runtime::interrupt::is_cancelled))
+            .map_err(|error| error.to_string())
+    })
+    .await
+    .map_err(|error| error.to_string())?
 }
 
 async fn execute_program<P: AnalysisTaskPool>(

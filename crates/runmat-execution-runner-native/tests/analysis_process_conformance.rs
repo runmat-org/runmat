@@ -77,6 +77,9 @@ mod remote_families;
 #[cfg(feature = "occt-native")]
 #[path = "analysis_process_conformance/assessment_publication.rs"]
 mod assessment_publication;
+#[cfg(feature = "occt-native")]
+#[path = "analysis_process_conformance/result_transaction.rs"]
+mod result_transaction;
 #[path = "analysis_process_conformance/electrothermal.rs"]
 mod electrothermal;
 #[cfg(feature = "occt-native")]
@@ -263,6 +266,14 @@ async fn parent() {
         electrothermal::run().await;
         return;
     }
+    if std::env::args_os().any(|argument| argument == "--result-transaction-only") {
+        #[cfg(feature = "occt-native")]
+        result_transaction::run().await;
+        #[cfg(not(feature = "occt-native"))]
+        panic!("result transaction conformance requires occt-native");
+        #[cfg(feature = "occt-native")]
+        return;
+    }
     if std::env::args_os().any(|argument| argument == "--magnetic-authored-only") {
         #[cfg(feature = "occt-native")]
         magnetic_authored::run().await;
@@ -283,6 +294,8 @@ async fn parent() {
         signal::run_acoustic().await;
         return;
     }
+    #[cfg(feature = "occt-native")]
+    result_transaction::run().await;
     #[cfg(feature = "occt-native")]
     magnetic_authored::run().await;
     #[cfg(feature = "occt-native")]

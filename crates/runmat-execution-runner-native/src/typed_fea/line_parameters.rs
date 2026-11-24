@@ -32,7 +32,7 @@ pub(super) async fn execute_case(
     study: runmat_analysis_language::ResolvedAnalysisStudy,
     inputs: Vec<AuthoredStudyInputBinding>,
     options: &LocalFeaExecutionOptions,
-) -> Result<CompletedLocalFeaCase, String> {
+) -> Result<CompletedLocalFeaCase, super::FeaExecutionError> {
     let case_id = study.study.study_id.clone();
     let realized = study
         .study
@@ -109,13 +109,9 @@ pub(super) async fn execute_case(
         meshing_evidence,
         options: AnalysisLineParametersRunOptions::default(),
     }));
-    let mut publication = super::prepare_study_publication(&result, "typed-local")?;
-    publication
-        .admit_accelerator_placement(&options.accelerator_placement)
-        .map_err(|error| error.to_string())?;
-    let publication = super::assessment::complete(source, publication)
-        .await
-        .map_err(|error| error.to_string())?;
+    let publication =
+        super::execution::publish_completed_study(&result, "typed-local", options, Some(source))
+            .await?;
     Ok(CompletedLocalFeaCase {
         case_id,
         result,

@@ -7,7 +7,7 @@ use super::*;
 pub async fn execute_prepared_fea_study_locally(
     prepared: PreparedFeaStudy,
     options: &LocalFeaExecutionOptions,
-) -> Result<CompletedLocalFeaCase, String> {
+) -> Result<CompletedLocalFeaCase, FeaExecutionError> {
     validate_prepared_execution(&prepared, options)?;
     use runmat_runtime::analysis::fea_run_admission::{
         FeaRunKind, FeaRunOutcome, FeaRunRequest, FeaRunScope,
@@ -30,7 +30,7 @@ pub async fn execute_prepared_fea_study_locally(
         Ok(result) => result,
         Err(failure) => {
             let _ = scope.settle(failure.outcome());
-            return Err(failure.to_string());
+            return Err(failure.to_string().into());
         }
     };
     let outcome = if runmat_runtime::interrupt::is_cancelled() {
@@ -45,7 +45,7 @@ pub async fn execute_prepared_fea_study_locally(
         Err(original) => Err(original),
         Ok(value) => settlement
             .map(|()| value)
-            .map_err(|error| format!("{}: {error}", error.error_code())),
+            .map_err(|error| format!("{}: {error}", error.error_code()).into()),
     }
 }
 
@@ -53,7 +53,7 @@ pub(super) async fn execute_prepared_with_source(
     prepared: PreparedFeaStudy,
     options: &LocalFeaExecutionOptions,
     source: Option<&runmat_core::CheckedFeaSessionSource>,
-) -> Result<CompletedLocalFeaCase, String> {
+) -> Result<CompletedLocalFeaCase, FeaExecutionError> {
     validate_prepared_execution(&prepared, options)?;
     let case_id = prepared.realized.study_id.clone();
     let workers = options.workers.unwrap_or(prepared.workers).max(1);
@@ -75,16 +75,35 @@ pub(super) async fn execute_prepared_with_source(
         }
         crate::LocalStudyCompletion::Family(result) => *result,
     };
-    let mut publication = prepare_study_publication(&result, "typed-local")?;
-    publication
-        .admit_accelerator_placement(&options.accelerator_placement)
-        .map_err(|error| error.to_string())?;
-    let publication = complete_prepared_publication(source, publication).await?;
+    let publication = publish_completed_study(&result, "typed-local", options, source).await?;
     Ok(CompletedLocalFeaCase {
         case_id,
         result,
         publication,
     })
+}
+
+/// Publish a completed study as one result transaction.
+///
+/// Mesh files, study evidence, result objects and the manifest are staged in
+/// one captured transaction and commit together, or not at all. A provider
+/// that writes directly (a local folder) runs the same steps without a
+/// transaction. Assessment functions run between the two synchronous steps,
+/// with no artifact scope installed, because they await a task pool.
+pub(super) async fn publish_completed_study(
+    result: &CompletedFeaStudyResult,
+    placement: &str,
+    options: &LocalFeaExecutionOptions,
+    source: Option<&runmat_core::CheckedFeaSessionSource>,
+) -> Result<runmat_runtime::analysis::AnalysisStudyRunData, FeaExecutionError> {
+    runmat_runtime::analysis::storage::with_artifact_access_async(true, |scope| async move {
+        let mut publication = scope.enter(|_| prepare_study_publication(result, placement))?;
+        publication
+            .admit_accelerator_placement(&options.accelerator_placement)
+            .map_err(|error| error.to_string())?;
+        complete_prepared_publication(&scope, source, publication).await
+    })
+    .await?
 }
 
 /// Prepare the atomic publication of any completed authored study.
@@ -94,7 +113,7 @@ pub(super) async fn execute_prepared_with_source(
 pub fn prepare_study_publication(
     result: &CompletedFeaStudyResult,
     placement: &str,
-) -> Result<runmat_runtime::analysis::PreparedStudyPublication, String> {
+) -> Result<runmat_runtime::analysis::PreparedStudyPublication, FeaExecutionError> {
     use runmat_runtime::analysis::{AnalysisStudyCompletionIdentity, PrecisionMode, QualityPolicy};
     let context = || runmat_runtime::operations::OperationContext::new(None, None);
     // Every execution is its own attempt of the definition: a rerun publishes a fresh attempt
@@ -325,23 +344,19 @@ pub fn prepare_study_publication(
             )
         }
     };
-    publication.map_err(|error| {
-        // This native-host boundary carries text. Preserve the complete
-        // operation envelope, including recovery receipts and the original
-        // durability cause, rather than only its user-facing summary.
-        serde_json::to_string(&error).unwrap_or_else(|encoding| {
-            format!("operation error {error:?}; diagnostic encoding failed: {encoding}")
-        })
-    })
+    // The complete operation envelope, including recovery receipts and the
+    // original durability cause, crosses the host boundary as a value.
+    publication.map_err(FeaExecutionError::from)
 }
 
 async fn complete_prepared_publication(
+    scope: &runmat_runtime::analysis::storage::ArtifactAccessScope,
     source: Option<&runmat_core::CheckedFeaSessionSource>,
     publication: runmat_runtime::analysis::PreparedStudyPublication,
-) -> Result<runmat_runtime::analysis::AnalysisStudyRunData, String> {
+) -> Result<runmat_runtime::analysis::AnalysisStudyRunData, FeaExecutionError> {
     match source {
-        Some(source) => assessment::complete(source, publication).await,
-        None => assessment::complete_frozen_locally(publication, &[]).await,
+        Some(source) => assessment::complete_in(Some(scope), source, publication).await,
+        None => assessment::complete_frozen_in(Some(scope), publication, &[]).await,
     }
-    .map_err(|error| error.to_string())
+    .map_err(FeaExecutionError::from)
 }

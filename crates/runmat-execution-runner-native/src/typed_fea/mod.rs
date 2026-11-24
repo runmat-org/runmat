@@ -8,6 +8,8 @@ mod assessment;
 mod run_admission;
 mod callable;
 mod chain;
+mod error;
+pub use error::FeaExecutionError;
 mod execution;
 mod family_execution;
 mod geometry;
@@ -262,7 +264,7 @@ impl LocalFeaExecution {
 #[derive(Debug)]
 pub struct LocalSweepCase {
     pub case_id: String,
-    pub outcome: Result<CompletedLocalFeaCase, String>,
+    pub outcome: Result<CompletedLocalFeaCase, FeaExecutionError>,
 }
 
 /// Runs a checked study or sweep locally. The run is one `fea.study` trace span with a step
@@ -270,7 +272,7 @@ pub struct LocalSweepCase {
 pub async fn execute_checked_fea_locally(
     source: &runmat_core::CheckedFeaSessionSource,
     options: LocalFeaExecutionOptions,
-) -> Result<LocalFeaExecution, String> {
+) -> Result<LocalFeaExecution, FeaExecutionError> {
     use runmat_analysis_fea::progress::trace;
     use tracing::Instrument;
     let study = trace::study_span(&source.physical_path().display().to_string());
@@ -283,7 +285,7 @@ async fn execute_checked_fea_in_study_span(
     source: &runmat_core::CheckedFeaSessionSource,
     options: LocalFeaExecutionOptions,
     study: &tracing::Span,
-) -> Result<LocalFeaExecution, String> {
+) -> Result<LocalFeaExecution, FeaExecutionError> {
     use runmat_analysis_fea::progress::trace;
     // The source was checked when it was loaded; this step admits the checked root for this
     // run and reports the check's errors.
@@ -318,7 +320,7 @@ async fn execute_checked_fea_in_study_span(
         Ok(result) => result,
         Err(failure) => {
             let _ = scope.settle(failure.outcome());
-            return Err(failure.to_string());
+            return Err(failure.to_string().into());
         }
     };
     let outcome = run_admission::outcome(&result);
@@ -327,7 +329,7 @@ async fn execute_checked_fea_in_study_span(
         Err(original) => Err(original),
         Ok(value) => settlement
             .map(|()| value)
-            .map_err(|error| format!("{}: {error}", error.error_code())),
+            .map_err(|error| format!("{}: {error}", error.error_code()).into()),
     }
 }
 
@@ -335,7 +337,7 @@ async fn execute_admitted_root(
     source: &runmat_core::CheckedFeaSessionSource,
     root: ResolvedFeaRoot,
     options: LocalFeaExecutionOptions,
-) -> Result<LocalFeaExecution, String> {
+) -> Result<LocalFeaExecution, FeaExecutionError> {
     match root {
         ResolvedFeaRoot::Study(study) => {
             let frequencies = harmonic_frequency_cases(&study);
@@ -573,7 +575,7 @@ async fn execute_study_cases(
     study: runmat_analysis_language::ResolvedAnalysisStudy,
     prefix: &str,
     options: &LocalFeaExecutionOptions,
-) -> Result<Vec<CompletedLocalFeaCase>, String> {
+) -> Result<Vec<CompletedLocalFeaCase>, FeaExecutionError> {
     let label = |analysis: &str| {
         if prefix.is_empty() {
             analysis.to_string()
@@ -692,7 +694,7 @@ async fn execute_case(
     study: runmat_analysis_language::ResolvedAnalysisStudy,
     inputs: Vec<AuthoredStudyInputBinding>,
     options: &LocalFeaExecutionOptions,
-) -> Result<CompletedLocalFeaCase, String> {
+) -> Result<CompletedLocalFeaCase, FeaExecutionError> {
     // A cross-section is meshed and solved in place: no exact geometry or prepared root.
     if line_parameters::is_cross_section(&study) {
         return line_parameters::execute_case(source, study, inputs, options).await;
