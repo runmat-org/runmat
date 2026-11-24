@@ -251,12 +251,37 @@ fn persist_mesh_borrowed_typed(
     let evidence_path = root.join(format!(
         "{artifact_digest}-{evidence_digest}.meshing-evidence.cbor"
     ));
-    access.persist_typed(&artifact_path, &artifact_bytes)?;
-    access.persist_typed(&evidence_path, &evidence_bytes)?;
+    access.persist_typed(&persistence::MeshObject {
+        path: &artifact_path,
+        bytes: &artifact_bytes,
+        digest: &artifact_digest,
+        identify: &solver_mesh_digest,
+    })?;
+    access.persist_typed(&persistence::MeshObject {
+        path: &evidence_path,
+        bytes: &evidence_bytes,
+        digest: &evidence_digest,
+        identify: &content_sha256,
+    })?;
     Ok(ResolvedStudyMesh {
         artifact_path: Some(artifact_path.display().to_string()),
         evidence_path: Some(evidence_path.display().to_string()),
     })
+}
+
+/// Decode a stored solver mesh and return the canonical digest recomputed from its content.
+fn solver_mesh_digest(bytes: &[u8]) -> Option<String> {
+    runmat_meshing_core::SolverMeshArtifact::canonical_decode_with_cancellation(
+        bytes,
+        &MeshPersistenceCancellation,
+    )
+    .ok()
+    .map(|artifact| encode_digest(artifact.canonical_digest.bytes()))
+}
+
+/// Meshing evidence is named by the SHA-256 of its canonical bytes.
+fn content_sha256(bytes: &[u8]) -> Option<String> {
+    Some(encode_digest(&Sha256::digest(bytes).into()))
 }
 
 struct MeshPersistenceCancellation;
@@ -266,8 +291,55 @@ impl runmat_meshing_core::MeshingCancellationSignal for MeshPersistenceCancellat
     }
 }
 
-fn persist_canonical(path: &Path, bytes: &[u8]) -> Result<(), String> {
-    // The browser's artifacts belong to the installed provider, not std::fs.
+/// How an existing object relates to the one being saved.
+#[derive(Debug, PartialEq, Eq)]
+enum Reconciled {
+    /// The stored bytes are the bytes being saved.
+    Current,
+    /// The stored object is stale or corrupt and is replaced.
+    Stale,
+}
+
+/// A stored object larger than this cannot be an encoding of the incoming
+/// object; it is replaced without being read.
+fn stored_object_read_limit(incoming: &[u8]) -> u64 {
+    (incoming.len() as u64).saturating_mul(2).max(1024 * 1024)
+}
+
+/// Compare an existing object with the one being saved. `existing` is `None`
+/// when the stored object was too large to read. Equal bytes are current.
+/// Otherwise the stored bytes are decoded and their canonical digest is
+/// recomputed: a different digest, or bytes that do not decode, is a stale or
+/// corrupt object. The same digest with different bytes means the encoder did
+/// not produce one encoding for one digest, which is a defect and an error.
+fn reconcile_existing(
+    object: &persistence::MeshObject<'_>,
+    existing: Option<&[u8]>,
+) -> Result<Reconciled, String> {
+    if crate::interrupt::is_cancelled() {
+        return Err("meshing persistence cancelled".into());
+    }
+    let Some(existing) = existing else {
+        return Ok(Reconciled::Stale);
+    };
+    if existing == object.bytes {
+        return Ok(Reconciled::Current);
+    }
+    match (object.identify)(existing) {
+        Some(digest) if digest == object.digest => Err(format!(
+            "canonical meshing output at {} has canonical digest {} in both the stored and the new object, but their bytes differ (stored sha256 {}, new sha256 {}): the mesh encoder did not produce one encoding for one digest",
+            object.path.display(),
+            object.digest,
+            encode_digest(&Sha256::digest(existing).into()),
+            encode_digest(&Sha256::digest(object.bytes).into()),
+        )),
+        Some(_) | None => Ok(Reconciled::Stale),
+    }
+}
+
+/// Save one canonical object through the host filesystem of an in-memory result store.
+fn persist_canonical(object: &persistence::MeshObject<'_>) -> Result<(), String> {
+    let path = object.path;
     // Only an authoritative NotFound permits creating a new immutable artifact.
     let existing_len = match runmat_filesystem::metadata(path) {
         Ok(metadata) => Some(metadata.len()),
@@ -275,52 +347,26 @@ fn persist_canonical(path: &Path, bytes: &[u8]) -> Result<(), String> {
         Err(error) => return Err(format!("failed to inspect {}: {error}", path.display())),
     };
     if let Some(existing_len) = existing_len {
-        // A different length is a collision without reading it. An equal
-        // length is read through the provider's own read, which every provider
-        // supports; a pinned execution refuses synchronous opens.
-        if existing_len != bytes.len() as u64 {
-            return Err(format!(
-                "canonical meshing output collision at {}",
-                path.display()
-            ));
-        }
-        let existing = runmat_filesystem::read(path)
-            .map_err(|error| format!("failed to open {}: {error}", path.display()))?;
-        return compare_canonical(path, bytes, &mut std::io::Cursor::new(existing));
-    }
-    atomic_write_bytes(&path.to_path_buf(), bytes)
-}
-
-fn compare_canonical(
-    path: &Path,
-    bytes: &[u8],
-    existing: &mut impl std::io::Read,
-) -> Result<(), String> {
-    let mut offset = 0;
-    let mut buffer = [0_u8; 8192];
-    while offset < bytes.len() {
         if crate::interrupt::is_cancelled() {
             return Err("meshing persistence cancelled".into());
         }
-        let count = buffer.len().min(bytes.len() - offset);
-        let read = std::io::Read::read(existing, &mut buffer[..count])
-            .map_err(|error| format!("failed to read {}: {error}", path.display()))?;
-        if read == 0 || buffer[..read] != bytes[offset..offset + read] {
-            break;
+        // A pinned execution refuses synchronous opens; every provider supports read.
+        let existing = if existing_len <= stored_object_read_limit(object.bytes) {
+            Some(
+                runmat_filesystem::read(path)
+                    .map_err(|error| format!("failed to open {}: {error}", path.display()))?,
+            )
+        } else {
+            None
+        };
+        if reconcile_existing(object, existing.as_deref())? == Reconciled::Current {
+            return Ok(());
         }
-        offset += read;
     }
-    if offset == bytes.len()
-        && std::io::Read::read(existing, &mut buffer[..1])
-            .map_err(|error| format!("failed to read {}: {error}", path.display()))?
-            == 0
-    {
-        return Ok(());
+    if crate::interrupt::is_cancelled() {
+        return Err("meshing persistence cancelled".into());
     }
-    Err(format!(
-        "canonical meshing output collision at {}",
-        path.display()
-    ))
+    atomic_write_bytes(&path.to_path_buf(), object.bytes)
 }
 
 fn encode_digest(bytes: &[u8; 32]) -> String {

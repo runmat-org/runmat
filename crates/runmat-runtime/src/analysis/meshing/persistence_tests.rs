@@ -1,20 +1,106 @@
 use super::*;
+
+/// Test objects are `<digest>:<payload>`; bytes without a `:` do not decode.
+fn test_digest(bytes: &[u8]) -> Option<String> {
+    let text = std::str::from_utf8(bytes).ok()?;
+    text.split_once(':').map(|(digest, _)| digest.to_owned())
+}
+
+fn object<'a>(path: &'a Path, bytes: &'a [u8], digest: &'a str) -> persistence::MeshObject<'a> {
+    persistence::MeshObject {
+        path,
+        bytes,
+        digest,
+        identify: &test_digest,
+    }
+}
+
 #[test]
-fn immutable_mesh_collision_uses_the_installed_virtual_provider() {
+fn an_in_memory_result_store_saves_meshes_on_the_host_filesystem() {
     let _guard = crate::analysis::tests::analysis_test_guard();
     let provider = std::sync::Arc::new(runmat_filesystem::MemoryFsProvider::new());
     let _provider = runmat_filesystem::replace_provider(provider.clone());
     let path = Path::new("/immutable-mesh.cbor");
-    persist_canonical(path, b"original").unwrap();
-    persist_canonical(path, b"original").unwrap();
-    assert!(persist_canonical(path, b"different")
-        .unwrap_err()
-        .contains("collision"));
-    assert_eq!(runmat_filesystem::read(path).unwrap(), b"original");
+    persist_canonical(&object(path, b"d1:mesh", "d1")).unwrap();
+    persist_canonical(&object(path, b"d1:mesh", "d1")).unwrap();
+    // Same digest, different bytes: an encoder defect, named with both digests.
+    let error = persist_canonical(&object(path, b"d1:other", "d1")).unwrap_err();
+    assert!(error.contains("canonical digest d1"), "{error}");
+    assert!(error.contains("stored sha256"), "{error}");
+    assert_eq!(runmat_filesystem::read(path).unwrap(), b"d1:mesh");
+    // A stale object (another digest) and a corrupt one are replaced.
+    runmat_filesystem::write(path, b"d0:older encoding").unwrap();
+    persist_canonical(&object(path, b"d1:mesh", "d1")).unwrap();
+    assert_eq!(runmat_filesystem::read(path).unwrap(), b"d1:mesh");
+    runmat_filesystem::write(path, b"truncated").unwrap();
+    persist_canonical(&object(path, b"d1:mesh", "d1")).unwrap();
+    assert_eq!(runmat_filesystem::read(path).unwrap(), b"d1:mesh");
+}
 
-    // A captured publication keeps both mesh objects off the live provider
-    // until its enclosing operation succeeds. An ordinary provider above still
-    // supports direct writes without claiming coherent workspace access.
+#[test]
+fn meshes_use_the_result_store_provider_not_the_installed_provider() {
+    let _guard = crate::analysis::tests::analysis_test_guard();
+    let store_provider = std::sync::Arc::new(runmat_filesystem::MemoryFsProvider::new());
+    let _store_provider = runmat_filesystem::replace_provider(store_provider.clone());
+    let root = PathBuf::from("/.artifacts");
+    let previous_config = crate::analysis::replace_fea_runtime(crate::analysis::FeaRuntimeConfig {
+        artifact_root: Some(root.clone()),
+        study_artifact_root: Some(root.join("studies")),
+        ..Default::default()
+    })
+    .unwrap();
+    super::super::storage::configure_artifact_store(
+        super::super::storage::AnalysisArtifactStoreConfig::Filesystem { root: root.clone() },
+    )
+    .unwrap();
+    // The run installs a different provider (a pinned input snapshot in
+    // Desktop). It already holds a stale mesh under the same name.
+    let installed = std::sync::Arc::new(runmat_filesystem::MemoryFsProvider::new());
+    let _installed = runmat_filesystem::replace_provider(installed.clone());
+    let meshes = root.join("meshes");
+    let artifact = meshes.join("d1.solver-mesh.cbor");
+    installed
+        .write_project_path(artifact.clone(), b"d0:stale")
+        .unwrap();
+
+    // Outside a result transaction, this store's provider refuses direct
+    // access; the error says a transaction is required.
+    let refused = persistence::MeshPersistence::capture(&meshes)
+        .err()
+        .expect("direct access refused");
+    assert!(refused.contains("result transaction"), "{refused}");
+
+    futures::executor::block_on(async {
+        super::super::storage::with_artifact_access(true, |_| -> Result<(), String> {
+            let access = persistence::MeshPersistence::capture(&meshes)?;
+            access
+                .persist_typed(&object(&artifact, b"d1:mesh", "d1"))
+                .map_err(|error| error.to_string())?;
+            access
+                .persist_typed(&object(&artifact, b"d1:mesh", "d1"))
+                .map_err(|error| error.to_string())
+        })
+        .await
+        .unwrap()
+        .unwrap();
+    });
+    assert_eq!(
+        store_provider.read_project_path(artifact.clone()).unwrap(),
+        b"d1:mesh"
+    );
+    // The installed provider was neither consulted nor changed.
+    assert_eq!(
+        installed.read_project_path(artifact.clone()).unwrap(),
+        b"d0:stale"
+    );
+    crate::analysis::replace_fea_runtime(previous_config).unwrap();
+}
+
+#[test]
+fn a_stale_mesh_in_the_result_store_is_replaced_inside_the_transaction() {
+    let _guard = crate::analysis::tests::analysis_test_guard();
+    let provider = std::sync::Arc::new(runmat_filesystem::MemoryFsProvider::new());
+    let _provider = runmat_filesystem::replace_provider(provider.clone());
     let root = PathBuf::from("/.artifacts");
     let previous_config = crate::analysis::replace_fea_runtime(crate::analysis::FeaRuntimeConfig {
         artifact_root: Some(root.clone()),
@@ -27,88 +113,85 @@ fn immutable_mesh_collision_uses_the_installed_virtual_provider() {
     )
     .unwrap();
     let meshes = root.join("meshes");
-    let artifact = meshes.join("fixture.solver-mesh.cbor");
-    let evidence = meshes.join("fixture.meshing-evidence.cbor");
-    futures::executor::block_on(async {
-        super::super::storage::with_artifact_access(true, |_| -> Result<(), String> {
-            let access = persistence::MeshPersistence::capture(&meshes)?;
-            access.persist(&artifact, b"mesh")?;
-            access.persist(&evidence, b"evidence")?;
-            access.persist(&artifact, b"mesh")?;
-            assert!(access
-                .persist(&artifact, b"collision")
-                .unwrap_err()
-                .contains("collision"));
-            assert!(provider.read_project_path(artifact.clone()).is_err());
-            assert!(provider.read_project_path(evidence.clone()).is_err());
-            Ok(())
-        })
-        .await
-        .unwrap()
+    let artifact = meshes.join("d1.solver-mesh.cbor");
+    provider
+        .write_project_path(artifact.clone(), b"d0:stale from an earlier failed run")
         .unwrap();
-        assert_eq!(
-            provider.read_project_path(artifact.clone()).unwrap(),
-            b"mesh"
-        );
-        assert_eq!(
-            provider.read_project_path(evidence.clone()).unwrap(),
-            b"evidence"
-        );
-
-        let abandoned = meshes.join("abandoned.solver-mesh.cbor");
-        let abandoned_evidence = meshes.join("abandoned.meshing-evidence.cbor");
+    futures::executor::block_on(async {
+        // A failed operation discards the replacement with everything else.
         let failed = super::super::storage::with_artifact_access(true, |_| -> Result<(), String> {
             let access = persistence::MeshPersistence::capture(&meshes)?;
-            access.persist(&abandoned, b"discard mesh")?;
-            access.persist(&abandoned_evidence, b"discard evidence")?;
+            access
+                .persist_typed(&object(&artifact, b"d1:mesh", "d1"))
+                .map_err(|error| error.to_string())?;
             Err("operation refused".into())
         })
         .await
         .unwrap();
         assert_eq!(failed.unwrap_err(), "operation refused");
-        assert!(provider.read_project_path(abandoned).is_err());
-        assert!(provider.read_project_path(abandoned_evidence).is_err());
-        assert_eq!(provider.read_project_path(artifact).unwrap(), b"mesh");
+        assert_eq!(
+            provider.read_project_path(artifact.clone()).unwrap(),
+            b"d0:stale from an earlier failed run"
+        );
+        super::super::storage::with_artifact_access(true, |_| -> Result<(), String> {
+            let access = persistence::MeshPersistence::capture(&meshes)?;
+            access
+                .persist_typed(&object(&artifact, b"d1:mesh", "d1"))
+                .map_err(|error| error.to_string())?;
+            let error = access
+                .persist_typed(&object(&artifact, b"d1:different bytes", "d1"))
+                .unwrap_err()
+                .to_string();
+            assert!(error.contains("canonical digest d1"), "{error}");
+            Ok(())
+        })
+        .await
+        .unwrap()
+        .unwrap();
     });
+    assert_eq!(provider.read_project_path(artifact).unwrap(), b"d1:mesh");
     crate::analysis::replace_fea_runtime(previous_config).unwrap();
 }
 
 #[test]
-fn immutable_mesh_collision_comparison_handles_matches_changes_short_and_oversized_files() {
+fn an_existing_mesh_read_observes_cancellation_and_keeps_the_original() {
     let _guard = crate::analysis::tests::analysis_test_guard();
     let directory = tempfile::tempdir().unwrap();
     let path = directory.path().join("original.cbor");
-    let original = vec![7_u8; 8193];
-    persist_canonical(&path, &original).unwrap();
-    persist_canonical(&path, &original).unwrap();
-    assert_eq!(runmat_filesystem::read(&path).unwrap(), original);
-    for incoming in [vec![8_u8; 8193], vec![7_u8; 8192], vec![7_u8; 8194]] {
-        assert!(persist_canonical(&path, &incoming)
-            .unwrap_err()
-            .contains("collision"));
-        assert_eq!(runmat_filesystem::read(&path).unwrap(), original);
-    }
-}
-
-#[test]
-fn immutable_mesh_collision_read_cancels_without_changing_original_or_later_replay() {
-    let _guard = crate::analysis::tests::analysis_test_guard();
-    let directory = tempfile::tempdir().unwrap();
-    let path = directory.path().join("original.cbor");
-    let original = vec![7_u8; 16385];
-    persist_canonical(&path, &original).unwrap();
+    let mut original = b"d1:".to_vec();
+    original.extend(vec![7_u8; 16385]);
+    persist_canonical(&object(&path, &original, "d1")).unwrap();
     {
         let _interrupt = crate::interrupt::replace_interrupt(Some(
             runmat_execution::CancellationToken::from_shared(std::sync::Arc::new(
                 std::sync::atomic::AtomicBool::new(true),
             )),
         ));
-        assert!(persist_canonical(&path, &original)
+        assert!(persist_canonical(&object(&path, &original, "d1"))
             .unwrap_err()
             .contains("cancelled"));
     }
     assert_eq!(runmat_filesystem::read(&path).unwrap(), original);
-    persist_canonical(&path, &original).unwrap();
+    persist_canonical(&object(&path, &original, "d1")).unwrap();
+}
+
+#[test]
+fn real_solver_meshes_identify_by_their_recomputed_canonical_digest() {
+    use runmat_meshing_core::{fixtures::canonical_tetrahedron_solver_mesh, ElementOrder};
+    let tet4 = canonical_tetrahedron_solver_mesh(ElementOrder::Tet4);
+    let tet10 = canonical_tetrahedron_solver_mesh(ElementOrder::Tet10);
+    let bytes = tet4.canonical_encode().unwrap();
+    assert_eq!(
+        solver_mesh_digest(&bytes).unwrap(),
+        encode_digest(tet4.canonical_digest.bytes())
+    );
+    assert_ne!(
+        solver_mesh_digest(&tet10.canonical_encode().unwrap()).unwrap(),
+        encode_digest(tet4.canonical_digest.bytes())
+    );
+    assert!(solver_mesh_digest(&bytes[..bytes.len() - 1]).is_none());
+    // One digest, one encoding: encoding twice gives the same bytes.
+    assert_eq!(tet4.canonical_encode().unwrap(), bytes);
 }
 
 #[test]
@@ -151,20 +234,17 @@ fn mesh_and_study_evidence_publish_inside_a_pinned_execution() {
     .unwrap();
     let pinned_provider = runmat_filesystem::replace_provider(std::sync::Arc::new(pinned));
     let mesh = Path::new("/fixture.solver-mesh.cbor");
-    persist_canonical(mesh, b"mesh").unwrap();
-    persist_canonical(mesh, b"mesh").unwrap();
-    assert!(persist_canonical(mesh, b"other")
+    persist_canonical(&object(mesh, b"d1:mesh", "d1")).unwrap();
+    persist_canonical(&object(mesh, b"d1:mesh", "d1")).unwrap();
+    assert!(persist_canonical(&object(mesh, b"d1:mesk", "d1"))
         .unwrap_err()
-        .contains("collision"));
-    assert!(persist_canonical(mesh, b"mesk")
-        .unwrap_err()
-        .contains("collision"));
+        .contains("canonical digest d1"));
     let evidence = PathBuf::from("/study.json");
     atomic_write_bytes(&evidence, b"first").unwrap();
     atomic_write_bytes(&evidence, b"replacement").unwrap();
     drop(pinned_provider);
     let _base_provider = runmat_filesystem::replace_provider(base);
-    assert_eq!(runmat_filesystem::read(mesh).unwrap(), b"mesh");
+    assert_eq!(runmat_filesystem::read(mesh).unwrap(), b"d1:mesh");
     assert_eq!(runmat_filesystem::read(&evidence).unwrap(), b"replacement");
     let mut names: Vec<_> = runmat_filesystem::read_dir(Path::new("/"))
         .unwrap()
