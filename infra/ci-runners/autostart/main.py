@@ -7,9 +7,11 @@ credential: it only verifies the webhook signature and calls the Compute API
 with its own service account, which may only get, start and resume the two
 runner VMs.
 
-A job can be queued while the VM is shutting down after its idle period. The
-service therefore watches the VM for a few minutes after each queued job and
-starts it again if it stops.
+A start can fail: the VM may still be stopping after its idle period, or the
+region's CPU quota may be in use by other machines. The service therefore keeps
+trying until the VM is running, for up to WATCH_MAX_SECONDS after the last
+queued job, and then watches it for WATCH_SECONDS more and starts it again if
+it stops.
 """
 
 import hashlib
@@ -29,6 +31,9 @@ REPOSITORIES = {"runmat-org/runmat", "runmat-org/runmat-private"}
 INSTANCES = json.loads(os.environ.get("CI_LABEL_INSTANCES",
                                       '{"runmat-gcp-linux-x64": "ci-linux-x64", "runmat-gcp-windows-x64": "ci-windows-x64"}'))
 WATCH_SECONDS = 8 * 60
+# Queued jobs wait up to 24 h on GitHub; quota held by other machines can take
+# hours to free.
+WATCH_MAX_SECONDS = int(os.environ.get("CI_WATCH_MAX_SECONDS", str(6 * 60 * 60)))
 watching = {}
 lock = threading.Lock()
 
@@ -55,23 +60,39 @@ def compute(method, instance, verb=""):
 
 def ensure_running(instance):
     status = compute("GET", instance)["status"]
-    if status in ("TERMINATED", "STOPPED"):
-        compute("POST", instance, "/start")
-        log(message="starting runner VM", instance=instance, was=status)
-    elif status == "SUSPENDED":
-        compute("POST", instance, "/resume")
-        log(message="resuming runner VM", instance=instance, was=status)
+    verb = {"TERMINATED": "/start", "STOPPED": "/start", "SUSPENDED": "/resume"}.get(status)
+    if verb:
+        # The start is asynchronous. A start that fails (for example QUOTA_EXCEEDED
+        # while other machines hold the region's CPUs) leaves the VM stopped, and
+        # the watcher's next pass tries again.
+        compute("POST", instance, verb)
+        log(message="starting runner VM", instance=instance, was=status, verb=verb)
     return status
 
 
 def watch(instance):
-    """Start the VM now, and again if it stops during the watch window."""
-    deadline = time.time() + WATCH_SECONDS
-    while time.time() < deadline:
+    """Start the VM, retrying until it runs, then restart it if it stops during WATCH_SECONDS.
+
+    watching[instance] holds the time of the last queued job; each new queued job
+    extends the retry window.
+    """
+    running_since = None
+    while True:
+        with lock:
+            last_queued = watching[instance]
+        now = time.time()
+        if running_since is not None and now - running_since >= WATCH_SECONDS and now - last_queued >= WATCH_SECONDS:
+            break
+        if running_since is None and now - last_queued >= WATCH_MAX_SECONDS:
+            log(message="gave up starting runner VM", instance=instance, hours=WATCH_MAX_SECONDS / 3600)
+            break
         try:
-            ensure_running(instance)
+            if ensure_running(instance) == "RUNNING":
+                running_since = running_since or now
+            else:
+                running_since = None
         except urllib.error.HTTPError as error:
-            # 400 while the VM is still stopping; a quota error is logged and retried.
+            # 400 while the VM is still stopping.
             log(message="start not possible yet", instance=instance, code=error.code,
                 detail=error.read().decode(errors="replace")[:500])
         except Exception as error:  # noqa: BLE001 - keep the watcher alive

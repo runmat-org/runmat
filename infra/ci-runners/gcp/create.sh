@@ -55,10 +55,12 @@ python3 -c "import secrets; print(secrets.token_hex(32), end='')" |
   gcloud secrets create ci-runner-webhook-secret --project $P --replication-policy automatic --data-file=-
 gcloud secrets add-iam-policy-binding ci-runner-webhook-secret --project $P \
   --member serviceAccount:ci-runner-autostart@$P.iam.gserviceaccount.com --role roles/secretmanager.secretAccessor
+# One instance stays up: a watcher thread retries a failed start (quota, VM still
+# stopping) for hours, and a scaled-in instance would end it.
 gcloud run deploy ci-runner-autostart --project $P --region $R --source autostart \
   --build-service-account projects/$P/serviceAccounts/ci-runner-build@$P.iam.gserviceaccount.com \
   --service-account ci-runner-autostart@$P.iam.gserviceaccount.com --allow-unauthenticated \
-  --no-cpu-throttling --min-instances 0 --max-instances 2 --memory 512Mi --cpu 1 --timeout 900 \
+  --no-cpu-throttling --min-instances 1 --max-instances 2 --memory 512Mi --cpu 1 --timeout 900 \
   --set-secrets WEBHOOK_SECRET=ci-runner-webhook-secret:latest --labels purpose=ci-runner,owner=design-ci
 url="$(gcloud run services describe ci-runner-autostart --project $P --region $R --format 'value(status.url)')/github"
 secret="$(gcloud secrets versions access latest --secret ci-runner-webhook-secret --project $P)"
