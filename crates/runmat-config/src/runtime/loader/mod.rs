@@ -8,7 +8,7 @@ pub use layers::{
     ConfigLoadOptions, ConfigSource, ConfigurationPolicy, HostConfigDocument, HostRuntimeSettings,
     ResolvedRuntimeConfig, UserSettingsSource,
 };
-pub use settings::UserSettingsDocument;
+pub use settings::{UserSettingsBusy, UserSettingsDocument, USER_SETTINGS_LOCK_WAIT};
 
 use anyhow::Result;
 use std::path::{Path, PathBuf};

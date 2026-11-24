@@ -103,5 +103,5 @@ async fn prepared_execution_rejects_metadata_and_envelope_substitution_before_ex
     let error = execute_prepared_fea_study_locally(prepared, &options)
         .await
         .unwrap_err();
-    assert!(error.contains("original root study"), "{error}");
+    assert!(error.to_string().contains("original root study"), "{error}");
 }

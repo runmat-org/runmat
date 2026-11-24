@@ -7,7 +7,7 @@ pub async fn execute_checked_fea_locally_with_timing(
     source: &runmat_core::CheckedFeaSessionSource,
     options: LocalFeaExecutionOptions,
     timing: &runmat_core::FeaExecutionTimingProfile,
-) -> Result<LocalFeaExecution, String> {
+) -> Result<LocalFeaExecution, FeaExecutionError> {
     // The display planner describes the default singleton CPU study with one
     // worker. Never reuse sweep, accelerator, implicit-allocation, or selected
     // root measurements for that route.

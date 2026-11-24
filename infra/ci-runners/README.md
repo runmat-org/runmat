@@ -19,8 +19,10 @@ The runners run only code from runmat-org repositories:
 
 - Workflows use a `runmat-gcp-*` label only for pushes, `workflow_dispatch`,
   `workflow_call`, schedules, releases and pull requests whose head branch is
-  in the same repository. In `.github/workflows/ci.yml`, a pull request from a
-  fork selects GitHub-hosted `ubuntu-latest` or `windows-latest` instead.
+  in the same repository. In `.github/workflows/ci.yml`, a job selects its
+  `runmat-gcp-*` label only for push, `workflow_dispatch` and schedule events
+  and same-repository pull requests; any other event, including a pull request
+  from a fork, selects the matrix entry's WarpBuild `fork_runner` label.
 - A fork's pull request runs the workflow file from the fork, so the fork could
   name a `runmat-gcp-*` label. The job-started hook on the VM refuses any
   `pull_request` job whose head repository is not the base repository, and any

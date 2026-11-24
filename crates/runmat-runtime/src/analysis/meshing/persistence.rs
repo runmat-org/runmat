@@ -1,8 +1,22 @@
-//! Mesh files share the result transaction when publication has captured one.
+//! Mesh files belong to the result store. They are written through the captured
+//! result transaction when one is open, otherwise through the result store's
+//! own provider. The process's installed provider is used only when the result
+//! store keeps results in memory and so has no filesystem of its own.
 use std::{io::ErrorKind, path::Path};
 
-use super::super::storage::AnalysisPublicationError;
+use super::super::storage::{AnalysisPublicationError, ResultStoreProvider};
 use runmat_filesystem::{workspace_access::WorkspaceAccess, AtomicCreateResult};
+
+/// One canonical mesh object and the digest that names it.
+pub(super) struct MeshObject<'a> {
+    pub(super) path: &'a Path,
+    pub(super) bytes: &'a [u8],
+    /// The canonical digest of `bytes`, as it appears in the file name.
+    pub(super) digest: &'a str,
+    /// Decodes stored bytes and recomputes their canonical digest. `None`
+    /// means the stored bytes do not decode as this kind of object.
+    pub(super) identify: &'a dyn Fn(&[u8]) -> Option<String>,
+}
 
 pub(super) struct MeshPersistence {
     scope: Option<Box<dyn WorkspaceAccess>>,
@@ -15,62 +29,88 @@ impl MeshPersistence {
     }
 
     pub(super) fn capture_typed(root: &Path) -> Result<Self, AnalysisPublicationError> {
-        let scope = super::super::storage::scoped_artifact_provider()
-            .map(|provider| {
-                let maximum = super::super::configuration::publication_staging_budget()
-                    .map_err(AnalysisPublicationError::from)?;
-                provider
-                    .workspace_access(root, true, maximum)
-                    .map_err(AnalysisPublicationError::from_io)
-            })
-            .transpose()?;
-        match &scope {
-            Some(scope) => scope.create_dir_all(Path::new(".")),
-            None => runmat_filesystem::create_dir_all(root),
+        let provider = ResultStoreProvider::capture()?;
+        if matches!(provider, ResultStoreProvider::HostOfMemoryStore(_)) {
+            runmat_filesystem::create_dir_all(root).map_err(AnalysisPublicationError::from_io)?;
+            return Ok(Self { scope: None });
         }
-        .map_err(AnalysisPublicationError::from_io)?;
-        Ok(Self { scope })
-    }
-
-    #[cfg(test)]
-    pub(super) fn persist(&self, path: &Path, bytes: &[u8]) -> Result<(), String> {
-        self.persist_typed(path, bytes)
-            .map_err(|error| error.to_string())
+        let maximum = super::super::configuration::publication_staging_budget()
+            .map_err(AnalysisPublicationError::from)?;
+        let scope = provider.workspace_access(root, true, maximum)?;
+        // A native scope creates its writable root when it opens, and refuses
+        // `.` as a target because the root's parent holds the publication
+        // journal. A transaction view needs the directory staged.
+        if matches!(provider, ResultStoreProvider::Scoped(_)) {
+            scope
+                .create_dir_all(Path::new("."))
+                .map_err(AnalysisPublicationError::from_io)?;
+        }
+        Ok(Self { scope: Some(scope) })
     }
 
     pub(super) fn persist_typed(
         &self,
-        path: &Path,
-        bytes: &[u8],
+        object: &MeshObject<'_>,
     ) -> Result<(), AnalysisPublicationError> {
         let Some(scope) = &self.scope else {
-            return super::persist_canonical(path, bytes).map_err(Into::into);
+            return super::persist_canonical(object).map_err(Into::into);
         };
-        let relative = Path::new(path.file_name().ok_or("mesh artifact has no file name")?);
-        let exists = match scope.metadata(relative) {
-            Ok(_) => true,
-            Err(error) if error.kind() == ErrorKind::NotFound => false,
+        let relative = Path::new(
+            object
+                .path
+                .file_name()
+                .ok_or("mesh artifact has no file name")?,
+        );
+        let existing_len = match scope.metadata(relative) {
+            Ok(metadata) => Some(metadata.len()),
+            Err(error) if error.kind() == ErrorKind::NotFound => None,
             Err(error) => return Err(AnalysisPublicationError::from_io(error)),
         };
-        if exists {
-            let mut existing = scope
-                .open_read(relative)
-                .map_err(AnalysisPublicationError::from_io)?;
-            super::compare_canonical(path, bytes, &mut existing)?;
-        } else {
+        if let Some(existing_len) = existing_len {
             if crate::interrupt::is_cancelled() {
                 return Err("meshing persistence cancelled".into());
             }
-            // Only a concurrent creator needs an owned comparison buffer. Its
-            // maximum is the incoming wire length, reserved by the caller's
-            // mesh-persistence phase before either encoding is allocated.
-            match scope
-                .atomic_create_new(relative, bytes, bytes.len() as u64)
-                .map_err(AnalysisPublicationError::from_io)?
+            let existing = if existing_len <= super::stored_object_read_limit(object.bytes) {
+                Some(
+                    scope
+                        .read(relative, existing_len)
+                        .map_err(AnalysisPublicationError::from_io)?,
+                )
+            } else {
+                None
+            };
+            if super::reconcile_existing(object, existing.as_deref())? == super::Reconciled::Current
             {
-                AtomicCreateResult::Published { .. } => {}
-                AtomicCreateResult::Existing(existing) => {
-                    super::compare_canonical(path, bytes, &mut std::io::Cursor::new(existing))?;
+                return scope
+                    .synchronize_immutable(relative)
+                    .map_err(AnalysisPublicationError::from_io);
+            }
+            // Stale or corrupt: replace it. The create below is conditional on
+            // the name being free, so a concurrent writer's object is compared,
+            // never overwritten.
+            scope
+                .remove_file(relative)
+                .map_err(AnalysisPublicationError::from_io)?;
+        }
+        if crate::interrupt::is_cancelled() {
+            return Err("meshing persistence cancelled".into());
+        }
+        // Only a concurrent creator needs an owned comparison buffer. Its
+        // maximum is the incoming wire length, reserved by the caller's
+        // mesh-persistence phase before either encoding is allocated.
+        match scope
+            .atomic_create_new(relative, object.bytes, object.bytes.len() as u64)
+            .map_err(AnalysisPublicationError::from_io)?
+        {
+            AtomicCreateResult::Published { .. } => {}
+            AtomicCreateResult::Existing(existing) => {
+                if super::reconcile_existing(object, Some(&existing))? != super::Reconciled::Current
+                {
+                    return Err(format!(
+                        "canonical meshing output collision at {}: another writer created a different object while this one was saved",
+                        object.path.display()
+                    )
+                    .into());
                 }
             }
         }

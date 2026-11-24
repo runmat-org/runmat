@@ -376,7 +376,12 @@ fn source_identity(
         .to_path_buf();
     let logical_path =
         LogicalSourcePath::new(file_name.to_owned()).map_err(|error| error.to_string())?;
-    Ok((source_root, requested_path.to_path_buf(), logical_path))
+    // The runtime rebuilds this file's path from its root and logical path. Use
+    // that one spelling here too, so `study.fea` and `./study.fea` name the same
+    // checked source when a preview revision is compared with the run.
+    let physical_path = runmat_runtime::analysis::physical_source_path(&source_root, &logical_path)
+        .map_err(|diagnostic| diagnostic.message)?;
+    Ok((source_root, physical_path, logical_path))
 }
 
 async fn project_manifest(

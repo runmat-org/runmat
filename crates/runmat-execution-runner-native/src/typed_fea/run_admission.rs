@@ -130,7 +130,9 @@ fn planned_operations(
         .ok()
 }
 
-pub(super) fn outcome(result: &Result<LocalFeaExecution, String>) -> FeaRunOutcome {
+pub(super) fn outcome(
+    result: &Result<LocalFeaExecution, super::FeaExecutionError>,
+) -> FeaRunOutcome {
     if runmat_runtime::interrupt::is_cancelled() {
         return FeaRunOutcome::Cancelled;
     }

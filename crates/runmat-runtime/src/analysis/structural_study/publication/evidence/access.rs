@@ -1,6 +1,5 @@
 //! Captured provider-owned immutable evidence I/O, bounded before decode and visibility.
 use super::*;
-use std::sync::Arc;
 use storage::AnalysisPublicationError as Error;
 
 /// Resident workspace for persisting immutable objects of at most `largest` bytes: the
@@ -10,22 +9,39 @@ pub(in crate::analysis) fn immutable_batch_workspace(largest: u64) -> Option<u64
     largest.checked_mul(2)
 }
 
+/// Evidence is a file of the result store. It is written through the captured
+/// transaction when one is open, otherwise through the result store's own
+/// provider, never through the process's installed provider. A store whose
+/// provider allows writes only inside a transaction refuses outside one.
 pub(in crate::analysis) struct StudyEvidenceAccess {
     root: PathBuf,
-    provider: Arc<dyn runmat_filesystem::FsProvider>,
+    provider: Result<storage::ResultStoreProvider, String>,
 }
 impl StudyEvidenceAccess {
     pub(in crate::analysis) fn capture() -> Self {
-        Self::new(
-            study_evidence_root(),
-            storage::scoped_artifact_provider().unwrap_or_else(runmat_filesystem::current_provider),
-        )
+        Self {
+            root: study_evidence_root(),
+            provider: storage::ResultStoreProvider::capture(),
+        }
     }
+    #[cfg(test)]
     pub(in crate::analysis) fn new(
         root: PathBuf,
-        provider: Arc<dyn runmat_filesystem::FsProvider>,
+        provider: std::sync::Arc<dyn runmat_filesystem::FsProvider>,
     ) -> Self {
-        Self { root, provider }
+        Self {
+            root,
+            provider: Ok(storage::ResultStoreProvider::Scoped(provider)),
+        }
+    }
+    fn workspace_access(
+        &self,
+        available: u64,
+    ) -> Result<Box<dyn runmat_filesystem::workspace_access::WorkspaceAccess>, Error> {
+        self.provider
+            .as_ref()
+            .map_err(|error| Error::from(error.clone()))?
+            .workspace_access(&self.root, true, available)
     }
     pub(in crate::analysis) fn persist_bytes(
         &self,
@@ -63,9 +79,7 @@ impl StudyEvidenceAccess {
             .checked_sub(largest)
             .filter(|available| maximum >= required && *available > 0)
             .ok_or_else(limited)?;
-        let scope = self
-            .provider
-            .workspace_access(&self.root, true, available)?;
+        let scope = self.workspace_access(available)?;
         let mut batch = ImmutableObjectBatch {
             root: &self.root,
             batch: scope.immutable_batch()?,
@@ -97,9 +111,7 @@ impl StudyEvidenceAccess {
             .filter(|bytes| *bytes > 0)
             .ok_or_else(|| limited("evidence encoding exceeds its phase allowance"))?;
         let bytes = runmat_canonical_codec::encode_json_bounded(evidence, available)?;
-        let scope = self
-            .provider
-            .workspace_access(&self.root, true, available)?;
+        let scope = self.workspace_access(available)?;
         let path = std::path::Path::new(relative);
         scope.create_dir_all(path.parent().ok_or("evidence path has no parent")?)?;
         match scope.atomic_create_new(path, &bytes, available)? {

@@ -17,6 +17,7 @@ on:
   pull_request:
     branches:
       - '**'
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -51,7 +52,7 @@ jobs:
       - run: python3 scripts/qualification/scientific.py verify
 
   distribution-contracts:
-    if: github.event_name == 'push' || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.fork == true)
+    if: github.event_name == 'push' || github.event_name == 'workflow_dispatch' || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.fork == true)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -87,7 +88,7 @@ jobs:
 
   docs-lint:
     # FEA docs: capability ledger (ledger↔code↔docs), pending flags, fea highlighting, front matter, links, and generated pages.
-    if: github.event_name == 'push' || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.fork == true)
+    if: github.event_name == 'push' || github.event_name == 'workflow_dispatch' || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.fork == true)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -108,32 +109,37 @@ jobs:
     needs: changes
     name: ${{ matrix.name }}
     # Run on pushes for all branches, and only on PRs from forks to avoid double CI on same-repo PRs
-    if: inputs.release_validation || (needs.changes.outputs.native == 'true' && (github.event_name == 'push' || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.fork == true)))
+    if: inputs.release_validation || (needs.changes.outputs.native == 'true' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch' || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.fork == true)))
     strategy:
       fail-fast: false
       max-parallel: 15
       matrix:
         include:
           - runner: runmat-gcp-linux-x64
+            fork_runner: warp-ubuntu-latest-x64-16x
             name: linux-quality
             task: quality
             needs_occt: true
           - runner: runmat-gcp-linux-x64
+            fork_runner: warp-ubuntu-latest-x64-16x
             name: linux-tests-language
             task: test
             test_group: language
             needs_occt: false
           - runner: runmat-gcp-linux-x64
+            fork_runner: warp-ubuntu-latest-x64-16x
             name: linux-tests-runtime
             task: test
             test_group: runtime
             needs_occt: true
           - runner: runmat-gcp-linux-x64
+            fork_runner: warp-ubuntu-latest-x64-16x
             name: linux-tests-geometry-analysis
             task: test
             test_group: geometry-analysis
             needs_occt: true
           - runner: runmat-gcp-linux-x64
+            fork_runner: warp-ubuntu-latest-x64-16x
             name: linux-tests-tooling-distributed
             task: test
             test_group: tooling-distributed
@@ -159,25 +165,30 @@ jobs:
             test_group: tooling-distributed
             needs_occt: false
           - runner: runmat-gcp-windows-x64
+            fork_runner: warp-windows-latest-x64-8x
             name: windows-quality
             task: quality
             needs_occt: true
           - runner: runmat-gcp-windows-x64
+            fork_runner: warp-windows-latest-x64-8x
             name: windows-tests-language
             task: test
             test_group: language
             needs_occt: false
           - runner: runmat-gcp-windows-x64
+            fork_runner: warp-windows-latest-x64-16x
             name: windows-tests-runtime
             task: test
             test_group: runtime
             needs_occt: true
           - runner: runmat-gcp-windows-x64
+            fork_runner: warp-windows-latest-x64-8x
             name: windows-tests-geometry-analysis
             task: test
             test_group: geometry-analysis
             needs_occt: true
           - runner: runmat-gcp-windows-x64
+            fork_runner: warp-windows-latest-x64-16x
             name: windows-tests-tooling-distributed
             task: test
             test_group: tooling-distributed
@@ -188,6 +199,7 @@ jobs:
             shard_count: 4
             cache_name: windows-tests-tooling-distributed
           - runner: runmat-gcp-windows-x64
+            fork_runner: warp-windows-latest-x64-16x
             name: windows-tests-tooling-distributed-tail
             task: test
             test_group: tooling-distributed
@@ -196,6 +208,7 @@ jobs:
             shard_count: 4
             cache_name: windows-tests-tooling-distributed
           - runner: runmat-gcp-windows-x64
+            fork_runner: warp-windows-latest-x64-16x
             name: windows-tests-tooling-distributed-third
             task: test
             test_group: tooling-distributed
@@ -204,6 +217,7 @@ jobs:
             shard_count: 4
             cache_name: windows-tests-tooling-distributed
           - runner: runmat-gcp-windows-x64
+            fork_runner: warp-windows-latest-x64-16x
             name: windows-tests-tooling-distributed-fourth
             task: test
             test_group: tooling-distributed
@@ -211,11 +225,13 @@ jobs:
             shard_index: 3
             shard_count: 4
             cache_name: windows-tests-tooling-distributed
-    # Runner rule: runmat-gcp-* labels are self-hosted GCP VMs and run only code
-    # from this repository (pushes, and pull requests whose head branch is in
-    # this repository). A fork pull request uses GitHub-hosted ubuntu-latest or
-    # windows-latest instead; the runners' job-started hook also refuses forks.
-    runs-on: ${{ (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository && startsWith(matrix.runner, 'runmat-gcp-')) && (contains(matrix.runner, 'windows') && 'windows-latest' || 'ubuntu-latest') || matrix.runner }}
+    # Runner rule: runmat-gcp-* labels are self-hosted GCP VMs (infra/ci-runners).
+    # They run only code from this repository: push, workflow_dispatch and
+    # schedule events, and pull requests whose head branch is in this
+    # repository. Every other event, including a fork pull request, uses the
+    # entry's WarpBuild fork_runner. The runners' job-started hook also refuses
+    # fork pull requests, whatever a workflow file names.
+    runs-on: ${{ (contains(fromJSON('["push","workflow_dispatch","schedule"]'), github.event_name) || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository)) && matrix.runner || matrix.fork_runner || matrix.runner }}
     # The macOS tooling cohort reached six hours while compiling a later
     # batch after successful preceding tests. Keep the existing cohort intact
     # and use the same bounded window as the Windows test lanes.
@@ -790,6 +806,13 @@ jobs:
         run: |
           & ./infra/scripts/prepare-windows-cross-dependencies.ps1 -Target "${{ matrix.platform.target }}"
           & ./scripts/distribution/resolve-cargo-native-import-libraries.test.ps1
+
+      # Hosted images put rustup on PATH. The GCP runners keep it in CARGO_HOME
+      # on their cache disk (infra/ci-runners), which the job PATH lacks.
+      - name: Put the runner's Rust toolchain on PATH (GCP runners)
+        if: runner.os == 'Linux' && startsWith(runner.name, 'gcp-')
+        shell: bash
+        run: printf '%s\n' "${CARGO_HOME}/bin" >> "$GITHUB_PATH"
 
       - name: Install Rust release target
         shell: bash

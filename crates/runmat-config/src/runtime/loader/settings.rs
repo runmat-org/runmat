@@ -178,8 +178,19 @@ impl UserSettingsDocument {
 
     /// Save in the original format, rejecting concurrent external edits rather
     /// than silently overwriting them. A JSON browser host uses source() instead.
+    ///
+    /// Another writer may hold the settings lock briefly; on Linux a child
+    /// process forked while a save holds it also keeps it until the child
+    /// execs. The save waits up to [`USER_SETTINGS_LOCK_WAIT`] for the lock,
+    /// then fails with [`UserSettingsBusy`] (reachable with
+    /// `anyhow::Error::downcast_ref`).
     #[cfg(not(target_arch = "wasm32"))]
     pub fn save(&mut self, path: &Path) -> Result<()> {
+        self.save_with_lock_wait(path, USER_SETTINGS_LOCK_WAIT)
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    fn save_with_lock_wait(&mut self, path: &Path, wait: std::time::Duration) -> Result<()> {
         if RunmatConfigFormat::from_path(path)? != self.format {
             bail!("user settings format does not match destination");
         }
@@ -201,13 +212,7 @@ impl UserSettingsDocument {
             .read(true)
             .write(true)
             .open(path.with_file_name(lock_name))?;
-        match lock.try_lock() {
-            Ok(()) => {}
-            Err(fs::TryLockError::WouldBlock) => {
-                bail!("user settings are being updated; retry after reloading")
-            }
-            Err(fs::TryLockError::Error(error)) => return Err(error.into()),
-        }
+        lock_with_bounded_wait(&lock, wait)?;
         if self.origin.as_deref() == Some(path) {
             let current = match std::fs::read_to_string(path) {
                 Ok(source) => Some(source),
@@ -239,6 +244,110 @@ impl UserSettingsDocument {
         self.origin = Some(path.to_owned());
         self.original_source = Some(self.source.clone());
         Ok(())
+    }
+}
+
+/// How long a save waits for another writer to release the settings lock.
+pub const USER_SETTINGS_LOCK_WAIT: std::time::Duration = std::time::Duration::from_secs(2);
+
+/// Another writer held the user settings lock for the whole wait.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct UserSettingsBusy {
+    pub waited: std::time::Duration,
+}
+
+impl std::fmt::Display for UserSettingsBusy {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            formatter,
+            "user settings are being updated by another writer (waited {} ms); retry after reloading",
+            self.waited.as_millis()
+        )
+    }
+}
+
+impl std::error::Error for UserSettingsBusy {}
+
+/// Take the lock, retrying with backoff (5 ms doubling to 100 ms) until `wait` elapses.
+#[cfg(not(target_arch = "wasm32"))]
+fn lock_with_bounded_wait(lock: &fs::File, wait: std::time::Duration) -> Result<()> {
+    let started = std::time::Instant::now();
+    let mut backoff = std::time::Duration::from_millis(5);
+    loop {
+        match lock.try_lock() {
+            Ok(()) => return Ok(()),
+            Err(fs::TryLockError::WouldBlock) => {}
+            Err(fs::TryLockError::Error(error)) => return Err(error.into()),
+        }
+        let elapsed = started.elapsed();
+        if elapsed >= wait {
+            return Err(UserSettingsBusy { waited: elapsed }.into());
+        }
+        std::thread::sleep(backoff.min(wait - elapsed));
+        backoff = (backoff * 2).min(std::time::Duration::from_millis(100));
+    }
+}
+
+#[cfg(all(test, not(target_arch = "wasm32")))]
+mod lock_wait_tests {
+    use super::*;
+    use std::time::Duration;
+
+    fn hold_lock(
+        lock_path: PathBuf,
+        hold: Duration,
+    ) -> (std::thread::JoinHandle<()>, std::sync::mpsc::Receiver<()>) {
+        let (held, acquired) = std::sync::mpsc::channel();
+        let holder = std::thread::spawn(move || {
+            let file = OpenOptions::new()
+                .create(true)
+                .truncate(false)
+                .read(true)
+                .write(true)
+                .open(lock_path)
+                .unwrap();
+            file.lock().unwrap();
+            held.send(()).unwrap();
+            std::thread::sleep(hold);
+            file.unlock().unwrap();
+        });
+        (holder, acquired)
+    }
+
+    #[test]
+    fn a_save_waits_for_a_briefly_held_lock() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("runtime-settings.json");
+        let (holder, acquired) = hold_lock(
+            directory.path().join("runtime-settings.json.lock"),
+            Duration::from_millis(150),
+        );
+        acquired.recv().unwrap();
+        let mut document = UserSettingsDocument::parse("{}", RunmatConfigFormat::Json).unwrap();
+        document.save(&path).unwrap();
+        holder.join().unwrap();
+        assert_eq!(fs::read_to_string(&path).unwrap(), "{}");
+    }
+
+    #[test]
+    fn a_lock_held_past_the_wait_is_a_typed_busy_error() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("runtime-settings.json");
+        let (holder, acquired) = hold_lock(
+            directory.path().join("runtime-settings.json.lock"),
+            Duration::from_millis(600),
+        );
+        acquired.recv().unwrap();
+        let mut document = UserSettingsDocument::parse("{}", RunmatConfigFormat::Json).unwrap();
+        let error = document
+            .save_with_lock_wait(&path, Duration::from_millis(200))
+            .unwrap_err();
+        let busy = error
+            .downcast_ref::<UserSettingsBusy>()
+            .expect("typed busy error");
+        assert!(busy.waited >= Duration::from_millis(200));
+        assert!(!path.exists());
+        holder.join().unwrap();
     }
 }
 
