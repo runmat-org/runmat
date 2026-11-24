@@ -555,15 +555,20 @@ fn on_the_drone_two_tubes_in_four_levelled_clamps_overlap_nothing_and_each_seati
     let check = tool("design.check", json!({ "path": assembly }), &files);
     assert_eq!(check["data"]["errors"], 0, "{check:#}");
     eprintln!("clamp heights {heights:?} mm; seconds per seating {seconds:?}");
-    // The first seating regenerates the assembly's bodies; each later one reuses them and takes
-    // about 3 s here (the median, so a busy machine's odd slow call doesn't fail it; a seating
-    // that regenerates its neighbours again takes about 50 s).
+    // The first seating regenerates the assembly's bodies; each later one reuses them. The
+    // first seating is this machine's calibration, so the budget scales with the runner: a
+    // later seating takes about 1/20 of it (10-13 s after 220-320 s on the shared GCP CI
+    // slots, about 3 s on a dedicated 16-core runner), and a seating that regenerates its
+    // neighbours again does the first seating's kind of work (about 50 s where a reuse takes
+    // 3 s). The median keeps a busy machine's odd slow call from failing the test.
+    let first = seconds[0].1;
     let mut later: Vec<f64> = seconds[1..].iter().map(|(_, s)| *s).collect();
     later.sort_by(f64::total_cmp);
     let median = later[later.len() / 2];
     assert!(
-        median < 10.0,
-        "the median seating after the first took {median:.1} s: {seconds:?}"
+        median < first / 4.0,
+        "the median seating after the first took {median:.1} s, more than a quarter of the \
+         first seating's {first:.1} s: {seconds:?}"
     );
 }
 
