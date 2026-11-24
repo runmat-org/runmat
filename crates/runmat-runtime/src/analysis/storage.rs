@@ -774,8 +774,8 @@ pub(in crate::analysis) fn capture_artifact_store() -> Result<Arc<dyn AnalysisAr
 
 mod source_access;
 mod async_access;
-pub(in crate::analysis) use async_access::scoped_artifact_provider;
-pub use async_access::with_artifact_access;
+pub(in crate::analysis) use async_access::{scoped_artifact_provider, ResultStoreProvider};
+pub use async_access::{with_artifact_access, with_artifact_access_async, ArtifactAccessScope};
 pub use source_access::{
     load_acoustic_frequency_result, load_assessment_metadata, load_run_metadata, load_run_result,
     load_structural_frequency_result, resolve_run_attempt, run_attempts,
