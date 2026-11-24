@@ -6,7 +6,8 @@ pub use cluster::{ClusterRuntimePolicy, CLUSTER_RUNTIME_POLICY_SCHEMA_VERSION};
 pub use loader::ApplicationSettingsDirectory;
 pub use loader::{
     ConfigLoadOptions, ConfigLoader, ConfigSource, ConfigurationPolicy, HostConfigDocument,
-    HostRuntimeSettings, ResolvedRuntimeConfig, UserSettingsDocument, UserSettingsSource,
+    HostRuntimeSettings, ResolvedRuntimeConfig, UserSettingsBusy, UserSettingsDocument,
+    UserSettingsSource, USER_SETTINGS_LOCK_WAIT,
 };
 pub use schema::{
     error_namespace_for_language_compat, AccelPowerPreference, AccelerateConfig,
