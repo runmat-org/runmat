@@ -17,6 +17,7 @@ on:
   pull_request:
     branches:
       - '**'
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -51,7 +52,7 @@ jobs:
       - run: python3 scripts/qualification/scientific.py verify
 
   distribution-contracts:
-    if: github.event_name == 'push' || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.fork == true)
+    if: github.event_name == 'push' || github.event_name == 'workflow_dispatch' || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.fork == true)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -87,7 +88,7 @@ jobs:
 
   docs-lint:
     # FEA docs: capability ledger (ledger↔code↔docs), pending flags, fea highlighting, front matter, links, and generated pages.
-    if: github.event_name == 'push' || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.fork == true)
+    if: github.event_name == 'push' || github.event_name == 'workflow_dispatch' || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.fork == true)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -108,32 +109,37 @@ jobs:
     needs: changes
     name: ${{ matrix.name }}
     # Run on pushes for all branches, and only on PRs from forks to avoid double CI on same-repo PRs
-    if: inputs.release_validation || (needs.changes.outputs.native == 'true' && (github.event_name == 'push' || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.fork == true)))
+    if: inputs.release_validation || (needs.changes.outputs.native == 'true' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch' || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.fork == true)))
     strategy:
       fail-fast: false
       max-parallel: 15
       matrix:
         include:
-          - runner: warp-ubuntu-latest-x64-16x
+          - runner: runmat-gcp-linux-x64
+            fork_runner: warp-ubuntu-latest-x64-16x
             name: linux-quality
             task: quality
             needs_occt: true
-          - runner: warp-ubuntu-latest-x64-16x
+          - runner: runmat-gcp-linux-x64
+            fork_runner: warp-ubuntu-latest-x64-16x
             name: linux-tests-language
             task: test
             test_group: language
             needs_occt: false
-          - runner: warp-ubuntu-latest-x64-16x
+          - runner: runmat-gcp-linux-x64
+            fork_runner: warp-ubuntu-latest-x64-16x
             name: linux-tests-runtime
             task: test
             test_group: runtime
             needs_occt: true
-          - runner: warp-ubuntu-latest-x64-16x
+          - runner: runmat-gcp-linux-x64
+            fork_runner: warp-ubuntu-latest-x64-16x
             name: linux-tests-geometry-analysis
             task: test
             test_group: geometry-analysis
             needs_occt: true
-          - runner: warp-ubuntu-latest-x64-16x
+          - runner: runmat-gcp-linux-x64
+            fork_runner: warp-ubuntu-latest-x64-16x
             name: linux-tests-tooling-distributed
             task: test
             test_group: tooling-distributed
@@ -158,26 +164,31 @@ jobs:
             task: test
             test_group: tooling-distributed
             needs_occt: false
-          - runner: warp-windows-latest-x64-8x
+          - runner: runmat-gcp-windows-x64
+            fork_runner: warp-windows-latest-x64-8x
             name: windows-quality
             task: quality
             needs_occt: true
-          - runner: warp-windows-latest-x64-8x
+          - runner: runmat-gcp-windows-x64
+            fork_runner: warp-windows-latest-x64-8x
             name: windows-tests-language
             task: test
             test_group: language
             needs_occt: false
-          - runner: warp-windows-latest-x64-16x
+          - runner: runmat-gcp-windows-x64
+            fork_runner: warp-windows-latest-x64-16x
             name: windows-tests-runtime
             task: test
             test_group: runtime
             needs_occt: true
-          - runner: warp-windows-latest-x64-8x
+          - runner: runmat-gcp-windows-x64
+            fork_runner: warp-windows-latest-x64-8x
             name: windows-tests-geometry-analysis
             task: test
             test_group: geometry-analysis
             needs_occt: true
-          - runner: warp-windows-latest-x64-16x
+          - runner: runmat-gcp-windows-x64
+            fork_runner: warp-windows-latest-x64-16x
             name: windows-tests-tooling-distributed
             task: test
             test_group: tooling-distributed
@@ -187,7 +198,8 @@ jobs:
             shard_index: 0
             shard_count: 4
             cache_name: windows-tests-tooling-distributed
-          - runner: warp-windows-latest-x64-16x
+          - runner: runmat-gcp-windows-x64
+            fork_runner: warp-windows-latest-x64-16x
             name: windows-tests-tooling-distributed-tail
             task: test
             test_group: tooling-distributed
@@ -195,7 +207,8 @@ jobs:
             shard_index: 1
             shard_count: 4
             cache_name: windows-tests-tooling-distributed
-          - runner: warp-windows-latest-x64-16x
+          - runner: runmat-gcp-windows-x64
+            fork_runner: warp-windows-latest-x64-16x
             name: windows-tests-tooling-distributed-third
             task: test
             test_group: tooling-distributed
@@ -203,7 +216,8 @@ jobs:
             shard_index: 2
             shard_count: 4
             cache_name: windows-tests-tooling-distributed
-          - runner: warp-windows-latest-x64-16x
+          - runner: runmat-gcp-windows-x64
+            fork_runner: warp-windows-latest-x64-16x
             name: windows-tests-tooling-distributed-fourth
             task: test
             test_group: tooling-distributed
@@ -211,7 +225,13 @@ jobs:
             shard_index: 3
             shard_count: 4
             cache_name: windows-tests-tooling-distributed
-    runs-on: ${{ matrix.runner }}
+    # Runner rule: runmat-gcp-* labels are self-hosted GCP VMs (infra/ci-runners).
+    # They run only code from this repository: push, workflow_dispatch and
+    # schedule events, and pull requests whose head branch is in this
+    # repository. Every other event, including a fork pull request, uses the
+    # entry's WarpBuild fork_runner. The runners' job-started hook also refuses
+    # fork pull requests, whatever a workflow file names.
+    runs-on: ${{ (contains(fromJSON('["push","workflow_dispatch","schedule"]'), github.event_name) || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository)) && matrix.runner || matrix.fork_runner || matrix.runner }}
     # The macOS tooling cohort reached six hours while compiling a later
     # batch after successful preceding tests. Keep the existing cohort intact
     # and use the same bounded window as the Windows test lanes.
@@ -240,6 +260,13 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          if [[ -n "${RUNMAT_CI_TOOL:-}" ]]; then
+            # GCP runners keep a warm target per lane on their cache disk
+            # (infra/ci-runners). The tool sets CARGO_TARGET_DIR and gives
+            # unchanged sources their recorded times so Cargo reuses them.
+            "$(command -v python3 || command -v python)" "${RUNMAT_CI_TOOL}" acquire "runmat-${{ matrix.name }}" "runmat=${GITHUB_WORKSPACE}"
+            exit 0
+          fi
           # Every matrix job owns its runner and checkout. Use the cache
           # action's default workspace target path for its retained libraries.
           target_dir="${GITHUB_WORKSPACE}/target"
@@ -261,14 +288,17 @@ jobs:
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
+          # Hosted images carry unused tools; the GCP runners (RUNMAT_CI_TOOL set) do not.
           $storage = & ./infra/scripts/prepare-windows-build-storage.ps1 `
             -TargetDirectory $env:CARGO_TARGET_DIR `
             -ScratchDirectory "$env:RUNNER_TEMP/runmat-build-scratch" `
-            -ReclaimUnusedRunnerTools
+            -ReclaimUnusedRunnerTools:(-not $env:RUNMAT_CI_TOOL)
           "TMP=$($storage.ScratchDirectory)" >> $env:GITHUB_ENV
           "TEMP=$($storage.ScratchDirectory)" >> $env:GITHUB_ENV
 
+      # GCP runners use the warm lane target above instead of the Actions cache.
       - uses: Swatinem/rust-cache@v2
+        if: ${{ !startsWith(runner.name, 'gcp-') }}
         with:
           # Completed root test binaries are reclaimed after each batch.
           # Keep the remaining libraries at a stable, lane-specific path.
@@ -296,8 +326,9 @@ jobs:
             libxkbcommon-x11-0 libxrandr-dev libzmq3-dev ninja-build pkg-config unzip zip \
             xauth xvfb
 
+      # GCP runners keep vcpkg in RUNMAT_VCPKG_ROOT on their cache disk.
       - name: Restore pinned Linux OpenCASCADE
-        if: runner.os == 'Linux' && matrix.needs_occt
+        if: runner.os == 'Linux' && matrix.needs_occt && !startsWith(runner.name, 'gcp-')
         uses: actions/cache@v5
         with:
           path: ~/vcpkg-runmat
@@ -337,7 +368,7 @@ jobs:
       # missing or truncated (E0463). Check the restored target against the
       # manifest sealed at save time; clear it and build cold when incomplete.
       - name: Discard an incomplete Windows Rust cache restore
-        if: runner.os == 'Windows'
+        if: runner.os == 'Windows' && !startsWith(runner.name, 'gcp-')
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
@@ -349,7 +380,7 @@ jobs:
           "RUNMAT_CARGO_ARTIFACT_LEDGER=$env:RUNNER_TEMP/runmat-cargo-artifacts.txt" >> $env:GITHUB_ENV
 
       - name: Restore Windows native dependency cache
-        if: runner.os == 'Windows' && matrix.needs_occt
+        if: runner.os == 'Windows' && matrix.needs_occt && !startsWith(runner.name, 'gcp-')
         uses: actions/cache@v5
         with:
           path: ~/vcpkg-runmat/installed
@@ -649,7 +680,7 @@ jobs:
       # that the restore check above verifies. The budget keeps the restored
       # target plus its archive well inside the ~102 GiB free before restore.
       - name: Seal Windows Rust target for cache save
-        if: success() && runner.os == 'Windows'
+        if: success() && runner.os == 'Windows' && !startsWith(runner.name, 'gcp-')
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
@@ -659,6 +690,11 @@ jobs:
             --ledger "$env:RUNNER_TEMP/runmat-cargo-artifacts.txt" `
             --cap-gib 48
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Record warm lane source times
+        if: always() && startsWith(runner.name, 'gcp-')
+        shell: bash
+        run: '"$(command -v python3 || command -v python)" "${RUNMAT_CI_TOOL}" commit "runmat-${{ matrix.name }}" "runmat=${GITHUB_WORKSPACE}"'
 
 
   cross-build:
@@ -675,7 +711,7 @@ jobs:
       matrix:
         platform:
           - release_for: windows-x86_64
-            os: warp-windows-latest-x64-16x
+            os: runmat-gcp-windows-x64
             target: x86_64-pc-windows-msvc
             bin: runmat.exe
           - release_for: macos-x86_64
@@ -687,7 +723,7 @@ jobs:
             target: aarch64-apple-darwin
             bin: runmat
           - release_for: linux-x86_64
-            os: warp-ubuntu-latest-x64-16x
+            os: runmat-gcp-linux-x64
             target: x86_64-unknown-linux-gnu
             bin: runmat
     runs-on: ${{ matrix.platform.os }}
@@ -706,14 +742,22 @@ jobs:
         with:
           ref: ${{ inputs.source_ref || github.sha }}
 
+      - name: Use the warm lane target (GCP runners)
+        if: startsWith(runner.name, 'gcp-')
+        shell: bash
+        # infra/ci-runners: target/ links to this lane's warm target on the cache disk.
+        run: '"$(command -v python3 || command -v python)" "${RUNMAT_CI_TOOL}" acquire "runmat-native-${{ matrix.platform.target }}" "runmat=${GITHUB_WORKSPACE}" "--link=${GITHUB_WORKSPACE}/target"'
+
       - name: Prepare bounded Windows build storage
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
+          # Hosted images carry unused tools; the GCP runners (RUNMAT_CI_TOOL set) do not.
+          $target = if ($env:RUNMAT_CI_TARGET) { $env:RUNMAT_CI_TARGET } else { "$env:GITHUB_WORKSPACE/target" }
           $storage = & ./infra/scripts/prepare-windows-build-storage.ps1 `
-            -TargetDirectory "$env:GITHUB_WORKSPACE/target" `
+            -TargetDirectory $target `
             -ScratchDirectory "$env:RUNNER_TEMP/runmat-build-scratch" `
-            -ReclaimUnusedRunnerTools
+            -ReclaimUnusedRunnerTools:(-not $env:RUNMAT_CI_TOOL)
           "TMP=$($storage.ScratchDirectory)" >> $env:GITHUB_ENV
           "TEMP=$($storage.ScratchDirectory)" >> $env:GITHUB_ENV
 
@@ -748,7 +792,7 @@ jobs:
           printf '%s\n' 'MACOSX_DEPLOYMENT_TARGET=11.0' 'CMAKE_OSX_DEPLOYMENT_TARGET=11.0' >> "$GITHUB_ENV"
 
       - name: Restore Windows native dependency cache
-        if: runner.os == 'Windows' && matrix.platform.target != 'aarch64-pc-windows-gnu'
+        if: runner.os == 'Windows' && matrix.platform.target != 'aarch64-pc-windows-gnu' && !startsWith(runner.name, 'gcp-')
         uses: actions/cache@v5
         with:
           path: ~/vcpkg-runmat/installed
@@ -763,11 +807,19 @@ jobs:
           & ./infra/scripts/prepare-windows-cross-dependencies.ps1 -Target "${{ matrix.platform.target }}"
           & ./scripts/distribution/resolve-cargo-native-import-libraries.test.ps1
 
+      # Hosted images put rustup on PATH. The GCP runners keep it in CARGO_HOME
+      # on their cache disk (infra/ci-runners), which the job PATH lacks.
+      - name: Put the runner's Rust toolchain on PATH (GCP runners)
+        if: runner.os == 'Linux' && startsWith(runner.name, 'gcp-')
+        shell: bash
+        run: printf '%s\n' "${CARGO_HOME}/bin" >> "$GITHUB_PATH"
+
       - name: Install Rust release target
         shell: bash
         run: rustup target add "${{ matrix.platform.target }}"
 
       - name: Restore native artifact build cache
+        if: ${{ !startsWith(runner.name, 'gcp-') }}
         uses: Swatinem/rust-cache@v2
         with:
           shared-key: native-artifact-0.7-v2-${{ matrix.platform.target }}
@@ -786,6 +838,7 @@ jobs:
         run: node infra/scripts/native-build-cache-key.mjs >> "$GITHUB_OUTPUT"
 
       - name: Restore rolling native checkpoint
+        if: ${{ !startsWith(runner.name, 'gcp-') }}
         uses: actions/cache/restore@v5
         with:
           path: target
@@ -795,6 +848,7 @@ jobs:
             ${{ steps.native-checkpoint-key.outputs.key }}-
 
       - name: Restore byte-verified same-commit source timestamps
+        if: ${{ !startsWith(runner.name, 'gcp-') }}
         shell: bash
         run: node infra/scripts/native-build-cache-source.mjs restore target/.runmat-source-inputs.json
 
@@ -1001,7 +1055,7 @@ jobs:
 
       - name: Save rolling native checkpoint
         id: native-checkpoint-source
-        if: always() && steps.native-checkpoint-key.outputs.key != ''
+        if: always() && steps.native-checkpoint-key.outputs.key != '' && !startsWith(runner.name, 'gcp-')
         shell: bash
         run: node infra/scripts/native-build-cache-source.mjs capture target/.runmat-source-inputs.json
 
@@ -1011,6 +1065,11 @@ jobs:
         with:
           path: target
           key: ${{ steps.native-checkpoint-key.outputs.key }}-${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}
+
+      - name: Record warm lane source times
+        if: always() && startsWith(runner.name, 'gcp-')
+        shell: bash
+        run: '"$(command -v python3 || command -v python)" "${RUNMAT_CI_TOOL}" commit "runmat-native-${{ matrix.platform.target }}" "runmat=${GITHUB_WORKSPACE}"'
 
   runtime-artifacts-ready:
     if: github.event_name == 'push' && (github.ref == 'refs/heads/dev' || github.ref == 'refs/heads/main')

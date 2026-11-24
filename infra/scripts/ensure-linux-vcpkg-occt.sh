@@ -5,25 +5,18 @@ VCPKG_REF="${RUNMAT_VCPKG_REF:-2026.06.01}"
 VCPKG_ROOT="${RUNMAT_VCPKG_ROOT:-${HOME}/vcpkg-runmat}"
 VCPKG_TRIPLET="${RUNMAT_VCPKG_TRIPLET:-x64-linux-runmat-dynamic-release}"
 VCPKG_MARKER="${VCPKG_ROOT}/.runmat-vcpkg-ref"
-LOCK_DIR="${VCPKG_ROOT}.lock"
-LOCK_ACQUIRED=0
+LOCK_FILE="${VCPKG_ROOT}.flock"
 OVERLAY_TRIPLETS="${VCPKG_ROOT}/triplets/runmat"
 REPOSITORY_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 OVERLAY_PORTS="${REPOSITORY_ROOT}/infra/vcpkg-linux-ports"
 
 mkdir -p "$(dirname "${VCPKG_ROOT}")"
 
-for _ in $(seq 1 720); do
-  if mkdir "${LOCK_DIR}" 2>/dev/null; then
-    trap 'rmdir "${LOCK_DIR}"' EXIT
-    LOCK_ACQUIRED=1
-    break
-  fi
-  sleep 5
-done
-
-if [[ "${LOCK_ACQUIRED}" -ne 1 ]]; then
-  echo "Timed out waiting for vcpkg provisioning lock at ${LOCK_DIR}" >&2
+# flock releases the lock when this process exits, however it exits, so a
+# cancelled job or a VM reset cannot leave the lock held for later jobs.
+exec 9>"${LOCK_FILE}"
+if ! flock -w 3600 9; then
+  echo "Timed out waiting for vcpkg provisioning lock at ${LOCK_FILE}" >&2
   exit 1
 fi
 

@@ -1,0 +1,23 @@
+{
+  "displayName": "CI runner disk above 85%",
+  "documentation": {
+    "content": "A disk on ci-linux-x64 or ci-windows-x64 is more than 85% full. The job-started hook refuses jobs below its free-space floor, so CI jobs on that label may be failing. See infra/ci-runners/README.md in runmat-org/runmat: run the cache report on the VM, then evict lanes or grow the disk.",
+    "mimeType": "text/markdown"
+  },
+  "combiner": "OR",
+  "conditions": [
+    {
+      "displayName": "Disk used above 85% for 10 minutes",
+      "conditionThreshold": {
+        "filter": "resource.type = \"gce_instance\" AND metric.type = \"agent.googleapis.com/disk/percent_used\" AND metric.labels.state = \"used\" AND metadata.user_labels.purpose = \"ci-runner\"",
+        "aggregations": [{ "alignmentPeriod": "300s", "perSeriesAligner": "ALIGN_MAX" }],
+        "comparison": "COMPARISON_GT",
+        "thresholdValue": 85,
+        "duration": "600s",
+        "trigger": { "count": 1 }
+      }
+    }
+  ],
+  "alertStrategy": { "autoClose": "86400s" },
+  "userLabels": { "purpose": "ci-runner", "owner": "design-ci" }
+}
