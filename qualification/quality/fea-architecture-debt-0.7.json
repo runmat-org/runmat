@@ -104,12 +104,10 @@
     "architecture boundary check failed: crates/runmat-runtime/src/analysis/fea_run_admission/lifecycle.rs has 705 lines and adds untracked module-size debt",
     "architecture boundary check failed: crates/runmat-runtime/src/analysis/field_scene/volume.rs has 688 lines and adds untracked module-size debt",
     "architecture boundary check failed: crates/runmat-runtime/src/analysis/figures.rs grew from its 3724-line debt ceiling to 3790 lines",
-    "architecture boundary check failed: crates/runmat-runtime/src/analysis/mod.rs grew from its 3573-line debt ceiling to 3574 lines",
-    "architecture boundary check failed: crates/runmat-runtime/src/analysis/storage.rs grew from its 869-line debt ceiling to 948 lines",
     "architecture boundary check failed: crates/runmat-runtime/src/analysis/storage/frequency_sample.rs has 631 lines and adds untracked module-size debt",
     "architecture boundary check failed: crates/runmat-runtime/src/analysis/storage/publication.rs has 746 lines and adds untracked module-size debt"
   ],
-  "conservation": "The current reviewed intake retains the 103 diagnostic identities listed here under RM-1287 (111 before the 0.7.2 candidate update recorded in conservation_updates). The original 2026-11-09 integration review retained 107 findings after correcting the contracts.rs ceiling; later intake records added the other listed findings. Formatting commit 61159b5063 reduces procedure/lower.rs from 779 to 769 lines by joining two existing calls, without changing their arguments or control flow. This register updates that one diagnostic's line count; its other 110 identities and multiplicities remain unchanged. The exception covers structural/style debt in the listed FEA roots. Numerical failures and other architecture findings remain blocking. CI executes both original checkers and requires the exact diagnostic multiset and language ledger.",
+  "conservation": "The current reviewed intake retains the 101 diagnostic identities listed here under RM-1287 (111 before the 0.7.2 candidate update and 103 before the Desktop 0.7.2 results-read update, both recorded in conservation_updates). The original 2026-11-09 integration review retained 107 findings after correcting the contracts.rs ceiling; later intake records added the other listed findings. Formatting commit 61159b5063 reduces procedure/lower.rs from 779 to 769 lines by joining two existing calls, without changing their arguments or control flow. This register updates that one diagnostic's line count; its other 110 identities and multiplicities remain unchanged. The exception covers structural/style debt in the listed FEA roots. Numerical failures and other architecture findings remain blocking. CI executes both original checkers and requires the exact diagnostic multiset and language ledger.",
   "conservation_updates": [
     {
       "source_revision": "61159b5063003153525e707b5c06fd2403f51f6f",
@@ -131,7 +129,15 @@
         "architecture boundary check failed: crates/runmat-runtime/src/analysis/field_scene.rs has 735 lines and adds untracked module-size debt",
         "architecture boundary check failed: crates/runmat-runtime/src/analysis/operations/query.rs grew from its 1541-line debt ceiling to 1599 lines"
       ]
+    },
+    {
+      "source_revision": "659f785725bb7f5cb7785bb78726a6fb9e82ea5f",
+      "reason": "Desktop 0.7.2 results-read fix (659f785725). Code moved between modules with no behavior change: the snapshot wrappers for the results and field-page operations go to operations/query/result_snapshot.rs, the inline field-value budget (bounded_default_results_query, RESULTS_INLINE_FIELD_BYTES) to operations/query/inline_budget.rs, and the process-wide artifact store and retention configuration to storage/store_config.rs. Debt ceilings are lowered to the new sizes: analysis/mod.rs 3573 to 3544, operations/query.rs 1366 to 1333, storage.rs 869 to 850. The two findings below no longer occur; no finding is new and no line count exceeds its reviewed value. Diagnostic count goes from 103 to 101.",
+      "resolved": [
+        "architecture boundary check failed: crates/runmat-runtime/src/analysis/mod.rs grew from its 3573-line debt ceiling to 3574 lines",
+        "architecture boundary check failed: crates/runmat-runtime/src/analysis/storage.rs grew from its 869-line debt ceiling to 948 lines"
+      ]
     }
   ],
-  "diagnostic_count": 103
+  "diagnostic_count": 101
 }

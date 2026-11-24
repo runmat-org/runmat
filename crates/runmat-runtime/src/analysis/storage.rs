@@ -2,9 +2,9 @@ use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
 use std::io::ErrorKind;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::{Arc, OnceLock, RwLock};
 #[cfg(test)]
-use std::sync::{Mutex, MutexGuard};
+use std::sync::MutexGuard;
+use std::sync::{Arc, RwLock};
 
 use chrono::{DateTime, Utc};
 use runmat_analysis_core::{AnalysisField, AnalysisFieldValues};
@@ -723,19 +723,6 @@ fn sort_filesystem_artifacts_newest_first(artifacts: &mut [FilesystemRunArtifact
     });
 }
 
-fn global_store() -> &'static RwLock<Arc<dyn AnalysisArtifactStore>> {
-    static STORE: OnceLock<RwLock<Arc<dyn AnalysisArtifactStore>>> = OnceLock::new();
-    STORE.get_or_init(|| {
-        let default = store_from_config(config_from_env());
-        RwLock::new(default)
-    })
-}
-
-fn retention_config() -> &'static RwLock<AnalysisArtifactRetentionConfig> {
-    static CONFIG: OnceLock<RwLock<AnalysisArtifactRetentionConfig>> = OnceLock::new();
-    CONFIG.get_or_init(|| RwLock::new(AnalysisArtifactRetentionConfig::default()))
-}
-
 static NEXT_RUN_ID: AtomicU64 = AtomicU64::new(1);
 
 pub fn next_run_id() -> String {
@@ -774,6 +761,7 @@ pub(in crate::analysis) fn capture_artifact_store() -> Result<Arc<dyn AnalysisAr
 
 mod source_access;
 mod async_access;
+mod store_config;
 pub(in crate::analysis) use async_access::{
     read_result_file, scoped_artifact_provider, ResultStoreProvider,
 };
@@ -784,6 +772,15 @@ pub use source_access::{
     load_acoustic_frequency_result, load_assessment_metadata, load_run_metadata, load_run_result,
     load_structural_frequency_result, resolve_run_attempt, run_attempts,
 };
+#[cfg(test)]
+pub(crate) use store_config::{
+    artifact_store_test_guard, reset_artifact_store_for_tests, set_artifact_store_for_tests,
+};
+pub use store_config::{
+    configure_artifact_retention, configure_artifact_store, configure_artifact_store_from_env,
+    default_filesystem_artifact_root, replace_artifact_retention, replace_artifact_store,
+};
+use store_config::{global_store, retention_config};
 
 pub fn load_render_tile_index(run_id: &str) -> Result<Option<RenderTileIndex>, String> {
     let guard = capture_artifact_store()?;
@@ -843,105 +840,6 @@ pub fn list_run_results() -> Result<Vec<AnalysisRunResult>, String> {
 pub fn list_run_metadata() -> Result<Vec<AnalysisRunResult>, String> {
     let guard = capture_artifact_store()?;
     guard.list_run_metadata()
-}
-
-pub fn configure_artifact_store(config: AnalysisArtifactStoreConfig) -> Result<(), String> {
-    let mut guard = global_store()
-        .write()
-        .map_err(|_| "analysis artifact store lock poisoned".to_string())?;
-    *guard = store_from_config(config);
-    Ok(())
-}
-
-/// Install a retained host-owned store while preserving the exact previous
-/// owner. Embedded hosts must serialize access and restore it on scope exit;
-/// constructing a fresh in-memory store per command would discard results.
-pub fn replace_artifact_store(
-    store: Arc<dyn AnalysisArtifactStore>,
-) -> Result<Arc<dyn AnalysisArtifactStore>, String> {
-    let mut guard = global_store()
-        .write()
-        .map_err(|_| "analysis artifact store lock poisoned".to_string())?;
-    Ok(std::mem::replace(&mut *guard, store))
-}
-
-/// Scoped host counterpart of `configure_artifact_retention`.
-pub fn replace_artifact_retention(
-    config: AnalysisArtifactRetentionConfig,
-) -> Result<AnalysisArtifactRetentionConfig, String> {
-    let mut guard = retention_config()
-        .write()
-        .map_err(|_| "analysis artifact retention config lock poisoned".to_string())?;
-    Ok(std::mem::replace(&mut *guard, config))
-}
-
-pub fn configure_artifact_retention(config: AnalysisArtifactRetentionConfig) -> Result<(), String> {
-    let mut guard = retention_config()
-        .write()
-        .map_err(|_| "analysis artifact retention config lock poisoned".to_string())?;
-    *guard = config;
-    Ok(())
-}
-
-pub fn configure_artifact_store_from_env() -> Result<(), String> {
-    configure_artifact_store(config_from_env())
-}
-
-fn store_from_config(config: AnalysisArtifactStoreConfig) -> Arc<dyn AnalysisArtifactStore> {
-    match config {
-        AnalysisArtifactStoreConfig::InMemory => Arc::new(InMemoryAnalysisArtifactStore::new()),
-        AnalysisArtifactStoreConfig::Filesystem { root } => {
-            Arc::new(FilesystemAnalysisArtifactStore::new(root))
-        }
-    }
-}
-
-fn config_from_env() -> AnalysisArtifactStoreConfig {
-    let mode = std::env::var("RUNMAT_FEA_ARTIFACT_STORE")
-        .or_else(|_| std::env::var("RUNMAT_ANALYSIS_ARTIFACT_STORE"))
-        .unwrap_or_else(|_| "filesystem".to_string())
-        .to_lowercase();
-    if mode == "filesystem" {
-        let root = std::env::var("RUNMAT_FEA_ARTIFACT_ROOT")
-            .or_else(|_| std::env::var("RUNMAT_ANALYSIS_ARTIFACT_ROOT"))
-            .map(PathBuf::from)
-            .unwrap_or_else(|_| default_filesystem_artifact_root());
-        AnalysisArtifactStoreConfig::Filesystem { root }
-    } else {
-        AnalysisArtifactStoreConfig::InMemory
-    }
-}
-
-pub fn default_filesystem_artifact_root() -> PathBuf {
-    PathBuf::from(".artifacts")
-}
-
-#[cfg(test)]
-pub fn set_artifact_store_for_tests(store: Arc<dyn AnalysisArtifactStore>) {
-    let mut guard = global_store()
-        .write()
-        .expect("analysis artifact store lock poisoned");
-    *guard = store;
-}
-
-#[cfg(test)]
-pub fn reset_artifact_store_for_tests() {
-    let mut guard = global_store()
-        .write()
-        .expect("analysis artifact store lock poisoned");
-    *guard = Arc::new(InMemoryAnalysisArtifactStore::new());
-    *retention_config()
-        .write()
-        .expect("analysis artifact retention config lock poisoned") =
-        AnalysisArtifactRetentionConfig::default();
-}
-
-#[cfg(test)]
-pub(crate) fn artifact_store_test_guard() -> MutexGuard<'static, ()> {
-    static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
-    LOCK.get_or_init(|| Mutex::new(()))
-        .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner())
 }
 
 #[cfg(test)]
