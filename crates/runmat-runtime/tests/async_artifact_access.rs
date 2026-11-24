@@ -123,7 +123,17 @@ fn canonical_publication_reopens_and_failed_operations_do_not_publish() {
         .await
         .unwrap()
         .unwrap();
-        assert!(resolve_run_attempt(&run.run_id).is_err());
+        // Outside any scope, a provider that refuses direct coherent access
+        // answers reads from one read-only snapshot of its committed tree.
+        assert_eq!(resolve_run_attempt(&run.run_id).unwrap(), run.run_id);
+        let outside = analysis_results_by_run_id_op(
+            &run.run_id,
+            AnalysisResultsQuery::metadata_only(),
+            runmat_runtime::operations::OperationContext::new(None, None),
+        )
+        .map_err(|error| error.message)
+        .unwrap();
+        assert_eq!(outside.data.field_descriptors.len(), 1);
         let field = with_artifact_access(false, |store| {
             store.load_field_page(
                 &run.run_id,

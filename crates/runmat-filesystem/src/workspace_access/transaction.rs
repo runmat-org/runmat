@@ -129,6 +129,22 @@ impl WorkspaceTransaction {
             writable,
         })
     }
+    /// Capture a read-only snapshot of `root` for a synchronous caller.
+    ///
+    /// The returned view grants coherent read access to one consistent
+    /// revision of the provider's workspace. It has no persistence authority,
+    /// so nothing written to it reaches the provider. Native callers wait on a
+    /// separate thread; in the browser the provider must answer without
+    /// suspending, or the capture fails with `WouldBlock`.
+    pub fn capture_read_view_blocking(
+        provider: Arc<dyn FsProvider>,
+        root: PathBuf,
+        maximum: u64,
+    ) -> io::Result<Arc<dyn FsProvider>> {
+        crate::wait_for_fs("capture_read_view", move || async move {
+            Ok(Self::capture(provider, root, false, maximum).await?.view())
+        })
+    }
     pub fn view(&self) -> Arc<dyn FsProvider> {
         self.view.clone()
     }

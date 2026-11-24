@@ -1,7 +1,10 @@
 //! A checked study publishes its meshes, evidence and results in one result
 //! transaction through the result store's provider, never through the
 //! process's installed provider. Reruns reuse the stored mesh, and a stale
-//! mesh object under the same name is replaced.
+//! mesh object under the same name is replaced. After every publication the
+//! results reopen the way Desktop and the agent open them, outside any artifact
+//! scope: the run document, the attempt list, the results query, field values,
+//! the field scene, the `fea.results` object and a reassessment.
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
@@ -191,7 +194,7 @@ async fn exercise(
     }
     let meshes = root.join("meshes");
 
-    let first = run_study(label, source).await;
+    let (first, checked) = run_study(label, source).await;
     let mut stored = files.list(&meshes);
     assert_eq!(
         stored.len(),
@@ -215,10 +218,10 @@ async fn exercise(
         top.iter().any(|name| name != "meshes" && name != "studies"),
         "{label}: result objects were not committed: {top:?}"
     );
-    reopen(label, &first).await;
+    reopen(label, source, &checked, &first).await;
 
     // A rerun reuses the stored mesh object unchanged.
-    let second = run_study(label, source).await;
+    let (second, checked) = run_study(label, source).await;
     // Meshing evidence records each run's own meshing (for example its
     // timing), so a rerun may add an evidence object; the mesh is reused.
     stored = files.list(&meshes);
@@ -232,21 +235,40 @@ async fn exercise(
         mesh_bytes,
         "{label}: rerun changed the mesh"
     );
-    reopen(label, &second).await;
+    reopen(label, source, &checked, &second).await;
 
     // A stale object from an earlier failed run is replaced.
     files.plant(&mesh_path, b"stale mesh object from an earlier run");
-    let third = run_study(label, source).await;
+    let (third, checked) = run_study(label, source).await;
     assert_eq!(
         files.read(&mesh_path),
         mesh_bytes,
         "{label}: the stale mesh was not replaced"
     );
-    reopen(label, &third).await;
+    reopen(label, source, &checked, &third).await;
+
+    // A sweep publishes one study run per case; each case reopens.
+    let sweep = source.with_file_name("sweep.fea");
+    std::fs::write(
+        &sweep,
+        sweep_source(&std::fs::read_to_string(source).unwrap()),
+    )
+    .unwrap();
+    let cases = run_sweep(label, &sweep).await;
+    assert_eq!(cases.len(), 2, "{label}: expected two sweep cases");
+    for case in &cases {
+        reopen_results(label, &sweep, case).await;
+    }
     runmat_runtime::analysis::replace_fea_runtime(previous).unwrap();
 }
 
-async fn run_study(label: &str, source: &Path) -> runmat_runtime::analysis::AnalysisStudyRunData {
+async fn run_study(
+    label: &str,
+    source: &Path,
+) -> (
+    runmat_runtime::analysis::AnalysisStudyRunData,
+    runmat_core::CheckedFeaSessionSource,
+) {
     let mut session = runmat_core::RunMatSession::with_options(false, false).unwrap();
     let checked = session
         .load_and_check_fea_source_path(source)
@@ -259,9 +281,7 @@ async fn run_study(label: &str, source: &Path) -> runmat_runtime::analysis::Anal
         checked.check_result().diagnostics
     );
     let options = LocalFeaExecutionOptions {
-        root: Some(FeaRootSelector::Study {
-            id: "box_static".into(),
-        }),
+        root: Some(study_root()),
         workers: Some(1),
         cpu_threads_per_worker: Some(
             runmat_analysis_fea::planning::resource::LocalThreadCount::new(1).unwrap(),
@@ -274,19 +294,234 @@ async fn run_study(label: &str, source: &Path) -> runmat_runtime::analysis::Anal
     let LocalFeaExecution::Study(case) = completed else {
         panic!("{label}: expected one study");
     };
-    case.publication
+    (case.publication, checked)
 }
 
-async fn reopen(label: &str, run: &runmat_runtime::analysis::AnalysisStudyRunData) {
-    let run_id = run.steps[0].run_id.clone();
-    let loaded = runmat_runtime::analysis::storage::with_artifact_access(false, |store| {
-        store.load_run(&run_id)
-    })
-    .await
-    .unwrap()
-    .unwrap();
-    assert!(
-        loaded.is_some(),
-        "{label}: committed run {run_id} does not reopen"
+/// The loaded box with its load as a study input, swept over two loads.
+fn sweep_source(study: &str) -> String {
+    let swept = study
+        .replace(
+            "model loaded_box {\n",
+            "model loaded_box {\n    input load : force { default = 1 kN }\n",
+        )
+        .replace("= [0, -1, 0.5] kN", "= [0, -input.load, 0]")
+        .replace(
+            "study box_static {\n",
+            "study box_static {\n    input load : force { default = 1 kN }\n",
+        )
+        .replace(
+            "model = model.loaded_box\n",
+            "model = model.loaded_box(load = input.load)\n",
+        );
+    format!(
+        "{swept}\nsweep load_cases over study.box_static {{\n    axis load {{\n        light = 0.5 kN\n        heavy = 1.5 kN\n    }}\n}}\n"
+    )
+}
+
+async fn run_sweep(
+    label: &str,
+    source: &Path,
+) -> Vec<runmat_runtime::analysis::AnalysisStudyRunData> {
+    let mut session = runmat_core::RunMatSession::with_options(false, false).unwrap();
+    let checked = session
+        .load_and_check_fea_source_path(source)
+        .await
+        .unwrap();
+    assert_eq!(
+        checked.check_result().status,
+        FeaCheckStatus::Valid,
+        "{label}: {:?}",
+        checked.check_result().diagnostics
     );
+    let options = LocalFeaExecutionOptions {
+        root: Some(FeaRootSelector::Sweep {
+            id: "load_cases".into(),
+        }),
+        workers: Some(1),
+        cpu_threads_per_worker: Some(
+            runmat_analysis_fea::planning::resource::LocalThreadCount::new(1).unwrap(),
+        ),
+        ..Default::default()
+    };
+    let completed = execute_checked_fea_locally(&checked, options)
+        .await
+        .unwrap_or_else(|error| panic!("{label}: sweep failed: {error}"));
+    let LocalFeaExecution::Sweep { cases, .. } = completed else {
+        panic!("{label}: expected a sweep");
+    };
+    cases
+        .into_iter()
+        .map(|case| {
+            case.outcome
+                .unwrap_or_else(|error| panic!("{label}: case {} failed: {error}", case.case_id))
+                .publication
+        })
+        .collect()
+}
+
+fn study_root() -> FeaRootSelector {
+    FeaRootSelector::Study {
+        id: "box_static".into(),
+    }
+}
+
+/// Open a published run the way Desktop and the agent do: synchronous calls
+/// outside any artifact scope, then a reassessment that saves its evidence.
+async fn reopen(
+    label: &str,
+    source: &Path,
+    checked: &runmat_core::CheckedFeaSessionSource,
+    run: &runmat_runtime::analysis::AnalysisStudyRunData,
+) {
+    reopen_results(label, source, run).await;
+    reassess(label, checked, run).await;
+}
+
+async fn reopen_results(
+    label: &str,
+    source: &Path,
+    run: &runmat_runtime::analysis::AnalysisStudyRunData,
+) {
+    use runmat_runtime::analysis::{
+        analysis_document_study_result, analysis_field_page_by_run_id_op,
+        analysis_results_by_run_id_op, field_scene, storage, AnalysisFieldRequestOptions,
+        AnalysisFieldSelection, AnalysisResultsQuery,
+    };
+    use runmat_runtime::operations::OperationContext;
+    let run_id = run.steps[0].run_id.clone();
+
+    // The run document Desktop shows when a run finishes.
+    let document =
+        analysis_document_study_result(source.display().to_string(), run.clone(), Vec::new())
+            .unwrap_or_err(label, "run document");
+    assert!(
+        !document.field_bindings.is_empty(),
+        "{label}: the run document has no fields"
+    );
+
+    // The results panel: committed attempts and the attempt the id resolves to.
+    let attempts = storage::run_attempts(&run_id).unwrap_or_err(label, "attempt list");
+    let resolved = storage::resolve_run_attempt(&run_id).unwrap_or_err(label, "attempt");
+    assert!(
+        attempts.is_empty() || attempts.last() == Some(&resolved),
+        "{label}: {run_id} resolves to {resolved}, not the latest of {attempts:?}"
+    );
+    assert!(
+        storage::load_run_metadata(&run_id)
+            .unwrap_or_err(label, "run metadata")
+            .is_some(),
+        "{label}: run metadata of {run_id} is missing"
+    );
+
+    // The results query, metadata only and with field values.
+    let metadata = analysis_results_by_run_id_op(
+        &run_id,
+        AnalysisResultsQuery::metadata_only(),
+        OperationContext::new(None, None),
+    )
+    .map_err(|error| error.message)
+    .unwrap_or_err(label, "results metadata");
+    let field_id = metadata
+        .data
+        .field_descriptors
+        .iter()
+        .find(|descriptor| descriptor.field_id.contains("displacement"))
+        .or_else(|| metadata.data.field_descriptors.first())
+        .unwrap_or_else(|| panic!("{label}: {run_id} has no fields"))
+        .field_id
+        .clone();
+    let values = analysis_results_by_run_id_op(
+        &run_id,
+        AnalysisResultsQuery {
+            include_field_values: true,
+            ..AnalysisResultsQuery::metadata_only()
+        },
+        OperationContext::new(None, None),
+    )
+    .map_err(|error| error.message)
+    .unwrap_or_err(label, "results with field values");
+    assert!(
+        values
+            .data
+            .fields
+            .iter()
+            .any(|field| field.field_id == field_id),
+        "{label}: the results query returned no values for {field_id}"
+    );
+
+    // One field's values, as the field inspector pages them.
+    let page = analysis_field_page_by_run_id_op(
+        &run_id,
+        AnalysisFieldSelection::new(field_id.clone(), None),
+        AnalysisFieldRequestOptions::default(),
+        OperationContext::new(None, None),
+    )
+    .map_err(|error| error.message)
+    .unwrap_or_err(label, "field page");
+    assert!(page.data.count > 0, "{label}: field {field_id} is empty");
+
+    // The result view: render tiles, field values and the solver mesh.
+    let (scene, _, _) = field_scene::build_scene_view(
+        &run_id,
+        Some(&field_id),
+        "true",
+        1.0,
+        true,
+        None,
+        &Default::default(),
+    )
+    .map_err(|error| error.to_string())
+    .unwrap_or_err(label, "field scene");
+    assert!(
+        !scene.chunks.is_empty(),
+        "{label}: the field scene has no meshes"
+    );
+
+    // The `fea.results` object a script or the agent opens.
+    runmat_runtime::call_builtin_async("fea.results", &[run_id.as_str().into()])
+        .await
+        .map_err(|error| error.to_string())
+        .unwrap_or_err(label, "fea.results");
+}
+
+/// A reassessment of the saved study, which saves its own evidence.
+async fn reassess(
+    label: &str,
+    checked: &runmat_core::CheckedFeaSessionSource,
+    run: &runmat_runtime::analysis::AnalysisStudyRunData,
+) {
+    let manifest = run
+        .result_manifest_artifact_path
+        .clone()
+        .unwrap_or_else(|| panic!("{label}: the run has no result manifest"));
+    let definition: runmat_execution::Digest =
+        serde_json::from_value(serde_json::Value::String(run.study_fingerprint.clone())).unwrap();
+    let runmat_runtime::analysis::ResolvedFeaRoot::Study(study) =
+        checked.resolve_root(Some(&study_root())).unwrap()
+    else {
+        panic!("{label}: expected a study root");
+    };
+    let reassessed = runmat_execution_runner_native::reassess_saved_fea_locally(
+        checked,
+        definition,
+        Path::new(&manifest),
+        &study.study,
+        runmat_runtime::analysis::assessment::AssessmentEvaluationLimits::default(),
+        64 * 1024 * 1024,
+    )
+    .await
+    .unwrap_or_err(label, "reassessment");
+    assert!(
+        !reassessed.assessments.is_empty(),
+        "{label}: the reassessment has no assessments"
+    );
+}
+
+trait UnwrapOrErr<T> {
+    fn unwrap_or_err(self, label: &str, what: &str) -> T;
+}
+impl<T, E: std::fmt::Display> UnwrapOrErr<T> for Result<T, E> {
+    fn unwrap_or_err(self, label: &str, what: &str) -> T {
+        self.unwrap_or_else(|error| panic!("{label}: opening the {what} failed: {error}"))
+    }
 }

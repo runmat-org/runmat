@@ -130,7 +130,15 @@ pub(super) fn load_solver_mesh_artifact(
             .map_err(SolverMeshArtifactLoadError::Invalid)?;
         return Ok(mesh);
     }
-    let bytes = runmat_filesystem::read(path).map_err(SolverMeshArtifactLoadError::Read)?;
+    // A mesh in the result tree is read where it was published: through the
+    // result store's provider, from the open artifact scope or a read-only
+    // snapshot when the provider refuses direct access.
+    let maximum = SolverMeshArtifact::LIMITS.maximum_encoded_bytes as u64;
+    let bytes = match super::storage::read_result_file(path, maximum) {
+        Some(result) => result,
+        None => runmat_filesystem::read(path),
+    }
+    .map_err(SolverMeshArtifactLoadError::Read)?;
     SolverMeshArtifact::canonical_decode(&bytes).map_err(SolverMeshArtifactLoadError::Invalid)
 }
 

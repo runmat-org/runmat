@@ -1453,6 +1453,51 @@ fn analysis_plan_study_sweep_returns_typed_plan_entries() {
 }
 
 #[test]
+fn sweep_planning_evidence_commits_through_the_result_transaction_of_a_transaction_only_store() {
+    let _guard = analysis_test_guard();
+    // A memory provider refuses direct coherent access, as a cloud project does.
+    let provider = Arc::new(runmat_filesystem::MemoryFsProvider::new());
+    let _provider = runmat_filesystem::replace_provider(provider.clone());
+    let root = PathBuf::from("/.artifacts");
+    let _roots = scoped_fea_artifact_roots(&root);
+    storage::configure_artifact_store(storage::AnalysisArtifactStoreConfig::Filesystem {
+        root: root.clone(),
+    })
+    .unwrap();
+    let spec = AnalysisStudySweepSpec {
+        sweep_id: "transaction_only_sweep_plan".to_string(),
+        studies: vec![sample_linear_static_study_spec()],
+        fail_fast: true,
+    };
+    // Outside a transaction the write is refused, never sent to another provider.
+    let refused = analysis_plan_study_sweep_op(&spec, OperationContext::new(None, None))
+        .expect_err("a transaction-only store refuses evidence outside a transaction");
+    // The sweep reports the per-study refusal as its cause.
+    assert_eq!(
+        refused.context.get("cause_error_code").map(String::as_str),
+        Some("RM.FEA.PLAN_STUDY.ARTIFACT_STORE_FAILED"),
+        "{refused:?}"
+    );
+    let planned = futures::executor::block_on(storage::with_artifact_access(true, |_| {
+        analysis_plan_study_sweep_op(&spec, OperationContext::new(None, None))
+    }))
+    .unwrap()
+    .expect("planning inside the result transaction");
+    let validated = futures::executor::block_on(storage::with_artifact_access(true, |_| {
+        analysis_validate_study_sweep_op(&spec, OperationContext::new(None, None))
+    }))
+    .unwrap()
+    .expect("validation inside the result transaction");
+    for path in [
+        planned.data.evidence_artifact_path,
+        validated.data.evidence_artifact_path,
+    ] {
+        assert!(path.starts_with("/.artifacts/studies/sweeps/"), "{path}");
+        assert!(!provider.read_project_path(&path).unwrap().is_empty());
+    }
+}
+
+#[test]
 fn analysis_plan_study_sweep_rejects_empty_study_set() {
     let _guard = analysis_test_guard();
     let spec = AnalysisStudySweepSpec {

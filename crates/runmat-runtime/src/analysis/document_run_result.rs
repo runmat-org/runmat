@@ -6,28 +6,31 @@ pub fn analysis_document_study_result(
     run: AnalysisStudyRunData,
     progress_events: Vec<FeaProgressEvent>,
 ) -> Result<AnalysisDocumentRunResult, String> {
-    let step_results = run
-        .steps
-        .iter()
-        .map(|step| {
-            analysis_results_by_run_id_op(
-                &step.run_id,
-                AnalysisResultsQuery::metadata_only(),
-                crate::operations::OperationContext::new(None, None),
-            )
-            .map(|result| {
-                let mut data = result.data;
-                // The field behind the study's verdict comes first, ahead of declared outputs.
-                operations::move_fields_first(
-                    &mut data.field_descriptors,
-                    &operations::assessed_source_field_ids(&run.assessments, &step.run_id),
-                    |descriptor| descriptor.field_id.as_str(),
-                );
-                (step, data)
+    // Every step's results come from one snapshot of the result store.
+    let step_results = storage::with_result_reads(|| {
+        run.steps
+            .iter()
+            .map(|step| {
+                analysis_results_by_run_id_op(
+                    &step.run_id,
+                    AnalysisResultsQuery::metadata_only(),
+                    crate::operations::OperationContext::new(None, None),
+                )
+                .map(|result| {
+                    let mut data = result.data;
+                    // The field behind the study's verdict comes first, ahead of declared outputs.
+                    operations::move_fields_first(
+                        &mut data.field_descriptors,
+                        &operations::assessed_source_field_ids(&run.assessments, &step.run_id),
+                        |descriptor| descriptor.field_id.as_str(),
+                    );
+                    (step, data)
+                })
+                .map_err(|error| error.message)
             })
-            .map_err(|error| error.message)
-        })
-        .collect::<Result<Vec<_>, _>>()?;
+            .collect::<Result<Vec<_>, _>>()
+    })
+    .map_err(|error| error.to_string())??;
     let field_bindings = project_study_field_bindings(&step_results);
     let (results, result_summary) = project_study_result_views(&step_results)?;
     Ok(AnalysisDocumentRunResult {
