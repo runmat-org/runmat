@@ -6,8 +6,8 @@
   "encoding": "git-mode-type-blob-path-tuples-v1"
  },
  "accepted_inputs": {
-  "sha256": "5a8f3f741901589671062cca8344c9c4f5c41b3ba7e15f02e1db0f11483d4932",
-  "files": 26450,
+  "sha256": "256698236cd1b485dbad009e622c7fe4ec9a2c66726a01b6d9c57164c5890734",
+  "files": 26453,
   "encoding": "git-mode-type-blob-path-tuples-v1"
  },
  "cohorts": [
@@ -16,10 +16,236 @@
  "qualification_evidence": [
   {
    "path": "qualification/scientific/evidence/g132-authoring-catalog-move-20261120.json",
-   "sha256": "3251308f8b380b9899e0b749589146256d545f8e133e4834797d8213148ed02e"
+   "sha256": "014a5490445be1d1c102e0e04907c0a464051f666d9962fe983f2e231488299d"
   }
  ],
  "changed_inputs": [
+  {
+   "path": "crates/runmat-cli/src/commands/fea/run.rs",
+   "before": [
+    "100644",
+    "blob",
+    "ff5be9a0d2bef7ff6592caa01503647522f83658"
+   ],
+   "after": [
+    "100644",
+    "blob",
+    "5a2e57fed3fc096b3a660f84f2ddb7bc78ce2db1"
+   ],
+   "reason": "Desktop 0.7.2 runtime commits 6a9f95a5cc, 8aa1a3c7ba, e6955ffe19, 02ff287726, b4078030e5 (main 839f646161, 2026-11-24): one artifact transaction across an async publication with evidence through the result store's provider; meshes persisted through the result store, with stale stored objects replaced after their canonical digest is recomputed; native typed FEA publication inside one result transaction with errors carried as values; one physical path spelling for a root-level FEA source; a 2 s wait for the user settings lock."
+  },
+  {
+   "path": "crates/runmat-config/src/runtime/loader/mod.rs",
+   "before": [
+    "100644",
+    "blob",
+    "fdf628e3905038c61fc1a992a8a7df76672e33cb"
+   ],
+   "after": [
+    "100644",
+    "blob",
+    "034404b4d6ca0d1a9bd873564d48c14b45cb70ad"
+   ],
+   "reason": "Desktop 0.7.2 runtime commits 6a9f95a5cc, 8aa1a3c7ba, e6955ffe19, 02ff287726, b4078030e5 (main 839f646161, 2026-11-24): one artifact transaction across an async publication with evidence through the result store's provider; meshes persisted through the result store, with stale stored objects replaced after their canonical digest is recomputed; native typed FEA publication inside one result transaction with errors carried as values; one physical path spelling for a root-level FEA source; a 2 s wait for the user settings lock."
+  },
+  {
+   "path": "crates/runmat-config/src/runtime/loader/settings.rs",
+   "before": [
+    "100644",
+    "blob",
+    "444a7df3245c5b99c5974023e3dcad9953da83a5"
+   ],
+   "after": [
+    "100644",
+    "blob",
+    "c631c2c6fbf2b8c4a2dfc9606b484988e84fbdc9"
+   ],
+   "reason": "Desktop 0.7.2 runtime commits 6a9f95a5cc, 8aa1a3c7ba, e6955ffe19, 02ff287726, b4078030e5 (main 839f646161, 2026-11-24): one artifact transaction across an async publication with evidence through the result store's provider; meshes persisted through the result store, with stale stored objects replaced after their canonical digest is recomputed; native typed FEA publication inside one result transaction with errors carried as values; one physical path spelling for a root-level FEA source; a 2 s wait for the user settings lock."
+  },
+  {
+   "path": "crates/runmat-config/src/runtime/mod.rs",
+   "before": [
+    "100644",
+    "blob",
+    "73690e940fb0e57a92e3d34c9fc0f803cc9dae09"
+   ],
+   "after": [
+    "100644",
+    "blob",
+    "a23f0a94fb938a65ff6fa44ef2f9c9926ac652a7"
+   ],
+   "reason": "Desktop 0.7.2 runtime commits 6a9f95a5cc, 8aa1a3c7ba, e6955ffe19, 02ff287726, b4078030e5 (main 839f646161, 2026-11-24): one artifact transaction across an async publication with evidence through the result store's provider; meshes persisted through the result store, with stale stored objects replaced after their canonical digest is recomputed; native typed FEA publication inside one result transaction with errors carried as values; one physical path spelling for a root-level FEA source; a 2 s wait for the user settings lock."
+  },
+  {
+   "path": "crates/runmat-core/src/session/fea_source.rs",
+   "before": [
+    "100644",
+    "blob",
+    "058bebc3c82448ca20562958135e511fd886af44"
+   ],
+   "after": [
+    "100644",
+    "blob",
+    "5ea0afe3ef93e8db436bed33d324c41d8003a21f"
+   ],
+   "reason": "Desktop 0.7.2 runtime commits 6a9f95a5cc, 8aa1a3c7ba, e6955ffe19, 02ff287726, b4078030e5 (main 839f646161, 2026-11-24): one artifact transaction across an async publication with evidence through the result store's provider; meshes persisted through the result store, with stale stored objects replaced after their canonical digest is recomputed; native typed FEA publication inside one result transaction with errors carried as values; one physical path spelling for a root-level FEA source; a 2 s wait for the user settings lock."
+  },
+  {
+   "path": "crates/runmat-core/tests/fea_source_root_level.rs",
+   "before": null,
+   "after": [
+    "100644",
+    "blob",
+    "65aeceebb11fd6b358ed69c4d8dbdda188402e84"
+   ],
+   "reason": "Desktop 0.7.2 runtime commits 6a9f95a5cc, 8aa1a3c7ba, e6955ffe19, 02ff287726, b4078030e5 (main 839f646161, 2026-11-24): one artifact transaction across an async publication with evidence through the result store's provider; meshes persisted through the result store, with stale stored objects replaced after their canonical digest is recomputed; native typed FEA publication inside one result transaction with errors carried as values; one physical path spelling for a root-level FEA source; a 2 s wait for the user settings lock."
+  },
+  {
+   "path": "crates/runmat-execution-runner-native/src/lib.rs",
+   "before": [
+    "100644",
+    "blob",
+    "3aa39aad849c475ade45fe9a70fd9cd83b4b03ee"
+   ],
+   "after": [
+    "100644",
+    "blob",
+    "20f23571b7aa5712015afedcfe37ab8291d39b45"
+   ],
+   "reason": "Desktop 0.7.2 runtime commits 6a9f95a5cc, 8aa1a3c7ba, e6955ffe19, 02ff287726, b4078030e5 (main 839f646161, 2026-11-24): one artifact transaction across an async publication with evidence through the result store's provider; meshes persisted through the result store, with stale stored objects replaced after their canonical digest is recomputed; native typed FEA publication inside one result transaction with errors carried as values; one physical path spelling for a root-level FEA source; a 2 s wait for the user settings lock."
+  },
+  {
+   "path": "crates/runmat-execution-runner-native/src/typed_fea/assessment.rs",
+   "before": [
+    "100644",
+    "blob",
+    "11cfa5879e34a986828f9149e6e29ecab73e1cde"
+   ],
+   "after": [
+    "100644",
+    "blob",
+    "9b612ed290171e979fa41aa1c011acec1a8b0ef0"
+   ],
+   "reason": "Desktop 0.7.2 runtime commits 6a9f95a5cc, 8aa1a3c7ba, e6955ffe19, 02ff287726, b4078030e5 (main 839f646161, 2026-11-24): one artifact transaction across an async publication with evidence through the result store's provider; meshes persisted through the result store, with stale stored objects replaced after their canonical digest is recomputed; native typed FEA publication inside one result transaction with errors carried as values; one physical path spelling for a root-level FEA source; a 2 s wait for the user settings lock."
+  },
+  {
+   "path": "crates/runmat-execution-runner-native/src/typed_fea/duration.rs",
+   "before": [
+    "100644",
+    "blob",
+    "b3b8ee70b67c787068dbf510d5cc5d0cf762411d"
+   ],
+   "after": [
+    "100644",
+    "blob",
+    "531d284f33114d1235811c7e8f82c9e82ab6fb46"
+   ],
+   "reason": "Desktop 0.7.2 runtime commits 6a9f95a5cc, 8aa1a3c7ba, e6955ffe19, 02ff287726, b4078030e5 (main 839f646161, 2026-11-24): one artifact transaction across an async publication with evidence through the result store's provider; meshes persisted through the result store, with stale stored objects replaced after their canonical digest is recomputed; native typed FEA publication inside one result transaction with errors carried as values; one physical path spelling for a root-level FEA source; a 2 s wait for the user settings lock."
+  },
+  {
+   "path": "crates/runmat-execution-runner-native/src/typed_fea/error.rs",
+   "before": null,
+   "after": [
+    "100644",
+    "blob",
+    "f20ac2f89a8ab09f6de045acb9377385c6e14600"
+   ],
+   "reason": "Desktop 0.7.2 runtime commits 6a9f95a5cc, 8aa1a3c7ba, e6955ffe19, 02ff287726, b4078030e5 (main 839f646161, 2026-11-24): one artifact transaction across an async publication with evidence through the result store's provider; meshes persisted through the result store, with stale stored objects replaced after their canonical digest is recomputed; native typed FEA publication inside one result transaction with errors carried as values; one physical path spelling for a root-level FEA source; a 2 s wait for the user settings lock."
+  },
+  {
+   "path": "crates/runmat-execution-runner-native/src/typed_fea/execution.rs",
+   "before": [
+    "100644",
+    "blob",
+    "04bba5114de60cf38432986c896e93f8f8dc0885"
+   ],
+   "after": [
+    "100644",
+    "blob",
+    "c88f58c27dd7f305bab10c92573c426d8f4aa7f0"
+   ],
+   "reason": "Desktop 0.7.2 runtime commits 6a9f95a5cc, 8aa1a3c7ba, e6955ffe19, 02ff287726, b4078030e5 (main 839f646161, 2026-11-24): one artifact transaction across an async publication with evidence through the result store's provider; meshes persisted through the result store, with stale stored objects replaced after their canonical digest is recomputed; native typed FEA publication inside one result transaction with errors carried as values; one physical path spelling for a root-level FEA source; a 2 s wait for the user settings lock."
+  },
+  {
+   "path": "crates/runmat-execution-runner-native/src/typed_fea/line_parameters.rs",
+   "before": [
+    "100644",
+    "blob",
+    "15ec43ee1e2d0cf62fa86a137fb27d6007f71152"
+   ],
+   "after": [
+    "100644",
+    "blob",
+    "0684ea2cbe5bfcb5c700bd95ec853712852132ec"
+   ],
+   "reason": "Desktop 0.7.2 runtime commits 6a9f95a5cc, 8aa1a3c7ba, e6955ffe19, 02ff287726, b4078030e5 (main 839f646161, 2026-11-24): one artifact transaction across an async publication with evidence through the result store's provider; meshes persisted through the result store, with stale stored objects replaced after their canonical digest is recomputed; native typed FEA publication inside one result transaction with errors carried as values; one physical path spelling for a root-level FEA source; a 2 s wait for the user settings lock."
+  },
+  {
+   "path": "crates/runmat-execution-runner-native/src/typed_fea/mod.rs",
+   "before": [
+    "100644",
+    "blob",
+    "bda825429218c65b1e9cb2f5012cb9058fb5a4ed"
+   ],
+   "after": [
+    "100644",
+    "blob",
+    "7badadd0e8e96a401916095b26f4adc4a36d2e27"
+   ],
+   "reason": "Desktop 0.7.2 runtime commits 6a9f95a5cc, 8aa1a3c7ba, e6955ffe19, 02ff287726, b4078030e5 (main 839f646161, 2026-11-24): one artifact transaction across an async publication with evidence through the result store's provider; meshes persisted through the result store, with stale stored objects replaced after their canonical digest is recomputed; native typed FEA publication inside one result transaction with errors carried as values; one physical path spelling for a root-level FEA source; a 2 s wait for the user settings lock."
+  },
+  {
+   "path": "crates/runmat-execution-runner-native/src/typed_fea/run_admission.rs",
+   "before": [
+    "100644",
+    "blob",
+    "a1a1d0a840839e0e26f143568b96aeea63e1f0bc"
+   ],
+   "after": [
+    "100644",
+    "blob",
+    "8167817da9634e82b9b26bf260043c27866a2277"
+   ],
+   "reason": "Desktop 0.7.2 runtime commits 6a9f95a5cc, 8aa1a3c7ba, e6955ffe19, 02ff287726, b4078030e5 (main 839f646161, 2026-11-24): one artifact transaction across an async publication with evidence through the result store's provider; meshes persisted through the result store, with stale stored objects replaced after their canonical digest is recomputed; native typed FEA publication inside one result transaction with errors carried as values; one physical path spelling for a root-level FEA source; a 2 s wait for the user settings lock."
+  },
+  {
+   "path": "crates/runmat-execution-runner-native/src/typed_fea/tests/prepared_execution.rs",
+   "before": [
+    "100644",
+    "blob",
+    "43e1ee1520755b7b5f8835c4833269633dc87468"
+   ],
+   "after": [
+    "100644",
+    "blob",
+    "f6e98a3c93ff6ed8e32c6b2932ed340ed883b357"
+   ],
+   "reason": "Desktop 0.7.2 runtime commits 6a9f95a5cc, 8aa1a3c7ba, e6955ffe19, 02ff287726, b4078030e5 (main 839f646161, 2026-11-24): one artifact transaction across an async publication with evidence through the result store's provider; meshes persisted through the result store, with stale stored objects replaced after their canonical digest is recomputed; native typed FEA publication inside one result transaction with errors carried as values; one physical path spelling for a root-level FEA source; a 2 s wait for the user settings lock."
+  },
+  {
+   "path": "crates/runmat-execution-runner-native/tests/analysis_process_conformance.rs",
+   "before": [
+    "100644",
+    "blob",
+    "c04e08d0004a49983054cc3601f9f38d06afbee3"
+   ],
+   "after": [
+    "100644",
+    "blob",
+    "5eb1630207734206af3e4288fa6ae8c213db805c"
+   ],
+   "reason": "Desktop 0.7.2 runtime commits 6a9f95a5cc, 8aa1a3c7ba, e6955ffe19, 02ff287726, b4078030e5 (main 839f646161, 2026-11-24): one artifact transaction across an async publication with evidence through the result store's provider; meshes persisted through the result store, with stale stored objects replaced after their canonical digest is recomputed; native typed FEA publication inside one result transaction with errors carried as values; one physical path spelling for a root-level FEA source; a 2 s wait for the user settings lock."
+  },
+  {
+   "path": "crates/runmat-execution-runner-native/tests/analysis_process_conformance/result_transaction.rs",
+   "before": null,
+   "after": [
+    "100644",
+    "blob",
+    "d2904c4cdfedaa2732092968ee1a58b123b5bd9d"
+   ],
+   "reason": "Desktop 0.7.2 runtime commits 6a9f95a5cc, 8aa1a3c7ba, e6955ffe19, 02ff287726, b4078030e5 (main 839f646161, 2026-11-24): one artifact transaction across an async publication with evidence through the result store's provider; meshes persisted through the result store, with stale stored objects replaced after their canonical digest is recomputed; native typed FEA publication inside one result transaction with errors carried as values; one physical path spelling for a root-level FEA source; a 2 s wait for the user settings lock."
+  },
   {
    "path": "crates/runmat-filesystem/src/lib.rs",
    "before": [
@@ -134,9 +360,23 @@
    "after": [
     "100644",
     "blob",
-    "753458743c34ffcf3521226d0d0f7c5eba4cb049"
+    "1bc9d727b06d56cd0cb8b9e2529838c3b649fcdc"
    ],
-   "reason": "Pinned-run repair d10736298d (FEA, 2026-11-20): study evidence and canonical meshes publish through the provider's atomic replace; the canonical-mesh collision check reads through the provider; a pinned execution may move and remove only the files and folders it created. File publication only: persist_canonical compares an existing artifact by length and then through the provider's read instead of a synchronous open."
+   "reason": "Pinned-run repair d10736298d (FEA, 2026-11-20): study evidence and canonical meshes publish through the provider's atomic replace; the canonical-mesh collision check reads through the provider; a pinned execution may move and remove only the files and folders it created. File publication only: persist_canonical compares an existing artifact by length and then through the provider's read instead of a synchronous open. Then changed by Desktop 0.7.2 runtime commits 6a9f95a5cc, 8aa1a3c7ba, e6955ffe19, 02ff287726, b4078030e5 (main 839f646161, 2026-11-24): one artifact transaction across an async publication with evidence through the result store's provider; meshes persisted through the result store, with stale stored objects replaced after their canonical digest is recomputed; native typed FEA publication inside one result transaction with errors carried as values; one physical path spelling for a root-level FEA source; a 2 s wait for the user settings lock."
+  },
+  {
+   "path": "crates/runmat-runtime/src/analysis/meshing/persistence.rs",
+   "before": [
+    "100644",
+    "blob",
+    "bda9a5df168d2864f5c7f2263f466dc40fa37f7c"
+   ],
+   "after": [
+    "100644",
+    "blob",
+    "d696dd8a6fb59c2136f35636260fed30c693bd4a"
+   ],
+   "reason": "Desktop 0.7.2 runtime commits 6a9f95a5cc, 8aa1a3c7ba, e6955ffe19, 02ff287726, b4078030e5 (main 839f646161, 2026-11-24): one artifact transaction across an async publication with evidence through the result store's provider; meshes persisted through the result store, with stale stored objects replaced after their canonical digest is recomputed; native typed FEA publication inside one result transaction with errors carried as values; one physical path spelling for a root-level FEA source; a 2 s wait for the user settings lock."
   },
   {
    "path": "crates/runmat-runtime/src/analysis/meshing/persistence_tests.rs",
@@ -148,9 +388,51 @@
    "after": [
     "100644",
     "blob",
-    "8755a7951df677513e37a577e598090b90498c70"
+    "de0be5f1af446b2f6a0d8189a76091429a196dbf"
    ],
-   "reason": "Pinned-run repair d10736298d (FEA, 2026-11-20): study evidence and canonical meshes publish through the provider's atomic replace; the canonical-mesh collision check reads through the provider; a pinned execution may move and remove only the files and folders it created. File publication only: tests only."
+   "reason": "Pinned-run repair d10736298d (FEA, 2026-11-20): study evidence and canonical meshes publish through the provider's atomic replace; the canonical-mesh collision check reads through the provider; a pinned execution may move and remove only the files and folders it created. File publication only: tests only. Then changed by Desktop 0.7.2 runtime commits 6a9f95a5cc, 8aa1a3c7ba, e6955ffe19, 02ff287726, b4078030e5 (main 839f646161, 2026-11-24): one artifact transaction across an async publication with evidence through the result store's provider; meshes persisted through the result store, with stale stored objects replaced after their canonical digest is recomputed; native typed FEA publication inside one result transaction with errors carried as values; one physical path spelling for a root-level FEA source; a 2 s wait for the user settings lock."
+  },
+  {
+   "path": "crates/runmat-runtime/src/analysis/storage.rs",
+   "before": [
+    "100644",
+    "blob",
+    "578881fc78d82f5ca7f2647fa6dc4e55611d2091"
+   ],
+   "after": [
+    "100644",
+    "blob",
+    "b0caf4af0353ef9749da07cf9a907068afde56cf"
+   ],
+   "reason": "Desktop 0.7.2 runtime commits 6a9f95a5cc, 8aa1a3c7ba, e6955ffe19, 02ff287726, b4078030e5 (main 839f646161, 2026-11-24): one artifact transaction across an async publication with evidence through the result store's provider; meshes persisted through the result store, with stale stored objects replaced after their canonical digest is recomputed; native typed FEA publication inside one result transaction with errors carried as values; one physical path spelling for a root-level FEA source; a 2 s wait for the user settings lock."
+  },
+  {
+   "path": "crates/runmat-runtime/src/analysis/storage/async_access.rs",
+   "before": [
+    "100644",
+    "blob",
+    "df02279c2f69a34033e70df4e9a1f95e52228dd8"
+   ],
+   "after": [
+    "100644",
+    "blob",
+    "7e0d48ef8b26fa0501608ac680f49f2b540b84dd"
+   ],
+   "reason": "Desktop 0.7.2 runtime commits 6a9f95a5cc, 8aa1a3c7ba, e6955ffe19, 02ff287726, b4078030e5 (main 839f646161, 2026-11-24): one artifact transaction across an async publication with evidence through the result store's provider; meshes persisted through the result store, with stale stored objects replaced after their canonical digest is recomputed; native typed FEA publication inside one result transaction with errors carried as values; one physical path spelling for a root-level FEA source; a 2 s wait for the user settings lock."
+  },
+  {
+   "path": "crates/runmat-runtime/src/analysis/structural_study/publication/evidence/access.rs",
+   "before": [
+    "100644",
+    "blob",
+    "aaad9d66d1468dd137cfcca9462e42bd5f3567df"
+   ],
+   "after": [
+    "100644",
+    "blob",
+    "12e1659c44625bda2c6f3920cec22d7d77c98148"
+   ],
+   "reason": "Desktop 0.7.2 runtime commits 6a9f95a5cc, 8aa1a3c7ba, e6955ffe19, 02ff287726, b4078030e5 (main 839f646161, 2026-11-24): one artifact transaction across an async publication with evidence through the result store's provider; meshes persisted through the result store, with stale stored objects replaced after their canonical digest is recomputed; native typed FEA publication inside one result transaction with errors carried as values; one physical path spelling for a root-level FEA source; a 2 s wait for the user settings lock."
   },
   {
    "path": "crates/runmat-runtime/src/builtins/generated_wasm_registry.rs",
@@ -209,5 +491,5 @@
    "reason": "Pinned-run repair d10736298d (FEA, 2026-11-20): study evidence and canonical meshes publish through the provider's atomic replace; the canonical-mesh collision check reads through the provider; a pinned execution may move and remove only the files and folders it created. File publication only: a test takes the provider override lock and a new test covers pair writes inside a pinned execution."
   }
  ],
- "reason": "Conserves the fresh 0.7.2 scientific measurements on dac88251ba across G132 24074bbb35: pure move of analysis_authoring_workflow, analysis_procedure_ids, analysis_output_operation_ids, analysis_language_reference_paths into contracts/authoring_catalog.rs, re-exported at the same path; no behaviour change; debt ceiling file lowered 2467\u21922442; FEA OK 2026-11-20. Every line removed from contracts.rs is in the new module; the only other lines are the mod line, the re-export, the module doc comment, its import and one test import. scripts/development/fea-module-size-debt.json is not a scientific input. Solver arithmetic, model inputs, dependencies, features and thresholds are unchanged. This review is not a rerun of the scientific or performance measurements. Also conserved across Pinned-run repair d10736298d (FEA, 2026-11-20): study evidence and canonical meshes publish through the provider's atomic replace; the canonical-mesh collision check reads through the provider; a pinned execution may move and remove only the files and folders it created. File publication only; no solver arithmetic, model inputs, materials, meshing algorithms, dependencies, features or thresholds changed, and the receipt workloads run without an input manifest, so they never use the pinned provider. Design reviewed the diff on 2026-11-20. Also conserved across WASM builtin registry fingerprint refresh 543c8f9f73 (Design, 2026-11-21): regenerated with scripts/regenerate-wasm-registry.mjs (target wasm32-unknown-unknown, features plot-web) at the 0.7.2 tag source; only the REGISTRY_SOURCE_FINGERPRINT literal changed (3084 registry entries, 2343 builtins, rows unchanged). The file is compiled only for target_arch = wasm32; native receipt workloads never include it; no solver arithmetic, model inputs, materials, meshing algorithms, dependencies, features or thresholds changed. Design reviewed the diff on 2026-11-21."
+ "reason": "Conserves the fresh 0.7.2 scientific measurements on dac88251ba across G132 24074bbb35: pure move of analysis_authoring_workflow, analysis_procedure_ids, analysis_output_operation_ids, analysis_language_reference_paths into contracts/authoring_catalog.rs, re-exported at the same path; no behaviour change; debt ceiling file lowered 2467\u21922442; FEA OK 2026-11-20. Every line removed from contracts.rs is in the new module; the only other lines are the mod line, the re-export, the module doc comment, its import and one test import. scripts/development/fea-module-size-debt.json is not a scientific input. Solver arithmetic, model inputs, dependencies, features and thresholds are unchanged. This review is not a rerun of the scientific or performance measurements. Also conserved across Pinned-run repair d10736298d (FEA, 2026-11-20): study evidence and canonical meshes publish through the provider's atomic replace; the canonical-mesh collision check reads through the provider; a pinned execution may move and remove only the files and folders it created. File publication only; no solver arithmetic, model inputs, materials, meshing algorithms, dependencies, features or thresholds changed, and the receipt workloads run without an input manifest, so they never use the pinned provider. Design reviewed the diff on 2026-11-20. Also conserved across WASM builtin registry fingerprint refresh 543c8f9f73 (Design, 2026-11-21): regenerated with scripts/regenerate-wasm-registry.mjs (target wasm32-unknown-unknown, features plot-web) at the 0.7.2 tag source; only the REGISTRY_SOURCE_FINGERPRINT literal changed (3084 registry entries, 2343 builtins, rows unchanged). The file is compiled only for target_arch = wasm32; native receipt workloads never include it; no solver arithmetic, model inputs, materials, meshing algorithms, dependencies, features or thresholds changed. Design reviewed the diff on 2026-11-21. Also conserved across Desktop 0.7.2 runtime commits 6a9f95a5cc, 8aa1a3c7ba, e6955ffe19, 02ff287726, b4078030e5 (main 839f646161, 2026-11-24): one artifact transaction across an async publication with evidence through the result store's provider; meshes persisted through the result store, with stale stored objects replaced after their canonical digest is recomputed; native typed FEA publication inside one result transaction with errors carried as values; one physical path spelling for a root-level FEA source; a 2 s wait for the user settings lock. Publication, persistence and source-path plumbing only. FEA review (verbatim): \"# FEA review: conserving the 0.7.2 scientific receipts across 60965cf6da..839f646161\n\n**Reviewer:** FEA. **Date:** 2026-11-24. **Verdict: confirmed. The receipts can be conserved.**\n\nI read the diff between 60965cf6da and 839f646161 on the policy input roots, in the worktree `runmat-desktop072-rt`. The five runtime commits are 6a9f95a5cc, 8aa1a3c7ba, e6955ffe19, 02ff287726 and b4078030e5. The two CI commits, f8cfa5ab00 and 839f646161, touch no input roots.\n\nThese commits change no solver arithmetic, model inputs, materials, meshing algorithms or thresholds. None of the changed files is in a solver, mesher, materials, physics or assessment-threshold module. The commits change where and how finished results are written. They do not change what is computed.\n\n## What each change does\n\n- **Publication in one transaction:** e6955ffe19 adds `publish_completed_study` (in `typed_fea/execution.rs` and `line_parameters.rs`), and 6a9f95a5cc adds `with_artifact_access_async`.\n  - Mesh files, study evidence, result objects and the manifest now commit in one transaction, or not at all.\n  - The steps are the same steps in the same order: `prepare_study_publication`, `admit_accelerator_placement`, then completion with the assessment receipts.\n  - Assessment functions still run outside the transaction, with the same inputs.\n  - The reassessment path wraps its prepare and complete steps the same way. Their arguments are unchanged.\n- **Assessment wrappers:** `assessment.rs` adds `complete_in`, `complete_frozen_in` and `finish`. They only choose which scope the final `publication.complete(receipts)` write runs in. Function evaluation and receipt contents are unchanged.\n- **Errors as values:** e6955ffe19 replaces `String` errors with `FeaExecutionError`. The operation envelope is now carried as a value; before, it was JSON text. This affects failure reporting only. A successful run's outputs are unchanged.\n- **Mesh persistence:** 8aa1a3c7ba changes how an already-stored mesh object is handled.\n  - Equal bytes are kept, as before.\n  - A stored object whose recomputed canonical digest differs, or that does not decode, is now replaced. Before, it was an error.\n  - The same digest with different bytes is still an error.\n  - Mesh generation, the mesh bytes, their canonical digests and the evidence SHA-256 are unchanged. The new helpers `solver_mesh_digest` and `content_sha256` recompute the existing digests and only read them.\n  - This changes behavior only when a stale object already sits at the destination. A receipt run produces the same mesh and the same digest as before.\n- **Evidence provider:** 6a9f95a5cc routes evidence reads and writes through the result store's provider (`ResultStoreProvider`) rather than the process's installed provider. The bytes written are unchanged.\n- **Source path:** 02ff287726 changes `source_identity` in `fea_source.rs` to return the physical path rebuilt from the source root and logical path. As a result, `study.fea` and `./study.fea` name the same checked source. The logical path and the source text are unchanged, so the study input does not change.\n- **Settings lock:** b4078030e5 makes the user settings lock wait up to 2 s and adds a typed busy error. It has no effect on a study.\n- **CLI:** `run.rs` changes one line, `message` \u2192 `message.to_string()`, for the new error type.\n\n## Limits of this review\n\nI reviewed the diff only. I did not rerun the qualification studies on 839f646161. The confirmation rests on the fact that no changed line sits in a computation path. I have not checked that the outputs are bit-identical.\n\nIf someone wants an empirical check, the cheapest one is a single release CLI run of a receipt study on each side. Compare the mesh digest and the solver-state content digests.\""
 }
