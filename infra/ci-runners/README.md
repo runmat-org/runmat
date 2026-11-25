@@ -1,17 +1,34 @@
 # GCP runners for GitHub Actions
 
-RunMat's Linux and Windows CI jobs run on two self-hosted VMs in the `runmat`
+RunMat's Linux and Windows CI jobs run on three self-hosted VMs in the `runmat`
 GCP project. macOS jobs stay on WarpBuild. Each VM starts when GitHub queues a
-job for its label, keeps a warm build cache on its own disk, and stops itself
-after 30 idle minutes.
+job for its label and stops itself after 30 idle minutes. The two test VMs keep
+a warm build cache on their own disks; the Windows build VM starts cold.
 
 | Label | VM | Machine | Runner slots | Disks |
 |---|---|---|---|---|
 | `runmat-gcp-linux-x64` | `ci-linux-x64` (Ubuntu 24.04) | n2-highmem-32: 32 vCPU, 256 GB | 5 for runmat, 2 for runmat-private | boot 100 GB, work 500 GB pd-ssd (`/ci/work`), cache 1500 GB pd-ssd (`/ci/cache`) |
 | `runmat-gcp-windows-x64` | `ci-windows-x64` (Windows Server 2022, licence included) | n2-highmem-64: 64 vCPU, 512 GB | 8 for runmat, 1 for runmat-private | boot 200 GB, work 600 GB pd-ssd (`D:`), cache 2000 GB pd-ssd (`E:`) |
+| `runmat-gcp-windows-build` | `ci-windows-build-x64` (Windows Server 2022, us-central1-c) | c2d-highmem-56: 56 vCPU, 448 GB | 1 for runmat | boot 150 GB pd-balanced, four 375 GB local NVMe SSDs: work (`D:`) and cache (`E:`) use one each |
+
+`ci-linux-x64` and `ci-windows-x64` are in us-central1-b. `ci-windows-build-x64`
+runs one job: the Windows release cross build in `.github/workflows/ci.yml`
+(`Cross build windows-x86_64`), which sets `CARGO_BUILD_JOBS` to the VM's core
+count. On the shared Windows VM, with two Cargo jobs beside up to eight test
+jobs, that build took eight hours. The build VM differs from the others:
+
+- It is in us-central1-c because us-central1-b had no C2D capacity on
+  2026-11-25.
+- Its work and cache disks are local SSDs, because the project's regional
+  SSD quota (20,480 GB) had 378 GB free. Local SSDs lose their data when the VM
+  stops, so each build after an idle stop starts with an empty Cargo target and
+  rebuilds the vcpkg native libraries. `setup.ps1` formats the blank disks at
+  boot. A c2d-highmem-56 takes 0, 4 or 8 local SSDs; two of the four are unused.
+- Windows cuts its computer name to 15 characters, so runner names use the
+  instance name (`gcp-ci-windows-build-x64-pub1`).
 
 A slot is one runner registration, so a VM runs up to that many jobs at once.
-The earlier `-8x`, `-4x` and `-16x` Warp labels all map to these two labels.
+The earlier `-8x`, `-4x` and `-16x` Warp labels all map to the two test labels.
 
 ## Who may use these runners
 
@@ -83,7 +100,7 @@ free. The prune runs every 24 hours while the VM is up and soon after each
 boot when the last prune is older than 20 hours.
 
 A Cloud Monitoring alert (`CI runner disk above 85%`) emails the owner when any
-disk on either VM passes 85% for 10 minutes.
+disk on a runner VM passes 85% for 10 minutes.
 
 ### Warm Cargo targets
 
@@ -123,11 +140,12 @@ GitHub workflow_job "queued" webhook (runmat, runmat-private)
 Cloud Run ci-runner-autostart (verifies the HMAC signature)
         |
         v
-Compute API: start ci-linux-x64 or ci-windows-x64 for the job's label
+Compute API: start the VM for the job's label (ci-linux-x64, ci-windows-x64
+or ci-windows-build-x64)
 ```
 
 The service holds no GitHub credential. Its service account can only get,
-start and resume the two VMs (`roles/ciRunnerStarter` on each instance) and
+start and resume the runner VMs (`roles/ciRunnerStarter` on each instance) and
 read the webhook secret. After a queued job it watches the VM for eight
 minutes and starts it again if the VM was shutting down when the job arrived.
 
@@ -151,7 +169,11 @@ it starts them again and stays up.
 
 - Change a script: edit it here, then run `gcp/push-bundle.sh linux` or
   `gcp/push-bundle.sh windows`. Linux reruns setup over IAP SSH; Windows resets
-  the VM and reruns setup at boot.
+  the VM and reruns setup at boot. For the build VM, run
+  `VM=ci-windows-build-x64 ZONE=us-central1-c gcp/push-bundle.sh windows`.
+- Add a label: add it to `INSTANCES` in `autostart/main.py` (`<zone>/<vm>` for a
+  VM outside us-central1-b) and redeploy the service with the `gcloud run
+  deploy` command in `gcp/create.sh`.
 - Add a slot or re-register: add it to the VM's `ci-slots` metadata, then run
   `gcp/push-bundle.sh <os> --register`. The script puts one-hour registration
   tokens in the VM's metadata for that setup run and removes them afterwards;

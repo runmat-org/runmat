@@ -106,10 +106,15 @@ jobs:
         run: node --test scripts/docs/docs-lint.test.mjs scripts/docs/generate-pages.test.mjs scripts/docs/check-snippets.test.mjs scripts/docs/registry-coverage.test.mjs scripts/docs/fea-grammar.test.mjs
 
   build-and-test:
-    needs: changes
+    # The fast checks gate the expensive lanes, so a broken receipt, docs page or
+    # distribution contract fails in minutes. linux-quality and windows-quality
+    # run inside this matrix and gate nothing.
+    needs: [changes, scientific-receipts, docs-lint, distribution-contracts]
     name: ${{ matrix.name }}
     # Run on pushes for all branches, and only on PRs from forks to avoid double CI on same-repo PRs
-    if: inputs.release_validation || (needs.changes.outputs.native == 'true' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch' || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.fork == true)))
+    # !failure() lets a gate that its own condition skipped (for example docs-lint
+    # on a same-repository pull request) pass while a failed gate stops the lane.
+    if: ${{ !cancelled() && !failure() && (inputs.release_validation || (needs.changes.outputs.native == 'true' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch' || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.fork == true)))) }}
     strategy:
       fail-fast: false
       max-parallel: 15
@@ -698,9 +703,9 @@ jobs:
 
 
   cross-build:
-    needs: changes
+    needs: [changes, scientific-receipts, docs-lint, distribution-contracts]
     # Build all release targets so failures are caught before tagging
-    if: ${{ !inputs.release_validation && needs.changes.outputs.native == 'true' && github.event_name == 'push' && (github.ref == 'refs/heads/dev' || github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/heads/release/')) }}
+    if: ${{ !cancelled() && !failure() && !inputs.release_validation && needs.changes.outputs.native == 'true' && github.event_name == 'push' && (github.ref == 'refs/heads/dev' || github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/heads/release/')) }}
     name: Cross build ${{ matrix.platform.release_for }}
     # The Windows cold build used nearly eight hours, leaving no time to
     # retain its checkpoint after acceptance. Other native lanes retain 8h.
@@ -711,7 +716,10 @@ jobs:
       matrix:
         platform:
           - release_for: windows-x86_64
-            os: runmat-gcp-windows-x64
+            # A dedicated 56-vCPU VM (infra/ci-runners): on the shared test VM
+            # this build took eight hours.
+            os: runmat-gcp-windows-build
+            fork_os: warp-windows-latest-x64-16x
             target: x86_64-pc-windows-msvc
             bin: runmat.exe
           - release_for: macos-x86_64
@@ -726,10 +734,14 @@ jobs:
             os: runmat-gcp-linux-x64
             target: x86_64-unknown-linux-gnu
             bin: runmat
-    runs-on: ${{ matrix.platform.os }}
+    # Same runner rule as build-and-test: runmat-gcp-* labels only for trusted
+    # events; anything else takes the entry's fork_os (WarpBuild) when it has one.
+    runs-on: ${{ (contains(fromJSON('["push","workflow_dispatch","schedule"]'), github.event_name) || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository)) && matrix.platform.os || matrix.platform.fork_os || matrix.platform.os }}
     env:
-      # Keep one Cargo producer per job. Windows has 64 GiB; its two compiler
-      # slots can overlap dependencies. Smaller Mac builders retain one slot.
+      # Keep one Cargo producer per job. Hosted Windows has 64 GiB; its two
+      # compiler slots can overlap dependencies. The dedicated Windows build VM
+      # raises this to its core count in the build step. Smaller Mac builders
+      # retain one slot.
       CARGO_BUILD_JOBS: ${{ matrix.platform.target == 'x86_64-unknown-linux-gnu' && '8' || (matrix.platform.target == 'x86_64-pc-windows-msvc' && '2' || '1') }}
       # Archive packaging executes a host-side Cargo tool in the dev profile.
       # Bound that tool's artifacts as well as the final release executable.
@@ -890,6 +902,9 @@ jobs:
           RUNMAT_OCCT_LINK_MODE: dylib
         run: |
           $ErrorActionPreference = 'Stop'
+          # The dedicated build VM (448 GiB) runs no other job: use every core.
+          if ($env:RUNNER_NAME -like 'gcp-ci-windows-build-*') { $env:CARGO_BUILD_JOBS = $env:NUMBER_OF_PROCESSORS }
+          Write-Host "CARGO_BUILD_JOBS=$env:CARGO_BUILD_JOBS on $env:RUNNER_NAME"
           & ./scripts/build-runmat-with-aot-runtime.ps1 --locked --release --target "${{ matrix.platform.target }}" --bin runmat --features "blas-lapack,vendored-openssl,occt-native"
           if ($LASTEXITCODE -ne 0) { throw "separate-runtime branch build failed with exit code $LASTEXITCODE" }
 

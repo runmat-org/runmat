@@ -4,7 +4,7 @@ GitHub sends `workflow_job` webhooks from runmat-org/runmat and
 runmat-org/runmat-private. For a `queued` job whose labels name one of the
 runner labels below, this service starts the matching VM. It holds no GitHub
 credential: it only verifies the webhook signature and calls the Compute API
-with its own service account, which may only get, start and resume the two
+with its own service account, which may only get, start and resume the
 runner VMs.
 
 A start can fail: the VM may still be stopping after its idle period, or the
@@ -28,8 +28,13 @@ PROJECT = os.environ.get("CI_PROJECT", "runmat")
 ZONE = os.environ.get("CI_ZONE", "us-central1-b")
 SECRET = os.environ["WEBHOOK_SECRET"].strip().encode()
 REPOSITORIES = {"runmat-org/runmat", "runmat-org/runmat-private"}
-INSTANCES = json.loads(os.environ.get("CI_LABEL_INSTANCES",
-                                      '{"runmat-gcp-linux-x64": "ci-linux-x64", "runmat-gcp-windows-x64": "ci-windows-x64"}'))
+# Label -> instance. An instance outside ZONE is written "<zone>/<instance>".
+INSTANCES = json.loads(os.environ.get("CI_LABEL_INSTANCES", json.dumps({
+    "runmat-gcp-linux-x64": "ci-linux-x64",
+    "runmat-gcp-windows-x64": "ci-windows-x64",
+    # The Windows release cross build: C2D had no capacity in us-central1-b.
+    "runmat-gcp-windows-build": "us-central1-c/ci-windows-build-x64",
+})))
 WATCH_SECONDS = 8 * 60
 # Queued jobs wait up to 24 h on GitHub; quota held by other machines can take
 # hours to free.
@@ -51,7 +56,8 @@ def token():
 
 
 def compute(method, instance, verb=""):
-    url = f"https://compute.googleapis.com/compute/v1/projects/{PROJECT}/zones/{ZONE}/instances/{instance}{verb}"
+    zone, _, name = instance.rpartition("/")
+    url = f"https://compute.googleapis.com/compute/v1/projects/{PROJECT}/zones/{zone or ZONE}/instances/{name}{verb}"
     request = urllib.request.Request(url, method=method, data=b"" if method == "POST" else None,
                                      headers={"Authorization": f"Bearer {token()}"})
     with urllib.request.urlopen(request, timeout=30) as response:

@@ -18,13 +18,25 @@ function Get-Md([string]$Key) {
     } catch { return '' }
 }
 $slots = (Get-Md 'ci-slots') -split '\s+' | Where-Object { $_ }
+# Runner names use the instance name: Windows cuts the computer name to 15
+# characters (ci-windows-build-x64 becomes CI-WINDOWS-BUIL).
+try {
+    $instance = (Invoke-WebRequest -Headers @{ 'Metadata-Flavor' = 'Google' } -UseBasicParsing `
+        -Uri 'http://metadata.google.internal/computeMetadata/v1/instance/name').Content
+    if ($instance -is [byte[]]) { $instance = [Text.Encoding]::UTF8.GetString($instance) }
+    $instance = [string]$instance
+} catch { $instance = '' }
+if (-not $instance) { $instance = $env:COMPUTERNAME }
+$instance = $instance.Trim().ToLower()
 $label = Get-Md 'ci-label'
 $runnerVersion = Get-Md 'ci-runner-version'
 $idleMinutes = Get-Md 'ci-idle-minutes'
 if (-not $idleMinutes) { $idleMinutes = 30 }
 
-# ---- disks: work (D:) and cache (E:) are separate persistent disks, so a full
-# cache or a runaway job cannot fill C:. They are told apart by size.
+# ---- disks: work (D:) and cache (E:) are separate disks, so a full cache or a
+# runaway job cannot fill C:. They are told apart by size. On a VM whose work and
+# cache are local SSDs (ci-windows-build-x64), both come back blank after every
+# stop, and this step formats them again at boot.
 foreach ($spec in @(@{ Letter = 'D'; Label = 'ci-work'; MaxGB = 1000 }, @{ Letter = 'E'; Label = 'ci-cache'; MaxGB = 100000 })) {
     if (Get-Volume -DriveLetter $spec.Letter -ErrorAction SilentlyContinue) { continue }
     $existing = Get-Volume -FileSystemLabel $spec.Label -ErrorAction SilentlyContinue
@@ -190,7 +202,7 @@ ACTIONS_RUNNER_HOOK_JOB_COMPLETED=C:\ci\windows\hooks\job-completed.ps1
         if (Test-Path $dir) { Remove-Item -Recurse -Force $dir }
         Copy-Item -Recurse $dist $dir
         Set-Content -Encoding ascii "$dir\.env" $envFile
-        $runnerName = "gcp-$($env:COMPUTERNAME.ToLower())-$slot"
+        $runnerName = "gcp-$instance-$slot"
         & "$dir\config.cmd" --unattended --replace --url "https://github.com/$repo" --token $token `
             --name $runnerName --labels $label --work "D:\ci-work\$slot\w" --disableupdate `
             --runasservice --windowslogonaccount '.\runner' --windowslogonpassword $password | Out-Null
@@ -200,7 +212,7 @@ ACTIONS_RUNNER_HOOK_JOB_COMPLETED=C:\ci\windows\hooks\job-completed.ps1
     Set-Content -Encoding ascii "$dir\.env" $envFile
     # The runner reads PATH for jobs from .path; put the shared rustup proxies first.
     Set-Content -Encoding ascii "$dir\.path" ("E:\ci-cache\cargo\bin;" + [Environment]::GetEnvironmentVariable('Path', 'Machine'))
-    $service = Get-Service "actions.runner.*" | Where-Object { $_.Name -like "*.gcp-$($env:COMPUTERNAME.ToLower())-$slot" }
+    $service = Get-Service "actions.runner.*" | Where-Object { $_.Name -like "*.gcp-$instance-$slot" }
     if ($service) {
         # The password changes at every boot. Start manually, after the slot is wiped below.
         & sc.exe config $service.Name obj= '.\runner' password= $password start= demand | Out-Null

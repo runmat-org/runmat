@@ -50,6 +50,26 @@ create_vm ci-windows-x64 n2-highmem-64 windows-2022 windows-cloud 200 600 2000 r
 gcp/push-bundle.sh linux --register
 gcp/push-bundle.sh windows --register   # remove ci-registration metadata once the slots are online
 
+# Windows release cross build (2026-11-25): one slot, label runmat-gcp-windows-build.
+# us-central1-c, because us-central1-b had no C2D capacity. Work and cache are
+# local SSDs (blank after every stop), because the regional SSD quota was nearly
+# used. c2d-highmem-56 accepts 0, 4 or 8 local SSDs. The startup script needs the
+# bundle at first boot, so it goes in at creation with a registration token.
+work="$(mktemp -d)"; (umask 077; (COPYFILE_DISABLE=1 tar --no-xattrs -czf - common windows) | base64 > "$work/bundle"
+  gh api -X POST repos/runmat-org/runmat/actions/runners/registration-token -q .token |
+    python3 -c 'import json, sys; print(json.dumps({"runmat-org/runmat": sys.stdin.read().strip()}))' > "$work/reg.json")
+gcloud compute instances create ci-windows-build-x64 --project $P --zone us-central1-c --machine-type c2d-highmem-56 \
+  --image-family windows-2022 --image-project windows-cloud --boot-disk-size 150GB --boot-disk-type pd-balanced \
+  --local-ssd=interface=NVME --local-ssd=interface=NVME --local-ssd=interface=NVME --local-ssd=interface=NVME \
+  --service-account ci-runner-vm@$P.iam.gserviceaccount.com --scopes cloud-platform --tags ci-runner \
+  --labels purpose=ci-runner,owner=design-ci --shielded-secure-boot \
+  --metadata "ci-label=runmat-gcp-windows-build,ci-runner-version=2.338.2,ci-idle-minutes=30,ci-slots=pub1=runmat-org/runmat,enable-windows-ssh=TRUE" \
+  --metadata-from-file "windows-startup-script-ps1=windows/startup.ps1,ci-bundle=$work/bundle,ci-registration=$work/reg.json"
+rm -rf "$work"
+gcloud compute instances add-iam-policy-binding ci-windows-build-x64 --project $P --zone us-central1-c \
+  --member serviceAccount:ci-runner-autostart@$P.iam.gserviceaccount.com --role projects/$P/roles/ciRunnerStarter
+# Once pub1 is online: gcloud compute instances remove-metadata ci-windows-build-x64 --zone us-central1-c --keys ci-registration
+
 # Autostart: webhook secret, Cloud Run service, repository webhooks.
 python3 -c "import secrets; print(secrets.token_hex(32), end='')" |
   gcloud secrets create ci-runner-webhook-secret --project $P --replication-policy automatic --data-file=-
