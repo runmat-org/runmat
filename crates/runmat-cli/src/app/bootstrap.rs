@@ -441,10 +441,8 @@ fn configure_analysis_from_config(config: &RunMatRuntimeConfig) -> Result<()> {
         publication_staging_cap_bytes: None,
     })
     .map_err(|err| anyhow::anyhow!("Failed to configure FEA runtime: {err}"))?;
-    // Result reads before the first run use this host's admitted memory; each run replaces it
-    // with its own pool.
-    runmat_execution_runner_native::admit_local_publication_memory()
-        .map_err(|err| anyhow::anyhow!("Failed to size FEA publication memory: {err}"))?;
+    // Result reads before the first run stage within this machine's memory (the runtime's
+    // default); each run installs its own pool.
     Ok(())
 }
 

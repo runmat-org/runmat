@@ -1,12 +1,15 @@
 //! The memory one study publication may stage.
 //!
 //! A study publication is staged whole in the publishing process before it commits. Its budget
-//! comes from the run's admitted memory authority: the memory the host admitted for the run,
-//! which also admits the solve and sizes the thread plan, less the memory the publishing process
-//! already holds when the budget is read. The host that owns machine discovery installs that
-//! authority (the native runner on Desktop and the CLI, the browser module on the web). A host
-//! may also set an explicit cap in `FeaRuntimeConfig::publication_staging_cap_bytes`; the budget
-//! is then the smaller of the two. With neither, publication refuses to start.
+//! comes from the run's admitted memory authority: the memory admitted for the run, which also
+//! admits the solve and sizes the thread plan, less the memory the publishing process already
+//! holds when the budget is read. A host that admits runs itself installs that authority (the
+//! native runner installs each run's pool on Desktop and the CLI; the browser module installs its
+//! instance budget). A process where no host has installed one uses this machine's memory: what
+//! the machine or container admits for work when the budget is read
+//! (`runmat_cpu_execution::machine_memory`, the probe the native runner's pool also reads). A
+//! host may also set an explicit cap in `FeaRuntimeConfig::publication_staging_cap_bytes`; the
+//! budget is then the smaller of the two.
 use std::sync::{Arc, OnceLock, RwLock};
 
 #[cfg(test)]
@@ -67,30 +70,48 @@ pub fn clear_publication_memory_authority(
     Ok(slot.take())
 }
 
-/// The staging budget: the authority's admitted memory less what the process holds, lowered to
-/// the host cap when one is set.
+/// The staging budget: the installed authority's admitted memory less what the process holds,
+/// or this machine's memory when no host installed an authority, lowered to the host cap when
+/// one is set.
 pub(super) fn staging_budget(cap: Option<u64>) -> Result<u64, String> {
     let authority = authority_slot()
         .read()
         .map_err(|_| "FEA publication memory authority lock poisoned".to_string())?
         .clone();
-    let admitted = authority
-        .map(|authority| authority.publication_memory()?.staging_bytes())
-        .transpose()?;
-    budget_from(admitted, cap)
+    let admitted = match authority {
+        Some(authority) => authority.publication_memory()?,
+        None => machine_publication_memory()?,
+    }
+    .staging_bytes()?;
+    Ok(cap.map_or(admitted, |cap| admitted.min(cap)))
 }
 
-fn budget_from(admitted: Option<u64>, cap: Option<u64>) -> Result<u64, String> {
-    match (admitted, cap) {
-        (Some(admitted), Some(cap)) => Ok(admitted.min(cap)),
-        (Some(bytes), None) | (None, Some(bytes)) => Ok(bytes),
-        (None, None) => Err(
-            "This host has not admitted any memory for saving study results. \
-             Run the study from RunMat Desktop or the RunMat CLI, or set a publication staging \
-             cap in the host's FEA configuration."
-                .into(),
-        ),
-    }
+/// This machine's memory as the publication authority. The machine's admissible memory is read
+/// now, so it already excludes what this process holds: the process is admitted its footprint
+/// plus that memory and holds its footprint, which leaves the admissible memory to stage.
+#[cfg(not(target_arch = "wasm32"))]
+fn machine_publication_memory() -> Result<PublicationMemory, String> {
+    use runmat_cpu_execution::machine_memory;
+    let unreadable = |error: std::io::Error| {
+        format!("RunMat could not read this machine's memory to save study results: {error}")
+    };
+    let resident_bytes = machine_memory::process_footprint_bytes().map_err(unreadable)?;
+    let admissible = machine_memory::admissible_memory_bytes().map_err(unreadable)?;
+    Ok(PublicationMemory {
+        admitted_bytes: resident_bytes.saturating_add(admissible),
+        resident_bytes,
+    })
+}
+
+/// A browser instance's memory is measured by the module that owns it, which installs the
+/// authority when it starts; a wasm process without that module has no memory to stage in.
+#[cfg(target_arch = "wasm32")]
+fn machine_publication_memory() -> Result<PublicationMemory, String> {
+    Err(
+        "This browser instance has not admitted any memory for saving study results. \
+         Start RunMat through its browser module, which admits the instance's memory."
+            .into(),
+    )
 }
 
 /// The plain-language refusal for a publication that needs more memory than its budget.

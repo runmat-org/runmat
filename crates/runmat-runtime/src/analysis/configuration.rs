@@ -16,8 +16,8 @@ pub struct FeaRuntimeConfig {
     /// An optional host cap, in bytes, on the memory one whole-study publication may stage.
     /// `None` (the default) leaves the budget to the run's admitted memory authority: the memory
     /// admitted for the run less what the publishing process holds (see
-    /// [`install_publication_memory_authority`]). A cap lowers that budget and never raises it;
-    /// a host with no installed authority publishes within its cap alone.
+    /// [`install_publication_memory_authority`]), or this machine's admissible memory when no
+    /// host installed an authority. A cap lowers that budget and never raises it.
     pub publication_staging_cap_bytes: Option<u64>,
 }
 

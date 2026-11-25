@@ -188,9 +188,9 @@ fn run() {
 
 async fn parent() {
     // This standalone process is the invocation host, as the CLI is in the product. It sets no
-    // publication cap, so each publication stages within this host's admitted run memory.
+    // publication cap, so each publication stages within its run's admitted memory, or this
+    // machine's memory before a run installs one.
     runmat_runtime::analysis::configure_fea_runtime(Default::default()).unwrap();
-    runmat_execution_runner_native::admit_local_publication_memory().unwrap();
     if std::env::args_os().any(|argument| argument == "--remote-families-only") {
         #[cfg(feature = "occt-native")]
         remote_families::run().await;

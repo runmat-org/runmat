@@ -8,5 +8,11 @@ description = "Bounded reusable shared-memory CPU execution for RunMat"
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 rayon = "1.11"
 
+[target.'cfg(all(not(target_arch = "wasm32"), target_os = "macos"))'.dependencies]
+libc = "0.2"
+
+[target.'cfg(all(not(target_arch = "wasm32"), not(target_os = "macos")))'.dependencies]
+sysinfo = { version = "0.30", default-features = false }
+
 [build-dependencies]
 runmat-build-identity = { workspace = true }

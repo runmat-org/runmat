@@ -2,7 +2,7 @@ use super::*;
 
 #[test]
 fn pruning_observation_attachment_preserves_other_runs_and_shared_objects() {
-    // The test host holds the provider lock and admits publication memory.
+    // The test host holds the provider lock.
     let _host = crate::analysis::tests::analysis_test_guard();
     let directory = tempfile::tempdir().unwrap();
     let root = directory.path();

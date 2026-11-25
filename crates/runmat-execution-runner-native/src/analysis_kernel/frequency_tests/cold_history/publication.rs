@@ -68,7 +68,6 @@ pub(super) fn publish(
         ..Default::default()
     })
     .unwrap();
-    crate::machine_capacity::admit_local_publication_memory().unwrap();
     runmat_runtime::analysis::storage::configure_artifact_store(
         AnalysisArtifactStoreConfig::Filesystem { root: runs.clone() },
     )

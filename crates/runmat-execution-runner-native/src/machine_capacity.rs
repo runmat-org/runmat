@@ -1,9 +1,6 @@
 //! Local host discovery, separated from portable numerical policies.
 use std::io;
 
-#[cfg(target_os = "macos")]
-mod macos;
-
 pub(crate) fn cpu_millicores() -> u32 {
     let threads = std::thread::available_parallelism()
         .map_or(1, usize::from)
@@ -11,18 +8,9 @@ pub(crate) fn cpu_millicores() -> u32 {
     threads as u32 * 1000
 }
 
+/// The memory this machine admits for work now (`runmat_cpu_execution::machine_memory`).
 pub(crate) fn memory_bytes() -> io::Result<u64> {
-    // Leave a quarter of currently available memory for the OS and other work.
-    // Admission is a snapshot; runtime ceilings/cancellation remain authoritative.
-    let available = available_memory()?;
-    let budget = available - available / 4;
-    if budget == 0 {
-        Err(io::Error::other(
-            "local memory discovery returned no available capacity",
-        ))
-    } else {
-        Ok(budget)
-    }
+    runmat_cpu_execution::machine_memory::admissible_memory_bytes()
 }
 
 /// Physical memory an analysis worker process holds before its first numerical store: the
@@ -61,7 +49,9 @@ fn worker_budget(pool_bytes: u64, coordinator_bytes: u64) -> io::Result<u64> {
 
 /// Record this process's footprint at a coordinator phase boundary (info level).
 pub(crate) fn trace_footprint(phase: &'static str) {
-    if let Ok((bytes, peak)) = footprint_and_peak() {
+    if let Ok((bytes, peak)) =
+        runmat_cpu_execution::machine_memory::process_footprint_and_peak_bytes()
+    {
         tracing::info!(
             phase,
             footprint_bytes = bytes,
@@ -73,23 +63,7 @@ pub(crate) fn trace_footprint(phase: &'static str) {
 
 /// This process's physical footprint.
 pub(crate) fn process_footprint() -> io::Result<u64> {
-    footprint_and_peak().map(|(bytes, _)| bytes)
-}
-
-#[cfg(target_os = "macos")]
-fn footprint_and_peak() -> io::Result<(u64, u64)> {
-    macos::process_footprint()
-}
-
-#[cfg(not(target_os = "macos"))]
-fn footprint_and_peak() -> io::Result<(u64, u64)> {
-    let pid = sysinfo::get_current_pid().map_err(io::Error::other)?;
-    let mut system = sysinfo::System::new();
-    system.refresh_process_specifics(pid, sysinfo::ProcessRefreshKind::new().with_memory());
-    system
-        .process(pid)
-        .map(|process| (process.memory(), process.memory()))
-        .ok_or_else(|| io::Error::other("this process's resident memory is not readable"))
+    runmat_cpu_execution::machine_memory::process_footprint_bytes()
 }
 
 /// Execution ceilings for one local meshing run: sized from the memory this host admits for work
@@ -131,12 +105,6 @@ pub(crate) fn run_pool(configured: Option<u64>) -> io::Result<u64> {
     Ok(pool)
 }
 
-/// Read this host's admitted memory for a run and make it the study publication authority, for
-/// hosts and tests that publish without configuring a native run first. Returns the pool.
-pub fn admit_local_publication_memory() -> io::Result<u64> {
-    run_pool(None)
-}
-
 /// One run's admitted memory, read by the runtime each time a publication sizes its staging.
 struct RunPublicationMemory {
     pool_bytes: u64,
@@ -149,26 +117,6 @@ impl runmat_runtime::analysis::PublicationMemoryAuthority for RunPublicationMemo
             resident_bytes: process_footprint().map_err(|error| error.to_string())?,
         })
     }
-}
-
-#[cfg(target_os = "macos")]
-fn available_memory() -> io::Result<u64> {
-    macos::available_memory()
-}
-
-#[cfg(not(target_os = "macos"))]
-fn available_memory() -> io::Result<u64> {
-    let mut system = sysinfo::System::new();
-    system.refresh_memory();
-    Ok(usable_memory(
-        system.available_memory(),
-        system.cgroup_limits().map(|limit| limit.free_memory),
-    ))
-}
-
-#[cfg(any(not(target_os = "macos"), test))]
-fn usable_memory(host_available: u64, container_available: Option<u64>) -> u64 {
-    container_available.map_or(host_available, |available| host_available.min(available))
 }
 
 /// The single thread-plan authority for local FEA execution.
@@ -233,13 +181,6 @@ pub(crate) fn case_concurrency(
 #[cfg(test)]
 mod tests {
     use super::*;
-    #[test]
-    fn container_memory_cannot_advertise_host_capacity() {
-        assert_eq!(usable_memory(16_000, Some(2_000)), 2_000);
-        assert_eq!(usable_memory(2_000, Some(16_000)), 2_000);
-        assert_eq!(usable_memory(16_000, None), 16_000);
-        assert_eq!(usable_memory(16_000, Some(0)), 0);
-    }
     #[test]
     fn a_worker_gets_the_pool_less_what_the_coordinator_holds() {
         const GB: u64 = 1_000_000_000;

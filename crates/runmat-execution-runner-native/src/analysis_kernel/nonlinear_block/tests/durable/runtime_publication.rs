@@ -104,7 +104,6 @@ fn publisher() {
         study_artifact_root: Some(directory.join("studies")),
         ..Default::default()
     };
-    crate::machine_capacity::admit_local_publication_memory().unwrap();
     analysis::configure_fea_runtime(FeaRuntimeConfig {
         publication_staging_cap_bytes: Some(1),
         ..config.clone()

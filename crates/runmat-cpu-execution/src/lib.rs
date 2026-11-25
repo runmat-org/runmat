@@ -1,4 +1,5 @@
-//! Shared CPU mechanics. Domains own partitioning, resource admission and result semantics.
+//! Shared CPU mechanics and the machine memory measurement ([`machine_memory`]). Domains own
+//! partitioning, resource admission and result semantics.
 //! No implicit global Rayon pool: callers must install an explicit admitted budget.
 /// Actual package build configuration used for internal artifact reuse.
 #[doc(hidden)]
@@ -8,6 +9,8 @@ pub use cooperative_sort::sort_copy_with_checkpoint;
 mod in_place_sort;
 pub use in_place_sort::sort_in_place_with_checkpoint;
 
+#[cfg(not(target_arch = "wasm32"))]
+pub mod machine_memory;
 #[cfg(not(target_arch = "wasm32"))]
 mod native;
 #[cfg(not(target_arch = "wasm32"))]

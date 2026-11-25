@@ -36,7 +36,7 @@ fn budget_is_the_admitted_run_memory_less_what_the_process_holds() {
         admitted: 16 * GIB,
         resident: AtomicU64::new(3 * GIB),
     });
-    install_publication_memory_authority(host.clone()).unwrap();
+    let previous = install_publication_memory_authority(host.clone()).unwrap();
     with_cap(None, || {
         assert_eq!(super::super::publication_staging_budget(), Ok(13 * GIB));
         // The budget is read when a publication starts, so it follows what the run holds then.
@@ -58,17 +58,33 @@ fn budget_is_the_admitted_run_memory_less_what_the_process_holds() {
     let exhausted = with_cap(None, super::super::publication_staging_budget).unwrap_err();
     assert!(exhausted.contains("No memory is left to save this study's results"));
     assert!(exhausted.contains("Close other applications"));
+    match previous {
+        Some(previous) => install_publication_memory_authority(previous).map(|_| ()),
+        None => clear_publication_memory_authority().map(|_| ()),
+    }
+    .unwrap();
 }
 
 #[test]
-fn a_host_without_an_authority_publishes_within_its_cap_or_not_at_all() {
+fn a_host_without_an_authority_publishes_within_this_machines_memory() {
     let _guard = crate::analysis::tests::analysis_test_guard();
-    clear_publication_memory_authority().unwrap();
-    with_cap(Some(5_000_000), || {
-        assert_eq!(super::super::publication_staging_budget(), Ok(5_000_000));
+    let previous = clear_publication_memory_authority().unwrap();
+    let machine = with_cap(None, super::super::publication_staging_budget).unwrap();
+    assert!(machine > 0);
+    assert!(
+        machine <= runmat_cpu_execution::machine_memory::available_memory_bytes().unwrap(),
+        "{machine}"
+    );
+    // A host cap still lowers the machine's budget and never raises it.
+    with_cap(Some(5_000), || {
+        assert_eq!(super::super::publication_staging_budget(), Ok(5_000));
     });
-    let refused = with_cap(None, super::super::publication_staging_budget).unwrap_err();
-    assert!(refused.contains("has not admitted any memory for saving study results"));
+    with_cap(Some(u64::MAX), || {
+        assert!(super::super::publication_staging_budget().unwrap() < u64::MAX);
+    });
+    if let Some(previous) = previous {
+        install_publication_memory_authority(previous).unwrap();
+    }
 }
 
 #[test]
