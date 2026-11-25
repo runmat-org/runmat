@@ -324,11 +324,8 @@ async fn execute_family_locally(
     let _assembling = assemble_step.enter();
     // One read per run: the pool less what this coordinator holds once the family compile has
     // finished. Planning makes the read; the worker envelope reuses its value.
-    let pool = match analysis_config.local_memory_capacity_bytes {
-        Some(capacity) => capacity,
-        None => crate::machine_capacity::memory_bytes()
-            .map_err(|error| NativeExecutionError::Configuration(error.to_string()))?,
-    };
+    let pool = crate::machine_capacity::run_pool(analysis_config.local_memory_capacity_bytes)
+        .map_err(|error| NativeExecutionError::Configuration(error.to_string()))?;
     let worker_memory = || -> Result<u64, String> {
         let worker_memory_bytes = crate::machine_capacity::worker_memory_bytes(pool)
             .map_err(|error| error.to_string())?;

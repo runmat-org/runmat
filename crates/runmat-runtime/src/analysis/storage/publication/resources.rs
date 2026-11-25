@@ -43,6 +43,32 @@ fn add(a: u64, b: u64) -> Result<u64, AnalysisPublicationError> {
         })
 }
 
+/// The plain-language refusal for staging that would exceed its budget: the bytes staging
+/// `retained`, the builder's preparation holds, the source workspace holds and the step adds.
+pub(super) fn over_budget(
+    builder: &AnalysisPublicationBuilder,
+    retained: u64,
+    source_workspace: u64,
+    additional: u64,
+) -> AnalysisPublicationError {
+    let (preparation, maximum) = (builder.preparation_resident_bytes, builder.maximum_bytes);
+    let terms = [retained, preparation, source_workspace, additional];
+    let required = terms
+        .iter()
+        .fold(0u64, |sum, bytes| sum.saturating_add(*bytes));
+    AnalysisPublicationError::ResourceLimit {
+        message: crate::analysis::over_budget_message(
+            required,
+            maximum,
+            &format!(
+                "retained={retained}, preparation={preparation}, \
+                 source_workspace={source_workspace}, additional={additional}, \
+                 required={required}, maximum={maximum} bytes"
+            ),
+        ),
+    }
+}
+
 pub(super) fn retained(
     runs: &HashMap<String, PersistedAnalysisArtifact>,
     chunks: &HashMap<Digest, Arc<[u8]>>,

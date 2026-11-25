@@ -4,14 +4,14 @@ import { readFileSync } from "node:fs";
 import { BASELINE, CI_RUN, validateDelta, validateRun, requiredJobs } from "./release-ci-checkpoint.mjs";
 
 const ci = readFileSync(new URL("../../.github/workflows/ci.yml", import.meta.url), "utf8");
-const names = requiredJobs(ci);
+const names = requiredJobs(ci, 21);
 const run = () => ({ id: CI_RUN, head_sha: BASELINE, head_repository: { full_name: "runmat-org/runmat" },
   head_branch: "main", event: "push", path: ".github/workflows/ci.yml", status: "completed", conclusion: "success" });
 const jobs = () => names.map(name => ({ name, status: "completed", conclusion: "success" }));
 const changed = path => ({ path, beforeMode: "100644", afterMode: "100644" });
 
 test("requires the complete successful cross-platform checkpoint", () => {
-  assert.equal(names.length, 26);
+  assert.equal(names.length, 30);
   validateRun(run(), jobs(), names);
   for (const change of [{ status: "in_progress" }, { conclusion: "failure" }, { head_sha: "a".repeat(40) },
     { head_branch: "dev" }, { event: "pull_request" }, { head_repository: { full_name: "other/runmat" } },

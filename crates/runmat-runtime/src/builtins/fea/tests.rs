@@ -1771,8 +1771,13 @@ fn fea_results_field_exposes_values_metadata_and_plot_context() {
         .properties()
         .contains_key(FEA_STUDY_CONTEXT_PROPERTY));
 
-    // Inline values remain usable even when the configured store cannot
-    // provide synchronous access outside a captured transaction.
+    // Inline values remain usable when the configured result store holds no
+    // record of the run. The store is reconfigured to an empty result root on
+    // a fresh provider that allows access only through a captured transaction;
+    // reads outside a scope take a read-only snapshot of that empty tree.
+    assert!(crate::analysis::storage::load_run_result(&run_id)
+        .unwrap()
+        .is_some());
     let original_store = crate::analysis::storage::replace_artifact_store(std::sync::Arc::new(
         crate::analysis::storage::InMemoryAnalysisArtifactStore::new(),
     ))
@@ -1786,7 +1791,17 @@ fn fea_results_field_exposes_values_metadata_and_plot_context() {
         },
     )
     .unwrap();
-    assert!(crate::analysis::storage::resolve_run_attempt(&run_id).is_err());
+    // The reconfigured store must not serve the run held by the previous store.
+    assert_eq!(
+        crate::analysis::storage::resolve_run_attempt(&run_id).unwrap(),
+        run_id
+    );
+    assert!(crate::analysis::storage::run_attempts(&run_id)
+        .unwrap()
+        .is_empty());
+    assert!(crate::analysis::storage::load_run_result(&run_id)
+        .unwrap()
+        .is_none());
     assert_eq!(
         block_on(fea_results_builtin(
             crate::builtins::common::test_support::builtin_arguments(vec![results.clone()]),

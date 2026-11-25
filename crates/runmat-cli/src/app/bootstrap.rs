@@ -437,11 +437,14 @@ fn configure_analysis_from_config(config: &RunMatRuntimeConfig) -> Result<()> {
             .study_artifact_root
             .clone()
             .or_else(|| Some(artifact_root.join("studies"))),
-        // The run's admitted memory (the shared machine-capacity authority).
-        publication_staging_bytes: runmat_execution_runner_native::publication_staging_bytes()
-            .map_err(|err| anyhow::anyhow!("Failed to size FEA publication memory: {err}"))?,
+        // No cap: each publication stages within its run's admitted memory.
+        publication_staging_cap_bytes: None,
     })
     .map_err(|err| anyhow::anyhow!("Failed to configure FEA runtime: {err}"))?;
+    // Result reads before the first run use this host's admitted memory; each run replaces it
+    // with its own pool.
+    runmat_execution_runner_native::admit_local_publication_memory()
+        .map_err(|err| anyhow::anyhow!("Failed to size FEA publication memory: {err}"))?;
     Ok(())
 }
 

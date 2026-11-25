@@ -53,9 +53,11 @@ export function validateDelta(changes, before, after) {
   }
 }
 
-export function requiredJobs(ci) {
+// The baseline CI run's matrix had 17 groups; verifyCheckpoint() reads the
+// baseline's ci.yml. Tests pass the current workflow's group count.
+export function requiredJobs(ci, expectedGroups = 17) {
   const groups = [...ci.matchAll(/^            name: ([a-z][a-z0-9-]+)\s*$/gm)].map(match => match[1]);
-  assert.equal(groups.length, 17, "Unexpected baseline test matrix");
+  assert.equal(groups.length, expectedGroups, "Unexpected baseline test matrix");
   return [...groups, "changes", "distribution-contracts", "Verify committed scientific qualification", "docs-lint",
     "Cross build macos-aarch64", "Cross build macos-x86_64", "Cross build linux-x86_64", "Cross build windows-x86_64",
     "runtime-artifacts-ready"];

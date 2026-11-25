@@ -6,8 +6,8 @@
   "encoding": "git-mode-type-blob-path-tuples-v1"
  },
  "accepted_inputs": {
-  "sha256": "267d5a80a22617753b40f45fc39af7e526d7793203789b778f8bc2c5b984d06f",
-  "files": 26453,
+  "sha256": "56097a4a40341b11d41accd703803cf74837303ac10fffcc680d7a07f46155fa",
+  "files": 26459,
   "encoding": "git-mode-type-blob-path-tuples-v1"
  },
  "cohorts": [
@@ -16,10 +16,24 @@
  "qualification_evidence": [
   {
    "path": "qualification/scientific/evidence/g132-authoring-catalog-move-20261120.json",
-   "sha256": "609533e32197af4a8223a28c900b2d205a53b540b7fe17db3bd219fb05108bf5"
+   "sha256": "bf2d2ddd7b46aeb2b7f5d877e182bf055f48d6ea11669255f3624f85b8bd62fd"
   }
  ],
  "changed_inputs": [
+  {
+   "path": "crates/runmat-cli/src/app/bootstrap.rs",
+   "before": [
+    "100644",
+    "blob",
+    "1ba97ce5be2774caf4d4a931d6a2328d2903db80"
+   ],
+   "after": [
+    "100644",
+    "blob",
+    "b360ed6a42d1c7368a4f6c745711501e121f9de1"
+   ],
+   "reason": "Desktop 0.7.2 commits 80b539ab9a (FEA builtin test asserts a reconfigured store does not serve the old run) and a62c161606 (publication staging budget from the run's admitted memory instead of a fixed 128 MiB default; plain-sentence refusals; large-publication e2e) (2026-11-25)."
+  },
   {
    "path": "crates/runmat-cli/src/commands/fea/run.rs",
    "before": [
@@ -101,6 +115,62 @@
    "reason": "Desktop 0.7.2 runtime commits 6a9f95a5cc, 8aa1a3c7ba, e6955ffe19, 02ff287726, b4078030e5 (main 839f646161, 2026-11-24): one artifact transaction across an async publication with evidence through the result store's provider; meshes persisted through the result store, with stale stored objects replaced after their canonical digest is recomputed; native typed FEA publication inside one result transaction with errors carried as values; one physical path spelling for a root-level FEA source; a 2 s wait for the user settings lock."
   },
   {
+   "path": "crates/runmat-execution-runner-native/src/analysis_kernel/frequency_tests/cold_history/publication.rs",
+   "before": [
+    "100644",
+    "blob",
+    "5136274724f97f63d54a45dbbeffb7a6ccdb19f7"
+   ],
+   "after": [
+    "100644",
+    "blob",
+    "ab09c2666a9f8fd77e447bf2826ca94577244b99"
+   ],
+   "reason": "Desktop 0.7.2 commits 80b539ab9a (FEA builtin test asserts a reconfigured store does not serve the old run) and a62c161606 (publication staging budget from the run's admitted memory instead of a fixed 128 MiB default; plain-sentence refusals; large-publication e2e) (2026-11-25)."
+  },
+  {
+   "path": "crates/runmat-execution-runner-native/src/analysis_kernel/nonlinear_block/tests/durable/runtime_publication.rs",
+   "before": [
+    "100644",
+    "blob",
+    "13b51bbccc295f0c95de8d3dfea7fcf9a79a0f4a"
+   ],
+   "after": [
+    "100644",
+    "blob",
+    "d0995e088d8fe9a3f30f62d00d0f9b7012ea7a82"
+   ],
+   "reason": "Desktop 0.7.2 commits 80b539ab9a (FEA builtin test asserts a reconfigured store does not serve the old run) and a62c161606 (publication staging budget from the run's admitted memory instead of a fixed 128 MiB default; plain-sentence refusals; large-publication e2e) (2026-11-25)."
+  },
+  {
+   "path": "crates/runmat-execution-runner-native/src/analysis_placement.rs",
+   "before": [
+    "100644",
+    "blob",
+    "d6e1fa3e08cbe45259f349e1da4157787d083ebb"
+   ],
+   "after": [
+    "100644",
+    "blob",
+    "548d651e9af9c9289618fb7624ccaa246a0bc190"
+   ],
+   "reason": "Desktop 0.7.2 commits 80b539ab9a (FEA builtin test asserts a reconfigured store does not serve the old run) and a62c161606 (publication staging budget from the run's admitted memory instead of a fixed 128 MiB default; plain-sentence refusals; large-publication e2e) (2026-11-25)."
+  },
+  {
+   "path": "crates/runmat-execution-runner-native/src/config.rs",
+   "before": [
+    "100644",
+    "blob",
+    "a353ee96746f84539cff29572de25d9510fc177b"
+   ],
+   "after": [
+    "100644",
+    "blob",
+    "bf2a9c21e62ab0c76434d25ff1c70b732d3c0f01"
+   ],
+   "reason": "Desktop 0.7.2 commits 80b539ab9a (FEA builtin test asserts a reconfigured store does not serve the old run) and a62c161606 (publication staging budget from the run's admitted memory instead of a fixed 128 MiB default; plain-sentence refusals; large-publication e2e) (2026-11-25)."
+  },
+  {
    "path": "crates/runmat-execution-runner-native/src/lib.rs",
    "before": [
     "100644",
@@ -110,9 +180,37 @@
    "after": [
     "100644",
     "blob",
-    "20f23571b7aa5712015afedcfe37ab8291d39b45"
+    "db5f9eb1d32e7b93be5bcb1d2343932cf3161f21"
    ],
-   "reason": "Desktop 0.7.2 runtime commits 6a9f95a5cc, 8aa1a3c7ba, e6955ffe19, 02ff287726, b4078030e5 (main 839f646161, 2026-11-24): one artifact transaction across an async publication with evidence through the result store's provider; meshes persisted through the result store, with stale stored objects replaced after their canonical digest is recomputed; native typed FEA publication inside one result transaction with errors carried as values; one physical path spelling for a root-level FEA source; a 2 s wait for the user settings lock."
+   "reason": "Desktop 0.7.2 runtime commits 6a9f95a5cc, 8aa1a3c7ba, e6955ffe19, 02ff287726, b4078030e5 (main 839f646161, 2026-11-24): one artifact transaction across an async publication with evidence through the result store's provider; meshes persisted through the result store, with stale stored objects replaced after their canonical digest is recomputed; native typed FEA publication inside one result transaction with errors carried as values; one physical path spelling for a root-level FEA source; a 2 s wait for the user settings lock. Then changed by Desktop 0.7.2 commits 80b539ab9a (FEA builtin test asserts a reconfigured store does not serve the old run) and a62c161606 (publication staging budget from the run's admitted memory instead of a fixed 128 MiB default; plain-sentence refusals; large-publication e2e) (2026-11-25)."
+  },
+  {
+   "path": "crates/runmat-execution-runner-native/src/local_structural_study.rs",
+   "before": [
+    "100644",
+    "blob",
+    "f42415e391b95f9067d974fe3a74639ee0a503b2"
+   ],
+   "after": [
+    "100644",
+    "blob",
+    "183e600efdfdd9ff9fcf684e61ee12a7343b26d2"
+   ],
+   "reason": "Desktop 0.7.2 commits 80b539ab9a (FEA builtin test asserts a reconfigured store does not serve the old run) and a62c161606 (publication staging budget from the run's admitted memory instead of a fixed 128 MiB default; plain-sentence refusals; large-publication e2e) (2026-11-25)."
+  },
+  {
+   "path": "crates/runmat-execution-runner-native/src/machine_capacity.rs",
+   "before": [
+    "100644",
+    "blob",
+    "627fb4abb872beffbef60e02ac7aaae417226a8b"
+   ],
+   "after": [
+    "100644",
+    "blob",
+    "c6fe78fa3f8fff4fee6d5c4e922ba06944a7a9ef"
+   ],
+   "reason": "Desktop 0.7.2 commits 80b539ab9a (FEA builtin test asserts a reconfigured store does not serve the old run) and a62c161606 (publication staging budget from the run's admitted memory instead of a fixed 128 MiB default; plain-sentence refusals; large-publication e2e) (2026-11-25)."
   },
   {
    "path": "crates/runmat-execution-runner-native/src/typed_fea/assessment.rs",
@@ -232,9 +330,19 @@
    "after": [
     "100644",
     "blob",
-    "5eb1630207734206af3e4288fa6ae8c213db805c"
+    "063b17bcafb2ddd2a8b821a2f59fdac71b4744bd"
    ],
-   "reason": "Desktop 0.7.2 runtime commits 6a9f95a5cc, 8aa1a3c7ba, e6955ffe19, 02ff287726, b4078030e5 (main 839f646161, 2026-11-24): one artifact transaction across an async publication with evidence through the result store's provider; meshes persisted through the result store, with stale stored objects replaced after their canonical digest is recomputed; native typed FEA publication inside one result transaction with errors carried as values; one physical path spelling for a root-level FEA source; a 2 s wait for the user settings lock."
+   "reason": "Desktop 0.7.2 runtime commits 6a9f95a5cc, 8aa1a3c7ba, e6955ffe19, 02ff287726, b4078030e5 (main 839f646161, 2026-11-24): one artifact transaction across an async publication with evidence through the result store's provider; meshes persisted through the result store, with stale stored objects replaced after their canonical digest is recomputed; native typed FEA publication inside one result transaction with errors carried as values; one physical path spelling for a root-level FEA source; a 2 s wait for the user settings lock. Then changed by Desktop 0.7.2 commits 80b539ab9a (FEA builtin test asserts a reconfigured store does not serve the old run) and a62c161606 (publication staging budget from the run's admitted memory instead of a fixed 128 MiB default; plain-sentence refusals; large-publication e2e) (2026-11-25)."
+  },
+  {
+   "path": "crates/runmat-execution-runner-native/tests/analysis_process_conformance/large_publication.rs",
+   "before": null,
+   "after": [
+    "100644",
+    "blob",
+    "5f2f49c2efbe4e6a6780d4c2968c640bb53841eb"
+   ],
+   "reason": "Desktop 0.7.2 commits 80b539ab9a (FEA builtin test asserts a reconfigured store does not serve the old run) and a62c161606 (publication staging budget from the run's admitted memory instead of a fixed 128 MiB default; plain-sentence refusals; large-publication e2e) (2026-11-25)."
   },
   {
    "path": "crates/runmat-execution-runner-native/tests/analysis_process_conformance/result_transaction.rs",
@@ -242,9 +350,9 @@
    "after": [
     "100644",
     "blob",
-    "2f7c5649efc0e11e5925f06461cdff4a5735f2b2"
+    "d34f6bb44f90366696a1bc10a21769f6e07d4c8c"
    ],
-   "reason": "Desktop 0.7.2 runtime commits 6a9f95a5cc, 8aa1a3c7ba, e6955ffe19, 02ff287726, b4078030e5 (main 839f646161, 2026-11-24): one artifact transaction across an async publication with evidence through the result store's provider; meshes persisted through the result store, with stale stored objects replaced after their canonical digest is recomputed; native typed FEA publication inside one result transaction with errors carried as values; one physical path spelling for a root-level FEA source; a 2 s wait for the user settings lock. Then changed by Desktop 0.7.2 results-read commits 890cf145c4, 30d0015a13, 659f785725, c649497cc6, db1ac0c968 (2026-11-24): the drone seating timing test budgets later seatings against the first seating (test only); a read-only workspace view captured from a blocking caller; FEA result reads on transaction-only stores from one read-only snapshot of the committed tree; sweep plan and validation evidence written inside the result transaction; the result-transaction e2e reopens every flow."
+   "reason": "Desktop 0.7.2 runtime commits 6a9f95a5cc, 8aa1a3c7ba, e6955ffe19, 02ff287726, b4078030e5 (main 839f646161, 2026-11-24): one artifact transaction across an async publication with evidence through the result store's provider; meshes persisted through the result store, with stale stored objects replaced after their canonical digest is recomputed; native typed FEA publication inside one result transaction with errors carried as values; one physical path spelling for a root-level FEA source; a 2 s wait for the user settings lock. Then changed by Desktop 0.7.2 results-read commits 890cf145c4, 30d0015a13, 659f785725, c649497cc6, db1ac0c968 (2026-11-24): the drone seating timing test budgets later seatings against the first seating (test only); a read-only workspace view captured from a blocking caller; FEA result reads on transaction-only stores from one read-only snapshot of the committed tree; sweep plan and validation evidence written inside the result transaction; the result-transaction e2e reopens every flow. Then changed by Desktop 0.7.2 commits 80b539ab9a (FEA builtin test asserts a reconfigured store does not serve the old run) and a62c161606 (publication staging budget from the run's admitted memory instead of a fixed 128 MiB default; plain-sentence refusals; large-publication e2e) (2026-11-25)."
   },
   {
    "path": "crates/runmat-filesystem/src/lib.rs",
@@ -339,6 +447,40 @@
     "3cd65db69ed215531160b91be4170b701e54e8f2"
    ],
    "reason": "Windows console-window repair (Design WINFLASH072, 2026-11-20): a host without a console window starts children with CREATE_NO_WINDOW, also for taskkill and tasklist; process creation flags only, Windows only; no solver, input or threshold change."
+  },
+  {
+   "path": "crates/runmat-runtime/src/analysis/configuration.rs",
+   "before": [
+    "100644",
+    "blob",
+    "7da8ea49a61d549383703b205bcec6635177bb4b"
+   ],
+   "after": [
+    "100644",
+    "blob",
+    "0857fc783d71f148b42ea4bd3f4755bea9cff6d3"
+   ],
+   "reason": "Desktop 0.7.2 commits 80b539ab9a (FEA builtin test asserts a reconfigured store does not serve the old run) and a62c161606 (publication staging budget from the run's admitted memory instead of a fixed 128 MiB default; plain-sentence refusals; large-publication e2e) (2026-11-25)."
+  },
+  {
+   "path": "crates/runmat-runtime/src/analysis/configuration/publication_memory.rs",
+   "before": null,
+   "after": [
+    "100644",
+    "blob",
+    "1d96b2a6a0957032ea9cede18dfa8b00ec8ed842"
+   ],
+   "reason": "Desktop 0.7.2 commits 80b539ab9a (FEA builtin test asserts a reconfigured store does not serve the old run) and a62c161606 (publication staging budget from the run's admitted memory instead of a fixed 128 MiB default; plain-sentence refusals; large-publication e2e) (2026-11-25)."
+  },
+  {
+   "path": "crates/runmat-runtime/src/analysis/configuration/publication_memory/tests.rs",
+   "before": null,
+   "after": [
+    "100644",
+    "blob",
+    "225336416dfeda887f0f5e34ec164e3efe65128d"
+   ],
+   "reason": "Desktop 0.7.2 commits 80b539ab9a (FEA builtin test asserts a reconfigured store does not serve the old run) and a62c161606 (publication staging budget from the run's admitted memory instead of a fixed 128 MiB default; plain-sentence refusals; large-publication e2e) (2026-11-25)."
   },
   {
    "path": "crates/runmat-runtime/src/analysis/contracts.rs",
@@ -458,9 +600,9 @@
    "after": [
     "100644",
     "blob",
-    "c5aa45181c541613d992f5f3071288ac82d6d748"
+    "68bb194836a30514693e2b7d52eac619dad5501e"
    ],
-   "reason": "Desktop 0.7.2 results-read commits 890cf145c4, 30d0015a13, 659f785725, c649497cc6, db1ac0c968 (2026-11-24): the drone seating timing test budgets later seatings against the first seating (test only); a read-only workspace view captured from a blocking caller; FEA result reads on transaction-only stores from one read-only snapshot of the committed tree; sweep plan and validation evidence written inside the result transaction; the result-transaction e2e reopens every flow."
+   "reason": "Desktop 0.7.2 results-read commits 890cf145c4, 30d0015a13, 659f785725, c649497cc6, db1ac0c968 (2026-11-24): the drone seating timing test budgets later seatings against the first seating (test only); a read-only workspace view captured from a blocking caller; FEA result reads on transaction-only stores from one read-only snapshot of the committed tree; sweep plan and validation evidence written inside the result transaction; the result-transaction e2e reopens every flow. Then changed by Desktop 0.7.2 commits 80b539ab9a (FEA builtin test asserts a reconfigured store does not serve the old run) and a62c161606 (publication staging budget from the run's admitted memory instead of a fixed 128 MiB default; plain-sentence refusals; large-publication e2e) (2026-11-25)."
   },
   {
    "path": "crates/runmat-runtime/src/analysis/operations/query.rs",
@@ -472,9 +614,43 @@
    "after": [
     "100644",
     "blob",
-    "d7e4cf77e154494994a1c6474bab173f14035ccc"
+    "1295fbfcbf0e822103d492984a6159ee1c3e335b"
    ],
-   "reason": "Desktop 0.7.2 results-read commits 890cf145c4, 30d0015a13, 659f785725, c649497cc6, db1ac0c968 (2026-11-24): the drone seating timing test budgets later seatings against the first seating (test only); a read-only workspace view captured from a blocking caller; FEA result reads on transaction-only stores from one read-only snapshot of the committed tree; sweep plan and validation evidence written inside the result transaction; the result-transaction e2e reopens every flow."
+   "reason": "Desktop 0.7.2 results-read commits 890cf145c4, 30d0015a13, 659f785725, c649497cc6, db1ac0c968 (2026-11-24): the drone seating timing test budgets later seatings against the first seating (test only); a read-only workspace view captured from a blocking caller; FEA result reads on transaction-only stores from one read-only snapshot of the committed tree; sweep plan and validation evidence written inside the result transaction; the result-transaction e2e reopens every flow. Then changed by Desktop 0.7.2 architecture-debt code move 086da98cda (2026-11-24): result-snapshot wrappers and the inline results budget moved from operations/query.rs, and the process-wide store configuration moved from storage.rs, into new modules with re-exports; module-size ceilings lowered."
+  },
+  {
+   "path": "crates/runmat-runtime/src/analysis/operations/query/inline_budget.rs",
+   "before": null,
+   "after": [
+    "100644",
+    "blob",
+    "142771c5a933907e2fbd2728629c0a9c277120db"
+   ],
+   "reason": "Desktop 0.7.2 architecture-debt code move 086da98cda (2026-11-24): result-snapshot wrappers and the inline results budget moved from operations/query.rs, and the process-wide store configuration moved from storage.rs, into new modules with re-exports; module-size ceilings lowered."
+  },
+  {
+   "path": "crates/runmat-runtime/src/analysis/operations/query/result_snapshot.rs",
+   "before": null,
+   "after": [
+    "100644",
+    "blob",
+    "2c1cc50546625f51f37804451eea55afd3c1ec2e"
+   ],
+   "reason": "Desktop 0.7.2 architecture-debt code move 086da98cda (2026-11-24): result-snapshot wrappers and the inline results budget moved from operations/query.rs, and the process-wide store configuration moved from storage.rs, into new modules with re-exports; module-size ceilings lowered."
+  },
+  {
+   "path": "crates/runmat-runtime/src/analysis/prepared_study_publication/failure/tests.rs",
+   "before": [
+    "100644",
+    "blob",
+    "e273c863d25a6d6e86bbe3217c42c1cda43b08d4"
+   ],
+   "after": [
+    "100644",
+    "blob",
+    "b4d01969cc49c201e5e0ee7e6b2620a745e2755d"
+   ],
+   "reason": "Desktop 0.7.2 commits 80b539ab9a (FEA builtin test asserts a reconfigured store does not serve the old run) and a62c161606 (publication staging budget from the run's admitted memory instead of a fixed 128 MiB default; plain-sentence refusals; large-publication e2e) (2026-11-25)."
   },
   {
    "path": "crates/runmat-runtime/src/analysis/solver_mesh_artifact.rs",
@@ -500,9 +676,9 @@
    "after": [
     "100644",
     "blob",
-    "8cccb60a1b6c90404f4f0c809d7366cb398cebc5"
+    "27e04c774646456a4c1a22bc2889e89abb685a3e"
    ],
-   "reason": "Desktop 0.7.2 runtime commits 6a9f95a5cc, 8aa1a3c7ba, e6955ffe19, 02ff287726, b4078030e5 (main 839f646161, 2026-11-24): one artifact transaction across an async publication with evidence through the result store's provider; meshes persisted through the result store, with stale stored objects replaced after their canonical digest is recomputed; native typed FEA publication inside one result transaction with errors carried as values; one physical path spelling for a root-level FEA source; a 2 s wait for the user settings lock. Then changed by Desktop 0.7.2 results-read commits 890cf145c4, 30d0015a13, 659f785725, c649497cc6, db1ac0c968 (2026-11-24): the drone seating timing test budgets later seatings against the first seating (test only); a read-only workspace view captured from a blocking caller; FEA result reads on transaction-only stores from one read-only snapshot of the committed tree; sweep plan and validation evidence written inside the result transaction; the result-transaction e2e reopens every flow."
+   "reason": "Desktop 0.7.2 runtime commits 6a9f95a5cc, 8aa1a3c7ba, e6955ffe19, 02ff287726, b4078030e5 (main 839f646161, 2026-11-24): one artifact transaction across an async publication with evidence through the result store's provider; meshes persisted through the result store, with stale stored objects replaced after their canonical digest is recomputed; native typed FEA publication inside one result transaction with errors carried as values; one physical path spelling for a root-level FEA source; a 2 s wait for the user settings lock. Then changed by Desktop 0.7.2 results-read commits 890cf145c4, 30d0015a13, 659f785725, c649497cc6, db1ac0c968 (2026-11-24): the drone seating timing test budgets later seatings against the first seating (test only); a read-only workspace view captured from a blocking caller; FEA result reads on transaction-only stores from one read-only snapshot of the committed tree; sweep plan and validation evidence written inside the result transaction; the result-transaction e2e reopens every flow. Then changed by Desktop 0.7.2 architecture-debt code move 086da98cda (2026-11-24): result-snapshot wrappers and the inline results budget moved from operations/query.rs, and the process-wide store configuration moved from storage.rs, into new modules with re-exports; module-size ceilings lowered."
   },
   {
    "path": "crates/runmat-runtime/src/analysis/storage/access.rs",
@@ -519,6 +695,20 @@
    "reason": "Desktop 0.7.2 results-read commits 890cf145c4, 30d0015a13, 659f785725, c649497cc6, db1ac0c968 (2026-11-24): the drone seating timing test budgets later seatings against the first seating (test only); a read-only workspace view captured from a blocking caller; FEA result reads on transaction-only stores from one read-only snapshot of the committed tree; sweep plan and validation evidence written inside the result transaction; the result-transaction e2e reopens every flow."
   },
   {
+   "path": "crates/runmat-runtime/src/analysis/storage/access/tests.rs",
+   "before": [
+    "100644",
+    "blob",
+    "8ca68a121f63b79d79abf7f98c5d7cf1885874ec"
+   ],
+   "after": [
+    "100644",
+    "blob",
+    "3b4b0fcde9330c94d620cbef111180ca101753d3"
+   ],
+   "reason": "Desktop 0.7.2 commits 80b539ab9a (FEA builtin test asserts a reconfigured store does not serve the old run) and a62c161606 (publication staging budget from the run's admitted memory instead of a fixed 128 MiB default; plain-sentence refusals; large-publication e2e) (2026-11-25)."
+  },
+  {
    "path": "crates/runmat-runtime/src/analysis/storage/async_access.rs",
    "before": [
     "100644",
@@ -531,6 +721,62 @@
     "13ac8239f47856e5e27d9489270d22b5a4607e75"
    ],
    "reason": "Desktop 0.7.2 runtime commits 6a9f95a5cc, 8aa1a3c7ba, e6955ffe19, 02ff287726, b4078030e5 (main 839f646161, 2026-11-24): one artifact transaction across an async publication with evidence through the result store's provider; meshes persisted through the result store, with stale stored objects replaced after their canonical digest is recomputed; native typed FEA publication inside one result transaction with errors carried as values; one physical path spelling for a root-level FEA source; a 2 s wait for the user settings lock. Then changed by Desktop 0.7.2 results-read commits 890cf145c4, 30d0015a13, 659f785725, c649497cc6, db1ac0c968 (2026-11-24): the drone seating timing test budgets later seatings against the first seating (test only); a read-only workspace view captured from a blocking caller; FEA result reads on transaction-only stores from one read-only snapshot of the committed tree; sweep plan and validation evidence written inside the result transaction; the result-transaction e2e reopens every flow."
+  },
+  {
+   "path": "crates/runmat-runtime/src/analysis/storage/observations/tests.rs",
+   "before": [
+    "100644",
+    "blob",
+    "8f3e46e705f9f9fb189fc7fe55ffbe52cd918ecc"
+   ],
+   "after": [
+    "100644",
+    "blob",
+    "41818cb18256a54b0a3757becf480cf053906a3f"
+   ],
+   "reason": "Desktop 0.7.2 commits 80b539ab9a (FEA builtin test asserts a reconfigured store does not serve the old run) and a62c161606 (publication staging budget from the run's admitted memory instead of a fixed 128 MiB default; plain-sentence refusals; large-publication e2e) (2026-11-25)."
+  },
+  {
+   "path": "crates/runmat-runtime/src/analysis/storage/publication.rs",
+   "before": [
+    "100644",
+    "blob",
+    "e18a64b44f367454db3800370b9304b43b7864e7"
+   ],
+   "after": [
+    "100644",
+    "blob",
+    "f0be3bd3af716a311806be6e414f787ab30f4112"
+   ],
+   "reason": "Desktop 0.7.2 commits 80b539ab9a (FEA builtin test asserts a reconfigured store does not serve the old run) and a62c161606 (publication staging budget from the run's admitted memory instead of a fixed 128 MiB default; plain-sentence refusals; large-publication e2e) (2026-11-25). Then changed by Desktop 0.7.2 release CI fix ea2974ec54 (2026-11-25): a local rename in storage/publication.rs for rustfmt, and the runtime test admission host installs a publication memory authority as real hosts do."
+  },
+  {
+   "path": "crates/runmat-runtime/src/analysis/storage/publication/outcome.rs",
+   "before": [
+    "100644",
+    "blob",
+    "07a0be844563c1029be936b395895e97ee39846e"
+   ],
+   "after": [
+    "100644",
+    "blob",
+    "90d67cc68b4843bf755e86e748f6aec342255400"
+   ],
+   "reason": "Desktop 0.7.2 commits 80b539ab9a (FEA builtin test asserts a reconfigured store does not serve the old run) and a62c161606 (publication staging budget from the run's admitted memory instead of a fixed 128 MiB default; plain-sentence refusals; large-publication e2e) (2026-11-25)."
+  },
+  {
+   "path": "crates/runmat-runtime/src/analysis/storage/publication/resources.rs",
+   "before": [
+    "100644",
+    "blob",
+    "bf323e7abca552583eb3c0fd425104afdb3549f6"
+   ],
+   "after": [
+    "100644",
+    "blob",
+    "29219fef052c99fdbce6ddf719aaadf0f0a82d9b"
+   ],
+   "reason": "Desktop 0.7.2 commits 80b539ab9a (FEA builtin test asserts a reconfigured store does not serve the old run) and a62c161606 (publication staging budget from the run's admitted memory instead of a fixed 128 MiB default; plain-sentence refusals; large-publication e2e) (2026-11-25)."
   },
   {
    "path": "crates/runmat-runtime/src/analysis/storage/source_access.rs",
@@ -547,6 +793,44 @@
    "reason": "Desktop 0.7.2 results-read commits 890cf145c4, 30d0015a13, 659f785725, c649497cc6, db1ac0c968 (2026-11-24): the drone seating timing test budgets later seatings against the first seating (test only); a read-only workspace view captured from a blocking caller; FEA result reads on transaction-only stores from one read-only snapshot of the committed tree; sweep plan and validation evidence written inside the result transaction; the result-transaction e2e reopens every flow."
   },
   {
+   "path": "crates/runmat-runtime/src/analysis/storage/store_config.rs",
+   "before": null,
+   "after": [
+    "100644",
+    "blob",
+    "56437397dfb13532c66a3b44f23fff98410ad802"
+   ],
+   "reason": "Desktop 0.7.2 architecture-debt code move 086da98cda (2026-11-24): result-snapshot wrappers and the inline results budget moved from operations/query.rs, and the process-wide store configuration moved from storage.rs, into new modules with re-exports; module-size ceilings lowered."
+  },
+  {
+   "path": "crates/runmat-runtime/src/analysis/storage/test_support.rs",
+   "before": [
+    "100644",
+    "blob",
+    "c84276bf2aafa416d6815a1ca23f0d4ba028e555"
+   ],
+   "after": [
+    "100644",
+    "blob",
+    "f5d7da4b5c132ec05287bc484c52a546dc512437"
+   ],
+   "reason": "Desktop 0.7.2 commits 80b539ab9a (FEA builtin test asserts a reconfigured store does not serve the old run) and a62c161606 (publication staging budget from the run's admitted memory instead of a fixed 128 MiB default; plain-sentence refusals; large-publication e2e) (2026-11-25)."
+  },
+  {
+   "path": "crates/runmat-runtime/src/analysis/structural_study/lifecycle/intent_completion.rs",
+   "before": [
+    "100644",
+    "blob",
+    "0f91cedb84181219b07151cd56d96b1efece2dc5"
+   ],
+   "after": [
+    "100644",
+    "blob",
+    "c45aab596f42a43337eff8859e882828d387618a"
+   ],
+   "reason": "Desktop 0.7.2 commits 80b539ab9a (FEA builtin test asserts a reconfigured store does not serve the old run) and a62c161606 (publication staging budget from the run's admitted memory instead of a fixed 128 MiB default; plain-sentence refusals; large-publication e2e) (2026-11-25)."
+  },
+  {
    "path": "crates/runmat-runtime/src/analysis/structural_study/publication/evidence/access.rs",
    "before": [
     "100644",
@@ -559,6 +843,20 @@
     "12e1659c44625bda2c6f3920cec22d7d77c98148"
    ],
    "reason": "Desktop 0.7.2 runtime commits 6a9f95a5cc, 8aa1a3c7ba, e6955ffe19, 02ff287726, b4078030e5 (main 839f646161, 2026-11-24): one artifact transaction across an async publication with evidence through the result store's provider; meshes persisted through the result store, with stale stored objects replaced after their canonical digest is recomputed; native typed FEA publication inside one result transaction with errors carried as values; one physical path spelling for a root-level FEA source; a 2 s wait for the user settings lock."
+  },
+  {
+   "path": "crates/runmat-runtime/src/analysis/study_publication/preparation.rs",
+   "before": [
+    "100644",
+    "blob",
+    "fead60c35a71ce2f5af0cd9e22e79688bec59fd0"
+   ],
+   "after": [
+    "100644",
+    "blob",
+    "464148220ca3f4234044b4014532981fe0de7e7a"
+   ],
+   "reason": "Desktop 0.7.2 commits 80b539ab9a (FEA builtin test asserts a reconfigured store does not serve the old run) and a62c161606 (publication staging budget from the run's admitted memory instead of a fixed 128 MiB default; plain-sentence refusals; large-publication e2e) (2026-11-25)."
   },
   {
    "path": "crates/runmat-runtime/src/analysis/tests.rs",
@@ -601,6 +899,20 @@
     "c2269cbe88aacf247f6c99cf2fa86a800d5490fe"
    ],
    "reason": "Desktop 0.7.2 results-read commits 890cf145c4, 30d0015a13, 659f785725, c649497cc6, db1ac0c968 (2026-11-24): the drone seating timing test budgets later seatings against the first seating (test only); a read-only workspace view captured from a blocking caller; FEA result reads on transaction-only stores from one read-only snapshot of the committed tree; sweep plan and validation evidence written inside the result transaction; the result-transaction e2e reopens every flow."
+  },
+  {
+   "path": "crates/runmat-runtime/src/builtins/fea/tests.rs",
+   "before": [
+    "100644",
+    "blob",
+    "37aab775c52b98bed20fb9e33f35f8d03f744704"
+   ],
+   "after": [
+    "100644",
+    "blob",
+    "f4835de33ef5c9cb8493094680b46b0365a84d1e"
+   ],
+   "reason": "Desktop 0.7.2 commits 80b539ab9a (FEA builtin test asserts a reconfigured store does not serve the old run) and a62c161606 (publication staging budget from the run's admitted memory instead of a fixed 128 MiB default; plain-sentence refusals; large-publication e2e) (2026-11-25)."
   },
   {
    "path": "crates/runmat-runtime/src/builtins/generated_wasm_registry.rs",
@@ -671,7 +983,63 @@
     "fe25d29700c24c040bb2f7f662d0082543f7a2c3"
    ],
    "reason": "Desktop 0.7.2 results-read commits 890cf145c4, 30d0015a13, 659f785725, c649497cc6, db1ac0c968 (2026-11-24): the drone seating timing test budgets later seatings against the first seating (test only); a read-only workspace view captured from a blocking caller; FEA result reads on transaction-only stores from one read-only snapshot of the committed tree; sweep plan and validation evidence written inside the result transaction; the result-transaction e2e reopens every flow."
+  },
+  {
+   "path": "crates/runmat-runtime/tests/support/fea_admission.rs",
+   "before": [
+    "100644",
+    "blob",
+    "669fc74354da058ce7ea785415725aa23a124102"
+   ],
+   "after": [
+    "100644",
+    "blob",
+    "8fe2cbf3e0eb282d736e98cf2d592ae8205c1fd2"
+   ],
+   "reason": "Desktop 0.7.2 release CI fix ea2974ec54 (2026-11-25): a local rename in storage/publication.rs for rustfmt, and the runtime test admission host installs a publication memory authority as real hosts do."
+  },
+  {
+   "path": "crates/runmat-wasm/src/api/fea_execution.rs",
+   "before": [
+    "100644",
+    "blob",
+    "c3e7b11e6ac77e7203a16ffff292babd29276a35"
+   ],
+   "after": [
+    "100644",
+    "blob",
+    "af8c8ad9f4cbeb82793a009e279a5433d0bf1199"
+   ],
+   "reason": "Desktop 0.7.2 commits 80b539ab9a (FEA builtin test asserts a reconfigured store does not serve the old run) and a62c161606 (publication staging budget from the run's admitted memory instead of a fixed 128 MiB default; plain-sentence refusals; large-publication e2e) (2026-11-25)."
+  },
+  {
+   "path": "crates/runmat-wasm/src/api/fea_execution/platform.rs",
+   "before": [
+    "100644",
+    "blob",
+    "1aa0a7a31f217841a62ed1b49e54343d21d677d6"
+   ],
+   "after": [
+    "100644",
+    "blob",
+    "53ccc90faf43341293064c669331bb145cc670d6"
+   ],
+   "reason": "Desktop 0.7.2 commits 80b539ab9a (FEA builtin test asserts a reconfigured store does not serve the old run) and a62c161606 (publication staging budget from the run's admitted memory instead of a fixed 128 MiB default; plain-sentence refusals; large-publication e2e) (2026-11-25)."
+  },
+  {
+   "path": "crates/runmat-wasm/src/api/init.rs",
+   "before": [
+    "100644",
+    "blob",
+    "a007bf60247a3e88e623aa113fd3c6415b4a63f1"
+   ],
+   "after": [
+    "100644",
+    "blob",
+    "8eac66abf552ebe3dea45140e910c578e90b5502"
+   ],
+   "reason": "Desktop 0.7.2 commits 80b539ab9a (FEA builtin test asserts a reconfigured store does not serve the old run) and a62c161606 (publication staging budget from the run's admitted memory instead of a fixed 128 MiB default; plain-sentence refusals; large-publication e2e) (2026-11-25)."
   }
  ],
- "reason": "Conserves the fresh 0.7.2 scientific measurements on dac88251ba across G132 24074bbb35: pure move of analysis_authoring_workflow, analysis_procedure_ids, analysis_output_operation_ids, analysis_language_reference_paths into contracts/authoring_catalog.rs, re-exported at the same path; no behaviour change; debt ceiling file lowered 2467\u21922442; FEA OK 2026-11-20. Every line removed from contracts.rs is in the new module; the only other lines are the mod line, the re-export, the module doc comment, its import and one test import. scripts/development/fea-module-size-debt.json is not a scientific input. Solver arithmetic, model inputs, dependencies, features and thresholds are unchanged. This review is not a rerun of the scientific or performance measurements. Also conserved across Pinned-run repair d10736298d (FEA, 2026-11-20): study evidence and canonical meshes publish through the provider's atomic replace; the canonical-mesh collision check reads through the provider; a pinned execution may move and remove only the files and folders it created. File publication only; no solver arithmetic, model inputs, materials, meshing algorithms, dependencies, features or thresholds changed, and the receipt workloads run without an input manifest, so they never use the pinned provider. Design reviewed the diff on 2026-11-20. Also conserved across WASM builtin registry fingerprint refresh 543c8f9f73 (Design, 2026-11-21): regenerated with scripts/regenerate-wasm-registry.mjs (target wasm32-unknown-unknown, features plot-web) at the 0.7.2 tag source; only the REGISTRY_SOURCE_FINGERPRINT literal changed (3084 registry entries, 2343 builtins, rows unchanged). The file is compiled only for target_arch = wasm32; native receipt workloads never include it; no solver arithmetic, model inputs, materials, meshing algorithms, dependencies, features or thresholds changed. Design reviewed the diff on 2026-11-21. Also conserved across Desktop 0.7.2 runtime commits 6a9f95a5cc, 8aa1a3c7ba, e6955ffe19, 02ff287726, b4078030e5 (main 839f646161, 2026-11-24): one artifact transaction across an async publication with evidence through the result store's provider; meshes persisted through the result store, with stale stored objects replaced after their canonical digest is recomputed; native typed FEA publication inside one result transaction with errors carried as values; one physical path spelling for a root-level FEA source; a 2 s wait for the user settings lock. Publication, persistence and source-path plumbing only. FEA review (verbatim): \"# FEA review: conserving the 0.7.2 scientific receipts across 60965cf6da..839f646161\n\n**Reviewer:** FEA. **Date:** 2026-11-24. **Verdict: confirmed. The receipts can be conserved.**\n\nI read the diff between 60965cf6da and 839f646161 on the policy input roots, in the worktree `runmat-desktop072-rt`. The five runtime commits are 6a9f95a5cc, 8aa1a3c7ba, e6955ffe19, 02ff287726 and b4078030e5. The two CI commits, f8cfa5ab00 and 839f646161, touch no input roots.\n\nThese commits change no solver arithmetic, model inputs, materials, meshing algorithms or thresholds. None of the changed files is in a solver, mesher, materials, physics or assessment-threshold module. The commits change where and how finished results are written. They do not change what is computed.\n\n## What each change does\n\n- **Publication in one transaction:** e6955ffe19 adds `publish_completed_study` (in `typed_fea/execution.rs` and `line_parameters.rs`), and 6a9f95a5cc adds `with_artifact_access_async`.\n  - Mesh files, study evidence, result objects and the manifest now commit in one transaction, or not at all.\n  - The steps are the same steps in the same order: `prepare_study_publication`, `admit_accelerator_placement`, then completion with the assessment receipts.\n  - Assessment functions still run outside the transaction, with the same inputs.\n  - The reassessment path wraps its prepare and complete steps the same way. Their arguments are unchanged.\n- **Assessment wrappers:** `assessment.rs` adds `complete_in`, `complete_frozen_in` and `finish`. They only choose which scope the final `publication.complete(receipts)` write runs in. Function evaluation and receipt contents are unchanged.\n- **Errors as values:** e6955ffe19 replaces `String` errors with `FeaExecutionError`. The operation envelope is now carried as a value; before, it was JSON text. This affects failure reporting only. A successful run's outputs are unchanged.\n- **Mesh persistence:** 8aa1a3c7ba changes how an already-stored mesh object is handled.\n  - Equal bytes are kept, as before.\n  - A stored object whose recomputed canonical digest differs, or that does not decode, is now replaced. Before, it was an error.\n  - The same digest with different bytes is still an error.\n  - Mesh generation, the mesh bytes, their canonical digests and the evidence SHA-256 are unchanged. The new helpers `solver_mesh_digest` and `content_sha256` recompute the existing digests and only read them.\n  - This changes behavior only when a stale object already sits at the destination. A receipt run produces the same mesh and the same digest as before.\n- **Evidence provider:** 6a9f95a5cc routes evidence reads and writes through the result store's provider (`ResultStoreProvider`) rather than the process's installed provider. The bytes written are unchanged.\n- **Source path:** 02ff287726 changes `source_identity` in `fea_source.rs` to return the physical path rebuilt from the source root and logical path. As a result, `study.fea` and `./study.fea` name the same checked source. The logical path and the source text are unchanged, so the study input does not change.\n- **Settings lock:** b4078030e5 makes the user settings lock wait up to 2 s and adds a typed busy error. It has no effect on a study.\n- **CLI:** `run.rs` changes one line, `message` \u2192 `message.to_string()`, for the new error type.\n\n## Limits of this review\n\nI reviewed the diff only. I did not rerun the qualification studies on 839f646161. The confirmation rests on the fact that no changed line sits in a computation path. I have not checked that the outputs are bit-identical.\n\nIf someone wants an empirical check, the cheapest one is a single release CLI run of a receipt study on each side. Compare the mesh digest and the solver-state content digests.\" Also conserved across Desktop 0.7.2 results-read commits 890cf145c4, 30d0015a13, 659f785725, c649497cc6, db1ac0c968 (2026-11-24): the drone seating timing test budgets later seatings against the first seating (test only); a read-only workspace view captured from a blocking caller; FEA result reads on transaction-only stores from one read-only snapshot of the committed tree; sweep plan and validation evidence written inside the result transaction; the result-transaction e2e reopens every flow. Result and evidence read/write locations only. FEA review (verbatim): \"# FEA review: conserving the 0.7.2 scientific receipts across 85a53253cc..db1ac0c968\n\n**Reviewer:** FEA. **Date:** 2026-11-24. **Verdict: confirmed. The receipts can be conserved.**\n\nI read the full diff from 85a53253cc to db1ac0c968 in the worktree `runmat-desktop072-rt2`, covering the five commits 890cf145c4, 30d0015a13, 659f785725, c649497cc6 and db1ac0c968. Design's reading is correct. These commits change only where saved results and evidence are read from and written to. No solver arithmetic, model inputs, materials, meshing or thresholds change. No changed file is in a solver, mesher, materials, physics or assessment-threshold module.\n\n## What each change does\n\n- **890cf145c4, drone seating test:** this is a timing assertion in a CAD test. The fixed limit of a 10 s median becomes \"under a quarter of the first seating on the same runner\". The test is not a scientific input.\n- **30d0015a13, filesystem:** adds `WorkspaceTransaction::capture_read_view_blocking`, a read-only snapshot that cannot write to the provider.\n- **659f785725, runtime reads:** wraps the existing result reads in `storage::with_result_reads`, so they all come from one snapshot. The wrapped reads are:\n  - the run attempt and record loads in `source_access.rs`;\n  - assessment metadata;\n  - results by run ID;\n  - field pages;\n  - the field scene;\n  - the document run result.\n\n  The functions inside each wrapper are unchanged, and so are their arguments.\n  - `solver_mesh_artifact.rs` reads mesh bytes through `read_result_file`, falling back to `runmat_filesystem::read`. The bytes and the decode are unchanged.\n  - `storage/access.rs` adds a safety net: on a transaction-only store with no open scope, a read takes its own read-only snapshot.\n  - `evidence_filesystem.rs` now refuses an evidence write outside a transaction on such a store. Before, that write would have gone to another provider.\n- **c649497cc6, sweep evidence:** the `fea.plan` and `fea.validate` sweep evidence is now written through `write_captured_evidence` inside a result transaction (`artifact_access::publish`).\n  - The payload bytes and the evidence path are unchanged. Only the write route changes.\n  - The `generated_wasm_registry.rs` fingerprint changes because it hashes the builtin sources, which this commit edits. It identifies the registry and does not measure physics.\n- **db1ac0c968, runner-native:** an end-to-end test of the result transaction now reopens every FEA flow. This is test only.\n\n## Limits of this review\n\nAs with the earlier review (`072-desktop-runtime-conservation-FEA-review.md`), I reviewed the diff and did not rerun the qualification studies at db1ac0c968. The confirmation rests on two facts: no changed line sits in a computation path, and the bytes read and written are unchanged.\""
+ "reason": "Conserves the fresh 0.7.2 scientific measurements on dac88251ba across G132 24074bbb35: pure move of analysis_authoring_workflow, analysis_procedure_ids, analysis_output_operation_ids, analysis_language_reference_paths into contracts/authoring_catalog.rs, re-exported at the same path; no behaviour change; debt ceiling file lowered 2467\u21922442; FEA OK 2026-11-20. Every line removed from contracts.rs is in the new module; the only other lines are the mod line, the re-export, the module doc comment, its import and one test import. scripts/development/fea-module-size-debt.json is not a scientific input. Solver arithmetic, model inputs, dependencies, features and thresholds are unchanged. This review is not a rerun of the scientific or performance measurements. Also conserved across Pinned-run repair d10736298d (FEA, 2026-11-20): study evidence and canonical meshes publish through the provider's atomic replace; the canonical-mesh collision check reads through the provider; a pinned execution may move and remove only the files and folders it created. File publication only; no solver arithmetic, model inputs, materials, meshing algorithms, dependencies, features or thresholds changed, and the receipt workloads run without an input manifest, so they never use the pinned provider. Design reviewed the diff on 2026-11-20. Also conserved across WASM builtin registry fingerprint refresh 543c8f9f73 (Design, 2026-11-21): regenerated with scripts/regenerate-wasm-registry.mjs (target wasm32-unknown-unknown, features plot-web) at the 0.7.2 tag source; only the REGISTRY_SOURCE_FINGERPRINT literal changed (3084 registry entries, 2343 builtins, rows unchanged). The file is compiled only for target_arch = wasm32; native receipt workloads never include it; no solver arithmetic, model inputs, materials, meshing algorithms, dependencies, features or thresholds changed. Design reviewed the diff on 2026-11-21. Also conserved across Desktop 0.7.2 runtime commits 6a9f95a5cc, 8aa1a3c7ba, e6955ffe19, 02ff287726, b4078030e5 (main 839f646161, 2026-11-24): one artifact transaction across an async publication with evidence through the result store's provider; meshes persisted through the result store, with stale stored objects replaced after their canonical digest is recomputed; native typed FEA publication inside one result transaction with errors carried as values; one physical path spelling for a root-level FEA source; a 2 s wait for the user settings lock. Publication, persistence and source-path plumbing only. FEA review (verbatim): \"# FEA review: conserving the 0.7.2 scientific receipts across 60965cf6da..839f646161\n\n**Reviewer:** FEA. **Date:** 2026-11-24. **Verdict: confirmed. The receipts can be conserved.**\n\nI read the diff between 60965cf6da and 839f646161 on the policy input roots, in the worktree `runmat-desktop072-rt`. The five runtime commits are 6a9f95a5cc, 8aa1a3c7ba, e6955ffe19, 02ff287726 and b4078030e5. The two CI commits, f8cfa5ab00 and 839f646161, touch no input roots.\n\nThese commits change no solver arithmetic, model inputs, materials, meshing algorithms or thresholds. None of the changed files is in a solver, mesher, materials, physics or assessment-threshold module. The commits change where and how finished results are written. They do not change what is computed.\n\n## What each change does\n\n- **Publication in one transaction:** e6955ffe19 adds `publish_completed_study` (in `typed_fea/execution.rs` and `line_parameters.rs`), and 6a9f95a5cc adds `with_artifact_access_async`.\n  - Mesh files, study evidence, result objects and the manifest now commit in one transaction, or not at all.\n  - The steps are the same steps in the same order: `prepare_study_publication`, `admit_accelerator_placement`, then completion with the assessment receipts.\n  - Assessment functions still run outside the transaction, with the same inputs.\n  - The reassessment path wraps its prepare and complete steps the same way. Their arguments are unchanged.\n- **Assessment wrappers:** `assessment.rs` adds `complete_in`, `complete_frozen_in` and `finish`. They only choose which scope the final `publication.complete(receipts)` write runs in. Function evaluation and receipt contents are unchanged.\n- **Errors as values:** e6955ffe19 replaces `String` errors with `FeaExecutionError`. The operation envelope is now carried as a value; before, it was JSON text. This affects failure reporting only. A successful run's outputs are unchanged.\n- **Mesh persistence:** 8aa1a3c7ba changes how an already-stored mesh object is handled.\n  - Equal bytes are kept, as before.\n  - A stored object whose recomputed canonical digest differs, or that does not decode, is now replaced. Before, it was an error.\n  - The same digest with different bytes is still an error.\n  - Mesh generation, the mesh bytes, their canonical digests and the evidence SHA-256 are unchanged. The new helpers `solver_mesh_digest` and `content_sha256` recompute the existing digests and only read them.\n  - This changes behavior only when a stale object already sits at the destination. A receipt run produces the same mesh and the same digest as before.\n- **Evidence provider:** 6a9f95a5cc routes evidence reads and writes through the result store's provider (`ResultStoreProvider`) rather than the process's installed provider. The bytes written are unchanged.\n- **Source path:** 02ff287726 changes `source_identity` in `fea_source.rs` to return the physical path rebuilt from the source root and logical path. As a result, `study.fea` and `./study.fea` name the same checked source. The logical path and the source text are unchanged, so the study input does not change.\n- **Settings lock:** b4078030e5 makes the user settings lock wait up to 2 s and adds a typed busy error. It has no effect on a study.\n- **CLI:** `run.rs` changes one line, `message` \u2192 `message.to_string()`, for the new error type.\n\n## Limits of this review\n\nI reviewed the diff only. I did not rerun the qualification studies on 839f646161. The confirmation rests on the fact that no changed line sits in a computation path. I have not checked that the outputs are bit-identical.\n\nIf someone wants an empirical check, the cheapest one is a single release CLI run of a receipt study on each side. Compare the mesh digest and the solver-state content digests.\" Also conserved across Desktop 0.7.2 results-read commits 890cf145c4, 30d0015a13, 659f785725, c649497cc6, db1ac0c968 (2026-11-24): the drone seating timing test budgets later seatings against the first seating (test only); a read-only workspace view captured from a blocking caller; FEA result reads on transaction-only stores from one read-only snapshot of the committed tree; sweep plan and validation evidence written inside the result transaction; the result-transaction e2e reopens every flow. Result and evidence read/write locations only. FEA review (verbatim): \"# FEA review: conserving the 0.7.2 scientific receipts across 85a53253cc..db1ac0c968\n\n**Reviewer:** FEA. **Date:** 2026-11-24. **Verdict: confirmed. The receipts can be conserved.**\n\nI read the full diff from 85a53253cc to db1ac0c968 in the worktree `runmat-desktop072-rt2`, covering the five commits 890cf145c4, 30d0015a13, 659f785725, c649497cc6 and db1ac0c968. Design's reading is correct. These commits change only where saved results and evidence are read from and written to. No solver arithmetic, model inputs, materials, meshing or thresholds change. No changed file is in a solver, mesher, materials, physics or assessment-threshold module.\n\n## What each change does\n\n- **890cf145c4, drone seating test:** this is a timing assertion in a CAD test. The fixed limit of a 10 s median becomes \"under a quarter of the first seating on the same runner\". The test is not a scientific input.\n- **30d0015a13, filesystem:** adds `WorkspaceTransaction::capture_read_view_blocking`, a read-only snapshot that cannot write to the provider.\n- **659f785725, runtime reads:** wraps the existing result reads in `storage::with_result_reads`, so they all come from one snapshot. The wrapped reads are:\n  - the run attempt and record loads in `source_access.rs`;\n  - assessment metadata;\n  - results by run ID;\n  - field pages;\n  - the field scene;\n  - the document run result.\n\n  The functions inside each wrapper are unchanged, and so are their arguments.\n  - `solver_mesh_artifact.rs` reads mesh bytes through `read_result_file`, falling back to `runmat_filesystem::read`. The bytes and the decode are unchanged.\n  - `storage/access.rs` adds a safety net: on a transaction-only store with no open scope, a read takes its own read-only snapshot.\n  - `evidence_filesystem.rs` now refuses an evidence write outside a transaction on such a store. Before, that write would have gone to another provider.\n- **c649497cc6, sweep evidence:** the `fea.plan` and `fea.validate` sweep evidence is now written through `write_captured_evidence` inside a result transaction (`artifact_access::publish`).\n  - The payload bytes and the evidence path are unchanged. Only the write route changes.\n  - The `generated_wasm_registry.rs` fingerprint changes because it hashes the builtin sources, which this commit edits. It identifies the registry and does not measure physics.\n- **db1ac0c968, runner-native:** an end-to-end test of the result transaction now reopens every FEA flow. This is test only.\n\n## Limits of this review\n\nAs with the earlier review (`072-desktop-runtime-conservation-FEA-review.md`), I reviewed the diff and did not rerun the qualification studies at db1ac0c968. The confirmation rests on two facts: no changed line sits in a computation path, and the bytes read and written are unchanged.\" Also conserved across Desktop 0.7.2 architecture-debt code move 086da98cda (2026-11-24): result-snapshot wrappers and the inline results budget moved from operations/query.rs, and the process-wide store configuration moved from storage.rs, into new modules with re-exports; module-size ceilings lowered. Code moved between modules with re-exports; no behavior change. FEA review (verbatim): \"# FEA review: conserving the 0.7.2 scientific receipts across 593942f86a..086da98cda\n\n**Reviewer:** FEA. **Date:** 2026-11-24. **Verdict: confirmed. The receipts can be conserved.**\n\nI read the one commit 086da98cda, \"runtime: keep FEA debt modules within their reviewed ceilings\", in the worktree `runmat-desktop072-rt2`. Design's reading is correct. The commit moves code verbatim, keeps the public paths through re-exports, and changes no behavior. No solver arithmetic, model inputs, materials, meshing or thresholds change.\n\n## How I checked\n\nI collected the removed and added lines in `crates/runmat-runtime/src/analysis`, with indentation stripped, and compared them as two sorted lists.\n\n- Every removed line appears again among the added lines, with three exceptions.\n- Two of the exceptions are a visibility change on a function signature: `global_store` and `retention_config` become `pub(super)`.\n- The third is the `with_result_snapshot` signature, whose visibility becomes plain private in `result_snapshot.rs`.\n- The other added lines are scaffolding:\n  - module doc comments;\n  - `mod` declarations;\n  - `use super::*` and the moved `std` imports;\n  - the `pub use` and `pub(crate) use` re-export lists, including the `#[cfg(test)]` test helpers.\n\nThe function bodies are unchanged:\n- `with_result_snapshot`, `analysis_results_by_run_id_op` and `analysis_field_page_by_run_id_op`;\n- `bounded_default_results_query`, including its arithmetic, and the `RESULTS_INLINE_FIELD_BYTES` constant of 16 MiB;\n- the store and retention configuration functions.\n\n## Register changes\n\n- `fea-module-size-debt.json` lowers three ceilings, and each matches the file's line count at 086da98cda:\n  - `analysis/mod.rs`: 3544;\n  - `storage.rs`: 850;\n  - `operations/query.rs`: 1333.\n- `fea-architecture-debt-0.7.json` resolves the two findings that no longer occur, for mod.rs and storage.rs. It records the update in `conservation_updates` and sets `diagnostic_count` from 103 to 101. These are code-structure records and do not measure physics.\n\n## Limits of this review\n\nI reviewed the diff only. I did not build the commit or rerun studies, and I rely on Design's rustc 1.90 test, clippy and architecture-check results.\" Also conserved across Desktop 0.7.2 commits 80b539ab9a (FEA builtin test asserts a reconfigured store does not serve the old run) and a62c161606 (publication staging budget from the run's admitted memory instead of a fixed 128 MiB default; plain-sentence refusals; large-publication e2e) (2026-11-25). Staging memory ceiling and refusal text only; test expectation updated. FEA review (verbatim): \"# FEA review: conserving the 0.7.2 scientific receipts across 0359e282f5..a62c161606\n\n**Reviewer:** FEA. **Date:** 2026-11-25. **Verdict: confirmed. The receipts can be conserved.**\n\nI read the full diff from 0359e282f5 to a62c161606 in the worktree `runmat-desktop072-rt2`, covering the three commits 80b539ab9a, 6297ce2744 and a62c161606. Design's reading is correct. These commits change how much memory a study publication may stage and how refusals read. They do not change what is computed or written. No solver arithmetic, model inputs, materials, meshing or thresholds change.\n\n## What each change does\n\n- **80b539ab9a:** test only (`builtins/fea/tests.rs`). The assertion now matches how the read fix behaves on a reconfigured store.\n- **6297ce2744:** changes only `.github/workflows/ci.yml` and `scripts/distribution/release-ci-checkpoint*`. Neither is a scientific input root.\n- **a62c161606, staging budget:** the staging budget now comes from a new `PublicationMemoryAuthority`. It is the run's admitted memory less the memory the publishing process holds when the budget is read. An optional host cap can only lower it. The fixed 128 MiB default is gone.\n  - **Native runner:** `machine_capacity::run_pool` returns the same pool value as before: the configured capacity, or else `memory_bytes()`. It also installs that value as the authority. The solve's admission and the thread plan therefore get the same number as before.\n  - **wasm:** the authority is the instance budget less the live heap.\n  - **Where the budget is used:** I checked every caller of `publication_staging_budget()`. Each one uses it only as a ceiling: to open a workspace scope, to size typed residency, and in family planning's admission check in `study_family.rs`. No digest, identity, result value or written byte reads it.\n- **a62c161606, refusals:** `AnalysisPublicationError::ResourceLimit` now displays a plain sentence, with the measured terms after it.\n  - `outcome.rs` changes the message order from \"context: message\" to \"message (context)\".\n  - `intent_completion.rs` routes a mesh-store failure through `publication_failure`, so capacity and durability outcomes keep their own error codes.\n  - These affect failure reporting only.\n- **a62c161606, other:** the large-publication end-to-end test is test only, and the change to `fea-module-size-debt.json` is a size ceiling.\n\n## One behavior note\n\nThis note does not affect conservation.\n\n- On the CLI, the old budget was the host's whole admitted memory. The new one subtracts the memory the publishing process already holds, so it is a little smaller. A study whose planned publication sits right at the limit could now be refused at planning, before any solve, where it was admitted before.\n- On a host that relied on the 128 MiB default, the budget is now larger.\n\nEither way the outcome is admit or refuse. A study that publishes gets the same values and bytes as before. The receipt studies are far below these limits.\n\n## Limits of this review\n\nI reviewed the diff only. I did not build the commits or rerun studies at a62c161606.\" Also conserved across Desktop 0.7.2 release CI fix ea2974ec54 (2026-11-25): a local rename in storage/publication.rs for rustfmt, and the runtime test admission host installs a publication memory authority as real hosts do. A local rename and a test-host memory authority; no behavior change. FEA review (verbatim): \"# FEA review: conserving the 0.7.2 scientific receipts across 28e4ad9b97..ea2974ec54\n\n**Reviewer:** FEA. **Date:** 2026-11-25. **Verdict: confirmed. The receipts can be conserved.**\n\nI read the one commit ea2974ec54 in full. It changes two files by 33 lines added and 3 removed. No solver arithmetic, model inputs, materials, meshing or thresholds change.\n\n## What the commit changes\n\n- **`crates/runmat-runtime/src/analysis/storage/publication.rs`:** renames the local variable `source_workspace` to `source` in three places within one function, so rustfmt keeps the call on one line. The same value feeds the same checked sum and the same `over_budget` call, so behavior is unchanged.\n- **`crates/runmat-runtime/tests/support/fea_admission.rs`:** this is test support only. The test admission host installs a fixed publication memory authority, once per test process, with 128 MiB admitted and nothing resident. That budget is the same as the old fixed default, and it is the same on every machine. Production hosts do not use this file.\n\n## Limits of this review\n\nI reviewed the diff only. I did not build the commit or rerun studies.\""
 }

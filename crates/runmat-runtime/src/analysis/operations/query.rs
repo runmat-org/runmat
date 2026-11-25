@@ -11,30 +11,10 @@ pub(crate) use field_order::{
     assessed_source_field_ids, move_fields_first, result_field_inventory,
 };
 mod structural_frequency;
-
-/// Answer a stored-results operation from one consistent snapshot of the
-/// result store (see [`storage::with_result_reads`]).
-pub(in crate::analysis) fn with_result_snapshot<T>(
-    context: &OperationContext,
-    run_id: &str,
-    operation: impl FnOnce() -> Result<T, OperationErrorEnvelope>,
-) -> Result<T, OperationErrorEnvelope> {
-    storage::with_result_reads(operation).map_err(|error| {
-        operation_error(
-            ANALYSIS_RESULTS_OPERATION,
-            ANALYSIS_RESULTS_OP_VERSION,
-            context,
-            OperationErrorSpec {
-                error_code: "RM.FEA.RESULTS.ARTIFACT_STORE_FAILED",
-                error_type: OperationErrorType::Internal,
-                retryable: true,
-                severity: OperationErrorSeverity::Error,
-            },
-            format!("failed to open the saved FEA results: {error}"),
-            BTreeMap::from([("run_id".to_string(), run_id.to_string())]),
-        )
-    })?
-}
+mod inline_budget;
+pub use inline_budget::{bounded_default_results_query, RESULTS_INLINE_FIELD_BYTES};
+mod result_snapshot;
+pub use result_snapshot::{analysis_field_page_by_run_id_op, analysis_results_by_run_id_op};
 
 fn filter_analysis_fields_by_indices(
     fields: &[AnalysisField],
@@ -1090,54 +1070,6 @@ fn analysis_results_op_with_field_inventory(
     ))
 }
 
-/// Field payload a default results object holds inline; larger runs page values through
-/// `fea.field`.
-pub const RESULTS_INLINE_FIELD_BYTES: u64 = 16 * 1024 * 1024;
-
-/// The default results view of a stored run: values of the selected fields inline when they fit
-/// [`RESULTS_INLINE_FIELD_BYTES`], descriptors only otherwise. Only a caller that chose no
-/// field-value option applies this; an explicit field-value request is never narrowed.
-pub fn bounded_default_results_query(
-    run_id: &str,
-    mut query: AnalysisResultsQuery,
-) -> Result<AnalysisResultsQuery, String> {
-    if !query.include_field_values {
-        return Ok(query);
-    }
-    let run_id = storage::resolve_run_attempt(run_id)?;
-    let Some(inventory) = storage::load_field_inventory(&run_id)? else {
-        return Ok(query);
-    };
-    let payload = inventory
-        .iter()
-        .filter(|field| {
-            query.include_fields.is_empty() || query.include_fields.contains(&field.field_id)
-        })
-        .map(|field| {
-            field
-                .shape
-                .iter()
-                .try_fold(8u64, |bytes, extent| bytes.checked_mul(*extent as u64))
-                .unwrap_or(u64::MAX)
-        })
-        .fold(0u64, u64::saturating_add);
-    if payload > RESULTS_INLINE_FIELD_BYTES {
-        query.include_field_values = false;
-    }
-    Ok(query)
-}
-
-pub fn analysis_results_by_run_id_op(
-    run_id: &str,
-    query: AnalysisResultsQuery,
-    context: OperationContext,
-) -> Result<OperationEnvelope<AnalysisResultsData>, OperationErrorEnvelope> {
-    let snapshot_context = context.clone();
-    with_result_snapshot(&snapshot_context, run_id, || {
-        results_by_run_id(run_id, query, context)
-    })
-}
-
 fn results_by_run_id(
     run_id: &str,
     query: AnalysisResultsQuery,
@@ -1270,18 +1202,6 @@ fn frequency_field_descriptor(
     entry: &runmat_analysis_fea::results::field::RecoveredFieldArtifactEntry,
 ) -> Result<AnalysisFieldDescriptor, String> {
     AnalysisFieldDescriptor::from_recovered_entry(entry)
-}
-
-pub fn analysis_field_page_by_run_id_op(
-    run_id: &str,
-    selection: AnalysisFieldSelection,
-    options: AnalysisFieldRequestOptions,
-    context: OperationContext,
-) -> Result<OperationEnvelope<AnalysisFieldPageResult>, OperationErrorEnvelope> {
-    let snapshot_context = context.clone();
-    with_result_snapshot(&snapshot_context, run_id, || {
-        field_page_by_run_id(run_id, selection, options, context)
-    })
 }
 
 fn field_page_by_run_id(

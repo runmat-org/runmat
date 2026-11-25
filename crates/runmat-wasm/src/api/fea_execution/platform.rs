@@ -21,6 +21,25 @@ pub(in crate::api) fn free_heap_bytes() -> u64 {
     measure().free_bytes(crate::runtime::heap::live_heap_bytes())
 }
 
+/// This instance's memory as the runtime's publication authority: a study publication stages
+/// within the instance budget less the heap the instance holds when the publication starts.
+struct InstancePublicationMemory;
+impl runmat_runtime::analysis::PublicationMemoryAuthority for InstancePublicationMemory {
+    fn publication_memory(&self) -> Result<runmat_runtime::analysis::PublicationMemory, String> {
+        Ok(runmat_runtime::analysis::PublicationMemory {
+            admitted_bytes: instance_budget_bytes(),
+            resident_bytes: crate::runtime::heap::live_heap_bytes(),
+        })
+    }
+}
+
+pub(in crate::api) fn install_publication_memory() -> Result<(), String> {
+    runmat_runtime::analysis::install_publication_memory_authority(std::sync::Arc::new(
+        InstancePublicationMemory,
+    ))
+    .map(|_| ())
+}
+
 pub(in crate::api) fn limit_to_js(limit: &BrowserResourceLimit) -> JsValue {
     crate::wire::json_contract_to_js(&limit.diagnostic())
         .unwrap_or_else(|_| crate::wire::errors::js_error(&limit.message()))

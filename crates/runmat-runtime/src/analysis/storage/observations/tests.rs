@@ -2,7 +2,8 @@ use super::*;
 
 #[test]
 fn pruning_observation_attachment_preserves_other_runs_and_shared_objects() {
-    let _filesystem = runmat_filesystem::provider_override_lock();
+    // The test host holds the provider lock and admits publication memory.
+    let _host = crate::analysis::tests::analysis_test_guard();
     let directory = tempfile::tempdir().unwrap();
     let root = directory.path();
     std::fs::create_dir(root.join("observations")).unwrap();
@@ -24,7 +25,7 @@ fn pruning_observation_attachment_preserves_other_runs_and_shared_objects() {
 
 #[test]
 fn pruning_observation_attachment_rejects_unowned_targets() {
-    let _filesystem = runmat_filesystem::provider_override_lock();
+    let _host = crate::analysis::tests::analysis_test_guard();
     let directory = tempfile::tempdir().unwrap();
     let root = directory.path();
     std::fs::create_dir(root.join("observations")).unwrap();
