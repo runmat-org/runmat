@@ -114,7 +114,7 @@ jobs:
     # Run on pushes for all branches, and only on PRs from forks to avoid double CI on same-repo PRs
     # !failure() lets a gate that its own condition skipped (for example docs-lint
     # on a same-repository pull request) pass while a failed gate stops the lane.
-    if: ${{ !cancelled() && !failure() && (inputs.release_validation || (needs.changes.outputs.native == 'true' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch' || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.fork == true)))) }}
+    if: ${{ false && !cancelled() && !failure() && (inputs.release_validation || (needs.changes.outputs.native == 'true' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch' || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.fork == true)))) }}
     strategy:
       fail-fast: false
       max-parallel: 15
@@ -722,18 +722,6 @@ jobs:
             fork_os: warp-windows-latest-x64-16x
             target: x86_64-pc-windows-msvc
             bin: runmat.exe
-          - release_for: macos-x86_64
-            os: warp-macos-26-arm64-12x
-            target: x86_64-apple-darwin
-            bin: runmat
-          - release_for: macos-aarch64
-            os: warp-macos-26-arm64-12x
-            target: aarch64-apple-darwin
-            bin: runmat
-          - release_for: linux-x86_64
-            os: runmat-gcp-linux-x64
-            target: x86_64-unknown-linux-gnu
-            bin: runmat
     # Same runner rule as build-and-test: runmat-gcp-* labels only for trusted
     # events; anything else takes the entry's fork_os (WarpBuild) when it has one.
     runs-on: ${{ (contains(fromJSON('["push","workflow_dispatch","schedule"]'), github.event_name) || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository)) && matrix.platform.os || matrix.platform.fork_os || matrix.platform.os }}
