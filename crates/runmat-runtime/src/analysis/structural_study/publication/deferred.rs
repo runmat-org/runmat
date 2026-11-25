@@ -57,7 +57,7 @@ impl DeferredStudyRun {
         let receipt = self.store.commit_publication(prepared)?;
         self.published.data.result_manifest_artifact_path = receipt
             .manifest_artifact_path
-            .map(|path| path.to_string_lossy().into_owned());
+            .map(|path| runmat_filesystem::logical_path_string(&path));
         Ok(self.published)
     }
 }

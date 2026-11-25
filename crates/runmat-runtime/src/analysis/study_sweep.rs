@@ -397,7 +397,7 @@ fn publish_sweep(
             failed_count: failure_entries.len(),
             failure_entries,
             run_entries,
-            evidence_artifact_path: evidence_root.display().to_string(),
+            evidence_artifact_path: runmat_filesystem::logical_path_string(&evidence_root),
         },
     ))
 }

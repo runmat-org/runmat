@@ -61,7 +61,8 @@ pub use native_path::{
 };
 pub use native_path_intent::NativePathIntent;
 pub use provider_path::{
-    capture_provider_for_paths, capture_provider_path, normalize_virtual_path, FsPathNamespace,
+    capture_provider_for_paths, capture_provider_path, logical_path_string, normalize_virtual_path,
+    FsPathNamespace,
 };
 use provider_path::{capture_provider_many, capture_provider_pair};
 #[cfg(not(target_arch = "wasm32"))]

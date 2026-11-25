@@ -31,6 +31,23 @@ pub fn normalize_virtual_path(path: &Path) -> io::Result<PathBuf> {
     Ok(normalized)
 }
 
+/// Report a provider path as the logical `/`-separated string that records,
+/// manifests, operation data and other providers exchange. Paths built with
+/// `PathBuf` joins carry the host separator (`\` on Windows); this replaces the
+/// host separator with `/` so a project path reads identically on every OS.
+/// A `\` inside a file name on a `/`-separator host is kept.
+pub fn logical_path_string(path: &Path) -> String {
+    with_logical_separators(&path.to_string_lossy(), std::path::MAIN_SEPARATOR)
+}
+
+fn with_logical_separators(text: &str, host_separator: char) -> String {
+    if host_separator == '/' {
+        text.to_owned()
+    } else {
+        text.replace(host_separator, "/")
+    }
+}
+
 /// Absolute-path grammar owned by a filesystem provider. A rooted virtual
 /// path is independent of process CWD even on native Windows.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -171,6 +188,31 @@ mod tests {
     use super::*;
     use crate::{provider_override_lock, replace_provider, File, MemoryFsProvider};
     use std::io::{ErrorKind, Read};
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn logical_path_strings_use_slash_separators() {
+        assert_eq!(
+            with_logical_separators(r"/.artifacts\studies\sweeps\sweep_a\plan.json", '\\'),
+            "/.artifacts/studies/sweeps/sweep_a/plan.json"
+        );
+        assert_eq!(
+            with_logical_separators(r"/.artifacts/name\with\backslash", '/'),
+            r"/.artifacts/name\with\backslash"
+        );
+        let joined = PathBuf::from("/.artifacts")
+            .join("studies")
+            .join("sweeps")
+            .join("plan.json");
+        assert!(
+            joined.to_string_lossy().contains(std::path::MAIN_SEPARATOR),
+            "the join uses the host separator"
+        );
+        assert_eq!(
+            logical_path_string(&joined),
+            "/.artifacts/studies/sweeps/plan.json"
+        );
+    }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]

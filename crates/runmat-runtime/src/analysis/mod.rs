@@ -1666,7 +1666,7 @@ pub fn analysis_plan_study_sweep_op(
             failed_count: failure_entries.len(),
             failure_entries,
             plan_entries,
-            evidence_artifact_path: evidence_path.display().to_string(),
+            evidence_artifact_path: runmat_filesystem::logical_path_string(&evidence_path),
         },
     ))
 }
@@ -1759,7 +1759,7 @@ pub fn analysis_validate_study_sweep_op(
             valid,
             issue_codes,
             study_entries,
-            evidence_artifact_path: evidence_path.display().to_string(),
+            evidence_artifact_path: runmat_filesystem::logical_path_string(&evidence_path),
         },
     ))
 }

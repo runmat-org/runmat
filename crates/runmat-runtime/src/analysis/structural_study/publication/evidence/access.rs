@@ -157,7 +157,9 @@ impl StudyEvidenceAccess {
                 cause: error.to_string(),
             }
         })?;
-        Ok(self.root.join(path).display().to_string())
+        Ok(runmat_filesystem::logical_path_string(
+            &self.root.join(path),
+        ))
     }
 }
 fn limited(message: &str) -> Error {
@@ -200,6 +202,8 @@ impl ImmutableObjectBatch<'_> {
                 return Err("immutable object identity already contains different content".into())
             }
         }
-        Ok(self.root.join(path).display().to_string())
+        Ok(runmat_filesystem::logical_path_string(
+            &self.root.join(path),
+        ))
     }
 }

@@ -264,8 +264,8 @@ fn persist_mesh_borrowed_typed(
         identify: &content_sha256,
     })?;
     Ok(ResolvedStudyMesh {
-        artifact_path: Some(artifact_path.display().to_string()),
-        evidence_path: Some(evidence_path.display().to_string()),
+        artifact_path: Some(runmat_filesystem::logical_path_string(&artifact_path)),
+        evidence_path: Some(runmat_filesystem::logical_path_string(&evidence_path)),
     })
 }
 
