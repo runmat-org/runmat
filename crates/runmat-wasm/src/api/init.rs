@@ -54,6 +54,9 @@ pub async fn init_runmat(options: JsValue) -> Result<RunMatWasm, JsValue> {
     init_logging_once();
     crate::runtime::settings::apply_resources(&config.runtime)
         .map_err(|error| init_error(InitErrorCode::InvalidOptions, error))?;
+    // Study publications stage within this instance's memory.
+    crate::api::fea_execution::install_publication_memory()
+        .map_err(|error| init_error(InitErrorCode::InvalidOptions, error))?;
     #[cfg(target_arch = "wasm32")]
     ensure_figure_event_bridge();
     let dialog_host = install_fs_provider_from_options(&options).map_err(|err| {

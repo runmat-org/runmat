@@ -18,7 +18,7 @@ fn carried_inventory_budget_admits_native_list_and_read_without_global_redirecti
     let store = FilesystemAnalysisArtifactStore::new(root.path().to_path_buf());
     let scope = store.access_with_budget(false, 4096).unwrap();
     let mut changed = previous;
-    changed.publication_staging_bytes = 1;
+    changed.publication_staging_cap_bytes = Some(1);
     crate::analysis::configure_fea_runtime(changed).unwrap();
     let entries = scope.fs_read_dir(root.path()).unwrap();
     let original = entries

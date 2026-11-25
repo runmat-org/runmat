@@ -18,7 +18,7 @@ mod plan;
 mod platform;
 pub(super) use plan::browser_fea_plan;
 use platform::admit;
-pub(super) use platform::{free_heap_bytes, instance_budget_bytes};
+pub(super) use platform::{free_heap_bytes, install_publication_memory, instance_budget_bytes};
 use runmat_core::{BrowserResourceLimit, BrowserResourceTerm};
 
 const PUBLICATION_HOST_REASON: &str = "Result storage is unavailable in this browser workspace.";

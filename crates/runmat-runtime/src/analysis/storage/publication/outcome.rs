@@ -29,8 +29,9 @@ impl AnalysisPublicationError {
             Self::Rejected { message } => Self::Rejected {
                 message: format!("{context}: {message}"),
             },
+            // A resource refusal leads with its plain-language sentence; measured terms follow.
             Self::ResourceLimit { message } => Self::ResourceLimit {
-                message: format!("{context}: {message}"),
+                message: format!("{message} ({context})"),
             },
             uncertain => uncertain,
         }
@@ -77,13 +78,12 @@ impl From<&str> for AnalysisPublicationError {
 }
 impl std::fmt::Display for AnalysisPublicationError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        // Native hosts still have textual error envelopes. Preserve the complete typed
-        // outcome there rather than dropping its original receipt into a short message.
+        // Refusals display their plain message; the outcome kind travels in the envelope's
+        // error code and type. Uncertain durability keeps its complete typed receipt, which
+        // recovery needs and no sentence can carry.
         match self {
-            Self::Rejected { message } => f.write_str(message),
-            Self::ResourceLimit { .. }
-            | Self::DurabilityIndeterminate { .. }
-            | Self::EvidenceDurabilityIndeterminate { .. } => {
+            Self::Rejected { message } | Self::ResourceLimit { message } => f.write_str(message),
+            Self::DurabilityIndeterminate { .. } | Self::EvidenceDurabilityIndeterminate { .. } => {
                 let value = serde_json::to_string(self).map_err(|_| std::fmt::Error)?;
                 f.write_str(&value)
             }

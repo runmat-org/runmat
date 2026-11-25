@@ -2,21 +2,23 @@
 use std::path::PathBuf;
 use std::sync::{OnceLock, RwLock};
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+mod publication_memory;
+pub(super) use publication_memory::over_budget_message;
+pub use publication_memory::{
+    clear_publication_memory_authority, install_publication_memory_authority, PublicationMemory,
+    PublicationMemoryAuthority,
+};
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct FeaRuntimeConfig {
     pub artifact_root: Option<PathBuf>,
     pub study_artifact_root: Option<PathBuf>,
-    /// Additional host storage envelope for privately prepared whole-study publication.
-    pub publication_staging_bytes: u64,
-}
-impl Default for FeaRuntimeConfig {
-    fn default() -> Self {
-        Self {
-            artifact_root: None,
-            study_artifact_root: None,
-            publication_staging_bytes: 128 * 1024 * 1024,
-        }
-    }
+    /// An optional host cap, in bytes, on the memory one whole-study publication may stage.
+    /// `None` (the default) leaves the budget to the run's admitted memory authority: the memory
+    /// admitted for the run less what the publishing process holds (see
+    /// [`install_publication_memory_authority`]). A cap lowers that budget and never raises it;
+    /// a host with no installed authority publishes within its cap alone.
+    pub publication_staging_cap_bytes: Option<u64>,
 }
 
 fn fea_runtime_config() -> &'static RwLock<FeaRuntimeConfig> {
@@ -31,12 +33,14 @@ pub(super) fn current_fea_runtime_config() -> FeaRuntimeConfig {
         .unwrap_or_default()
 }
 
-/// Resource authority cannot silently revert to a default ceiling after lock poisoning.
+/// The memory one whole-study publication may stage, read when a publication starts. Resource
+/// authority cannot silently revert to a default ceiling after lock poisoning.
 pub(super) fn publication_staging_budget() -> Result<u64, String> {
-    fea_runtime_config()
+    let cap = fea_runtime_config()
         .read()
-        .map(|guard| guard.publication_staging_bytes)
-        .map_err(|_| "FEA publication resource config lock poisoned".to_string())
+        .map(|guard| guard.publication_staging_cap_bytes)
+        .map_err(|_| "FEA publication resource config lock poisoned".to_string())?;
+    publication_memory::staging_budget(cap)
 }
 
 pub fn default_fea_artifact_root() -> PathBuf {
@@ -50,8 +54,8 @@ pub fn configure_fea_runtime(config: FeaRuntimeConfig) -> Result<(), String> {
 /// Embedded hosts serialize runtime commands and restore the returned exact
 /// configuration when their execution scope exits.
 pub fn replace_fea_runtime(config: FeaRuntimeConfig) -> Result<FeaRuntimeConfig, String> {
-    if config.publication_staging_bytes == 0 {
-        return Err("publication staging budget must be positive".into());
+    if config.publication_staging_cap_bytes == Some(0) {
+        return Err("publication staging cap must be positive".into());
     }
     let mut guard = fea_runtime_config()
         .write()

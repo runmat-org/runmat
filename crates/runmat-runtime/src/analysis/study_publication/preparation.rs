@@ -141,7 +141,11 @@ mod tests {
         let constrained = PublicationPreparation::capture_with_budget(
             definition,
             &(),
-            storage::publication::typed_resident(&(), config.publication_staging_bytes).unwrap()
+            storage::publication::typed_resident(
+                &(),
+                configuration::publication_staging_budget().unwrap(),
+            )
+            .unwrap()
                 * 2
                 + mesh.canonical_encoding_resident_bytes_estimate().unwrap() / 2,
         )
@@ -164,7 +168,7 @@ mod tests {
         configuration::configure_fea_runtime(config.clone()).unwrap();
         storage::set_artifact_store_for_tests(replacement.clone());
         configuration::configure_fea_runtime(configuration::FeaRuntimeConfig {
-            publication_staging_bytes: 1,
+            publication_staging_cap_bytes: Some(1),
             ..config.clone()
         })
         .unwrap();

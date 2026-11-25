@@ -187,15 +187,10 @@ fn run() {
 }
 
 async fn parent() {
-    // This standalone process is the invocation host, as CLI bootstrap is in
-    // the product. Capture the same finite host publication allowance rather
-    // than accidentally testing numerical completion under an embedded default.
-    runmat_runtime::analysis::configure_fea_runtime(runmat_runtime::analysis::FeaRuntimeConfig {
-        publication_staging_bytes: runmat_execution_runner_native::publication_staging_bytes()
-            .unwrap(),
-        ..Default::default()
-    })
-    .unwrap();
+    // This standalone process is the invocation host, as the CLI is in the product. It sets no
+    // publication cap, so each publication stages within this host's admitted run memory.
+    runmat_runtime::analysis::configure_fea_runtime(Default::default()).unwrap();
+    runmat_execution_runner_native::admit_local_publication_memory().unwrap();
     if std::env::args_os().any(|argument| argument == "--remote-families-only") {
         #[cfg(feature = "occt-native")]
         remote_families::run().await;
@@ -271,6 +266,14 @@ async fn parent() {
         result_transaction::run().await;
         #[cfg(not(feature = "occt-native"))]
         panic!("result transaction conformance requires occt-native");
+        #[cfg(feature = "occt-native")]
+        return;
+    }
+    if std::env::args_os().any(|argument| argument == "--large-publication-only") {
+        #[cfg(feature = "occt-native")]
+        result_transaction::large_publication::run().await;
+        #[cfg(not(feature = "occt-native"))]
+        panic!("large publication conformance requires occt-native");
         #[cfg(feature = "occt-native")]
         return;
     }

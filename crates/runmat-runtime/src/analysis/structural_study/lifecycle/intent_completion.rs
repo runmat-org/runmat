@@ -49,12 +49,19 @@ pub(in crate::analysis) fn prepare_structural_study_intent_completion(
     let persisted_mesh = preparation
         .persist_mesh(&meshing_output.artifact, &meshing_output.evidence)
         .map_err(|error| {
-            intent_completion_error(
-                &intent,
-                "RM.FEA.RUN_STUDY.MESH_ARTIFACT_STORE_FAILED",
-                OperationErrorType::Internal,
-                OperationErrorSeverity::Error,
-                error.to_string(),
+            // Capacity and durability outcomes keep their own codes and structured context.
+            crate::analysis::prepared_study_publication::publication_failure(
+                error,
+                &intent.context,
+                |message| {
+                    intent_completion_error(
+                        &intent,
+                        "RM.FEA.RUN_STUDY.MESH_ARTIFACT_STORE_FAILED",
+                        OperationErrorType::Internal,
+                        OperationErrorSeverity::Error,
+                        message,
+                    )
+                },
             )
         })?;
     match (intent.workloads.clone(), result) {

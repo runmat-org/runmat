@@ -93,7 +93,7 @@ fn footprint_and_peak() -> io::Result<(u64, u64)> {
 }
 
 /// Execution ceilings for one local meshing run: sized from the memory this host admits for work
-/// (the same authority as publication staging and the thread plan) and from the requested mesh
+/// (the same authority as publication staging and the thread plan, `run_pool`) and from the requested mesh
 /// size. They bound whether the run completes, never what it produces. A host whose available
 /// memory cannot be read gets an error; no portable constant stands in for its capacity.
 pub fn meshing_execution_ceilings(
@@ -113,13 +113,42 @@ pub fn meshing_execution_ceilings_for(
     runmat_meshing_core::MeshingExecutionCeilings::for_host(capacity_bytes, limits)
 }
 
-/// Host budget for publishing one study: the memory this host admits for a run, the same
-/// authority as the run's pool (`NativeExecutionConfig::local_memory_capacity_bytes`).
-/// Publication runs in the coordinating process after the run's workers have finished, so it
-/// may use the run's whole admitted memory. Study planning refuses a study whose planned
-/// publication exceeds it, before any solve.
-pub fn publication_staging_bytes() -> io::Result<u64> {
-    memory_bytes()
+/// The memory this host admits for one run (`NativeExecutionConfig::local_memory_capacity_bytes`):
+/// the configured pool when the run has one, else read now. The same value admits the run's solve
+/// and sizes its thread plan, and becomes the authority for the run's study publication: a
+/// publication may stage this pool less what this coordinating process holds when it reads its
+/// budget. Study planning refuses a study whose planned publication exceeds that, before any
+/// solve.
+pub(crate) fn run_pool(configured: Option<u64>) -> io::Result<u64> {
+    let pool = match configured {
+        Some(pool) => pool,
+        None => memory_bytes()?,
+    };
+    runmat_runtime::analysis::install_publication_memory_authority(std::sync::Arc::new(
+        RunPublicationMemory { pool_bytes: pool },
+    ))
+    .map_err(io::Error::other)?;
+    Ok(pool)
+}
+
+/// Read this host's admitted memory for a run and make it the study publication authority, for
+/// hosts and tests that publish without configuring a native run first. Returns the pool.
+pub fn admit_local_publication_memory() -> io::Result<u64> {
+    run_pool(None)
+}
+
+/// One run's admitted memory, read by the runtime each time a publication sizes its staging.
+struct RunPublicationMemory {
+    pool_bytes: u64,
+}
+
+impl runmat_runtime::analysis::PublicationMemoryAuthority for RunPublicationMemory {
+    fn publication_memory(&self) -> Result<runmat_runtime::analysis::PublicationMemory, String> {
+        Ok(runmat_runtime::analysis::PublicationMemory {
+            admitted_bytes: self.pool_bytes,
+            resident_bytes: process_footprint().map_err(|error| error.to_string())?,
+        })
+    }
 }
 
 #[cfg(target_os = "macos")]

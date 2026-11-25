@@ -17,6 +17,9 @@ use runmat_runtime::analysis::{
     FeaCheckStatus, FeaRootSelector, FeaRuntimeConfig,
 };
 
+#[path = "large_publication.rs"]
+pub(super) mod large_publication;
+
 /// A project server: capture and conditional publication go to an in-memory
 /// authority. Its sandbox refuses direct workspace access.
 struct FakeTransactionServer(Arc<MemoryFsProvider>);

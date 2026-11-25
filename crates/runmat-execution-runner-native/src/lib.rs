@@ -12,7 +12,7 @@ pub(crate) mod console_retention;
 mod fea_delegation;
 pub mod fea_proxy;
 pub use accelerator_placement::active_provider_resource;
-pub use machine_capacity::publication_staging_bytes;
+pub use machine_capacity::admit_local_publication_memory;
 mod analysis_acoustic;
 mod analysis_acoustic_response;
 mod analysis_electrical;

@@ -58,9 +58,10 @@ fn resource_exhaustion_is_capacity_and_semantic_rejection_keeps_family_handler()
     );
     assert_eq!(envelope.error_type, OperationErrorType::Capacity);
     assert!(!envelope.retryable);
+    // The message is the refusal's plain sentence; the outcome kind is the code and type.
     assert_eq!(
-        serde_json::from_str::<AnalysisPublicationError>(&envelope.message).unwrap(),
-        original
+        envelope.message,
+        "original admitted inventory exceeds allowance"
     );
     let envelope = publication_failure(
         AnalysisPublicationError::Rejected {

@@ -298,12 +298,7 @@ impl AnalysisPublicationBuilder {
                 message: "staging byte overflow".into(),
             })?;
         if total > self.maximum_bytes {
-            return Err(AnalysisPublicationError::ResourceLimit {
-                message: format!(
-                    "publication staging exceeds its byte budget: retained={retained}, preparation={}, source_workspace={source_workspace}, additional={additional}, required={total}, maximum={} bytes",
-                    self.preparation_resident_bytes, self.maximum_bytes,
-                ),
-            });
+            return Err(resources::over_budget(self, retained, source_workspace, additional));
         }
         Ok(())
     }

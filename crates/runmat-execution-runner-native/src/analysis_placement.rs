@@ -227,11 +227,9 @@ pub async fn execute_structural_workloads_locally(
         );
     // The effective ceiling is min(authored, machine): an unbounded authored ceiling runs within
     // the memory this host admits (the same snapshot as the pool's capacity).
-    let machine_resident_bytes = match execution_config.local_memory_capacity_bytes {
-        Some(capacity) => capacity,
-        None => crate::machine_capacity::memory_bytes()
-            .map_err(|error| crate::NativeExecutionError::Configuration(error.to_string()))?,
-    };
+    let machine_resident_bytes =
+        crate::machine_capacity::run_pool(execution_config.local_memory_capacity_bytes)
+            .map_err(|error| crate::NativeExecutionError::Configuration(error.to_string()))?;
     let maximum_resident_bytes = authored_resident_bytes.min(machine_resident_bytes);
     // Every structural task's output inventory derives from this same admitted budget.
     let inventory = ObjectInventoryLimits::admitted(maximum_resident_bytes);

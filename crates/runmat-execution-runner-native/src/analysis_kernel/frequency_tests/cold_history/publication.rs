@@ -68,6 +68,7 @@ pub(super) fn publish(
         ..Default::default()
     })
     .unwrap();
+    crate::machine_capacity::admit_local_publication_memory().unwrap();
     runmat_runtime::analysis::storage::configure_artifact_store(
         AnalysisArtifactStoreConfig::Filesystem { root: runs.clone() },
     )
@@ -122,7 +123,7 @@ pub(super) fn publish(
     runmat_runtime::analysis::configure_fea_runtime(FeaRuntimeConfig {
         artifact_root: Some(root.join("artifacts")),
         study_artifact_root: Some(root.join("studies")),
-        publication_staging_bytes: 1,
+        publication_staging_cap_bytes: Some(1),
     })
     .unwrap();
     let identity =

@@ -95,7 +95,7 @@ impl NativeExecutionConfig {
             max_workers: std::thread::available_parallelism()
                 .map_or(1, |count| count.get().min(32) as u32),
             local_cpu_capacity_millicores: Some(super::machine_capacity::cpu_millicores()),
-            local_memory_capacity_bytes: Some(super::machine_capacity::memory_bytes()?),
+            local_memory_capacity_bytes: Some(super::machine_capacity::run_pool(None)?),
             authored_worker_memory_bytes: None,
             max_message_bytes: 64 * 1024 * 1024,
             max_object_bytes: 512 * 1024 * 1024,
