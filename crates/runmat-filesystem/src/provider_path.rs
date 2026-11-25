@@ -37,11 +37,23 @@ pub fn normalize_virtual_path(path: &Path) -> io::Result<PathBuf> {
 /// host separator with `/` so a project path reads identically on every OS.
 /// A `\` inside a file name on a `/`-separator host is kept.
 pub fn logical_path_string(path: &Path) -> String {
-    with_logical_separators(&path.to_string_lossy(), std::path::MAIN_SEPARATOR)
+    let host_path = matches!(
+        path.components().next(),
+        Some(std::path::Component::Prefix(_))
+    );
+    with_logical_separators(
+        &path.to_string_lossy(),
+        std::path::MAIN_SEPARATOR,
+        host_path,
+    )
 }
 
-fn with_logical_separators(text: &str, host_separator: char) -> String {
-    if host_separator == '/' {
+/// A path that starts with a host prefix (a Windows drive, UNC share or
+/// verbatim `\\?\` path) is a host filesystem path: it keeps its native
+/// spelling, because rewriting a verbatim prefix changes what it names.
+/// Project-relative and rooted logical paths use '/' separators.
+fn with_logical_separators(text: &str, host_separator: char, host_path: bool) -> String {
+    if host_separator == '/' || host_path {
         text.to_owned()
     } else {
         text.replace(host_separator, "/")
@@ -193,13 +205,20 @@ mod tests {
     #[test]
     fn logical_path_strings_use_slash_separators() {
         assert_eq!(
-            with_logical_separators(r"/.artifacts\studies\sweeps\sweep_a\plan.json", '\\'),
+            with_logical_separators(r"/.artifacts\studies\sweeps\sweep_a\plan.json", '\\', false),
             "/.artifacts/studies/sweeps/sweep_a/plan.json"
         );
         assert_eq!(
-            with_logical_separators(r"/.artifacts/name\with\backslash", '/'),
+            with_logical_separators(r"/.artifacts/name\with\backslash", '/', false),
             r"/.artifacts/name\with\backslash"
         );
+        // Host paths keep their native spelling, including verbatim prefixes.
+        for host in [
+            r"\\?\C:\Users\ci\store\publications\abc\manifest.json",
+            r"C:\Users\ci\store\manifest.json",
+        ] {
+            assert_eq!(with_logical_separators(host, '\\', true), host);
+        }
         let joined = PathBuf::from("/.artifacts")
             .join("studies")
             .join("sweeps")
