@@ -289,16 +289,16 @@ impl AnalysisPublicationBuilder {
             .read()
             .map_err(|_| "staging lock poisoned")?;
         let retained = resources::retained(&runs, &chunks, &observations, self.maximum_bytes)?;
-        let source_workspace = self.active_source_workspace()?;
+        let source = self.active_source_workspace()?;
         let total = retained
             .checked_add(self.preparation_resident_bytes)
-            .and_then(|bytes| bytes.checked_add(source_workspace))
+            .and_then(|bytes| bytes.checked_add(source))
             .and_then(|bytes| bytes.checked_add(additional))
             .ok_or_else(|| AnalysisPublicationError::ResourceLimit {
                 message: "staging byte overflow".into(),
             })?;
         if total > self.maximum_bytes {
-            return Err(resources::over_budget(self, retained, source_workspace, additional));
+            return Err(resources::over_budget(self, retained, source, additional));
         }
         Ok(())
     }
