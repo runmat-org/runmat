@@ -2,6 +2,13 @@
 use super::super::GraphAttemptAuthority;
 use super::*;
 
+/// How long a worker that has already sent its terminal response may take to
+/// exit with its whole process tree. Process teardown on a loaded Windows
+/// host has exceeded 5 s, which reported a completed attempt as a lost
+/// worker. The bound only matters when the tree does not exit; a prompt exit
+/// returns at once.
+const WORKER_RETIREMENT_BOUND: Duration = Duration::from_secs(30);
+
 pub(crate) struct ProcessOwner<'a> {
     pub(crate) attempt: &'a AttemptRequest,
     pub(crate) config: &'a crate::NativeExecutionConfig,
@@ -799,7 +806,7 @@ pub(super) async fn run_process(
         // after the terminal frame so the worker observes EOF before wait.
         // No cancellation or collective command is legal after completion.
         drop(writer);
-        match tokio::time::timeout(Duration::from_secs(5), child.wait_and_retire_tree()).await {
+        match tokio::time::timeout(WORKER_RETIREMENT_BOUND, child.wait_and_retire_tree()).await {
             Ok(Ok(exit)) => {
                 child_retired = true;
                 *retirement = LocalRetirementEvidence::FullTreeRetired;
@@ -830,7 +837,7 @@ pub(super) async fn run_process(
     } else {
         // The leader must stay pinned until its entire owned tree retires.
         drop(writer);
-        let exit = match tokio::time::timeout(Duration::from_secs(5), child.wait_and_retire_tree()).await {
+        let exit = match tokio::time::timeout(WORKER_RETIREMENT_BOUND, child.wait_and_retire_tree()).await {
             Ok(Ok(exit)) => exit,
             Ok(Err(error)) => return Err(TransferFailure::RetirementUnverified(format!(
                 "worker replied, but its process tree could not be retired: {error}"
